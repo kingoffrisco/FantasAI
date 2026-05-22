@@ -68,6 +68,7 @@ async def get_trending_players_from_databricks(
 
     try:
         result = await dbx_client.execute_query(query)
+        rows = dbx_client.extract_rows(result)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Databricks query failed: {exc}") from exc
 
@@ -76,7 +77,9 @@ async def get_trending_players_from_databricks(
         "catalog": settings.databricks_catalog,
         "schema": settings.databricks_schema,
         "limit": limit,
-        "result": result,
+        "count": len(rows),
+        "players": rows,
+        "raw_status": result.get("status", {}),
     }
 
 
@@ -106,6 +109,7 @@ async def get_roster_recommendations(
 
     try:
         result = await dbx_client.execute_query(query)
+        rows = dbx_client.extract_rows(result)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Recommendation query failed: {exc}") from exc
 
@@ -113,5 +117,7 @@ async def get_roster_recommendations(
         "source": "databricks",
         "type": "roster_recommendations",
         "limit": limit,
-        "result": result,
+        "count": len(rows),
+        "recommendations": rows,
+        "raw_status": result.get("status", {}),
     }
