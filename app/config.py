@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     databricks_token: str = ""
     databricks_catalog: str = "main"
     databricks_schema: str = "fantasai"
+    databricks_warehouse_id: str = ""
     vector_search_endpoint: str = ""
     sleeper_base_url: str = "https://api.sleeper.app/v1"
     fantasy_news_api_key: str = ""
