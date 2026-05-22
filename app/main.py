@@ -43,9 +43,18 @@ async def get_trending_players(
 
 
 @app.get("/players/trending/from-databricks")
-def get_trending_players_from_databricks() -> dict:
+def get_trending_players_from_databricks(
+    limit: int = Query(default=25, ge=1, le=100),
+) -> dict:
+    query = f"""
+    SELECT player_id, trend_count, add_drop, lookback_hours, ingested_at
+    FROM {settings.databricks_catalog}.{settings.databricks_schema}.silver_trending_players
+    ORDER BY ingested_at DESC, trend_count DESC
+    LIMIT {limit}
+    """.strip()
+
     return {
         "status": "not_implemented",
-        "message": "Replace this stub with Databricks SQL or warehouse query integration.",
-        "table": f"{settings.databricks_catalog}.{settings.databricks_schema}.silver_trending_players",
+        "message": "Add Databricks SQL execution using your warehouse or SQL statement API.",
+        "query": query,
     }
