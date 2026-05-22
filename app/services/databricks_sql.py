@@ -76,3 +76,22 @@ class DatabricksSQLClient:
                 },
                 "statement_id": statement_id,
             }
+
+    @staticmethod
+    def extract_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+        manifest = result.get("manifest", {})
+        schema = manifest.get("schema", {})
+        columns = schema.get("columns", [])
+        data_array = result.get("result", {}).get("data_array", [])
+
+        column_names = [col.get("name", f"col_{idx}") for idx, col in enumerate(columns)]
+
+        rows = []
+        for raw_row in data_array:
+            row = {}
+            for idx, value in enumerate(raw_row):
+                key = column_names[idx] if idx < len(column_names) else f"col_{idx}"
+                row[key] = value
+            rows.append(row)
+
+        return rows
