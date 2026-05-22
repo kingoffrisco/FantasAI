@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 
 from app.config import settings
+from app.services.databricks_sql import DatabricksSQLClient
 from app.services.fantasy_apis import SleeperClient
 
 app = FastAPI(title="FantasAI API", version="0.1.0")
@@ -43,9 +44,15 @@ async def get_trending_players(
 
 
 @app.get("/players/trending/from-databricks")
-def get_trending_players_from_databricks(
+async def get_trending_players_from_databricks(
     limit: int = Query(default=25, ge=1, le=100),
 ) -> dict:
+    if not settings.databricks_host or not settings.databricks_token or not settings.databricks_warehouse_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Databricks configuration is incomplete. Set DATABRICKS_HOST, DATABRICKS_TOKEN, and DATABRICKS_WAREHOUSE_ID.",
+        )
+
     query = f"""
     SELECT player_id, trend_count, add_drop, lookback_hours, ingested_at
     FROM {settings.databricks_catalog}.{settings.databricks_schema}.silver_trending_players
@@ -53,8 +60,58 @@ def get_trending_players_from_databricks(
     LIMIT {limit}
     """.strip()
 
+    dbx_client = DatabricksSQLClient(
+        host=settings.databricks_host,
+        token=settings.databricks_token,
+        warehouse_id=settings.databricks_warehouse_id,
+    )
+
+    try:
+        result = await dbx_client.execute_query(query)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Databricks query failed: {exc}") from exc
+
     return {
-        "status": "not_implemented",
-        "message": "Add Databricks SQL execution using your warehouse or SQL statement API.",
-        "query": query,
+        "source": "databricks",
+        "catalog": settings.databricks_catalog,
+        "schema": settings.databricks_schema,
+        "limit": limit,
+        "result": result,
+    }
+
+
+@app.get("/recommendations/roster")
+async def get_roster_recommendations(
+    limit: int = Query(default=10, ge=1, le=50),
+) -> dict:
+    if not settings.databricks_host or not settings.databricks_token or not settings.databricks_warehouse_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Databricks configuration is incomplete. Set DATABRICKS_HOST, DATABRICKS_TOKEN, and DATABRICKS_WAREHOUSE_ID.",
+        )
+
+    query = f"""
+    SELECT player_id, trend_count, add_drop, lookback_hours, ingested_at
+    FROM {settings.databricks_catalog}.{settings.databricks_schema}.silver_trending_players
+    WHERE add_drop = 'add'
+    ORDER BY trend_count DESC, ingested_at DESC
+    LIMIT {limit}
+    """.strip()
+
+    dbx_client = DatabricksSQLClient(
+        host=settings.databricks_host,
+        token=settings.databricks_token,
+        warehouse_id=settings.databricks_warehouse_id,
+    )
+
+    try:
+        result = await dbx_client.execute_query(query)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Recommendation query failed: {exc}") from exc
+
+    return {
+        "source": "databricks",
+        "type": "roster_recommendations",
+        "limit": limit,
+        "result": result,
     }
