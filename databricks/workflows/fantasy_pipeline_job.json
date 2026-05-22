@@ -17,6 +17,59 @@
       "notebook_task": {
         "notebook_path": "/Workspace/Shared/FantasAI/02_silver_normalization"
       }
+    },
+    {
+      "task_key": "player_metadata_ingestion",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Shared/FantasAI/03_player_metadata_ingestion"
+      }
+    },
+    {
+      "task_key": "league_ingestion",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Shared/FantasAI/04_league_ingestion"
+      }
+    },
+    {
+      "task_key": "roster_ingestion",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Shared/FantasAI/05_roster_ingestion"
+      }
+    },
+    {
+      "task_key": "matchups_ingestion",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Shared/FantasAI/06_matchups_ingestion"
+      }
+    },
+    {
+      "task_key": "news_ingestion",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Shared/FantasAI/07_news_ingestion"
+      }
+    },
+    {
+      "task_key": "silver_domain_normalization",
+      "depends_on": [
+        {
+          "task_key": "player_metadata_ingestion"
+        },
+        {
+          "task_key": "league_ingestion"
+        },
+        {
+          "task_key": "roster_ingestion"
+        },
+        {
+          "task_key": "matchups_ingestion"
+        },
+        {
+          "task_key": "news_ingestion"
+        }
+      ],
+      "notebook_task": {
+        "notebook_path": "/Workspace/Shared/FantasAI/08_silver_domain_normalization"
+      }
     }
   ]
 }
