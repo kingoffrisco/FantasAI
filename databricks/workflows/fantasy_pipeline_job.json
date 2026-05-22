@@ -1,0 +1,22 @@
+{
+  "name": "fantasai-pipeline",
+  "tasks": [
+    {
+      "task_key": "bronze_ingestion",
+      "notebook_task": {
+        "notebook_path": "/Workspace/Shared/FantasAI/01_bronze_ingestion"
+      }
+    },
+    {
+      "task_key": "silver_normalization",
+      "depends_on": [
+        {
+          "task_key": "bronze_ingestion"
+        }
+      ],
+      "notebook_task": {
+        "notebook_path": "/Workspace/Shared/FantasAI/02_silver_normalization"
+      }
+    }
+  ]
+}
