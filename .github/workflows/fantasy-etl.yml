@@ -1,0 +1,151 @@
+name: Fantasy ETL → S3
+
+# Runs every hour during NFL season; can also be triggered manually from
+# the GitHub Actions tab (useful for backfilling a specific week).
+on:
+  schedule:
+    - cron: '0 * * * *'   # top of every hour, UTC
+  workflow_dispatch:
+    inputs:
+      week:
+        description: 'NFL week to backfill (leave blank for current week)'
+        required: false
+        default: ''
+      season:
+        description: 'Season year (leave blank for current season)'
+        required: false
+        default: ''
+
+jobs:
+  etl:
+    name: Fetch → S3
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      API_BASE: https://api.fantasai.net
+      S3_BUCKET: aws-kingoffrisco-s3-bucket
+      S3_PREFIX: fantasai
+      AWS_DEFAULT_REGION: us-east-1
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            us-east-1
+
+      # ── Resolve current NFL week/season from Sleeper ──────────────────────
+      - name: Get current NFL state
+        id: nfl
+        run: |
+          STATE=$(curl -sf https://api.sleeper.app/v1/state/nfl)
+          WEEK=$(echo "$STATE"   | python3 -c "import sys,json; d=json.load(sys.stdin); print(max(1, d.get('week',1)))")
+          SEASON=$(echo "$STATE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('season','2025'))")
+          STYPE=$(echo "$STATE"  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('season_type','regular'))")
+
+          # Override with workflow_dispatch inputs if provided
+          WEEK="${{ github.event.inputs.week || '' }}"
+          if [ -z "$WEEK" ]; then WEEK=$(echo "$STATE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(max(1, d.get('week',1)))"); fi
+          SEASON_OVERRIDE="${{ github.event.inputs.season || '' }}"
+          if [ -z "$SEASON_OVERRIDE" ]; then SEASON_OVERRIDE=$SEASON; fi
+
+          echo "week=$WEEK"         >> $GITHUB_OUTPUT
+          echo "season=$SEASON_OVERRIDE" >> $GITHUB_OUTPUT
+          echo "season_type=$STYPE" >> $GITHUB_OUTPUT
+          echo "NFl state: season=$SEASON_OVERRIDE week=$WEEK type=$STYPE"
+
+      # ── Fetch all endpoints ───────────────────────────────────────────────
+      - name: Fetch API data
+        id: fetch
+        env:
+          WEEK:   ${{ steps.nfl.outputs.week }}
+          SEASON: ${{ steps.nfl.outputs.season }}
+          STYPE:  ${{ steps.nfl.outputs.season_type }}
+        run: |
+          mkdir -p /tmp/fantasai
+
+          fetch() {
+            local url="$1"
+            local dest="$2"
+            echo "  GET $url"
+            if curl -sf --max-time 30 "$url" -o "$dest"; then
+              SIZE=$(wc -c < "$dest")
+              echo "  ✓ $dest ($SIZE bytes)"
+            else
+              echo "  ✗ failed: $url"
+            fi
+          }
+
+          echo "=== Static endpoints ==="
+          fetch "$API_BASE/api/v1/league"   /tmp/fantasai/league.json
+          fetch "$API_BASE/api/v1/injuries" /tmp/fantasai/injuries.json
+
+          echo "=== CBS endpoints (require cookie — may 500 if offline) ==="
+          fetch "$API_BASE/api/v1/rosters"         /tmp/fantasai/rosters.json
+          fetch "$API_BASE/api/v1/draft?year=$SEASON" /tmp/fantasai/draft_${SEASON}.json
+
+          echo "=== Weekly Sleeper data (week=$WEEK season=$SEASON) ==="
+          fetch "$API_BASE/api/v1/stats/week?week=$WEEK&season=$SEASON&type=$STYPE" \
+                /tmp/fantasai/stats_${SEASON}_week${WEEK}.json
+          fetch "$API_BASE/api/v1/projections?week=$WEEK&season=$SEASON&type=$STYPE" \
+                /tmp/fantasai/projections_${SEASON}_week${WEEK}.json
+
+          # Tag each file with fetch metadata
+          FETCHED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          for f in /tmp/fantasai/*.json; do
+            python3 - <<EOF
+          import json, sys
+          with open("$f") as fh:
+              d = json.load(fh)
+          if isinstance(d, dict):
+              d.setdefault("etl_fetched_at", "$FETCHED_AT")
+              d.setdefault("etl_week", $WEEK)
+              d.setdefault("etl_season", $SEASON)
+          with open("$f", "w") as fh:
+              json.dump(d, fh)
+          EOF
+          done
+
+      # ── Upload to S3 ──────────────────────────────────────────────────────
+      - name: Upload to S3
+        env:
+          WEEK:   ${{ steps.nfl.outputs.week }}
+          SEASON: ${{ steps.nfl.outputs.season }}
+        run: |
+          PREFIX="s3://$S3_BUCKET/$S3_PREFIX"
+
+          upload() {
+            local src="$1"
+            local dest="$2"
+            if [ -f "$src" ]; then
+              aws s3 cp "$src" "$dest" --content-type "application/json"
+              echo "  ✓ $dest"
+            fi
+          }
+
+          # Always-latest copies (easy to query from Databricks)
+          upload /tmp/fantasai/league.json   "$PREFIX/league/latest.json"
+          upload /tmp/fantasai/injuries.json "$PREFIX/injuries/latest.json"
+          upload /tmp/fantasai/rosters.json  "$PREFIX/rosters/latest.json"
+
+          # Draft — partitioned by season
+          upload /tmp/fantasai/draft_${SEASON}.json \
+                 "$PREFIX/draft/season=${SEASON}/data.json"
+
+          # Stats — partitioned by season + week (Hive-style, AutoLoader friendly)
+          upload /tmp/fantasai/stats_${SEASON}_week${WEEK}.json \
+                 "$PREFIX/stats/season=${SEASON}/week=${WEEK}/data.json"
+          upload /tmp/fantasai/projections_${SEASON}_week${WEEK}.json \
+                 "$PREFIX/projections/season=${SEASON}/week=${WEEK}/data.json"
+
+          # Also overwrite "current week" aliases
+          upload /tmp/fantasai/stats_${SEASON}_week${WEEK}.json \
+                 "$PREFIX/stats/season=${SEASON}/current_week.json"
+          upload /tmp/fantasai/projections_${SEASON}_week${WEEK}.json \
+                 "$PREFIX/projections/season=${SEASON}/current_week.json"
+
+          echo ""
+          echo "S3 layout:"
+          aws s3 ls "s3://$S3_BUCKET/$S3_PREFIX/" --recursive | tail -20
