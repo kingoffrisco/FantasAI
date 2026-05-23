@@ -50,37 +50,37 @@ const DEFAULTS = {
 
   // Scoring — offensive
   offensiveScoring: [
-    { code: 'FG',     name: 'Field Goals',                                  value: '3 points' },
-    { code: 'FL',     name: 'Fumble Lost (incl. ST plays)',                  value: '-1 point' },
-    { code: 'Fum2PK', name: 'Fumble Recovery 2-pt Conv (Kick)',              value: '2 points' },
-    { code: 'Fum2PT', name: 'Fumble Recovery 2-pt Conv (Two-pt formation)', value: '2 points' },
-    { code: 'OFRTD',  name: 'Offensive Fumble Recovery TD',                  value: '6 points' },
-    { code: 'Pa2P',   name: 'Passing Two-point Conversion',                  value: '2 points' },
-    { code: 'PaInt',  name: 'Passing Interception',                          value: '-1 point' },
-    { code: 'PaTD',   name: 'Passing TD',                                    value: '4 pts · +2 pts for 50–99 yds' },
-    { code: 'PaYd',   name: 'Passing Yards',                                 value: '0.04 pts/yd · +2 @ 300+ · +2 @ 400+ · +3 @ 500+' },
-    { code: 'Re2P',   name: 'Receiving Two-point Conversion',                value: '2 points' },
-    { code: 'ReTD',   name: 'Receiving TD',                                  value: '6 pts · +2 pts for 50–99 yds' },
-    { code: 'ReYd',   name: 'Receiving Yards',                               value: '0.1 pts/yd · +2 @ 100+ · +2 @ 200+ · +3 @ 300+' },
-    { code: 'Ru2P',   name: 'Rushing Two-point Conversion',                  value: '2 points' },
-    { code: 'RuTD',   name: 'Rushing TD',                                    value: '6 pts · +2 pts for 40–99 yds' },
-    { code: 'RuYd',   name: 'Rushing Yards',                                 value: '0.1 pts/yd · +2 @ 100+ · +2 @ 200+ · +3 @ 300+' },
-    { code: 'XP',     name: 'Extra Points',                                  value: '1 point' },
+    { code: 'FG',     name: 'Field Goals',                                                   value: '3 points' },
+    { code: 'FL',     name: 'Fumble Lost, Including ST plays',                               value: '-1 point' },
+    { code: 'Fum2PK', name: 'Fumble Recovery Two-point Conversion, Kicking formation',      value: '2 points' },
+    { code: 'Fum2PT', name: 'Fumble Recovery Two-point Conversion, Two-point formation',    value: '2 points' },
+    { code: 'OFRTD',  name: 'Offensive Fumble Recovery TD',                                  value: '6 points' },
+    { code: 'Pa2P',   name: 'Passing Two-point Conversion',                                  value: '2 points' },
+    { code: 'PaInt',  name: 'Passing Interception',                                          value: '-1 point' },
+    { code: 'PaTD',   name: 'Passing TD',                                                    value: '4 points\nPlus 2 points for a PaTD of 50 to 99 Yds' },
+    { code: 'PaYd',   name: 'Passing Yards',                                                 value: '0+ PaYds = .04 points for every 1 PaYd\nPlus a 2 point bonus @ 300+ PaYd\nPlus a 2 point bonus @ 400+ PaYd\nPlus a 3 point bonus @ 500+ PaYd' },
+    { code: 'Re2P',   name: 'Receiving Two-point Conversion',                                value: '2 points' },
+    { code: 'ReTD',   name: 'Receiving TD',                                                  value: '6 points\nPlus 2 points for a ReTD of 50 to 99 Yds' },
+    { code: 'ReYd',   name: 'Receiving Yards',                                               value: '0+ ReYds = .1 points for every 1 ReYd\nPlus a 2 point bonus @ 100+ ReYd\nPlus a 2 point bonus @ 200+ ReYd\nPlus a 3 point bonus @ 300+ ReYd' },
+    { code: 'Ru2P',   name: 'Rushing Two-point Conversion',                                  value: '2 points' },
+    { code: 'RuTD',   name: 'Rushing TD',                                                    value: '6 points\nPlus 2 points for a RuTD of 40 to 99 Yds' },
+    { code: 'RuYd',   name: 'Rushing Yards',                                                 value: '0+ RuYds = .1 points for every 1 RuYd\nPlus a 2 point bonus @ 100+ RuYd\nPlus a 2 point bonus @ 200+ RuYd\nPlus a 3 point bonus @ 300+ RuYd' },
+    { code: 'XP',     name: 'Extra Points',                                                  value: '1 point' },
   ],
 
   // Scoring — defensive
   defensiveScoring: [
-    { code: 'BFB',    name: 'Blocked Field Goals (ID/ST/DST)',               value: '3 points' },
-    { code: 'BP',     name: 'Blocked Punts (ID/ST/DST)',                     value: '2 points' },
-    { code: 'BXP',    name: 'Blocked Extra Points (ID/ST/DST)',              value: '2 points' },
-    { code: 'DFR',    name: 'Defensive/ST Fumble Recovered (ID/DT/DST)',     value: '2 points' },
-    { code: 'DSTPA',  name: 'Points Against Defense/ST',                     value: '0–6 pts allowed: 8 · 7–13: 6 · 14–20: 4 · 21–27: 2' },
-    { code: 'DTD',    name: 'Defensive & Special Teams TD',                  value: '6 points' },
-    { code: 'Int',    name: 'Interceptions',                                  value: '2 points' },
-    { code: 'SACK',   name: 'Sack',                                           value: '1 point' },
-    { code: 'ST2PT',  name: 'Special Teams Conversion Return (ID/ST/DST)',   value: '2 points' },
-    { code: 'STY',    name: 'Safety',                                         value: '5 points' },
-    { code: 'YDS',    name: 'Yards Allowed',                                  value: '0 points' },
+    { code: 'BFB',   name: 'Blocked Field Goals (ID/ST/DST)',                             value: '3 points' },
+    { code: 'BP',    name: 'Blocked Punts (ID/ST/DST)',                                   value: '2 points' },
+    { code: 'BXP',   name: 'Blocked Extra Points (ID/ST/DST)',                            value: '2 points' },
+    { code: 'DFR',   name: 'Defensive/ST Fumble Recovered (ID/DT/DST)',                   value: '2 points' },
+    { code: 'DSTPA', name: 'Points Against Defense/ST',                                   value: '0 - 6 DSTPAs = 8 points\n7 - 13 DSTPAs = 6 points\n14 - 20 DSTPAs = 4 points\n21 - 27 DSTPAs = 2 points' },
+    { code: 'DTD',   name: 'Total Defensive and Special Teams TD',                        value: '6 points' },
+    { code: 'Int',   name: 'Interceptions',                                               value: '2 points' },
+    { code: 'SACK',  name: 'Sack',                                                        value: '1 point' },
+    { code: 'ST2PT', name: 'Special Teams Conversion Return for Two-points (ID/ST/DST)', value: '2 points' },
+    { code: 'STY',   name: 'Safety',                                                      value: '5 points' },
+    { code: 'YDS',   name: 'Yards Allowed',                                               value: '0 points' },
   ],
 
   // Scoring policies
@@ -136,6 +136,7 @@ export default function LeagueSettings({ user }) {
   const [data, setData]       = React.useState(load);
   const [activeTab, setTab]   = React.useState('general');
   const [editingRule, setEditingRule] = React.useState(null);
+  const [editingScore, setEditingScore] = React.useState(null);
   const [saved, setSaved]     = React.useState(false);
 
   // For inline field editing
@@ -165,6 +166,16 @@ export default function LeagueSettings({ user }) {
     persist(next);
     setData(next);
     setEditingRule(null);
+    flash();
+  }
+
+  function saveScore(type, index, value) {
+    const arr = type === 'offensive' ? 'offensiveScoring' : 'defensiveScoring';
+    const updated = data[arr].map((s, i) => i === index ? { ...s, value } : s);
+    const next = { ...data, [arr]: updated };
+    persist(next);
+    setData(next);
+    setEditingScore(null);
     flash();
   }
 
@@ -297,48 +308,34 @@ export default function LeagueSettings({ user }) {
       {activeTab === 'scoring' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card title="Scoring Policies">
-            <Row label="Scoring System"         value={data.scoringPolicies.system} />
-            <Row label="Scoring per Period"     value={data.scoringPolicies.perPeriod} />
-            <Row label="Matchup Tiebreaker"     value={data.scoringPolicies.matchupTiebreaker} />
+            <Row label="Scoring System"     value={data.scoringPolicies.system} />
+            <Row label="Scoring per Period" value={data.scoringPolicies.perPeriod} />
+            <Row label="Matchup Tiebreaker" value={data.scoringPolicies.matchupTiebreaker} />
           </Card>
 
-          <Card title="Offensive Scoring">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <Th>Code</Th><Th>Name</Th><Th>Points</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.offensiveScoring.map(s => (
-                  <tr key={s.code} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <Td><span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)' }}>{s.code}</span></Td>
-                    <Td>{s.name}</Td>
-                    <Td style={{ color: 'var(--text-dim)' }}>{s.value}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+          <ScoringSection
+            title="Offense"
+            rows={data.offensiveScoring}
+            type="offensive"
+            canEdit={canEdit}
+            editing={editingScore}
+            onEdit={(index, draft) => setEditingScore({ type: 'offensive', index, draft })}
+            onDraftChange={draft => setEditingScore(e => ({ ...e, draft }))}
+            onSave={() => saveScore(editingScore.type, editingScore.index, editingScore.draft)}
+            onCancel={() => setEditingScore(null)}
+          />
 
-          <Card title="Defensive / Special Teams Scoring">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <Th>Code</Th><Th>Name</Th><Th>Points</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.defensiveScoring.map(s => (
-                  <tr key={s.code} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <Td><span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)' }}>{s.code}</span></Td>
-                    <Td>{s.name}</Td>
-                    <Td style={{ color: 'var(--text-dim)' }}>{s.value}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+          <ScoringSection
+            title="Defense / Special Teams"
+            rows={data.defensiveScoring}
+            type="defensive"
+            canEdit={canEdit}
+            editing={editingScore}
+            onEdit={(index, draft) => setEditingScore({ type: 'defensive', index, draft })}
+            onDraftChange={draft => setEditingScore(e => ({ ...e, draft }))}
+            onSave={() => saveScore(editingScore.type, editingScore.index, editingScore.draft)}
+            onCancel={() => setEditingScore(null)}
+          />
         </div>
       )}
 
@@ -465,6 +462,75 @@ function Th({ children, align }) {
 }
 function Td({ children, align, style: s }) {
   return <td style={{ padding: '9px 12px', textAlign: align || 'left', color: 'var(--text)', verticalAlign: 'top', ...s }}>{children}</td>;
+}
+
+function ScoringSection({ title, rows, type, canEdit, editing, onEdit, onDraftChange, onSave, onCancel }) {
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
+        {title}
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+            <Th style={{ width: 72 }}>Code</Th>
+            <Th style={{ width: '30%' }}>Name</Th>
+            <Th>Points / Rules</Th>
+            {canEdit && <Th style={{ width: 100 }} />}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((s, i) => {
+            const isActive = editing && editing.type === type && editing.index === i;
+            return (
+              <tr key={s.code} style={{
+                borderBottom: '1px solid var(--border)',
+                background: isActive ? 'rgba(198,255,58,.05)' : 'transparent',
+                transition: 'background .1s',
+              }}>
+                <Td>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)' }}>{s.code}</span>
+                </Td>
+                <Td>{s.name}</Td>
+                <Td>
+                  {isActive ? (
+                    <textarea
+                      className="input"
+                      value={editing.draft}
+                      onChange={e => onDraftChange(e.target.value)}
+                      rows={Math.max(2, (editing.draft.match(/\n/g) || []).length + 1)}
+                      autoFocus
+                      style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit', fontSize: 12, lineHeight: 1.55 }}
+                    />
+                  ) : (
+                    <span style={{ color: 'var(--text-dim)', whiteSpace: 'pre-line', lineHeight: 1.65 }}>{s.value}</span>
+                  )}
+                </Td>
+                {canEdit && (
+                  <Td align="right">
+                    {isActive ? (
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                        <button className="btn primary sm" onClick={onSave}>Save</button>
+                        <button className="btn ghost sm" onClick={onCancel}>✕</button>
+                      </div>
+                    ) : (
+                      <button
+                        className="btn ghost sm"
+                        disabled={!!(editing && editing.type === type && editing.index !== i)}
+                        onClick={() => onEdit(i, s.value)}
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </Td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function RuleCard({ label, text, canEdit, isEditing, onEdit, onCancel, onSave }) {
