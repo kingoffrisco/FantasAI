@@ -24,7 +24,7 @@ jobs:
       API_BASE: https://api.fantasai.net
       S3_BUCKET: aws-kingoffisco-s3-bucket
       S3_PREFIX: fantasai
-      AWS_DEFAULT_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-2
 
     steps:
       - name: Configure AWS credentials
@@ -32,7 +32,7 @@ jobs:
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            us-east-1
+          aws-region:            us-east-2
 
       - name: Resolve NFL week and season
         id: nfl
