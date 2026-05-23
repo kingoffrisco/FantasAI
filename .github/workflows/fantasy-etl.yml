@@ -70,12 +70,12 @@ jobs:
             fi
           }
 
-          fetch "$API_BASE/api/v1/injuries"                                               /tmp/fantasai/injuries.json
-          fetch "$API_BASE/api/v1/stats/week?week=${WEEK}&season=${SEASON}&type=${STYPE}" /tmp/fantasai/stats_${SEASON}_week${WEEK}.json
+          fetch "$API_BASE/api/v1/injuries"                                                /tmp/fantasai/injuries.json
+          fetch "$API_BASE/api/v1/stats/week?week=${WEEK}&season=${SEASON}&type=${STYPE}"  /tmp/fantasai/stats_${SEASON}_week${WEEK}.json
           fetch "$API_BASE/api/v1/projections?week=${WEEK}&season=${SEASON}&type=${STYPE}" /tmp/fantasai/projections_${SEASON}_week${WEEK}.json
-          fetch "$API_BASE/api/v1/league"                                                 /tmp/fantasai/league.json
-          fetch "$API_BASE/api/v1/rosters"                                                /tmp/fantasai/rosters.json
-          fetch "$API_BASE/api/v1/draft?year=${SEASON}"                                   /tmp/fantasai/draft_${SEASON}.json
+          fetch "$API_BASE/api/v1/league"                                                  /tmp/fantasai/league.json
+          fetch "$API_BASE/api/v1/rosters"                                                 /tmp/fantasai/rosters.json
+          fetch "$API_BASE/api/v1/draft?year=${SEASON}"                                    /tmp/fantasai/draft_${SEASON}.json
 
           echo "Files fetched:"
           ls -lh /tmp/fantasai/
