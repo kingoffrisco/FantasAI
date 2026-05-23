@@ -137,6 +137,7 @@ export default function LeagueSettings({ user }) {
   const [activeTab, setTab]   = React.useState('general');
   const [editingRule, setEditingRule] = React.useState(null);
   const [editingScore, setEditingScore] = React.useState(null);
+  const [editingRoster, setEditingRoster] = React.useState(null);
   const [saved, setSaved]     = React.useState(false);
 
   // For inline field editing
@@ -176,6 +177,25 @@ export default function LeagueSettings({ user }) {
     persist(next);
     setData(next);
     setEditingScore(null);
+    flash();
+  }
+
+  function saveRosterLimit(key, draft) {
+    const next = { ...data, roster: { ...data.roster, [key]: { min: Number(draft.min), max: Number(draft.max) } } };
+    persist(next);
+    setData(next);
+    setEditingRoster(null);
+    flash();
+  }
+
+  function saveRosterPosition(index, draft) {
+    const positions = data.positions.map((p, i) =>
+      i === index ? { ...p, activeMin: Number(draft.activeMin), activeMax: Number(draft.activeMax), rosterTotal: draft.rosterTotal } : p
+    );
+    const next = { ...data, positions };
+    persist(next);
+    setData(next);
+    setEditingRoster(null);
     flash();
   }
 
@@ -253,23 +273,54 @@ export default function LeagueSettings({ user }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <Th>Status</Th><Th align="center">Min</Th><Th align="center">Max</Th>
+                  <Th>Status</Th>
+                  <Th align="center" style={{ width: 90 }}>Min</Th>
+                  <Th align="center" style={{ width: 90 }}>Max</Th>
+                  {canEdit && <Th style={{ width: 110 }} />}
                 </tr>
               </thead>
               <tbody>
                 {[
-                  ['Starters',        data.roster.starters],
-                  ['Bench',           data.roster.bench],
-                  ['Injured Players', data.roster.injuredPlayers],
-                  ['Practice Players',data.roster.practicePlayers],
-                  ['Total Players',   data.roster.totalPlayers],
-                ].map(([label, r]) => (
-                  <tr key={label} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <Td>{label}</Td>
-                    <Td align="center">{r.min}</Td>
-                    <Td align="center">{r.max}</Td>
-                  </tr>
-                ))}
+                  ['starters',        'Starters',         data.roster.starters],
+                  ['bench',           'Bench',             data.roster.bench],
+                  ['injuredPlayers',  'Injured Players',   data.roster.injuredPlayers],
+                  ['practicePlayers', 'Practice Players',  data.roster.practicePlayers],
+                  ['totalPlayers',    'Total Players',     data.roster.totalPlayers],
+                ].map(([key, label, r]) => {
+                  const isActive = editingRoster?.section === 'limits' && editingRoster?.key === key;
+                  const draft = isActive ? editingRoster.draft : null;
+                  return (
+                    <tr key={key} style={{ borderBottom: '1px solid var(--border)', background: isActive ? 'rgba(198,255,58,.05)' : 'transparent' }}>
+                      <Td>{label}</Td>
+                      <Td align="center">
+                        {isActive
+                          ? <NumInput value={draft.min} onChange={v => setEditingRoster(e => ({ ...e, draft: { ...e.draft, min: v } }))} />
+                          : r.min}
+                      </Td>
+                      <Td align="center">
+                        {isActive
+                          ? <NumInput value={draft.max} onChange={v => setEditingRoster(e => ({ ...e, draft: { ...e.draft, max: v } }))} />
+                          : r.max}
+                      </Td>
+                      {canEdit && (
+                        <Td align="right">
+                          {isActive ? (
+                            <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                              <button className="btn primary sm" onClick={() => saveRosterLimit(key, draft)}>Save</button>
+                              <button className="btn ghost sm" onClick={() => setEditingRoster(null)}>✕</button>
+                            </div>
+                          ) : (
+                            <button className="btn ghost sm"
+                              disabled={!!editingRoster}
+                              onClick={() => setEditingRoster({ section: 'limits', key, draft: { min: r.min, max: r.max } })}>
+                              Edit
+                            </button>
+                          )}
+                        </Td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </Card>
@@ -278,18 +329,56 @@ export default function LeagueSettings({ user }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <Th>Position</Th><Th align="center">Active Min</Th><Th align="center">Active Max</Th><Th align="center">Roster Total</Th>
+                  <Th style={{ width: 80 }}>Position</Th>
+                  <Th align="center" style={{ width: 100 }}>Active Min</Th>
+                  <Th align="center" style={{ width: 100 }}>Active Max</Th>
+                  <Th align="center">Roster Total</Th>
+                  {canEdit && <Th style={{ width: 110 }} />}
                 </tr>
               </thead>
               <tbody>
-                {data.positions.map(p => (
-                  <tr key={p.key} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <Td><strong>{p.label}</strong></Td>
-                    <Td align="center">{p.activeMin}</Td>
-                    <Td align="center">{p.activeMax}</Td>
-                    <Td align="center">{p.rosterTotal}</Td>
-                  </tr>
-                ))}
+                {data.positions.map((p, i) => {
+                  const isActive = editingRoster?.section === 'positions' && editingRoster?.index === i;
+                  const draft = isActive ? editingRoster.draft : null;
+                  return (
+                    <tr key={p.key} style={{ borderBottom: '1px solid var(--border)', background: isActive ? 'rgba(198,255,58,.05)' : 'transparent' }}>
+                      <Td><strong>{p.label}</strong></Td>
+                      <Td align="center">
+                        {isActive
+                          ? <NumInput value={draft.activeMin} onChange={v => setEditingRoster(e => ({ ...e, draft: { ...e.draft, activeMin: v } }))} />
+                          : p.activeMin}
+                      </Td>
+                      <Td align="center">
+                        {isActive
+                          ? <NumInput value={draft.activeMax} onChange={v => setEditingRoster(e => ({ ...e, draft: { ...e.draft, activeMax: v } }))} />
+                          : p.activeMax}
+                      </Td>
+                      <Td align="center">
+                        {isActive
+                          ? <input className="input" value={draft.rosterTotal}
+                              onChange={e => setEditingRoster(ev => ({ ...ev, draft: { ...ev.draft, rosterTotal: e.target.value } }))}
+                              style={{ width: 90, textAlign: 'center', padding: '3px 6px' }} />
+                          : p.rosterTotal}
+                      </Td>
+                      {canEdit && (
+                        <Td align="right">
+                          {isActive ? (
+                            <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                              <button className="btn primary sm" onClick={() => saveRosterPosition(i, draft)}>Save</button>
+                              <button className="btn ghost sm" onClick={() => setEditingRoster(null)}>✕</button>
+                            </div>
+                          ) : (
+                            <button className="btn ghost sm"
+                              disabled={!!editingRoster}
+                              onClick={() => setEditingRoster({ section: 'positions', index: i, draft: { activeMin: p.activeMin, activeMax: p.activeMax, rosterTotal: p.rosterTotal } })}>
+                              Edit
+                            </button>
+                          )}
+                        </Td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </Card>
@@ -457,8 +546,21 @@ function SettingsTable({ rows, canEdit, editField, fieldDraft, setFieldDraft, on
   );
 }
 
-function Th({ children, align }) {
-  return <th style={{ padding: '8px 12px', textAlign: align || 'left', fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em' }}>{children}</th>;
+function NumInput({ value, onChange }) {
+  return (
+    <input
+      className="input"
+      type="number"
+      min={0}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      style={{ width: 60, textAlign: 'center', padding: '3px 6px' }}
+    />
+  );
+}
+
+function Th({ children, align, style: s }) {
+  return <th style={{ padding: '8px 12px', textAlign: align || 'left', fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', ...s }}>{children}</th>;
 }
 function Td({ children, align, style: s }) {
   return <td style={{ padding: '9px 12px', textAlign: align || 'left', color: 'var(--text)', verticalAlign: 'top', ...s }}>{children}</td>;
