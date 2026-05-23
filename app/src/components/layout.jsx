@@ -79,7 +79,8 @@ export const Sidebar = ({ active, onNav, user }) => {
     { id: 'owners',    label: 'Owner Intel',       icon: '◉', badge: '12' },
     { id: 'cbs',       label: 'CBS Rankings',      icon: '▦', badge: '432' },
     { group: 'Setup' },
-    { id: 'sources',   label: 'Sources',           icon: '⌁', badge: 'CBS' },
+    { id: 'sources',  label: 'Sources',          icon: '⌁', badge: 'CBS' },
+    { id: 'settings', label: 'Rules & Settings',  icon: '📋' },
     ...(isAdmin ? [
       { group: 'Admin' },
       { id: 'admin-owners', label: 'Owners', icon: '👤' },
@@ -146,7 +147,8 @@ const BASE_SECTIONS = [
   {
     group: 'Setup',
     items: [
-      { id: 'sources',   label: 'Sources',         icon: '⌁',  badge: 'CBS' },
+      { id: 'sources',  label: 'Sources',          icon: '⌁', badge: 'CBS' },
+      { id: 'settings', label: 'Rules & Settings', icon: '📋' },
     ],
   },
 ];

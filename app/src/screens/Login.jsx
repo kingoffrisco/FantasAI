@@ -72,12 +72,13 @@ export default function Login({ onLogin }) {
 
     setLoading(true);
     setTimeout(() => onLogin({
-      email:    trimmed,
-      teamId:   team.id,
-      teamName: ov.name  || team.name,
-      logo:     team.logo,
-      color:    team.color,
-      isAdmin:  false,
+      email:           trimmed,
+      teamId:          team.id,
+      teamName:        ov.name  || team.name,
+      logo:            team.logo,
+      color:           team.color,
+      isAdmin:         false,
+      isCommissioner:  !!ov.isCommissioner,
       needsPasswordChange,
     }), 600);
   }

@@ -17,6 +17,7 @@ import OwnerIntelScreen from './screens/OwnerIntel.jsx';
 import { CBSRankingsScreen } from './components/CBSConnectModal.jsx';
 import SourcesScreen from './screens/Sources.jsx';
 import AdminOwners from './screens/AdminOwners.jsx';
+import LeagueSettings from './screens/LeagueSettings.jsx';
 import CurrentRosterScreen from './screens/CurrentRoster.jsx';
 import WaiversScreen from './screens/Waivers.jsx';
 
@@ -49,6 +50,7 @@ const CRUMBS = {
   cbs:       ['Draft', 'CBS Sports Rankings'],
   sources:       ['Setup', 'Sources & Connections'],
   'admin-owners': ['Admin', 'Owner Management'],
+  settings:       ['Setup', 'Rules & League Settings'],
 };
 
 export default function App() {
@@ -222,6 +224,7 @@ export default function App() {
           {active === 'cbs'       && <CBSRankingsScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} />}
           {active === 'admin-owners'  && <AdminOwners />}
+          {active === 'settings'      && <LeagueSettings user={user} />}
         </div>
 
         {showAI && <AICopilot active={active} aiMode={aiMode} />}
