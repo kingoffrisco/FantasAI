@@ -48,6 +48,11 @@ Requires secret: `CBS_COOKIE` (set via `wrangler secret put CBS_COOKIE`)
 ### Frontend (`app/`)
 React + Vite app deployed to Cloudflare Pages (`fantasai-app`). Connects to the CBS Worker for live league data.
 
+**Deployment note:** Cloudflare Pages production branch is set to `main`. Always deploy via `npm run deploy` from `app/` — this builds with Vite and uploads directly to Pages. The custom domain `fantasai.net` tracks the production deployment. After deploying, confirm `fantasai.net` is serving the new bundle by checking the JS filename in the page source matches `main.fantasai-app.pages.dev`.
+
+#### Admin Panel
+Log in with `admin@fantasai.net` to access the **Admin** section in the sidebar (only visible to admin). The **Owners** screen allows changing team names, login emails, and passwords for any league member. Changes are stored in `localStorage` under `fantasai_owners_config` and take effect immediately on the login screen.
+
 ### ETL Pipeline (`.github/workflows/fantasy-etl.yml`)
 Runs every hour via GitHub Actions. Fetches all API endpoints and uploads JSON to S3.
 
@@ -121,6 +126,13 @@ npx wrangler deploy
 cd worker
 npx wrangler deploy
 ```
+
+## Cloudflare Configuration Notes
+
+- **Pages production branch:** Set to `main` via Cloudflare API — ensures `wrangler pages deploy` goes to production
+- **Workers Routes:** Only `api.fantasai.net/*` → `fantasai-api`. Do not add a route for `fantasai.net/*` or it will intercept Pages traffic
+- **DNS:** `api.fantasai.net` uses an `AAAA 100::` proxied record (dummy IP — Cloudflare intercepts before it hits the IP)
+- **SSL:** AWS CA bundle at `~/.aws/ca-bundle.pem` is required locally due to Norton HTTPS scanning. Set in `~/.aws/config` as `ca_bundle`
 
 ## GitHub Secrets Required
 
