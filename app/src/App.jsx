@@ -5,6 +5,7 @@ import AICopilot from './components/AICopilot.jsx';
 import { TweaksPanel, TweakSection, TweakColor, TweakRadio, TweakToggle, useTweaks } from './components/TweaksPanel.jsx';
 
 import Login from './screens/Login.jsx';
+import ChangePassword from './screens/ChangePassword.jsx';
 import Dashboard from './screens/Dashboard.jsx';
 import PlayersScreen, { PlayerDetail } from './screens/Players.jsx';
 import NewsScreen from './screens/News.jsx';
@@ -73,14 +74,20 @@ export default function App() {
     localStorage.setItem('fantasai_slot_overrides', JSON.stringify(overrides));
   }
 
+  const [needsPasswordChange, setNeedsPasswordChange] = React.useState(false);
+
   function handleLogin(u) {
     localStorage.setItem('fantasai_user', JSON.stringify(u));
     setUser(u);
     const roster = TEAM_ROSTERS[u.teamId] || MY_ROSTER;
     setMyRosterIds(new Set(roster.map(r => r.playerId).filter(Boolean)));
-    // Clear slot overrides when switching accounts
     setRosterSlotOverrides({});
     localStorage.removeItem('fantasai_slot_overrides');
+    if (u.needsPasswordChange) setNeedsPasswordChange(true);
+  }
+
+  function handlePasswordChanged() {
+    setNeedsPasswordChange(false);
   }
 
   function handleLogout() {
@@ -173,6 +180,7 @@ export default function App() {
   const playerObj = openPlayer ? findPlayer(openPlayer) : null;
 
   if (!user) return <Login onLogin={handleLogin} />;
+  if (needsPasswordChange) return <ChangePassword user={user} onDone={handlePasswordChanged} />;
 
   return (
     <React.Fragment>
