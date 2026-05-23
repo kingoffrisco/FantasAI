@@ -1,128 +1,142 @@
-FantasAI
+# FantasAI
 
-FantasAI is a fantasy sports AI assistant built for ingesting fantasy data, normalizing it in Databricks Delta tables, and serving insights through a FastAPI backend.
-What this project will do
+FantasAI is a fantasy sports AI assistant that ingests NFL and fantasy data, normalizes it in Databricks Delta tables, and serves insights through a live API and web app.
 
-    Ingest fantasy sports data from external APIs such as Sleeper
-    Store raw and normalized data in Delta tables
-    Support retrieval pipelines for AI-powered recommendations
-    Expose API endpoints for health, data access, and future chat/recommendation workflows
+## Live URLs
 
-Current scaffold
+| Service | URL |
+|---|---|
+| Website | https://fantasai.net |
+| API | https://api.fantasai.net |
+| CBS Worker | https://fantasai-cbs.fantasai.workers.dev |
 
-app/
-  config.py
-  main.py
-  rag/
-    pipeline.py
-  services/
-    fantasy_apis.py
-databricks/
-  notebooks/
-    01_bronze_ingestion.py
-    02_silver_normalization.py
-  sql/
-    01_create_schemas.sql
-    02_create_bronze_tables.sql
-    03_create_silver_tables.sql
-  workflows/
-    fantasy_pipeline_job.json
-.env.example
-.gitignore
-requirements.txt
-README.md
+## Architecture
 
-Local development
-1. Create a virtual environment
+```
+Sleeper API ──┐
+CBS Sports ───┤──► api.fantasai.net (Cloudflare Worker) ──► GitHub Actions ETL ──► S3
+              │                                                                      │
+              └──► fantasai-cbs Worker (auth proxy)                                 │
+                                                                                    ▼
+                                                             aws-kingoffisco-s3-bucket/fantasai/
+                                                                                    │
+fantasai.net (Cloudflare Pages) ◄───────────────────────────────────────────────────┘
+```
 
-python -m venv .venv
-source .venv/bin/activate
+## Services
 
-On Windows PowerShell:
+### API Worker (`worker-api/`)
+Deployed to `api.fantasai.net`. Aggregates data from Sleeper and the CBS Worker.
 
+| Endpoint | Source | Description |
+|---|---|---|
+| `GET /api/health` | — | Health check |
+| `GET /api/v1/injuries` | Sleeper | Injured players with status |
+| `GET /api/v1/stats/week` | Sleeper | Weekly player stats |
+| `GET /api/v1/projections` | Sleeper | Weekly projections |
+| `GET /api/v1/league` | CBS Worker | League info |
+| `GET /api/v1/rosters` | CBS Worker | Team rosters |
+| `GET /api/v1/draft` | CBS Worker | Draft results |
+
+Query params for stats/projections: `?week=N&season=Y&type=regular|pre|post`
+
+### CBS Worker (`worker/`)
+Deployed to `fantasai-cbs.fantasai.workers.dev`. Authenticates with CBS Sports using a session cookie and exposes league data as JSON.
+
+Requires secret: `CBS_COOKIE` (set via `wrangler secret put CBS_COOKIE`)
+
+### Frontend (`app/`)
+React + Vite app deployed to Cloudflare Pages (`fantasai-app`). Connects to the CBS Worker for live league data.
+
+### ETL Pipeline (`.github/workflows/fantasy-etl.yml`)
+Runs every hour via GitHub Actions. Fetches all API endpoints and uploads JSON to S3.
+
+**S3 layout:**
+```
+aws-kingoffisco-s3-bucket/fantasai/
+  injuries/latest.json
+  league/latest.json
+  rosters/latest.json
+  draft/season=YYYY/data.json
+  stats/season=YYYY/week=N/data.json
+  stats/season=YYYY/current_week.json
+  projections/season=YYYY/week=N/data.json
+  projections/season=YYYY/current_week.json
+```
+
+### Databricks (`databricks/`)
+Bronze/silver Delta table pipeline for normalized analytics.
+
+| Layer | Tables |
+|---|---|
+| Bronze | `bronze_nfl_state`, `bronze_trending_players` |
+| Silver | `silver_nfl_state`, `silver_trending_players` |
+
+## Local Development
+
+### FastAPI backend
+
+```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-
-2. Install dependencies
-
 pip install -r requirements.txt
-
-3. Configure environment variables
-
-Copy the example file:
-
-cp .env.example .env
-
-Fill in values for:
-
-    OPENAI_API_KEY
-    DATABRICKS_HOST
-    DATABRICKS_TOKEN
-    DATABRICKS_CATALOG
-    DATABRICKS_SCHEMA
-    VECTOR_SEARCH_ENDPOINT
-
-4. Run the API
-
+cp .env.example .env   # fill in values
 uvicorn app.main:app --reload
+```
 
-5. Test the API
+Endpoints: `http://127.0.0.1:8000/docs`
 
-Open:
+### Frontend
 
-    http://127.0.0.1:8000/
-    http://127.0.0.1:8000/health
-    http://127.0.0.1:8000/players/trending
-    http://127.0.0.1:8000/docs
+```powershell
+cd app
+npm install
+npm run dev
+```
 
-API endpoints
-GET /
+### Workers
 
-Basic service metadata.
-GET /health
+```powershell
+# CBS Worker
+cd worker
+npx wrangler dev
 
-Health check endpoint.
-GET /players/trending
+# API Worker
+cd worker-api
+npx wrangler dev
+```
 
-Returns trending player data from Sleeper.
+### Deploy
 
-Query parameters:
+```powershell
+# Frontend → Cloudflare Pages
+cd app
+npm run deploy
 
-    add_drop: add or drop
-    hours: lookback window, default 24
-    limit: max number of players, default 25
+# API Worker → api.fantasai.net
+cd worker-api
+npx wrangler deploy
 
-Example:
+# CBS Worker
+cd worker
+npx wrangler deploy
+```
 
-curl "http://127.0.0.1:8000/players/trending?add_drop=add&hours=24&limit=10"
+## GitHub Secrets Required
 
-Databricks structure
+| Secret | Description |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | AWS IAM access key |
+| `AWS_ACCESS_S3_SECRET` | AWS IAM secret key |
 
-This project uses a simple bronze/silver pattern:
+## Environment Variables (.env)
 
-    Bronze: raw API payloads
-    Silver: normalized, analytics-friendly tables
-
-Suggested catalog/schema:
-
-    catalog: main
-    schema: fantasai
-
-Suggested Delta tables
-Bronze
-
-    bronze_nfl_state
-    bronze_trending_players
-
-Silver
-
-    silver_nfl_state
-    silver_trending_players
-
-Next steps
-
-    Add player metadata ingestion
-    Add league and roster ingestion
-    Add embeddings and vector search integration
-    Add recommendation endpoints
-    Add tests, Docker, and CI
+| Variable | Description |
+|---|---|
+| `OPENAI_API_KEY` | OpenAI API key |
+| `DATABRICKS_HOST` | Databricks workspace URL |
+| `DATABRICKS_TOKEN` | Databricks personal access token |
+| `DATABRICKS_CATALOG` | Default: `main` |
+| `DATABRICKS_SCHEMA` | Default: `fantasai` |
+| `DATABRICKS_WAREHOUSE_ID` | SQL warehouse ID |
+| `VECTOR_SEARCH_ENDPOINT` | Databricks Vector Search endpoint |
