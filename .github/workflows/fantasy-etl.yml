@@ -43,8 +43,8 @@ jobs:
           API_TYPE=$(echo "$STATE"   | python3 -c "import sys,json; print(json.load(sys.stdin).get('season_type','regular'))")
           WEEK="${{ github.event.inputs.week }}"
           SEASON="${{ github.event.inputs.season }}"
-          [ -z "$WEEK" ]   && WEEK="$API_WEEK"
-          [ -z "$SEASON" ] && SEASON="$API_SEASON"
+          if [ -z "$WEEK" ];   then WEEK="$API_WEEK";   fi
+          if [ -z "$SEASON" ]; then SEASON="$API_SEASON"; fi
           echo "week=$WEEK"       >> "$GITHUB_OUTPUT"
           echo "season=$SEASON"   >> "$GITHUB_OUTPUT"
           echo "stype=$API_TYPE"  >> "$GITHUB_OUTPUT"
