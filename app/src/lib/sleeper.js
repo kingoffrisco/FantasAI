@@ -1,0 +1,130 @@
+// Direct Sleeper API client — no auth required, CORS-open.
+// Module-level caches deduplicate the large per-week payloads when multiple
+// players are fetched concurrently.
+
+const SLEEPER = 'https://api.sleeper.app/v1';
+
+// ── Player map (~5 MB) — loaded once per session ────────────────────────────
+let _playerMap = null;
+let _playerMapPromise = null;
+
+async function getPlayerMap() {
+  if (_playerMap) return _playerMap;
+  if (!_playerMapPromise) {
+    _playerMapPromise = fetch(`${SLEEPER}/players/nfl`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => { _playerMap = d; return d; })
+      .catch(e => { _playerMapPromise = null; throw e; });
+  }
+  return _playerMapPromise;
+}
+
+// ── Per-week stats/projections — shared across concurrent calls ─────────────
+const _cache = {};
+const _pending = {};
+
+async function fetchCached(url, key) {
+  if (_cache[key] !== undefined) return _cache[key];
+  if (!_pending[key]) {
+    _pending[key] = fetch(url)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { _cache[key] = d; return d; })
+      .catch(() => { _cache[key] = null; return null; });
+  }
+  return _pending[key];
+}
+
+// ── Name search ─────────────────────────────────────────────────────────────
+function findInMap(map, name, pos) {
+  const q = name.toLowerCase().trim();
+  // Exact full-name match, position-filtered first
+  for (const [id, p] of Object.entries(map)) {
+    const full = (p.full_name || `${p.first_name} ${p.last_name}`).trim().toLowerCase();
+    if (full === q && (!pos || !p.position || p.position === pos)) return [id, p];
+  }
+  // Exact without position filter
+  for (const [id, p] of Object.entries(map)) {
+    const full = (p.full_name || `${p.first_name} ${p.last_name}`).trim().toLowerCase();
+    if (full === q) return [id, p];
+  }
+  // Partial fallback
+  for (const [id, p] of Object.entries(map)) {
+    const full = (p.full_name || `${p.first_name} ${p.last_name}`).trim().toLowerCase();
+    if ((full.includes(q) || q.includes(full)) && (!pos || !p.position || p.position === pos)) return [id, p];
+  }
+  return null;
+}
+
+// ── Season total aggregation ─────────────────────────────────────────────────
+function aggregate(statsArr) {
+  const totals = {};
+  for (const s of statsArr) {
+    if (!s) continue;
+    for (const [k, v] of Object.entries(s)) {
+      if (typeof v === 'number') totals[k] = (totals[k] || 0) + v;
+    }
+  }
+  return totals;
+}
+
+// ── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Fetch stats + projections for a single player directly from Sleeper.
+ * Returns the same shape as the worker's /api/player/stats endpoint so
+ * callers don't need to change their data-consumption code.
+ */
+export async function fetchSleeperPlayerStats(name, pos, season = 2025) {
+  // NFL state (current week / season type)
+  const state = await fetch(`${SLEEPER}/state/nfl`)
+    .then(r => r.json())
+    .catch(() => ({}));
+
+  const currentWeek = Math.max(1, state.week || 18);
+  // During offseason / preseason, pull regular-season stats from last season
+  const isOff = state.season_type === 'off' || state.season_type === 'pre';
+  const statsType = isOff ? 'regular' : (state.season_type || 'regular');
+  const maxWeek   = isOff ? 18 : Math.min(currentWeek, 18);
+
+  // Find player in map
+  const map = await getPlayerMap();
+  const entry = findInMap(map, name, pos);
+  if (!entry) return { found: false, searched: name, pos };
+  const [sleeperId, player] = entry;
+
+  // Fetch last 8 completed weeks of stats (deduped via cache)
+  const weeksWanted = Array.from({ length: 8 }, (_, i) => maxWeek - i).filter(w => w >= 1);
+  const weekData = await Promise.all(
+    weeksWanted.map(wk =>
+      fetchCached(`${SLEEPER}/stats/nfl/regular/${season}/${wk}`, `stats:${season}:${wk}`)
+    )
+  );
+
+  // Fetch projections for the most relevant week
+  const projWeek = isOff ? 1 : currentWeek;
+  const projData = await fetchCached(
+    `${SLEEPER}/projections/nfl/${statsType}/${season}/${projWeek}`,
+    `proj:${statsType}:${season}:${projWeek}`
+  );
+
+  const weeklyStats = {};
+  weekData.forEach((d, i) => {
+    const s = d?.[sleeperId];
+    if (s && Object.keys(s).length > 0) weeklyStats[weeksWanted[i]] = s;
+  });
+
+  return {
+    found: true,
+    sleeperId,
+    name:          player.full_name || `${player.first_name} ${player.last_name}`,
+    team:          player.team || '',
+    pos:           player.position || pos,
+    status:        player.injury_status || player.status || 'Active',
+    injuryBodyPart: player.injury_body_part || '',
+    currentWeek,
+    gamesPlayed:   Object.keys(weeklyStats).length,
+    weeklyStats,
+    seasonTotals:  aggregate(Object.values(weeklyStats)),
+    projection:    projData?.[sleeperId] ?? null,
+  };
+}

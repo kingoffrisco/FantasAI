@@ -1,0 +1,632 @@
+import React from 'react';
+import { PLAYERS, findPlayer, MY_ROSTER, DRAFT_PICKS, TEAM_ROSTERS, findTeam, NFL_TEAMS, NEWS, FREE_DATA_SOURCES, RANKING_SOURCES } from '../lib/data.js';
+
+const FREE_DATA_SOURCES_LIST = FREE_DATA_SOURCES.map(s => ({ id: s.id, name: s.name, defaultEnabled: s.enabled }));
+const FEED_NAMES = Object.fromEntries(RANKING_SOURCES.map(s => [s.id, s.name.replace(' (ECR)', '').replace(' Fantasy', '').replace(' Sports Rankings', '').replace(' Rankings', '')]));
+
+import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint } from '../components/ui.jsx';
+import { useApi } from '../hooks.js';
+import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
+
+const WORKER = (import.meta.env?.VITE_WORKER_URL || '').replace(/\/$/, '');
+
+export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new Set(), onAddPlayer, user, watchlistIds = new Set(), onToggleWatch }) {
+  const [pos, setPos] = React.useState('ALL');
+  const [search, setSearch] = React.useState('');
+  const [sort, setSort] = React.useState('proj');
+  const [avail, setAvail] = React.useState('all');
+  const [selected, setSelected] = React.useState(null);
+
+  const draftedIds = new Set(DRAFT_PICKS.filter(p => p.playerId).map(p => p.playerId));
+
+  let players = PLAYERS.filter(p => {
+    if (pos !== 'ALL' && p.pos !== pos) return false;
+    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (avail === 'free' && draftedIds.has(p.id)) return false;
+    return true;
+  });
+
+  players.sort((a, b) => {
+    if (sort === 'proj') return b.proj - a.proj;
+    if (sort === 'last') return b.last - a.last;
+    if (sort === 'avg') return b.avg - a.avg;
+    if (sort === 'owned') return b.owned - a.owned;
+    if (sort === 'adp') return a.adp - b.adp;
+    if (sort === 'rank') return a.ecr - b.ecr;
+    return 0;
+  });
+
+  return (
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+    <div className="col" style={{ flex: 1, minWidth: 0, overflow: 'hidden', height: '100%' }}>
+      <div className="page-head">
+        <div>
+          <h1>Players</h1>
+          <div className="sub">{players.length} of {PLAYERS.length} matching · Updated 2 min ago</div>
+        </div>
+        <div className="flex gap-8">
+          <button className="btn ghost"><span>⇣</span> Export</button>
+          <button className="btn ai"><span>◆</span> Ask FantasAI</button>
+        </div>
+      </div>
+
+      <div className="toolbar">
+        <div className="chips">
+          {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => (
+            <div key={p} className={`chip ${pos === p ? 'accent active' : ''}`} onClick={() => setPos(p)}>{p}</div>
+          ))}
+        </div>
+        <input className="input search" placeholder="Filter by name" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 220 }} />
+        <div className="chips">
+          {[['all', 'All'], ['free', 'Available'], ['rostered', 'Rostered']].map(([k, v]) => (
+            <div key={k} className={`chip ${avail === k ? 'active' : ''}`} onClick={() => setAvail(k)}>{v}</div>
+          ))}
+        </div>
+        <select className="input" value={sort} onChange={e => setSort(e.target.value)}>
+          <option value="proj">Sort: Projection</option>
+          <option value="last">Sort: Last Week</option>
+          <option value="avg">Sort: Season Avg</option>
+          <option value="owned">Sort: % Owned</option>
+          <option value="adp">Sort: ADP</option>
+          <option value="rank">Sort: Expert Rank</option>
+        </select>
+        <div className="grow"></div>
+        <span className="faint mono" style={{ fontSize: 11 }}>Scoring: HALF PPR</span>
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Player</th>
+              <th>Opp</th>
+              <th className={`num ${sort === 'proj' ? 'sorted' : ''}`} onClick={() => setSort('proj')}>Proj</th>
+              <th className={`num ${sort === 'last' ? 'sorted' : ''}`} onClick={() => setSort('last')}>Last</th>
+              <th className={`num ${sort === 'avg' ? 'sorted' : ''}`} onClick={() => setSort('avg')}>Avg</th>
+              <th className="num">Trend</th>
+              <th className={`num ${sort === 'owned' ? 'sorted' : ''}`} onClick={() => setSort('owned')}>%Own</th>
+              <th className={`num ${sort === 'adp' ? 'sorted' : ''}`} onClick={() => setSort('adp')}>ADP</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {players.map((p, i) => {
+              const isOnMyRoster = myRosterIds.has(p.id);
+              const isAvail = !draftedIds.has(p.id) && !isOnMyRoster;
+              const aiPick = aiMode !== 'subtle' ? null :
+                (p.id === 65 ? 'fade — hammy' : p.id === 62 ? 'BUY' : p.id === 80 ? 'TE1 lock' : null);
+              return (
+                <tr key={p.id} className={selected === p.id ? 'selected' : ''} onClick={() => setSelected(p.id)}>
+                  <td className="rank">{i + 1}</td>
+                  <td onClick={(e) => { e.stopPropagation(); onOpenPlayer(p.id); }} style={{ cursor: 'pointer' }}>
+                    <PlayerCell player={p} watched={watchlistIds.has(p.id)} />
+                  </td>
+                  <td>
+                    <span className="mono dim" style={{ fontSize: 11 }}>vs {p.opp}</span>
+                    <div className="mono faint" style={{ fontSize: 10 }}>D #{p.oppRank}</div>
+                  </td>
+                  <td className="num">
+                    <span style={{ fontWeight: 600 }}>{p.proj.toFixed(1)}</span>
+                    <ProjBar value={p.proj} />
+                  </td>
+                  <td className="num">{p.last.toFixed(1)}</td>
+                  <td className="num">{p.avg.toFixed(1)}</td>
+                  <td className="num"><Sparkline data={p.trend} /></td>
+                  <td className="num">{p.owned.toFixed(1)}%</td>
+                  <td className="num faint">{p.adp.toFixed(1)}</td>
+                  <td>
+                    {p.status !== 'OK' && <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>}
+                    {aiPick && <div><AIHint>{aiPick}</AIHint></div>}
+                  </td>
+                  <td>
+                    <div className="flex gap-8">
+                      <button
+                        className={`btn sm icon${watchlistIds.has(p.id) ? ' watch-active' : ''}`}
+                        title={watchlistIds.has(p.id) ? 'Remove from watchlist' : 'Add to watchlist'}
+                        onClick={e => { e.stopPropagation(); onToggleWatch?.(p.id); }}
+                      >{watchlistIds.has(p.id) ? '★' : '☆'}</button>
+                      {isOnMyRoster ? (
+                        <button className="btn sm success" disabled onClick={e => e.stopPropagation()}>✓ Rostered</button>
+                      ) : isAvail ? (
+                        <button className="btn sm primary" onClick={e => { e.stopPropagation(); onAddPlayer?.(p.id); }}>+ Add</button>
+                      ) : (
+                        <button className="btn sm ghost" disabled onClick={e => e.stopPropagation()}>Taken</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {user && <RosterPanel teamId={user.teamId} myRosterIds={myRosterIds} onOpenPlayer={onOpenPlayer} />}
+    </div>
+  );
+}
+
+// ─── RosterPanel ─────────────────────────────────────────────────────────────
+
+const SLOT_ORDER = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'DST', 'BENCH'];
+
+function RosterPanel({ teamId, myRosterIds, onOpenPlayer }) {
+  const team = findTeam(teamId);
+  const base = TEAM_ROSTERS[teamId] || [];
+  const baseIds = new Set(base.map(r => r.playerId).filter(Boolean));
+  const extraIds = [...myRosterIds].filter(id => id && !baseIds.has(id));
+  const fullRoster = [
+    ...base,
+    ...extraIds.map(id => ({ slot: 'BENCH', playerId: id })),
+  ].sort((a, b) => {
+    const ai = SLOT_ORDER.indexOf(a.slot); const bi = SLOT_ORDER.indexOf(b.slot);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+
+  const starters = fullRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
+  const totalProj = starters.reduce((s, r) => s + (findPlayer(r.playerId)?.proj || 0), 0);
+
+  return (
+    <div className="roster-panel">
+      <div className="roster-panel-head">
+        <span className="roster-team-dot" style={{ background: team?.color || 'var(--accent)' }} />
+        <div style={{ minWidth: 0 }}>
+          <div className="roster-team-name">{team?.name || 'My Roster'}</div>
+          <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+            Proj: <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{totalProj.toFixed(1)}</span>
+          </div>
+        </div>
+      </div>
+      <div className="roster-list">
+        {fullRoster.map((entry, i) => {
+          const p = entry.playerId ? findPlayer(entry.playerId) : null;
+          const isBench = entry.slot === 'BENCH';
+          return (
+            <div
+              key={i}
+              className={`roster-row${isBench ? ' bench' : ''}`}
+              onClick={() => p && onOpenPlayer?.(p.id)}
+              style={{ cursor: p ? 'pointer' : 'default' }}
+            >
+              <span className="roster-slot-tag">{entry.slot}</span>
+              {p ? (
+                <>
+                  <span className="roster-name">{p.name}</span>
+                  <span className="roster-team-abbr">{p.team}</span>
+                  <span className="roster-proj">{p.proj.toFixed(1)}</span>
+                </>
+              ) : (
+                <span style={{ flex: 1, fontSize: 11, color: 'var(--text-faint)' }}>Empty</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function fmtStat(v, dec = 0) {
+  if (v == null) return '—';
+  return dec > 0 ? Number(v).toFixed(dec) : String(Math.round(v));
+}
+
+function LiveBadge() {
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:4, fontSize:9,
+      fontFamily:'var(--font-mono)', letterSpacing:'.1em', color:'var(--accent-2)',
+      background:'rgba(78,168,255,.1)', border:'1px solid rgba(78,168,255,.3)',
+      borderRadius:4, padding:'1px 6px', textTransform:'uppercase' }}>
+      <span style={{ width:5, height:5, borderRadius:'50%', background:'var(--accent-2)',
+        boxShadow:'0 0 6px var(--accent-2)', animation:'pulse 2s infinite', display:'inline-block' }}/>
+      Live
+    </span>
+  );
+}
+
+// Position-aware game-log columns
+function glCols(pos) {
+  if (pos === 'QB')  return ['Att','Cmp','Yds','TD','INT','Pts'];
+  if (pos === 'RB')  return ['Att','Ru Yds','Rec','Re Yds','TD','Pts'];
+  if (pos === 'K')   return ['FGM','FGA','XP','Pts'];
+  if (pos === 'DST') return ['Sack','INT','FR','TD','Pts'];
+  return ['Snp','Tgt','Rec','Yds','TD','Pts'];  // WR / TE
+}
+
+function glRow(pos, s) {
+  if (!s) return null;
+  const pts = s.pts_half_ppr ?? s.pts_std;
+  if (pos === 'QB')  return [fmtStat(s.pass_att), fmtStat(s.pass_cmp), fmtStat(s.pass_yd), fmtStat(s.pass_td), fmtStat(s.pass_int), fmtStat(pts, 1)];
+  if (pos === 'RB')  return [fmtStat(s.rush_att), fmtStat(s.rush_yd), fmtStat(s.rec), fmtStat(s.rec_yd), fmtStat((s.rush_td||0)+(s.rec_td||0)), fmtStat(pts, 1)];
+  if (pos === 'K')   return [fmtStat(s.fgm), fmtStat(s.fga), fmtStat(s.xpm), fmtStat(pts, 1)];
+  if (pos === 'DST') return [fmtStat(s.sack), fmtStat(s.def_int), fmtStat(s.def_fr), fmtStat(s.def_td), fmtStat(pts, 1)];
+  return [fmtStat(s.off_snp), fmtStat(s.rec_tgt), fmtStat(s.rec), fmtStat(s.rec_yd), fmtStat(s.rec_td), fmtStat(pts, 1)];
+}
+
+function SeasonStatBar({ label, val, max }) {
+  const pct = Math.min(100, (val / max) * 100);
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div className="flex" style={{ justifyContent:'space-between', marginBottom: 3 }}>
+        <span className="dim" style={{ fontSize: 11 }}>{label}</span>
+        <span style={{ fontFamily:'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{val ?? '—'}</span>
+      </div>
+      <div style={{ height: 3, background:'var(--panel-3)', borderRadius: 2 }}>
+        <div style={{ width:`${pct}%`, height:'100%', background:'var(--accent-2)', borderRadius: 2, transition:'width .4s' }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── PlayerDetail ─────────────────────────────────────────────────────────────
+
+export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPlayer, sourcesState }) {
+  if (!player) return null;
+  const [activeTab, setTab] = React.useState('overview');
+  const [added, setAdded] = React.useState(false);
+
+  React.useEffect(() => { setAdded(false); }, [player.id]);
+
+  const isOnRoster = myRosterIds.has(player.id);
+  const sleeperEnabled = sourcesState?.freeApis?.['sleeper-api'] !== false;
+
+  function handleAdd() {
+    if (isOnRoster || added) return;
+    onAddPlayer?.(player.id);
+    setAdded(true);
+    setTimeout(onClose, 1300);
+  }
+
+  const { data: live, loading, error } = useApi(
+    () => sleeperEnabled
+      ? fetchSleeperPlayerStats(player.name, player.pos)
+      : Promise.resolve(null),
+    [player.id, sleeperEnabled]
+  );
+
+  const hasLive = !loading && live?.found && live.weeklyStats && Object.keys(live.weeklyStats).length > 0;
+  const statusFromLive = live?.status && live.status !== 'Active' ? live.status : null;
+  const sleeperAvatarUrl = live?.sleeperId
+    ? `https://sleepercdn.com/avatars/${live.sleeperId}`
+    : null;
+
+  // Game log rows from live data or mock fallback
+  const liveRows = hasLive
+    ? Object.entries(live.weeklyStats)
+        .map(([wk, s]) => ({ wk: Number(wk), s }))
+        .sort((a, b) => b.wk - a.wk)
+    : null;
+
+  const mockGameLog = [
+    { wk: 10, opp: player.opp,  snaps: 64, tar: 9,  rec: 6, yds: 78,  td: 1, pts: player.last },
+    { wk: 9,  opp: 'BYE',       snaps:'—', tar:'—', rec:'—',yds:'—', td:'—', pts:'—' },
+    { wk: 8,  opp: '@NE',       snaps: 58, tar: 7,  rec: 5, yds: 64,  td: 0, pts: player.trend[4] },
+    { wk: 7,  opp: 'NYG',       snaps: 67, tar: 11, rec: 8, yds: 102, td: 1, pts: player.trend[3] },
+    { wk: 6,  opp: '@SF',       snaps: 54, tar: 6,  rec: 3, yds: 41,  td: 0, pts: player.trend[2] },
+    { wk: 5,  opp: 'TB',        snaps: 62, tar: 8,  rec: 6, yds: 88,  td: 1, pts: player.trend[1] },
+    { wk: 4,  opp: '@DAL',      snaps: 60, tar: 5,  rec: 4, yds: 54,  td: 0, pts: player.trend[0] },
+  ];
+
+  // Season stats derived from live totals or mock
+  const tot = hasLive ? live.seasonTotals : null;
+  const gp  = hasLive ? live.gamesPlayed : 10;
+  const liveLastPts = hasLive && live.currentWeek
+    ? (live.weeklyStats[live.currentWeek] ?? live.weeklyStats[live.currentWeek - 1])?.pts_half_ppr
+    : null;
+  const liveAvg = tot?.pts_half_ppr != null && gp > 0 ? (tot.pts_half_ppr / gp) : null;
+
+  return (
+    <React.Fragment>
+      <div className="drawer-overlay" onClick={onClose}></div>
+      <div className="drawer">
+
+        {/* ── Hero ── */}
+        <div className="detail-hero">
+          <PlayerAvatar player={player} size="xl" src={sleeperAvatarUrl} />
+          <div>
+            <div className="flex gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              <PosBadge pos={player.pos} solid />
+              <span className="mono dim" style={{ fontSize: 11 }}>{player.team} · #{player.num} · Age {player.age}</span>
+              {(player.status !== 'OK' || statusFromLive) &&
+                <span className="status-pill"><StatusDot status={player.status} /> {statusFromLive || player.status}</span>}
+              {hasLive && <LiveBadge />}
+            </div>
+            <h2>{player.name}</h2>
+            <div className="meta">
+              <span>ECR #{player.ecr}</span><span className="dot"></span>
+              <span>ADP {player.adp.toFixed(1)}</span><span className="dot"></span>
+              <span>Tier {player.tier}</span><span className="dot"></span>
+              <span>{player.owned.toFixed(1)}% rostered</span>
+            </div>
+          </div>
+          <div className="flex col gap-8" style={{ alignItems: 'stretch' }}>
+            {isOnRoster || added ? (
+              <button className="btn success" disabled>✓ {added ? 'Added!' : 'On Roster'}</button>
+            ) : (
+              <button className="btn primary" onClick={handleAdd}>+ Add to Roster</button>
+            )}
+            <button className="btn ghost">★ Watchlist</button>
+            <button className="btn ghost icon" onClick={onClose} style={{ alignSelf: 'flex-end' }}>✕</button>
+          </div>
+        </div>
+
+        {/* ── Tabs ── */}
+        <div className="tabs">
+          {[['overview','Overview'],['gamelog','Game Log'],['news','News'],['matchup','Matchup']].map(([k,v]) => (
+            <div key={k} className={`tab ${activeTab===k?'active':''}`} onClick={() => setTab(k)}>{v}</div>
+          ))}
+        </div>
+
+        <div style={{ padding: 18 }}>
+
+          {/* ── Overview ── */}
+          {activeTab === 'overview' && (
+            <React.Fragment>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10, marginBottom:16 }}>
+                <div className="stat">
+                  <div className="k">
+                    Wk {live?.currentWeek || '—'} Proj
+                    {hasLive && <span style={{ marginLeft: 5, fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', verticalAlign: 'middle' }}>SLEEPER</span>}
+                  </div>
+                  <div className="v accent">
+                    {(live?.projection?.pts_half_ppr ?? live?.projection?.pts_std ?? player.proj).toFixed(1)}
+                  </div>
+                  <div className="sub">vs {player.opp} (D #{player.oppRank})</div>
+                </div>
+                <div className="stat">
+                  <div className="k">Last Week</div>
+                  <div className="v">{(liveLastPts ?? player.last).toFixed(1)}</div>
+                  <div className="sub"><Delta from={liveAvg ?? player.avg} to={liveLastPts ?? player.last} /> vs avg</div>
+                </div>
+                <div className="stat">
+                  <div className="k">Season Avg</div>
+                  <div className="v">{(liveAvg ?? player.avg).toFixed(1)}</div>
+                  <div className="sub">{gp} games {hasLive ? <LiveBadge /> : 'played'}</div>
+                </div>
+                <div className="stat">
+                  <div className="k">6-Wk Trend</div>
+                  <div className="v"><Sparkline data={player.trend} width={80} height={28} /></div>
+                  <div className="sub mono">{player.trend.join(' · ')}</div>
+                </div>
+              </div>
+
+              {/* Season Stats */}
+              {loading && (
+                <div className="muted-card" style={{ marginBottom:16, padding:14, display:'flex', alignItems:'center', gap:10 }}>
+                  <div className="ai-orb" style={{ width:16, height:16 }} />
+                  <span className="dim" style={{ fontSize:12 }}>Fetching live stats from Sleeper…</span>
+                </div>
+              )}
+              {!loading && error && (
+                <div className="muted-card" style={{ marginBottom:16, padding:'10px 14px', borderLeft:'3px solid var(--border-strong)' }}>
+                  <span className="dim" style={{ fontSize:11 }}>
+                    Sleeper API error — showing projected data.{' '}
+                    <span className="mono faint" style={{ fontSize:10 }}>{String(error)}</span>
+                  </span>
+                </div>
+              )}
+              {!loading && !error && !hasLive && !sleeperEnabled && (
+                <div className="muted-card" style={{ marginBottom:16, padding:'10px 14px', borderLeft:'3px solid var(--border)' }}>
+                  <span className="dim" style={{ fontSize:11 }}>
+                    Sleeper API is disabled — showing projected data.{' '}
+                    <span className="mono faint" style={{ fontSize:10 }}>Enable in Sources → Free Data APIs</span>
+                  </span>
+                </div>
+              )}
+              {hasLive && tot && (
+                <div className="card" style={{ marginBottom:16 }}>
+                  <div className="card-head">
+                    <div className="card-title">2025 Season Stats</div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <LiveBadge />
+                      <span className="mono faint" style={{ fontSize:9 }}>Sleeper API · direct</span>
+                    </div>
+                  </div>
+                  <div className="card-body" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 24px' }}>
+                    {player.pos === 'QB' && <>
+                      <SeasonStatBar label="Pass Yards"  val={Math.round(tot.pass_yd  || 0)} max={5000} />
+                      <SeasonStatBar label="Pass TDs"    val={Math.round(tot.pass_td  || 0)} max={50}   />
+                      <SeasonStatBar label="Completions" val={Math.round(tot.pass_cmp || 0)} max={400}  />
+                      <SeasonStatBar label="INTs"        val={Math.round(tot.pass_int || 0)} max={20}   />
+                      <SeasonStatBar label="Rush Yards"  val={Math.round(tot.rush_yd  || 0)} max={800}  />
+                      <SeasonStatBar label="Fantasy Pts" val={fmtStat(tot.pts_half_ppr,1)} max={400}  />
+                    </>}
+                    {player.pos === 'RB' && <>
+                      <SeasonStatBar label="Rush Attempts" val={Math.round(tot.rush_att || 0)} max={300} />
+                      <SeasonStatBar label="Rush Yards"    val={Math.round(tot.rush_yd  || 0)} max={1800}/>
+                      <SeasonStatBar label="Rush TDs"      val={Math.round(tot.rush_td  || 0)} max={20}  />
+                      <SeasonStatBar label="Receptions"    val={Math.round(tot.rec      || 0)} max={100} />
+                      <SeasonStatBar label="Rec Yards"     val={Math.round(tot.rec_yd   || 0)} max={800} />
+                      <SeasonStatBar label="Fantasy Pts"   val={fmtStat(tot.pts_half_ppr,1)} max={350}  />
+                    </>}
+                    {(player.pos === 'WR' || player.pos === 'TE') && <>
+                      <SeasonStatBar label="Targets"     val={Math.round(tot.rec_tgt || 0)} max={200} />
+                      <SeasonStatBar label="Receptions"  val={Math.round(tot.rec     || 0)} max={150} />
+                      <SeasonStatBar label="Rec Yards"   val={Math.round(tot.rec_yd  || 0)} max={1800}/>
+                      <SeasonStatBar label="Rec TDs"     val={Math.round(tot.rec_td  || 0)} max={20}  />
+                      <SeasonStatBar label="Catch %"     val={tot.rec_tgt > 0 ? fmtStat((tot.rec/tot.rec_tgt)*100,1)+'%' : '—'} max={100} />
+                      <SeasonStatBar label="Fantasy Pts" val={fmtStat(tot.pts_half_ppr,1)} max={350}  />
+                    </>}
+                  </div>
+                </div>
+              )}
+
+              {/* Sources strip */}
+              {sourcesState && (
+                <div style={{ marginBottom:14, display:'flex', flexWrap:'wrap', gap:6, alignItems:'center' }}>
+                  <span className="mono faint" style={{ fontSize:10, letterSpacing:'.08em' }}>DATA SOURCES</span>
+                  {FREE_DATA_SOURCES_LIST.map(s => {
+                    const on = sourcesState.freeApis?.[s.id] !== false && sourcesState.freeApis?.[s.id] !== undefined
+                      ? sourcesState.freeApis[s.id]
+                      : s.defaultEnabled;
+                    return (
+                      <span key={s.id} style={{
+                        display:'inline-flex', alignItems:'center', gap:4, fontSize:10,
+                        fontFamily:'var(--font-mono)', padding:'2px 7px', borderRadius:4,
+                        background: on ? 'rgba(78,168,255,.1)' : 'var(--panel-2)',
+                        border: `1px solid ${on ? 'rgba(78,168,255,.35)' : 'var(--border)'}`,
+                        color: on ? 'var(--accent-2)' : 'var(--text-faint)',
+                      }}>
+                        <span style={{ width:5, height:5, borderRadius:'50%', background: on ? 'var(--accent-2)' : 'var(--text-faint)', display:'inline-block', flexShrink:0 }} />
+                        {s.name}{on ? ' · live' : ' · off'}
+                      </span>
+                    );
+                  })}
+                  {Object.entries(sourcesState.feeds || {}).filter(([,v]) => v.enabled).slice(0, 4).map(([id]) => {
+                    const name = FEED_NAMES[id] || id;
+                    return (
+                      <span key={id} style={{
+                        fontSize:10, fontFamily:'var(--font-mono)', padding:'2px 7px', borderRadius:4,
+                        background:'rgba(198,255,58,.07)', border:'1px solid rgba(198,255,58,.2)',
+                        color:'var(--accent)',
+                      }}>{name}</span>
+                    );
+                  })}
+                  {Object.entries(sourcesState.feeds || {}).filter(([,v]) => v.enabled).length > 4 && (
+                    <span className="faint mono" style={{ fontSize:10 }}>
+                      +{Object.entries(sourcesState.feeds).filter(([,v]) => v.enabled).length - 4} more
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* AI insight */}
+              <div className="muted-card" style={{ marginBottom:16, borderLeft:'3px solid var(--accent-2)' }}>
+                <div className="flex gap-8" style={{ alignItems:'center', marginBottom:8 }}>
+                  <div className="ai-orb" style={{ width:20, height:20 }}></div>
+                  <span style={{ fontFamily:'var(--font-display)', fontStretch:'87%', fontWeight:800, fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:'var(--accent-2)' }}>FantasAI Insight</span>
+                </div>
+                <div style={{ fontSize:13, lineHeight:1.55 }}>
+                  {player.proj > 18
+                    ? `Lock 'em in. Matchup model loves ${player.opp.replace('@','')} — ${player.name} should see volume at depth. Proj ${player.proj.toFixed(1)} is conservative; 75th-pct is ${(player.proj*1.25).toFixed(1)}.`
+                    : `Mixed signals. Volume is fine but ${player.opp.replace('@','')} has been stingy near the goal line. Floor ${(player.proj*0.6).toFixed(1)}, ceiling ${(player.proj*1.4).toFixed(1)}.`}
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-head"><div className="card-title">Latest News · {player.name}</div></div>
+                <div className="card-body">
+                  <div style={{ fontSize:12, lineHeight:1.6 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                      <span className="mono dim" style={{ fontSize:11 }}>2h ago · Beat Writer</span>
+                      <span className="news-impact impact-med">MED</span>
+                    </div>
+                    {player.news}. Full participation Thursday expected.
+                  </div>
+                </div>
+              </div>
+            </React.Fragment>
+          )}
+
+          {/* ── Game Log ── */}
+          {activeTab === 'gamelog' && (
+            loading
+              ? <div className="muted-card" style={{ padding:18, display:'flex', alignItems:'center', gap:10 }}>
+                  <div className="ai-orb" style={{ width:16, height:16 }} />
+                  <span className="dim" style={{ fontSize:12 }}>Loading game log from Sleeper…</span>
+                </div>
+              : liveRows
+                ? <>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                      <span className="dim" style={{ fontSize:11 }}>2025 Season · Half PPR</span>
+                      <LiveBadge />
+                      <span className="mono faint" style={{ fontSize:9 }}>Sleeper API</span>
+                    </div>
+                    <table className="gamelog">
+                      <thead>
+                        <tr>
+                          <th>Wk</th>
+                          {glCols(player.pos).map(c => <th key={c}>{c}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {liveRows.map(({ wk, s }) => {
+                          const cells = glRow(player.pos, s);
+                          if (!cells) return null;
+                          const ptsIdx = cells.length - 1;
+                          return (
+                            <tr key={wk}>
+                              <td className="mono" style={{ color:'var(--text-faint)' }}>{wk}</td>
+                              {cells.map((c, i) => (
+                                <td key={i} style={i===ptsIdx ? { fontWeight:600, color:'var(--accent)' } : {}}>{c}</td>
+                              ))}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </>
+                : <>
+                    {error && <div className="dim" style={{ fontSize:11, marginBottom:10 }}>Live data unavailable — showing sample data.</div>}
+                    <table className="gamelog">
+                      <thead><tr><th>Wk</th><th>Opp</th><th>Snp</th><th>Tar</th><th>Rec</th><th>Yds</th><th>TD</th><th>Pts</th></tr></thead>
+                      <tbody>
+                        {mockGameLog.map(g => (
+                          <tr key={g.wk}>
+                            <td>{g.wk}</td><td>{g.opp}</td><td>{g.snaps}</td>
+                            <td>{g.tar}</td><td>{g.rec}</td><td>{g.yds}</td><td>{g.td}</td>
+                            <td style={{ fontWeight:600, color:'var(--accent)' }}>{typeof g.pts==='number' ? g.pts.toFixed(1) : g.pts}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+          )}
+
+          {/* ── News ── */}
+          {activeTab === 'news' && (
+            <div>
+              {NEWS.filter(n => n.playerId === player.id).concat([
+                { id:90, mins:480, impact:'low', source:'Pre-season', title:`${player.name} expected to lead position group in snaps`, body:'Reports out of camp consistent with usage projections.' }
+              ]).map(n => (
+                <div key={n.id} className="muted-card" style={{ marginBottom:10 }}>
+                  <div className="flex gap-8" style={{ justifyContent:'space-between', marginBottom:6 }}>
+                    <span className="mono dim" style={{ fontSize:11 }}>{n.mins < 60 ? `${n.mins}m` : `${Math.floor(n.mins/60)}h`} ago · {n.source}</span>
+                    <span className={`news-impact impact-${n.impact}`}>{n.impact}</span>
+                  </div>
+                  <div style={{ fontWeight:600, marginBottom:4 }}>{n.title}</div>
+                  <div className="dim" style={{ fontSize:12 }}>{n.body}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Matchup ── */}
+          {activeTab === 'matchup' && (
+            <div>
+              <div className="muted-card" style={{ marginBottom:16 }}>
+                <div className="flex gap-16" style={{ justifyContent:'space-around', textAlign:'center' }}>
+                  <div>
+                    <div className="mono dim" style={{ fontSize:11 }}>{player.team}</div>
+                    <div style={{ fontFamily:'var(--font-display)', fontStretch:'75%', fontSize:28, fontWeight:900 }}>7-3</div>
+                  </div>
+                  <div style={{ fontFamily:'var(--font-display)', fontStretch:'75%', fontSize:28, fontWeight:900, color:'var(--text-faint)', alignSelf:'center' }}>vs</div>
+                  <div>
+                    <div className="mono dim" style={{ fontSize:11 }}>{player.opp}</div>
+                    <div style={{ fontFamily:'var(--font-display)', fontStretch:'75%', fontSize:28, fontWeight:900 }}>5-5</div>
+                  </div>
+                </div>
+                <div style={{ textAlign:'center', fontSize:11, color:'var(--text-faint)', marginTop:8 }} className="mono">SUN 1:00PM ET · O/U 47.5 · {player.team} -3.5</div>
+              </div>
+              <div className="card-title" style={{ marginBottom:8 }}>Defense vs Position ({player.pos})</div>
+              <table className="gamelog">
+                <thead><tr><th>Metric</th><th>{player.opp}</th><th>NFL Avg</th><th>Rank</th></tr></thead>
+                <tbody>
+                  <tr><td>FP Allowed/G</td><td>{(20-player.oppRank*0.3).toFixed(1)}</td><td>15.8</td><td style={{ color:player.oppRank>20?'var(--good)':'var(--danger)' }}>#{player.oppRank}</td></tr>
+                  <tr><td>Yds Allowed/G</td><td>284</td><td>241</td><td>#26</td></tr>
+                  <tr><td>TDs Allowed</td><td>18</td><td>14</td><td>#28</td></tr>
+                  <tr><td>Pressure %</td><td>22.4%</td><td>24.1%</td><td>#19</td></tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </React.Fragment>
+  );
+}
