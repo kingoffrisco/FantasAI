@@ -1,11 +1,12 @@
 import React from 'react';
 import { findPlayer, findTeam, MY_ROSTER, TEAM_ROSTERS, PLAYERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES } from './lib/data.js';
+import { applyLeagueData, clearLeagueData } from './lib/leagueStore.js';
 import { Sidebar, TopBar, MobileNav } from './components/layout.jsx';
 import AICopilot from './components/AICopilot.jsx';
 import { TweaksPanel, TweakSection, TweakColor, TweakRadio, TweakToggle, useTweaks } from './components/TweaksPanel.jsx';
 
 import Login from './screens/Login.jsx';
-import ChangePassword from './screens/ChangePassword.jsx';
+import ChangePassword, { ResetPasswordScreen } from './screens/ChangePassword.jsx';
 import Dashboard from './screens/Dashboard.jsx';
 import PlayersScreen, { PlayerDetail } from './screens/Players.jsx';
 import NewsScreen from './screens/News.jsx';
@@ -20,6 +21,110 @@ import AdminOwners from './screens/AdminOwners.jsx';
 import LeagueSettings from './screens/LeagueSettings.jsx';
 import CurrentRosterScreen from './screens/CurrentRoster.jsx';
 import WaiversScreen from './screens/Waivers.jsx';
+import HeadToHeadScreen from './screens/HeadToHead.jsx';
+
+function loadLeagueSettings() {
+  try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
+}
+
+const API_BASE = 'https://api.fantasai.net';
+
+async function fetchS3Roster(teamId) {
+  try {
+    const res = await Promise.race([
+      fetch(`${API_BASE}/api/v1/rosters/load?teamId=${teamId}`),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000)),
+    ]);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.fromS3 || data.playerIds === null) return null;
+    return data.playerIds.map(Number);
+  } catch { return null; }
+}
+
+async function loadLeagueData(leagueId) {
+  const cacheKey = `fantasai_league_data_${leagueId}`;
+
+  // Seed file on first run (fast, local — gitignored so never stale from code changes)
+  if (!localStorage.getItem(cacheKey)) {
+    try {
+      const r = await Promise.race([
+        fetch('/league-seed.json'),
+        new Promise((_, rej) => setTimeout(() => rej('timeout'), 2000)),
+      ]);
+      if (r.ok) {
+        const seed = await r.json();
+        const payload = { ...seed, leagueId };
+        applyLeagueData(payload);
+        localStorage.setItem(cacheKey, JSON.stringify(payload));
+      }
+    } catch {}
+  }
+
+  // S3 is always authoritative — overrides seed and cache
+  try {
+    const res = await Promise.race([
+      fetch(`${API_BASE}/api/v1/league-settings?leagueId=${leagueId}`),
+      new Promise((_, rej) => setTimeout(() => rej('timeout'), 5000)),
+    ]);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.fromS3) {
+      const payload = { leagueId, teams: data.teams ?? null, settings: data.settings ?? null, savedAt: data.savedAt ?? null };
+      applyLeagueData(payload);
+      localStorage.setItem(cacheKey, JSON.stringify(payload));
+    }
+  } catch {}
+}
+
+async function syncRosterToS3(teamId, playerIds) {
+  try {
+    await fetch(`${API_BASE}/api/v1/rosters/save`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ teamId: String(teamId), playerIds: [...playerIds] }),
+    });
+  } catch {} // non-blocking, silently fails
+}
+
+function validateRosterAdd(playerId, currentIds) {
+  const settings  = loadLeagueSettings();
+  const player    = PLAYERS.find(p => p.id === playerId);
+  if (!player) return null;
+
+  const totalMax  = settings?.roster?.totalPlayers?.max ?? 14;
+  const positions = settings?.positions ?? [
+    { key: 'QB', rosterTotal: '2' },
+    { key: 'RB', rosterTotal: 'No Limit' },
+    { key: 'WR', rosterTotal: 'No Limit' },
+    { key: 'TE', rosterTotal: 'No Limit' },
+    { key: 'K',  rosterTotal: 'No Limit' },
+    { key: 'DST',rosterTotal: 'No Limit' },
+  ];
+
+  if (currentIds.size >= totalMax) {
+    return {
+      title: 'Invalid Roster Request',
+      detail: `Your roster is full (${currentIds.size}/${totalMax} players). Drop a player first or see Rules & Settings.`,
+    };
+  }
+
+  const posEntry = positions.find(p => p.key === player.pos);
+  if (posEntry) {
+    const limitStr = posEntry.rosterTotal;
+    const limitNum = limitStr === 'No Limit' ? Infinity : parseInt(limitStr, 10);
+    if (!isNaN(limitNum) && isFinite(limitNum)) {
+      const currentOfPos = [...currentIds].filter(id => PLAYERS.find(p => p.id === id)?.pos === player.pos).length;
+      if (currentOfPos >= limitNum) {
+        return {
+          title: 'Invalid Roster Request',
+          detail: `You already have ${currentOfPos} ${player.pos}${currentOfPos !== 1 ? 's' : ''} — the limit is ${limitNum}. See Rules & Settings.`,
+        };
+      }
+    }
+  }
+  return null;
+}
 
 const TWEAK_DEFAULTS = {
   accent: '#c6ff3a',
@@ -42,6 +147,7 @@ const CRUMBS = {
   news:      ['League', 'Player News'],
   roster:    ['League', 'Current Roster'],
   waivers:   ['League', 'Waivers'],
+  h2h:       ['League', 'Head to Head'],
   compare:   ['Tools', 'Compare'],
   watchlist: ['Tools', 'Watchlist'],
   trade:     ['Tools', 'Trade Analyzer'],
@@ -64,9 +170,13 @@ export default function App() {
     try {
       const u = JSON.parse(localStorage.getItem('fantasai_user') || 'null');
       const roster = (u ? TEAM_ROSTERS[u.teamId] : null) || MY_ROSTER;
-      return new Set(roster.map(r => r.playerId).filter(Boolean));
-    } catch { return new Set(MY_ROSTER.map(r => r.playerId)); }
+      return new Set(roster.filter(r => r.slot !== 'BENCH').map(r => r.playerId).filter(Boolean));
+    } catch { return new Set(MY_ROSTER.filter(r => r.slot !== 'BENCH').map(r => r.playerId)); }
   });
+
+  // Stable ref so callbacks don't need user in their dep array
+  const userRef = React.useRef(user);
+  React.useEffect(() => { userRef.current = user; }, [user]);
 
   const [rosterSlotOverrides, setRosterSlotOverrides] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_slot_overrides') || '{}'); } catch { return {}; }
@@ -77,16 +187,46 @@ export default function App() {
   }
 
   const [needsPasswordChange, setNeedsPasswordChange] = React.useState(false);
+  const [resetToken, setResetToken] = React.useState(() => {
+    return new URLSearchParams(window.location.search).get('reset') || null;
+  });
 
   function handleLogin(u) {
     localStorage.setItem('fantasai_user', JSON.stringify(u));
     setUser(u);
-    const roster = TEAM_ROSTERS[u.teamId] || MY_ROSTER;
-    setMyRosterIds(new Set(roster.map(r => r.playerId).filter(Boolean)));
+    userRef.current = u;
+    // Load league data for the selected league (seed → S3)
+    loadLeagueData(u.leagueId || 'tau');
+    // Seed from static data immediately, then overwrite from S3
+    const staticRoster = TEAM_ROSTERS[u.teamId] || MY_ROSTER;
+    const staticIds = new Set(staticRoster.filter(r => r.slot !== 'BENCH').map(r => r.playerId).filter(Boolean));
+    setMyRosterIds(staticIds);
     setRosterSlotOverrides({});
     localStorage.removeItem('fantasai_slot_overrides');
     if (u.needsPasswordChange) setNeedsPasswordChange(true);
+    // Fetch the live roster from S3 (non-blocking — will override static once resolved)
+    if (u.teamId) {
+      fetchS3Roster(u.teamId).then(s3Ids => {
+        if (s3Ids !== null) setMyRosterIds(new Set(s3Ids));
+      });
+    }
   }
+
+  // On cold load (already logged in): restore league data from cache, then fetch fresh
+  React.useEffect(() => {
+    const leagueId = user?.leagueId || 'tau';
+    try {
+      const cached = JSON.parse(localStorage.getItem(`fantasai_league_data_${leagueId}`) || 'null');
+      if (cached) applyLeagueData(cached);
+    } catch {}
+    loadLeagueData(leagueId);
+
+    if (!user?.teamId) return;
+    fetchS3Roster(user.teamId).then(s3Ids => {
+      if (s3Ids !== null) setMyRosterIds(new Set(s3Ids));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally runs only once on mount
 
   function handlePasswordChanged() {
     setNeedsPasswordChange(false);
@@ -96,12 +236,78 @@ export default function App() {
     localStorage.removeItem('fantasai_user');
     localStorage.removeItem('fantasai_slot_overrides');
     setUser(null);
-    setMyRosterIds(new Set(MY_ROSTER.map(r => r.playerId)));
+    setMyRosterIds(new Set(MY_ROSTER.filter(r => r.slot !== 'BENCH').map(r => r.playerId)));
     setRosterSlotOverrides({});
+    clearLeagueData();
   }
 
-  const handleAddPlayer = React.useCallback(id => setMyRosterIds(prev => new Set([...prev, id])), []);
-  const handleDropPlayer = React.useCallback(id => setMyRosterIds(prev => { const n = new Set(prev); n.delete(id); return n; }), []);
+  // Admin / Commissioner: reset all rosters on S3 and clear local state
+  const [rosterResetState, setRosterResetState] = React.useState('idle'); // idle | loading | done | error
+  async function handleRosterReset() {
+    setRosterResetState('loading');
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/rosters/reset`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    '{}',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Clear local roster for whoever is looking
+      setMyRosterIds(new Set());
+      setRosterResetState('done');
+      setTimeout(() => setRosterResetState('idle'), 4000);
+    } catch {
+      setRosterResetState('error');
+      setTimeout(() => setRosterResetState('idle'), 4000);
+    }
+  }
+
+  const [rosterError, setRosterError] = React.useState(null);
+
+  const [tradeInit, setTradeInit] = React.useState({ key: 0, otherTeamId: null, getIds: [] });
+  const handleTradePlayer = React.useCallback((playerId, ownerTeamId) => {
+    setTradeInit(prev => ({ key: prev.key + 1, otherTeamId: ownerTeamId, getIds: [playerId] }));
+    setActive('trade');
+  }, []);
+
+  const handleAddPlayer = React.useCallback(id => {
+    setMyRosterIds(prev => {
+      const err = validateRosterAdd(id, prev);
+      if (err) { setRosterError(err); return prev; }
+      const next = new Set([...prev, id]);
+      if (userRef.current?.teamId) syncRosterToS3(userRef.current.teamId, next);
+      return next;
+    });
+  }, []);
+  const [waiverQueue, setWaiverQueue] = React.useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('fantasai_waivers') || '{}');
+      const now = Date.now();
+      // Drop expired entries on load
+      return Object.fromEntries(Object.entries(raw).filter(([, v]) => new Date(v.expiresAt).getTime() > now));
+    } catch { return {}; }
+  });
+
+  const handleDropPlayer = React.useCallback(id => {
+    setMyRosterIds(prev => {
+      const n = new Set(prev);
+      n.delete(id);
+      if (userRef.current?.teamId) syncRosterToS3(userRef.current.teamId, n);
+      return n;
+    });
+    // Place player on waivers: minimum 1 day, then the next Wed/Thu/Fri/Sat at 11:59 PM
+    const drop = new Date();
+    const earliest = new Date(drop.getTime() + 24 * 60 * 60 * 1000);
+    earliest.setHours(23, 59, 0, 0);
+    const waiver_days = new Set([3, 4, 5, 6]); // Wed Thu Fri Sat
+    while (!waiver_days.has(earliest.getDay())) earliest.setDate(earliest.getDate() + 1);
+    const entry = { droppedAt: drop.toISOString(), expiresAt: earliest.toISOString(), teamId: userRef.current?.teamId };
+    setWaiverQueue(prev => {
+      const next = { ...prev, [id]: entry };
+      localStorage.setItem('fantasai_waivers', JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   const [watchlistIds, setWatchlistIds] = React.useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem('fantasai_watchlist') || '[]')); } catch { return new Set(); }
@@ -181,6 +387,12 @@ export default function App() {
   const shellClass = `shell ${showAI ? 'has-ai' : ''} ${tweaks.showMobile ? 'mobile-mode' : ''}`;
   const playerObj = openPlayer ? findPlayer(openPlayer) : null;
 
+  if (resetToken) return (
+    <ResetPasswordScreen token={resetToken} onDone={() => {
+      setResetToken(null);
+      window.history.replaceState({}, '', window.location.pathname);
+    }} />
+  );
   if (!user) return <Login onLogin={handleLogin} />;
   if (needsPasswordChange) return <ChangePassword user={user} onDone={handlePasswordChanged} />;
 
@@ -211,20 +423,21 @@ export default function App() {
         <Sidebar active={active} onNav={setActive} user={user} />
 
         <div className="main">
-          {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} />}
-          {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} />}
+          {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} />}
+          {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} />}
           {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'roster'    && <CurrentRosterScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} />}
           {active === 'waivers'   && <WaiversScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} />}
+          {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'compare'   && <CompareScreen />}
           {active === 'watchlist' && <WatchlistScreen onOpenPlayer={setOpenPlayer} />}
-          {active === 'trade'     && <TradeScreen />}
+          {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} />}
           {active === 'draft'     && <DraftRoom aiMode={aiMode} />}
-          {active === 'owners'    && <OwnerIntelScreen onOpenPlayer={setOpenPlayer} />}
+          {active === 'owners'    && <OwnerIntelScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'cbs'       && <CBSRankingsScreen onOpenPlayer={setOpenPlayer} />}
-          {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} />}
+          {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} user={user} myRosterIds={myRosterIds} />}
           {active === 'admin-owners'  && <AdminOwners />}
-          {active === 'settings'      && <LeagueSettings user={user} />}
+          {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} />}
         </div>
 
         {showAI && <AICopilot active={active} aiMode={aiMode} />}
@@ -232,6 +445,26 @@ export default function App() {
       </div>
 
       {playerObj && <PlayerDetail player={playerObj} onClose={() => setOpenPlayer(null)} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} sourcesState={sourcesState} />}
+
+      {rosterError && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setRosterError(null)}>
+          <div style={{ background: 'var(--card)', border: '1px solid #ff5a6e', borderRadius: 14, padding: '28px 32px', maxWidth: 400, width: '90%', boxShadow: '0 24px 60px rgba(0,0,0,.5)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <span style={{ fontSize: 22 }}>🚫</span>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#ff5a6e' }}>{rosterError.title}</div>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.65, marginBottom: 20 }}>{rosterError.detail}</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn ghost sm" onClick={() => { setRosterError(null); setActive('settings'); }}>
+                View Rules & Settings
+              </button>
+              <button className="btn primary sm" onClick={() => setRosterError(null)}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Brand Accent">

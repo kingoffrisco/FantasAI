@@ -8,7 +8,7 @@ const SLEEPER = 'https://api.sleeper.app/v1';
 let _playerMap = null;
 let _playerMapPromise = null;
 
-async function getPlayerMap() {
+export async function getPlayerMap() {
   if (_playerMap) return _playerMap;
   if (!_playerMapPromise) {
     _playerMapPromise = fetch(`${SLEEPER}/players/nfl`)
@@ -65,6 +65,13 @@ function aggregate(statsArr) {
     }
   }
   return totals;
+}
+
+export async function fetchBulkWeekStats(season = 2025, week = 18) {
+  return fetchCached(
+    `${SLEEPER}/stats/nfl/regular/${season}/${week}`,
+    `stats:${season}:${week}`
+  );
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────

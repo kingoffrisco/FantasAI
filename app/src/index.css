@@ -406,19 +406,20 @@ select.input { appearance: none; padding-right: 28px; background-image: url("dat
 .draft-grid {
   display: grid;
   grid-template-rows: 84px 124px 1fr 180px;
-  grid-template-columns: 320px 1fr 320px;
+  grid-template-columns: 1fr 1fr 1fr 320px;
   grid-template-areas:
-    "clock clock clock"
-    "ghosts ghosts ghosts"
-    "board center roster"
-    "teams teams teams";
+    "clock clock clock clock"
+    "ghosts ghosts ghosts ghosts"
+    "board queue picklog roster"
+    "teams teams teams teams";
   height: 100%;
 }
-.draft-clock { grid-area: clock; background: linear-gradient(180deg, var(--panel-2) 0%, var(--bg-2) 100%); border-bottom: 1px solid var(--border); display: flex; align-items: center; }
-.draft-board { grid-area: board; border-right: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column; }
-.draft-center { grid-area: center; overflow: hidden; display: flex; flex-direction: column; }
-.draft-roster { grid-area: roster; border-left: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column; }
-.draft-teams { grid-area: teams; border-top: 1px solid var(--border); background: var(--bg-2); overflow: auto; }
+.draft-clock   { grid-area: clock;   background: linear-gradient(180deg, var(--panel-2) 0%, var(--bg-2) 100%); border-bottom: 1px solid var(--border); display: flex; align-items: center; }
+.draft-board   { grid-area: board;   border-right: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column; }
+.draft-queue   { grid-area: queue;   border-right: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column; }
+.draft-picklog { grid-area: picklog; border-right: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column; }
+.draft-roster  { grid-area: roster;  overflow: hidden; display: flex; flex-direction: column; }
+.draft-teams   { grid-area: teams;   border-top: 1px solid var(--border); background: var(--bg-2); overflow: auto; }
 
 /* Clock bar */
 .clock-time {
@@ -602,7 +603,7 @@ select.input { appearance: none; padding-right: 28px; background-image: url("dat
 @media (max-width: 900px) {
   .shell, .shell.has-ai { grid-template-columns: 1fr; grid-template-rows: 56px 1fr 56px; grid-template-areas: "topbar" "main" "mobnav"; }
   .logo-area, .side, .ai { display: none; }
-  .draft-grid { grid-template-columns: 1fr; grid-template-rows: 84px auto auto auto auto; grid-template-areas: "clock" "ghosts" "center" "board" "teams"; }
+  .draft-grid { grid-template-columns: 1fr; grid-template-rows: 84px auto auto auto auto auto auto; grid-template-areas: "clock" "ghosts" "board" "queue" "picklog" "roster" "teams"; }
   .draft-roster { display: none; }
   .trade-panels { grid-template-columns: 1fr; }
   .page-head { padding: 14px 16px; }

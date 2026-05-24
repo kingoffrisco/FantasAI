@@ -1,9 +1,9 @@
 import React from 'react';
-import { INTEGRATIONS, RANKING_SOURCES, OWNER_PROFILES, FREE_DATA_SOURCES, findTeam, PLAYERS } from '../lib/data.js';
+import { INTEGRATIONS, RANKING_SOURCES, OWNER_PROFILES, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, findTeam, PLAYERS } from '../lib/data.js';
 import { PosBadge } from '../components/ui.jsx';
 import { CBSConnectModal, WorkerConfig } from '../components/CBSConnectModal.jsx';
 
-export default function SourcesScreen({ onNav, sourcesState, onSourcesChange }) {
+export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, user, myRosterIds = new Set() }) {
   const [feeds, setFeeds] = React.useState(() =>
     RANKING_SOURCES.map(s => ({
       ...s,
@@ -172,6 +172,8 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange }) 
 
         <FreeApiSources freeApis={sourcesState?.freeApis || {}} onToggle={handleApiToggle} />
 
+        <LimitedApiSources user={user} myRosterIds={myRosterIds} />
+
         <div className="section-head" style={{ marginTop: 32 }}>
           <div>
             <div className="section-title">Owner Draft Tool Detection</div>
@@ -295,7 +297,9 @@ function CustomCheatSheet() {
   );
 }
 
-// Preview configs — what endpoint to hit and how to parse rows for display
+const WORKER_API = 'https://api.fantasai.net';
+
+// Preview configs — what endpoint to hit and how to parse the response for display
 const API_PREVIEW = {
   'sleeper-api': {
     probe: 'https://api.sleeper.app/v1/players/nfl/trending/add?lookback_hours=24&limit=10',
@@ -305,11 +309,32 @@ const API_PREVIEW = {
     })),
   },
   'leaguelogs-api': {
-    probe: 'https://www.leaguelogs.com/api/v1/sports',
-    label: 'Available Sports',
+    // Probe the homepage (via proxy) to confirm site is up — actual API requires an account token
+    probe: `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent('https://www.leaguelogs.com/')}`,
+    label: 'Connectivity check',
+    parse: () => [{ key: 0, col1: 'leaguelogs.com', col2: 'Site reachable ✓' }],
+  },
+  'nflverse': {
+    // GitHub releases API — public, CORS-allowed, no auth needed
+    probe: 'https://api.github.com/repos/nflverse/nflverse-data/releases?per_page=6',
+    label: 'Recent Data Releases',
+    parse: data => (Array.isArray(data) ? data : []).slice(0, 6).map((rel, i) => ({
+      key: i,
+      col1: rel.name || rel.tag_name || `Release ${i + 1}`,
+      col2: rel.published_at ? new Date(rel.published_at).toLocaleDateString() : 'N/A',
+    })),
+  },
+  'espn-nfl': {
+    // ESPN API routed through worker proxy (ESPN blocks browser CORS)
+    probe: `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent('https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams')}`,
+    label: 'NFL Teams',
     parse: data => {
-      const arr = Array.isArray(data) ? data : Object.entries(data || {}).map(([k, v]) => ({ name: k, ...(typeof v === 'object' ? v : { info: v }) }));
-      return arr.slice(0, 10).map((item, i) => ({ key: i, col1: item.name || item.sport || String(item), col2: item.type || item.description || '' }));
+      const teams = data?.sports?.[0]?.leagues?.[0]?.teams || data?.teams || [];
+      return teams.slice(0, 8).map((t, i) => ({
+        key: i,
+        col1: t.team?.displayName || t.displayName || `Team ${i + 1}`,
+        col2: t.team?.abbreviation || t.abbreviation || '',
+      }));
     },
   },
 };
@@ -329,31 +354,39 @@ function FreeApiSources({ freeApis = {}, onToggle }) {
 
     const previewConf = API_PREVIEW[src.id];
 
-    // Connectivity probe URL
-    let probeUrl = src.url;
-    if (src.id === 'sleeper-api')     probeUrl = previewConf?.probe || 'https://api.sleeper.app/v1/players/nfl';
-    else if (src.id === 'yahoo-api')  probeUrl = 'https://fantasysports.yahooapis.com/fantasy/v2/game/nfl';
-    else if (src.id === 'leaguelogs-api') probeUrl = previewConf?.probe || 'https://www.leaguelogs.com/api/v1/sports';
+    // Determine probe URL — use preview config probe if available, else src.url
+    let probeUrl = previewConf?.probe || src.url;
+    if (src.id === 'sleeper-api') probeUrl = previewConf?.probe || 'https://api.sleeper.app/v1/players/nfl';
+    if (src.id === 'yahoo-api')   probeUrl = 'https://fantasysports.yahooapis.com/fantasy/v2/game/nfl';
 
     try {
-      const res = await fetch(probeUrl, { signal: AbortSignal.timeout(8000) });
+      const res = await fetch(probeUrl, { signal: AbortSignal.timeout(10000) });
       if (res.ok) {
         setTestResults(r => ({ ...r, [src.id]: { ok: true, status: res.status, msg: `${res.status} OK — endpoint reachable` } }));
         onToggle?.(src.id, true);
-        // Parse preview records from the same response
         if (previewConf) {
           try {
-            const json = await res.json();
-            setPreviewData(p => ({ ...p, [src.id]: previewConf.parse(json) }));
+            const data = await res.json();
+            setPreviewData(p => ({ ...p, [src.id]: previewConf.parse(data) }));
           } catch {}
         }
       } else {
-        setTestResults(r => ({ ...r, [src.id]: { ok: false, msg: `${res.status} ${res.statusText} — endpoint unreachable` } }));
+        const isAuth = res.status === 401 || res.status === 403;
+        const is404  = res.status === 404;
+        const msg = isAuth
+          ? `${res.status} — Authentication required. Add your API key to connect.`
+          : is404
+            ? `${res.status} — Endpoint not found. This API may require authentication or the URL has changed.`
+            : `${res.status} ${res.statusText} — endpoint unreachable`;
+        setTestResults(r => ({ ...r, [src.id]: { ok: false, msg } }));
       }
     } catch (e) {
-      const msg = e.message?.includes('timeout') ? 'Timeout — endpoint not responding'
-        : e.message?.includes('Failed to fetch') ? 'Network error — CORS or offline'
-        : e.message || 'Unknown error';
+      const isNetErr = !e.message || e.message.includes('NetworkError') || e.message.includes('Failed to fetch') || e.message.includes('Load failed');
+      const msg = e.message?.includes('timeout') || e.name === 'TimeoutError'
+        ? 'Timeout — endpoint not responding after 10s'
+        : isNetErr
+          ? 'Network error — likely CORS block or offline. Try via worker proxy.'
+          : e.message || 'Unknown error';
       setTestResults(r => ({ ...r, [src.id]: { ok: false, msg } }));
     }
     setTesting(t => ({ ...t, [src.id]: false }));
@@ -377,7 +410,6 @@ function FreeApiSources({ freeApis = {}, onToggle }) {
           return (
             <div key={src.id} className={`src-feed ${src.enabled ? '' : 'off'}`}
               style={{ flexDirection: 'column', gap: 0, padding: 0 }}>
-              {/* Main row */}
               <div style={{ display: 'flex', gap: 12, padding: '14px 16px' }}>
                 <label className="src-toggle" style={{ marginTop: 2 }}>
                   <input type="checkbox" checked={src.enabled} onChange={() => onToggle?.(src.id)} />
@@ -431,13 +463,8 @@ function FreeApiSources({ freeApis = {}, onToggle }) {
                 </div>
               </div>
 
-              {/* Preview panel — shown after a successful test */}
               {preview && preview.length > 0 && (
-                <div style={{
-                  borderTop: '1px solid var(--border)',
-                  background: 'var(--panel-1)',
-                  padding: '10px 16px 12px',
-                }}>
+                <div style={{ borderTop: '1px solid var(--border)', background: 'var(--panel-1)', padding: '10px 16px 12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <span className="mono faint" style={{ fontSize: 10, letterSpacing: '.1em' }}>
                       LIVE SAMPLE · {conf?.label || 'First 10 Records'}
@@ -465,15 +492,352 @@ function FreeApiSources({ freeApis = {}, onToggle }) {
                 </div>
               )}
 
-              {/* No-preview state for OAuth APIs after a test attempt */}
               {result && !preview && result.ok && src.auth !== 'none' && (
-                <div style={{
-                  borderTop: '1px solid var(--border)',
-                  background: 'var(--panel-1)',
-                  padding: '8px 16px',
-                  fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)',
-                }}>
+                <div style={{ borderTop: '1px solid var(--border)', background: 'var(--panel-1)', padding: '8px 16px', fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
                   Preview requires OAuth login — authenticate in-app to see sample data.
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </React.Fragment>
+  );
+}
+
+// ── Limited-Free API Sources ──────────────────────────────────────────────────
+
+const LIMITED_PROBE = {
+  apifootball:   src => `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent('https://v1.american-football.api-sports.io/status')}&keyHeader=${encodeURIComponent(src.keyHeader)}&keyValue=${encodeURIComponent(src.apiKey || '')}`,
+  tank01:        src => `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent('https://tank01-fantasy-stats.p.rapidapi.com/getNFLNews?recentNews=true&maxItems=5')}&keyHeader=${encodeURIComponent(src.keyHeader)}&keyValue=${encodeURIComponent(src.apiKey || '')}&keyHost=${encodeURIComponent(src.keyHost || '')}`,
+  sportsdb:      src => `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent(`https://www.thesportsdb.com/api/v1/json/${src.apiKey || '3'}/search_all_leagues.php?s=American+Football`)}`,
+  mysportsfeeds: src => {
+    const b64 = btoa(`${src.apiKey || ''}:MYSPORTSFEEDS`);
+    return `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent('https://api.mysportsfeeds.com/v2.1/pull/nfl/2024-regular/standings.json')}&keyHeader=Authorization&keyValue=${encodeURIComponent('Basic ' + b64)}`;
+  },
+};
+
+const LIMITED_PARSE = {
+  apifootball: data => {
+    const r = data?.response;
+    if (r?.account) return [
+      { key: 0, col1: 'Plan', col2: r.account.plan || 'Free' },
+      { key: 1, col1: 'Requests today', col2: `${r.requests?.current ?? '?'} / ${r.requests?.['limit-day'] ?? '100'}` },
+    ];
+    return [];
+  },
+  tank01: data => {
+    const items = data?.body || [];
+    return items.slice(0, 5).map((it, i) => ({
+      key: i, col1: (it.title || '').slice(0, 40), col2: it.playerName || '',
+    }));
+  },
+  sportsdb: data => {
+    const leagues = data?.leagues || [];
+    return leagues.slice(0, 6).map((l, i) => ({
+      key: i, col1: l.strLeague || `League ${i + 1}`, col2: l.strCountry || '',
+    }));
+  },
+  mysportsfeeds: data => {
+    const teams = data?.standings || [];
+    return teams.slice(0, 6).map((s, i) => ({
+      key: i,
+      col1: s.team?.abbreviation || `Team ${i + 1}`,
+      col2: `${s.stats?.wins?.value ?? 0}–${s.stats?.losses?.value ?? 0}`,
+    }));
+  },
+};
+
+// Per-player fetch helpers for "Refresh My Roster"
+const ROSTER_REFRESH = {
+  apifootball: async (playerNames, src) => {
+    const results = [];
+    for (const name of playerNames.slice(0, 5)) {
+      const url = `https://v1.american-football.api-sports.io/players?name=${encodeURIComponent(name)}&league=1&season=2025`;
+      const probeUrl = `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent(url)}&keyHeader=${encodeURIComponent(src.keyHeader)}&keyValue=${encodeURIComponent(src.apiKey || '')}`;
+      try {
+        const res = await fetch(probeUrl, { signal: AbortSignal.timeout(8000) });
+        if (res.ok) {
+          const data = await res.json();
+          const p = data?.response?.[0]?.player;
+          if (p) results.push({ name: p.name, col2: `${p.statistics?.[0]?.games?.position || '?'} · ${p.statistics?.[0]?.games?.started ?? 0} starts` });
+        }
+      } catch {}
+    }
+    return results;
+  },
+  tank01: async (playerNames, src) => {
+    const results = [];
+    for (const name of playerNames.slice(0, 5)) {
+      const url = `https://tank01-fantasy-stats.p.rapidapi.com/getNFLPlayerInfo?playerName=${encodeURIComponent(name)}&getStats=true`;
+      const probeUrl = `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent(url)}&keyHeader=${encodeURIComponent(src.keyHeader)}&keyValue=${encodeURIComponent(src.apiKey || '')}&keyHost=${encodeURIComponent(src.keyHost || '')}`;
+      try {
+        const res = await fetch(probeUrl, { signal: AbortSignal.timeout(8000) });
+        if (res.ok) {
+          const data = await res.json();
+          const p = data?.body;
+          if (p) results.push({ name: p.longName || name, col2: `${p.pos || '?'} · ${p.team || '?'}` });
+        }
+      } catch {}
+    }
+    return results;
+  },
+  sportsdb: async (playerNames, src) => {
+    const results = [];
+    for (const name of playerNames.slice(0, 5)) {
+      const url = `https://www.thesportsdb.com/api/v1/json/${src.apiKey || '3'}/searchplayers.php?p=${encodeURIComponent(name)}`;
+      const probeUrl = `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent(url)}`;
+      try {
+        const res = await fetch(probeUrl, { signal: AbortSignal.timeout(8000) });
+        if (res.ok) {
+          const data = await res.json();
+          const p = data?.player?.[0];
+          if (p) results.push({ name: p.strPlayer || name, col2: p.strPosition || '?' });
+        }
+      } catch {}
+    }
+    return results;
+  },
+  mysportsfeeds: async (playerNames, src) => {
+    const b64 = btoa(`${src.apiKey || ''}:MYSPORTSFEEDS`);
+    const authVal = encodeURIComponent('Basic ' + b64);
+    const results = [];
+    for (const name of playerNames.slice(0, 5)) {
+      const url = `https://api.mysportsfeeds.com/v2.1/pull/nfl/2024-regular/player_gamelog.json?player=${encodeURIComponent(name)}&limit=1`;
+      const probeUrl = `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent(url)}&keyHeader=Authorization&keyValue=${authVal}`;
+      try {
+        const res = await fetch(probeUrl, { signal: AbortSignal.timeout(8000) });
+        if (res.ok) {
+          const data = await res.json();
+          const gl = data?.gamelogs?.[0];
+          if (gl) results.push({ name: gl.player?.fullName || name, col2: `Wk ${gl.game?.week ?? '?'} stats loaded` });
+        }
+      } catch {}
+    }
+    return results;
+  },
+};
+
+function LimitedApiSources({ user, myRosterIds = new Set() }) {
+  const [sources, setSources] = React.useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('fantasai_limited_apis') || '{}');
+      return LIMITED_FREE_SOURCES.map(s => ({
+        ...s,
+        apiKey:  saved[s.id]?.apiKey  ?? (s.defaultKey || ''),
+        enabled: saved[s.id]?.enabled ?? false,
+      }));
+    } catch {
+      return LIMITED_FREE_SOURCES.map(s => ({ ...s, apiKey: s.defaultKey || '', enabled: false }));
+    }
+  });
+  const [testing,        setTesting]        = React.useState({});
+  const [testResults,    setTestResults]     = React.useState({});
+  const [previewData,    setPreviewData]     = React.useState({});
+  const [refreshing,     setRefreshing]      = React.useState({});
+  const [refreshResults, setRefreshResults]  = React.useState({});
+
+  function persist(updated) {
+    const toSave = {};
+    for (const s of updated) toSave[s.id] = { apiKey: s.apiKey, enabled: s.enabled };
+    localStorage.setItem('fantasai_limited_apis', JSON.stringify(toSave));
+  }
+
+  function setKey(id, key) {
+    setSources(prev => { const next = prev.map(s => s.id === id ? { ...s, apiKey: key } : s); persist(next); return next; });
+  }
+
+  function toggleEnabled(id) {
+    setSources(prev => { const next = prev.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s); persist(next); return next; });
+  }
+
+  const testApi = async (src) => {
+    setTesting(t => ({ ...t, [src.id]: true }));
+    setTestResults(r => ({ ...r, [src.id]: null }));
+    setPreviewData(p => ({ ...p, [src.id]: null }));
+    const probeFn = LIMITED_PROBE[src.id];
+    if (!probeFn) { setTesting(t => ({ ...t, [src.id]: false })); return; }
+    try {
+      const res = await fetch(probeFn(src), { signal: AbortSignal.timeout(10000) });
+      if (res.ok) {
+        setTestResults(r => ({ ...r, [src.id]: { ok: true, msg: `${res.status} OK — connected` } }));
+        const parseFn = LIMITED_PARSE[src.id];
+        if (parseFn) {
+          try {
+            const data = await res.json();
+            setPreviewData(p => ({ ...p, [src.id]: parseFn(data) }));
+          } catch {}
+        }
+      } else {
+        const isAuth = res.status === 401 || res.status === 403;
+        const msg = isAuth
+          ? `${res.status} — Invalid API key or plan expired`
+          : `${res.status} — Endpoint unreachable`;
+        setTestResults(r => ({ ...r, [src.id]: { ok: false, msg } }));
+      }
+    } catch (e) {
+      setTestResults(r => ({ ...r, [src.id]: { ok: false, msg: e.name === 'TimeoutError' ? 'Timeout after 10s' : e.message || 'Network error' } }));
+    }
+    setTesting(t => ({ ...t, [src.id]: false }));
+  };
+
+  const refreshRoster = async (src) => {
+    setRefreshing(r => ({ ...r, [src.id]: true }));
+    setRefreshResults(r => ({ ...r, [src.id]: null }));
+    const refreshFn = ROSTER_REFRESH[src.id];
+    if (!refreshFn || myRosterIds.size === 0) {
+      setRefreshResults(r => ({ ...r, [src.id]: { ok: false, msg: 'No roster players found — log in first.' } }));
+      setRefreshing(r => ({ ...r, [src.id]: false }));
+      return;
+    }
+    const names = [...myRosterIds].map(id => {
+      const p = PLAYERS.find(pl => pl.id === id);
+      return p?.name || null;
+    }).filter(Boolean);
+
+    try {
+      const rows = await refreshFn(names, src);
+      setRefreshResults(r => ({ ...r, [src.id]: { ok: true, rows, updatedAt: new Date().toLocaleTimeString() } }));
+    } catch (e) {
+      setRefreshResults(r => ({ ...r, [src.id]: { ok: false, msg: e.message || 'Refresh failed' } }));
+    }
+    setRefreshing(r => ({ ...r, [src.id]: false }));
+  };
+
+  return (
+    <React.Fragment>
+      <div className="section-head" style={{ marginTop: 32 }}>
+        <div>
+          <div className="section-title">Limited-Free APIs</div>
+          <div className="section-sub">
+            APIs with a free tier (typically 100 req/day). Add your own API key to enable — each team owner can sign up independently for free and get additional live stats, projections, and injury data that will appear on their <strong>Current Roster</strong> page. Because requests are limited, data is only fetched for <strong>your rostered players</strong> and only when you press the refresh button on your Current Roster — it never runs automatically.
+          </div>
+        </div>
+        <span className="faint mono" style={{ fontSize: 11 }}>100 req/day free</span>
+      </div>
+
+      <div className="src-feeds">
+        {sources.map(src => {
+          const result  = testResults[src.id];
+          const preview = previewData[src.id];
+          const refresh = refreshResults[src.id];
+          const needsKey = !src.defaultKey && !src.apiKey;
+          return (
+            <div key={src.id} className={`src-feed ${src.enabled ? '' : 'off'}`}
+              style={{ flexDirection: 'column', gap: 0, padding: 0 }}>
+
+              {/* Main row */}
+              <div style={{ display: 'flex', gap: 12, padding: '14px 16px' }}>
+                <label className="src-toggle" style={{ marginTop: 2 }}>
+                  <input type="checkbox" checked={src.enabled} onChange={() => toggleEnabled(src.id)} />
+                  <span></span>
+                </label>
+                <div className="src-feed-name" style={{ flex: 1 }}>
+                  <div className="name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: src.color, display: 'inline-block', flexShrink: 0 }} />
+                    {src.name}
+                    <span className="src-feed-type type-adp" style={{ fontSize: 9 }}>LIMITED FREE</span>
+                  </div>
+                  <div className="meta" style={{ marginTop: 4 }}>
+                    <span className="mono faint" style={{ fontSize: 10 }}>{src.url}</span>
+                    <span className="dot" />
+                    <span className="faint" style={{ fontSize: 10 }}>{src.authNote}</span>
+                  </div>
+                  <div className="note" style={{ marginTop: 4 }}>
+                    {src.provides.map((p, j) => <span key={j} className="behavior-tag" style={{ marginRight: 4, marginBottom: 4 }}>{p}</span>)}
+                  </div>
+
+                  {/* API Key input */}
+                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="mono faint" style={{ fontSize: 10, flexShrink: 0 }}>
+                      {src.defaultKey ? 'SANDBOX KEY' : 'API KEY'}
+                    </span>
+                    <input
+                      className="input mono"
+                      placeholder={src.defaultKey ? `Default: "${src.defaultKey}"` : 'Paste your API key…'}
+                      style={{ flex: 1, maxWidth: 280, padding: '3px 8px', fontSize: 11 }}
+                      type="password"
+                      value={src.apiKey}
+                      onChange={e => setKey(src.id, e.target.value)}
+                    />
+                    {src.signupUrl && (
+                      <a href={src.signupUrl} target="_blank" rel="noopener noreferrer"
+                        className="btn sm ghost" style={{ fontSize: 10, textDecoration: 'none', whiteSpace: 'nowrap' }}>
+                        Get Key ↗
+                      </a>
+                    )}
+                  </div>
+
+                  {result && (
+                    <div className={`worker-msg ${result.ok ? 'ok' : 'err'}`} style={{ marginTop: 6 }}>
+                      {result.ok ? '✓ ' : '✗ '}{result.msg}
+                    </div>
+                  )}
+
+                  {/* Refresh result */}
+                  {refresh && (
+                    <div style={{ marginTop: 8 }}>
+                      {refresh.ok ? (
+                        <div style={{ background: 'var(--panel-1)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px' }}>
+                          <div className="mono faint" style={{ fontSize: 10, marginBottom: 6 }}>
+                            ROSTER REFRESH · {refresh.updatedAt} · {myRosterIds.size} players
+                          </div>
+                          {(refresh.rows || []).map((row, i) => (
+                            <div key={i} style={{ display: 'flex', gap: 8, fontSize: 11, padding: '2px 0', borderBottom: i < refresh.rows.length - 1 ? '1px solid var(--panel-3)' : 'none' }}>
+                              <span style={{ flex: 1, color: 'var(--text)' }}>{row.name}</span>
+                              <span className="mono faint">{row.col2}</span>
+                            </div>
+                          ))}
+                          {(refresh.rows || []).length === 0 && (
+                            <div className="faint" style={{ fontSize: 11 }}>No matching players found in API.</div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="worker-msg err">{refresh.msg}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
+                  <button
+                    className="btn sm ghost"
+                    onClick={() => testApi(src)}
+                    disabled={testing[src.id] || (needsKey)}
+                    title={needsKey ? 'Enter an API key first' : 'Test connectivity'}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    {testing[src.id] ? '⏳ Testing…' : '⚡ Test'}
+                  </button>
+                  <button
+                    className="btn sm ghost"
+                    onClick={() => refreshRoster(src)}
+                    disabled={refreshing[src.id] || (needsKey && !src.defaultKey)}
+                    title="Fetch fantasy updates for your rostered players only"
+                    style={{ whiteSpace: 'nowrap', color: 'var(--accent-2)', borderColor: 'rgba(78,168,255,.35)' }}
+                  >
+                    {refreshing[src.id] ? '⏳ Fetching…' : '↻ Refresh My Roster'}
+                  </button>
+                  <a href={src.docUrl} target="_blank" rel="noopener noreferrer"
+                    className="btn sm ghost" style={{ fontSize: 10, textDecoration: 'none' }}>
+                    Docs ↗
+                  </a>
+                </div>
+              </div>
+
+              {/* Preview panel after successful test */}
+              {preview && preview.length > 0 && (
+                <div style={{ borderTop: '1px solid var(--border)', background: 'var(--panel-1)', padding: '10px 16px 12px' }}>
+                  <div className="mono faint" style={{ fontSize: 10, letterSpacing: '.1em', marginBottom: 8 }}>LIVE SAMPLE</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 0' }}>
+                    {preview.map((row, i) => (
+                      <React.Fragment key={row.key}>
+                        <span className="mono faint" style={{ fontSize: 10, padding: '3px 8px 3px 0', borderBottom: i < preview.length - 1 ? '1px solid var(--panel-3)' : 'none' }}>{row.col1}</span>
+                        <span className="mono" style={{ fontSize: 10, padding: '3px 0', color: 'var(--accent)', textAlign: 'right', borderBottom: i < preview.length - 1 ? '1px solid var(--panel-3)' : 'none' }}>{row.col2}</span>
+                      </React.Fragment>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

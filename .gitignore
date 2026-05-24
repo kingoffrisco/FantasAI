@@ -19,6 +19,10 @@ ENV/
 # Environment files
 .env
 
+# League seed file — local copy of league config, updated via "Download Seed" in Settings
+# Never overwritten by git; keeps league data safe across code changes
+app/public/league-seed.json
+
 # IDEs and editors
 .vscode/
 .idea/

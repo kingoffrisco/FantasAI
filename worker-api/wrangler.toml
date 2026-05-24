@@ -11,10 +11,12 @@ routes = [
 
 [vars]
 SLEEPER_BASE    = "https://api.sleeper.app/v1"
-# CBS_WORKER_URL — set this to your fantasai-cbs workers.dev URL until you
-# give the CBS worker a custom subdomain, e.g.:
-#   https://fantasai-cbs.<your-subdomain>.workers.dev
 CBS_WORKER_URL  = "https://fantasai-cbs.fantasai.workers.dev"
+S3_BUCKET       = "aws-kingoffisco-s3-bucket"
+AWS_REGION      = "us-east-2"
 
-# Secrets (set with `wrangler secret put <NAME>`):
-#   FANTASAI_KEY  — optional shared secret; clients must send X-FantasAI-Key header
+# Secrets — add with: wrangler secret put <NAME> --name fantasai-api
+#   FANTASAI_KEY          optional shared key for protected GET routes
+#   AWS_ACCESS_KEY_ID     IAM key with s3:GetObject + s3:PutObject on the bucket
+#   AWS_SECRET_ACCESS_KEY paired secret
+#   RESEND_API_KEY        from resend.com — enables password reset emails

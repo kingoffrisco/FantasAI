@@ -215,9 +215,21 @@ function computePosSpend(teamId) {
 
 // ─── Screen component ────────────────────────────────────────────────────────
 
-export default function OwnerIntelScreen({ onOpenPlayer }) {
+function loadCommissioners() {
+  try {
+    const cfg = JSON.parse(localStorage.getItem('fantasai_owners_config') || '{}');
+    return new Set(
+      Object.entries(cfg)
+        .filter(([k, v]) => k !== 'resetTokens' && v?.isCommissioner)
+        .map(([k]) => parseInt(k))
+    );
+  } catch { return new Set(); }
+}
+
+export default function OwnerIntelScreen({ onOpenPlayer, user, myRosterIds, slotOverrides }) {
   const [selectedId, setSelectedId] = React.useState(2);
   const [mockOpen, setMockOpen] = React.useState(false);
+  const commissioners = React.useMemo(loadCommissioners, []);
 
   const { data: cbsTeams }   = useApi(() => api.teams(), []);
   const { data: draft2025 }  = useApi(() => api.draft(2025), []);
@@ -287,8 +299,12 @@ export default function OwnerIntelScreen({ onOpenPlayer }) {
                 onClick={() => setSelectedId(o.teamId)}>
                 <span className="logo" style={{ background: t.color }}>{t.logo}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="name">
-                    {t.name} {o.you && <span className="mono faint" style={{ fontSize: 9 }}>YOU</span>}
+                  <div className="name" style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                    {t.name}
+                    {o.you && <span className="mono faint" style={{ fontSize: 9 }}>YOU</span>}
+                    {commissioners.has(o.teamId) && (
+                      <span style={{ fontSize: 9, fontWeight: 800, background: '#ffb547', color: '#1a0d00', padding: '1px 5px', borderRadius: 3, letterSpacing: '.05em' }}>COMMISH</span>
+                    )}
                   </div>
                   <div className="arch">{t.owner || t.displayName}</div>
                   {t.email && (
@@ -302,7 +318,7 @@ export default function OwnerIntelScreen({ onOpenPlayer }) {
         </div>
 
         <div className="intel-main">
-          {selected && team && <OwnerProfile key={selectedId} owner={selected} team={team} onOpenPlayer={onOpenPlayer} />}
+          {selected && team && <OwnerProfile key={selectedId} owner={selected} team={team} onOpenPlayer={onOpenPlayer} isMyTeam={selectedId === user?.teamId} myRosterIds={myRosterIds} slotOverrides={slotOverrides} commissioners={commissioners} selectedId={selectedId} />}
         </div>
       </div>
 
@@ -315,8 +331,21 @@ export default function OwnerIntelScreen({ onOpenPlayer }) {
 
 const SLOT_ORDER = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'FLEX', 'FLEX', 'DST', 'BENCH', 'BENCH', 'BENCH', 'BENCH', 'BENCH', 'BENCH'];
 
-function OwnerRoster({ teamId, onOpenPlayer }) {
-  const roster = TEAM_ROSTERS[teamId] || [];
+function OwnerRoster({ teamId, onOpenPlayer, isMyTeam, myRosterIds, slotOverrides }) {
+  const baseRoster = TEAM_ROSTERS[teamId] || [];
+
+  let roster;
+  if (isMyTeam && myRosterIds) {
+    const liveBase = baseRoster.filter(r => !r.playerId || myRosterIds.has(r.playerId));
+    const baseIds  = new Set(baseRoster.map(r => r.playerId).filter(Boolean));
+    const added    = [...myRosterIds].filter(id => !baseIds.has(id)).map(id => ({ slot: 'BENCH', playerId: id }));
+    roster = [...liveBase, ...added];
+    if (slotOverrides) {
+      roster = roster.map(r => r.playerId && slotOverrides[r.playerId] ? { ...r, slot: slotOverrides[r.playerId] } : r);
+    }
+  } else {
+    roster = baseRoster;
+  }
 
   const starters = roster.filter(r => r.slot !== 'BENCH');
   const bench    = roster.filter(r => r.slot === 'BENCH');
@@ -358,7 +387,7 @@ function OwnerRoster({ teamId, onOpenPlayer }) {
 
 // ─── OwnerProfile ────────────────────────────────────────────────────────────
 
-function OwnerProfile({ owner, team, onOpenPlayer }) {
+function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOverrides, commissioners, selectedId }) {
   const o = owner;
   const realPosSpend = React.useMemo(() => computePosSpend(team.id), [team.id]);
   const posData = realPosSpend || o.posByRound;
@@ -371,6 +400,9 @@ function OwnerProfile({ owner, team, onOpenPlayer }) {
             <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontStretch: '75%', textTransform: 'uppercase', fontSize: 22, fontWeight: 900 }}>{team.displayName || team.name}</h2>
             {team.record && team.record !== '0-0' && <span className="dim mono" style={{ fontSize: 12 }}>· {team.record}</span>}
             {o.you && <span className="you-pill">YOU</span>}
+            {commissioners?.has(selectedId) && (
+              <span style={{ fontSize: 10, fontWeight: 800, background: '#ffb547', color: '#1a0d00', padding: '2px 7px', borderRadius: 4, letterSpacing: '.06em', alignSelf: 'center' }}>COMMISH</span>
+            )}
           </div>
           {team.owner && <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>{team.owner}</div>}
           <div className="intel-archetype">
@@ -422,7 +454,7 @@ function OwnerProfile({ owner, team, onOpenPlayer }) {
           </div>
         </div>
 
-        <OwnerRoster teamId={team.id} onOpenPlayer={onOpenPlayer} />
+        <OwnerRoster teamId={team.id} onOpenPlayer={onOpenPlayer} isMyTeam={isMyTeam} myRosterIds={myRosterIds} slotOverrides={slotOverrides} />
       </div>
 
       <div className="muted-card" style={{ marginTop: 14 }}>

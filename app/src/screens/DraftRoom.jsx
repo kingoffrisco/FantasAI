@@ -10,6 +10,8 @@ export default function DraftRoom({ aiMode }) {
   const [boardPos, setBoardPos] = React.useState('ALL');
   const [boardSearch, setBoardSearch] = React.useState('');
   const [showRecap, setShowRecap] = React.useState(false);
+  const [hidden, setHidden] = React.useState({ ghosts: false, queue: false, picklog: false, teams: false });
+  const togglePanel = id => setHidden(h => ({ ...h, [id]: !h[id] }));
 
   React.useEffect(() => {
     const t = setInterval(() => setSeconds(s => Math.max(0, s - 1)), 1000);
@@ -67,6 +69,18 @@ export default function DraftRoom({ aiMode }) {
 
   const myPicks = allPicks.filter(p => p.teamId === 1 && p.playerId);
   const teamsForCols = teamsOrder.map(id => LEAGUE_TEAMS.find(t => t.id === id));
+
+  const ghostPredictions = React.useMemo(() => {
+    const drafted = new Set();
+    const result = {};
+    const completed = allPicks.filter(pk => pk.playerId).sort((a, b) => a.pickNum - b.pickNum);
+    for (const pk of completed) {
+      const preds = predictPicks(pk.teamId, pk.pickNum, drafted, 1);
+      result[pk.pickNum] = preds[0] || null;
+      drafted.add(pk.playerId);
+    }
+    return result;
+  }, []);
   const clockClass = seconds < 10 ? 'danger' : seconds < 30 ? 'warn' : '';
   const isMyTurn = onClockTeamId === 1;
 
@@ -100,15 +114,33 @@ export default function DraftRoom({ aiMode }) {
           </div>
         </div>
 
-        <div style={{ padding: '0 24px', display: 'flex', gap: 8, alignSelf: 'center' }}>
-          <button className="btn ghost sm" onClick={() => setShowRecap(!showRecap)}>Round {currentRound - 1} Recap</button>
-          <button className="btn ghost sm">⏸ Pause</button>
-          {isMyTurn && <button className="btn primary">▶ Draft Best Available</button>}
+        <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6, alignSelf: 'center' }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn ghost sm" onClick={() => setShowRecap(!showRecap)}>Round {currentRound - 1} Recap</button>
+            <button className="btn ghost sm">⏸ Pause</button>
+            {isMyTurn && <button className="btn primary">▶ Draft Best Available</button>}
+          </div>
+          {/* Panel visibility toggles */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', paddingLeft: 2 }}>
+            <span className="mono faint" style={{ fontSize: 9, letterSpacing: '.1em' }}>PANELS</span>
+            {[
+              { id: 'ghosts',  label: 'Ghost Picks' },
+              { id: 'queue',   label: 'My Queue' },
+              { id: 'picklog', label: 'Pick Log' },
+              { id: 'teams',   label: 'Teams Grid' },
+            ].map(p => (
+              <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 11, color: hidden[p.id] ? 'var(--text-faint)' : 'var(--text-dim)', userSelect: 'none' }}>
+                <input type="checkbox" checked={!hidden[p.id]} onChange={() => togglePanel(p.id)}
+                  style={{ cursor: 'pointer', accentColor: 'var(--accent)', width: 13, height: 13 }} />
+                {p.label}
+              </label>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* GHOST PICKS STRIP */}
-      <div className="draft-ghosts">
+      <div className="draft-ghosts" style={hidden.ghosts ? { display: 'none' } : {}}>
         <div className="ghost-label">
           <div className="ai-orb" style={{ width: 16, height: 16 }}></div>
           <span>GHOST PICKS</span>
@@ -202,36 +234,108 @@ export default function DraftRoom({ aiMode }) {
         </div>
       </div>
 
-      {/* CENTER: AI + QUEUE + PICK LOG */}
-      <div className="draft-center">
-        <div style={{ padding: 14, borderBottom: '1px solid var(--border)' }}>
+      {/* MY QUEUE */}
+      <div className="draft-queue" style={hidden.queue ? { overflow: 'hidden' } : {}}>
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <div className="card-title" style={{ flex: 1 }}>My Queue · {queue.length}</div>
+          <button className="btn sm icon ghost" onClick={() => togglePanel('queue')} title={hidden.queue ? 'Expand' : 'Minimize'} style={{ marginRight: 4, fontSize: 10 }}>
+            {hidden.queue ? '▼' : '▲'}
+          </button>
+          <button className="btn sm ghost" onClick={() => setQueue([])}>Clear</button>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', display: hidden.queue ? 'none' : undefined }}>
+          {queue.map((id, i) => {
+            const p = findPlayer(id);
+            if (!p) return null;
+            return (
+              <div className="queue-item" key={id}>
+                <span className="grip">≡</span>
+                <span className="num">{i + 1}</span>
+                <PlayerAvatar player={p} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="player-name" style={{ fontSize: 12 }}>{p.name}</div>
+                  <div className="player-meta"><PosBadge pos={p.pos} /> {p.team} · ECR #{p.ecr}</div>
+                </div>
+                <button className="btn sm icon ghost" onClick={() => setQueue(queue.filter(x => x !== id))}>✕</button>
+              </div>
+            );
+          })}
+          {queue.length === 0 && (
+            <div className="empty">Queue empty<br /><span className="faint" style={{ fontSize: 11 }}>Add players from the Big Board.</span></div>
+          )}
+        </div>
+      </div>
+
+      {/* PICK LOG */}
+      <div className="draft-picklog" style={hidden.picklog ? { overflow: 'hidden' } : {}}>
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <div className="card-title" style={{ flex: 1 }}>Pick Log</div>
+          <button className="btn sm icon ghost" onClick={() => togglePanel('picklog')} title={hidden.picklog ? 'Expand' : 'Minimize'} style={{ marginRight: 8, fontSize: 10 }}>
+            {hidden.picklog ? '▼' : '▲'}
+          </button>
+          <span className="mono faint" style={{ fontSize: 10 }}>{CURRENT_PICK - 1}/192</span>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', display: hidden.picklog ? 'none' : undefined }}>
+          {allPicks.filter(pk => pk.playerId).slice().reverse().map(pk => {
+            const p = findPlayer(pk.playerId);
+            const t = LEAGUE_TEAMS.find(x => x.id === pk.teamId);
+            if (!p || !t) return null;
+            const adpDelta = pk.pickNum - (p.adp ?? p.ecr);
+            const ghost = ghostPredictions[pk.pickNum];
+            const ghostMatch = ghost?.player?.id === pk.playerId;
+            const deltaColor = adpDelta >= 3 ? '#4caf82' : adpDelta <= -3 ? '#ff5a6e' : 'var(--text-dim)';
+            return (
+              <div key={pk.pickNum} style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, background: t.me ? 'rgba(198,255,58,.03)' : '' }}>
+                <div className="mono faint" style={{ width: 38, fontSize: 11, flexShrink: 0 }}>{pk.round}.{pk.slot.toString().padStart(2, '0')}</div>
+                <PosBadge pos={p.pos} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap', overflow: 'hidden' }}>
+                    <span className="player-name" style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                    <span className="faint mono" style={{ fontSize: 10, flexShrink: 0 }}>{p.team}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: deltaColor, flexShrink: 0, marginLeft: 'auto' }}>
+                      {adpDelta >= 0 ? '+' : ''}{adpDelta.toFixed(1)}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className="player-meta" style={{ color: t.me ? 'var(--accent)' : 'var(--text-dim)', fontSize: 10 }}>→ {t.logo} {t.name}</span>
+                    {ghost && (
+                      ghostMatch
+                        ? <span style={{ fontSize: 9, color: '#4caf82', fontWeight: 700, marginLeft: 'auto', flexShrink: 0 }}>✓ Ghost</span>
+                        : <span style={{ fontSize: 9, color: 'var(--text-dim)', marginLeft: 'auto', flexShrink: 0 }}>Ghost: {ghost.player.name.split(' ').slice(-1)[0]}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* RIGHT: AI + Roster + Chat */}
+      <div className="draft-roster">
+        {/* AI Pick Engine */}
+        <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div className="suggest-card">
-            <div className="head">
+            <div className="head" style={{ marginBottom: 8 }}>
               <div className="ai-orb"></div>
               <span className="label">FantasAI Pick Engine</span>
               <span className="grow"></span>
-              <span className="mono faint" style={{ fontSize: 10 }}>Updated 0.2s ago</span>
+              <span className="mono faint" style={{ fontSize: 10 }}>0.2s ago</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {aiSuggestions.map((s, i) => {
                 const p = findPlayer(s.id);
                 if (!p) return null;
                 return (
-                  <div key={s.id} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, padding: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                      <span className="mono accent" style={{ fontSize: 10, fontWeight: 600 }}>#{i + 1}</span>
-                      <span className="mono faint" style={{ fontSize: 10 }}>{Math.round(94 - i * 7)}% match</span>
+                  <div key={s.id} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="mono accent" style={{ fontSize: 10, fontWeight: 700, flexShrink: 0 }}>#{i + 1}</span>
+                    <PlayerAvatar player={p} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="player-name" style={{ fontSize: 11 }}>{p.name}</div>
+                      <div className="player-meta"><PosBadge pos={p.pos} /> {p.team}</div>
                     </div>
-                    <div className="player-cell">
-                      <PlayerAvatar player={p} />
-                      <div style={{ minWidth: 0 }}>
-                        <div className="player-name" style={{ fontSize: 12 }}>{p.name}</div>
-                        <div className="player-meta"><PosBadge pos={p.pos} /> {p.team}</div>
-                      </div>
-                    </div>
-                    <div className="why" style={{ marginTop: 8, minHeight: 50 }}>{s.why}</div>
                     {(aiMode === 'centerpiece' || aiMode === 'copilot') && isMyTurn && (
-                      <button className="btn ai sm" style={{ width: '100%', marginTop: 8 }}>DRAFT</button>
+                      <button className="btn ai sm" style={{ padding: '3px 8px', fontSize: 10 }}>DRAFT</button>
                     )}
                   </div>
                 );
@@ -239,64 +343,6 @@ export default function DraftRoom({ aiMode }) {
             </div>
           </div>
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', flex: 1, overflow: 'hidden' }}>
-          {/* My Queue */}
-          <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
-              <div className="card-title" style={{ flex: 1 }}>My Queue · {queue.length}</div>
-              <button className="btn sm ghost" onClick={() => setQueue([])}>Clear</button>
-            </div>
-            <div style={{ flex: 1, overflow: 'auto' }}>
-              {queue.map((id, i) => {
-                const p = findPlayer(id);
-                if (!p) return null;
-                return (
-                  <div className="queue-item" key={id}>
-                    <span className="grip">≡</span>
-                    <span className="num">{i + 1}</span>
-                    <PlayerAvatar player={p} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="player-name" style={{ fontSize: 12 }}>{p.name}</div>
-                      <div className="player-meta"><PosBadge pos={p.pos} /> {p.team} · ECR #{p.ecr}</div>
-                    </div>
-                    <button className="btn sm icon ghost" onClick={() => setQueue(queue.filter(x => x !== id))}>✕</button>
-                  </div>
-                );
-              })}
-              {queue.length === 0 && <div className="empty">Queue is empty.<br /><span className="faint" style={{ fontSize: 11 }}>Add players from the big board.</span></div>}
-            </div>
-          </div>
-
-          {/* Pick Log */}
-          <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
-              <div className="card-title" style={{ flex: 1 }}>Pick Log</div>
-              <span className="mono faint" style={{ fontSize: 10 }}>{CURRENT_PICK - 1}/192</span>
-            </div>
-            <div style={{ flex: 1, overflow: 'auto' }}>
-              {allPicks.filter(pk => pk.playerId).slice().reverse().slice(0, 30).map(pk => {
-                const p = findPlayer(pk.playerId);
-                const t = LEAGUE_TEAMS.find(x => x.id === pk.teamId);
-                if (!p || !t) return null;
-                return (
-                  <div key={pk.pickNum} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, background: t.me ? 'rgba(198,255,58,.03)' : '' }}>
-                    <div className="mono faint" style={{ width: 40, fontSize: 11 }}>{pk.round}.{pk.slot.toString().padStart(2, '0')}</div>
-                    <PosBadge pos={p.pos} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="player-name" style={{ fontSize: 12 }}>{p.name} <span className="faint mono" style={{ fontSize: 10 }}>{p.team}</span></div>
-                      <div className="player-meta" style={{ color: t.me ? 'var(--accent)' : 'var(--text-dim)' }}>→ {t.logo} {t.name}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* RIGHT: Roster + Chat */}
-      <div className="draft-roster">
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center' }}>
           <div className="ai-orb" style={{ width: 18, height: 18, background: 'var(--accent)', boxShadow: '0 0 8px var(--accent)' }}></div>
           <div className="card-title" style={{ flex: 1, marginLeft: 10 }}>Armed Rodgery</div>
@@ -348,7 +394,7 @@ export default function DraftRoom({ aiMode }) {
       </div>
 
       {/* TEAMS GRID */}
-      <div className="draft-teams">
+      <div className="draft-teams" style={hidden.teams ? { display: 'none' } : {}}>
         <div className="teams-grid">
           {teamsForCols.map((t, colIdx) => {
             if (!t) return null;

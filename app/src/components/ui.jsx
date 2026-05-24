@@ -1,8 +1,23 @@
-import { NFL_TEAMS } from '../lib/data.js';
+import { NFL_TEAMS, SOURCE_META } from '../lib/data.js';
 
 export const PosBadge = ({ pos, solid }) => (
   <span className={`pos-badge pos-${pos} ${solid ? 'solid' : ''}`}>{pos}</span>
 );
+
+export const SourceBadge = ({ source }) => {
+  const color = SOURCE_META[source]?.color || '#888';
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      background: color + '1a', border: `1px solid ${color}40`,
+      color, borderRadius: 4, padding: '1px 7px',
+      fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+      letterSpacing: '.04em', whiteSpace: 'nowrap', flexShrink: 0,
+    }}>
+      {source}
+    </span>
+  );
+};
 
 export const StatusDot = ({ status }) => {
   if (!status || status === 'OK') return null;

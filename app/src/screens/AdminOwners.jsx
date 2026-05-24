@@ -2,6 +2,7 @@ import React from 'react';
 import { LEAGUE_TEAMS } from '../lib/data.js';
 
 const STORAGE_KEY = 'fantasai_owners_config';
+const API_BASE    = 'https://api.fantasai.net';
 
 function loadOverrides() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { return {}; }
@@ -9,6 +10,14 @@ function loadOverrides() {
 
 function saveOverrides(overrides) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+}
+
+function syncToS3(overrides) {
+  fetch(`${API_BASE}/api/v1/owners/config`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(overrides),
+  }).catch(err => console.warn('S3 sync failed:', err.message));
 }
 
 export default function AdminOwners() {
@@ -25,6 +34,7 @@ export default function AdminOwners() {
     };
     saveOverrides(next);
     setOverrides(next);
+    syncToS3(next);
   }
 
   function startEdit(team) {
@@ -48,6 +58,7 @@ export default function AdminOwners() {
     const next = { ...overrides, [teamId]: { ...existing, ...form } };
     saveOverrides(next);
     setOverrides(next);
+    syncToS3(next);
     setEditing(null);
     setSaved(teamId);
     setTimeout(() => setSaved(null), 2000);
@@ -58,6 +69,7 @@ export default function AdminOwners() {
     delete next[teamId];
     saveOverrides(next);
     setOverrides(next);
+    syncToS3(next);
     setEditing(null);
   }
 

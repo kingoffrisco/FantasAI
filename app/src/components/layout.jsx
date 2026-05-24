@@ -1,4 +1,25 @@
 import React from 'react';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, findPlayer } from '../lib/data.js';
+
+const H2H_SEASON_START = new Date('2026-09-09');
+const H2H_WEEKS = 14;
+
+function getH2HWeek() {
+  const today = new Date();
+  if (today < H2H_SEASON_START) return 1;
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+  return Math.min(Math.max(Math.floor((today - H2H_SEASON_START) / msPerWeek) + 1, 1), H2H_WEEKS);
+}
+
+function h2hSeed(teamId, week) {
+  return Math.sin(teamId * 7.3 + week * 3.1) * 18 + Math.cos(teamId * 2.1 + week * 5.7) * 8;
+}
+
+function h2hProj(teamId, week) {
+  const starters = (TEAM_ROSTERS[teamId] || []).filter(r => r.slot !== 'BENCH' && r.playerId);
+  const base = starters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
+  return Math.max(0, base + h2hSeed(teamId, week));
+}
 
 export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showChat, onToggleChat, user, onLogout, onExport }) => (
   <div className="topbar">
@@ -63,10 +84,51 @@ export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showCh
 
 export const Sidebar = ({ active, onNav, user }) => {
   const isAdmin = user?.isAdmin;
+
+  const h2hInfo = React.useMemo(() => {
+    const teamId = user?.teamId;
+    if (!teamId) return null;
+
+    const week = getH2HWeek();
+
+    // Prefer the commissioner-set schedule stored in localStorage
+    let weekMatchups = null;
+    try {
+      const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+      const ms = saved?.matchupSchedule;
+      if (ms) weekMatchups = ms[week] || ms[String(week)] || null;
+    } catch {}
+
+    // Fallback: generate a round-robin from LEAGUE_TEAMS
+    if (!weekMatchups) {
+      const ids = LEAGUE_TEAMS.map(t => t.id);
+      const n = ids.length;
+      const rest = ids.slice(1);
+      const rot = (week - 1) % (n - 1);
+      const rotated = [...rest.slice(rot), ...rest.slice(0, rot)];
+      const circle = [ids[0], ...rotated];
+      weekMatchups = Array.from({ length: Math.floor(n / 2) }, (_, i) => [circle[i], circle[n - 1 - i]]);
+    }
+
+    const pair = weekMatchups.find(([a, b]) => a === teamId || b === teamId);
+    if (!pair) return null;
+
+    const oppId = pair[0] === teamId ? pair[1] : pair[0];
+    const oppTeam = LEAGUE_TEAMS.find(t => t.id === oppId);
+
+    const myProj  = h2hProj(teamId, week);
+    const oppProj = h2hProj(oppId, week);
+    const isWinning = myProj >= oppProj;
+    const winPct = myProj + oppProj > 0 ? Math.round((myProj / (myProj + oppProj)) * 100) : 50;
+
+    return { week, oppTeam, isWinning, winPct };
+  }, [user?.teamId]);
+
   const items = [
     { group: 'League' },
     { id: 'dashboard', label: 'Dashboard',      icon: '🏈' },
     { id: 'roster',    label: 'Current Roster',  icon: '📋' },
+    { id: 'h2h',       label: 'Head to Head',    icon: '⚔' },
     { id: 'players',   label: 'Players',          icon: '👥', badge: 'All' },
     { id: 'news',      label: 'News & Updates',   icon: '📰', badge: '9', live: true },
     { id: 'waivers',   label: 'Waivers',           icon: '📑' },
@@ -86,6 +148,7 @@ export const Sidebar = ({ active, onNav, user }) => {
       { id: 'admin-owners', label: 'Owners', icon: '👤' },
     ] : []),
   ];
+
   return (
     <div className="side">
       <div className="team-card">
@@ -99,6 +162,31 @@ export const Sidebar = ({ active, onNav, user }) => {
       </div>
       {items.map((it, i) => it.group ? (
         <div key={i} className="nav-section">{it.group}</div>
+      ) : it.id === 'h2h' ? (
+        <div key="h2h"
+          className={`nav-item ${active === 'h2h' ? 'active' : ''}`}
+          onClick={() => onNav('h2h')}
+          style={{ alignItems: h2hInfo ? 'flex-start' : 'center' }}>
+          <span className="icon" style={{ marginTop: h2hInfo ? 2 : 0 }}>⚔</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span>Head to Head</span>
+            {h2hInfo && (() => {
+              const color = h2hInfo.isWinning ? '#4caf82' : '#ff9500';
+              const verb  = h2hInfo.isWinning ? 'Beating' : 'Losing to';
+              const opp   = h2hInfo.oppTeam?.name || 'Opponent';
+              return (
+                <div style={{
+                  fontSize: 10, fontWeight: 700, color,
+                  marginTop: 3, lineHeight: 1.3,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  Wk{h2hInfo.week} · {verb} {opp}
+                  <span style={{ marginLeft: 5, opacity: .85 }}>{h2hInfo.winPct}%</span>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
       ) : (
         <div key={it.id}
           className={`nav-item ${active === it.id ? 'active' : ''} ${it.live ? 'live' : ''}`}

@@ -5,6 +5,7 @@ const ADMIN_EMAIL      = 'admin@fantasai.net';
 const ADMIN_PASSWORD   = 'admin2025';
 const DEFAULT_PASSWORD = 'fantasy2025';
 const OWNERS_KEY       = 'fantasai_owners_config';
+const API_BASE         = 'https://api.fantasai.net';
 
 const SITES = [
   { id: 'tau', label: 'TAU Fantasy League' },
@@ -12,6 +13,29 @@ const SITES = [
 
 function loadOwnerConfig() {
   try { return JSON.parse(localStorage.getItem(OWNERS_KEY) || '{}'); } catch { return {}; }
+}
+
+async function fetchS3Config() {
+  try {
+    const res = await Promise.race([
+      fetch(`${API_BASE}/api/v1/owners/config`),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000)),
+    ]);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const s3data = await res.json();
+    // Merge: preserve locally-set passwords not yet synced to S3
+    const local = loadOwnerConfig();
+    const merged = { ...s3data };
+    for (const [teamId, localCfg] of Object.entries(local)) {
+      if (localCfg.passwordSet && !s3data[teamId]?.passwordSet) {
+        merged[teamId] = { ...(s3data[teamId] || {}), ...localCfg };
+      }
+    }
+    localStorage.setItem(OWNERS_KEY, JSON.stringify(merged));
+    return merged;
+  } catch {
+    return loadOwnerConfig(); // fall back to local cache
+  }
 }
 
 export default function Login({ onLogin }) {
@@ -22,76 +46,80 @@ export default function Login({ onLogin }) {
   const [error, setError]       = React.useState('');
   const [loading, setLoading]   = React.useState(false);
   const [view, setView]         = React.useState('login'); // 'login' | 'forgot'
-  const [resetEmail, setResetEmail]   = React.useState('');
-  const [resetSent, setResetSent]     = React.useState(false);
+  const [resetEmail, setResetEmail]     = React.useState('');
+  const [resetSent, setResetSent]       = React.useState(false);
   const [resetLoading, setResetLoading] = React.useState(false);
 
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault();
     setError('');
     const trimmed = email.trim().toLowerCase();
 
-    // Admin login
+    // Admin login — no S3 lookup needed
     if (trimmed === ADMIN_EMAIL) {
       if (pass !== ADMIN_PASSWORD) { setError('Incorrect password.'); return; }
       setLoading(true);
       setTimeout(() => onLogin({
-        email: ADMIN_EMAIL,
-        teamId: null,
-        teamName: 'Admin',
-        logo: '⚙',
-        color: '#c6ff3a',
-        isAdmin: true,
-        needsPasswordChange: false,
-      }), 600);
+        email: ADMIN_EMAIL, teamId: null, teamName: 'Admin',
+        logo: '⚙', color: '#c6ff3a', isAdmin: true, needsPasswordChange: false,
+        leagueId: site,
+      }), 400);
       return;
     }
 
-    // Owner login — check overrides then fall back to LEAGUE_TEAMS
-    const overrides = loadOwnerConfig();
+    setLoading(true);
+
+    // Fetch live config from S3 (falls back to localStorage on error/timeout)
+    const overrides = await fetchS3Config();
+
+    // Find team by email in overrides, then fall back to LEAGUE_TEAMS
     let team = null;
     let expectedPassword = DEFAULT_PASSWORD;
 
     for (const [teamId, cfg] of Object.entries(overrides)) {
+      if (teamId === 'resetTokens') continue;
       if ((cfg.email || '').toLowerCase() === trimmed) {
         team = LEAGUE_TEAMS.find(t => t.id === parseInt(teamId));
         if (cfg.password) expectedPassword = cfg.password;
         break;
       }
     }
-
     if (!team) {
       team = LEAGUE_TEAMS.find(t => (t.email || '').toLowerCase() === trimmed);
     }
 
-    if (!team) { setError('No account found for that email address.'); return; }
-    if (pass !== expectedPassword) { setError('Incorrect password.'); return; }
+    if (!team) { setLoading(false); setError('No account found for that email address.'); return; }
+    if (pass !== expectedPassword) { setLoading(false); setError('Incorrect password.'); return; }
 
     const ov = overrides[team.id] || {};
-    const needsPasswordChange = !ov.passwordSet;
-
-    setLoading(true);
-    setTimeout(() => onLogin({
-      email:           trimmed,
-      teamId:          team.id,
-      teamName:        ov.name  || team.name,
-      logo:            team.logo,
-      color:           team.color,
-      isAdmin:         false,
-      isCommissioner:  !!ov.isCommissioner,
-      needsPasswordChange,
-    }), 600);
+    onLogin({
+      email:               trimmed,
+      teamId:              team.id,
+      leagueId:            site,
+      teamName:            ov.name  || team.name,
+      logo:                team.logo,
+      color:               team.color,
+      isAdmin:             false,
+      isCommissioner:      !!ov.isCommissioner,
+      needsPasswordChange: !ov.passwordSet,
+    });
   }
 
   async function submitReset(e) {
     e.preventDefault();
     setResetLoading(true);
-    // Stub: wire up real email sending via API Worker or email provider
-    await new Promise(r => setTimeout(r, 800));
+    try {
+      await fetch(`${API_BASE}/api/v1/owners/reset-request`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: resetEmail.trim().toLowerCase() }),
+      });
+    } catch {}
     setResetSent(true);
     setResetLoading(false);
   }
 
+  // Build display list (merge overrides into LEAGUE_TEAMS)
   const overrides    = loadOwnerConfig();
   const displayTeams = LEAGUE_TEAMS.map(t => {
     const ov = overrides[t.id] || {};

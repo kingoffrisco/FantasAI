@@ -1,4 +1,5 @@
 // Mock data — converted from vanilla prototype to ES module exports
+import { getLiveTeams } from './leagueStore.js';
 
 export const NFL_TEAMS = [
   { abbr: "BAL", color: "#241773" }, { abbr: "BUF", color: "#00338D" },
@@ -157,7 +158,7 @@ export const LEAGUE_TEAMS = [
   { id: 12, cbsId: "12", name: "DJ 8 Trak",                owner: "Kirk King & Kyle King",    email: "kirkkingre@yahoo.com",      logo: "DJ", color: "#ff5a6e", record: "2-8",  pf: 988.4,  pa: 1344.6 },
 ];
 
-export const findTeam = (id) => LEAGUE_TEAMS.find(t => t.id === id);
+export const findTeam = (id) => (getLiveTeams() ?? LEAGUE_TEAMS).find(t => t.id === id);
 
 export const MY_ROSTER = [
   { slot: "QB",   playerId: 1 },
@@ -192,8 +193,35 @@ export const NEWS = [
   { id: 6, playerId: 26,  type: "transaction", mins: 146, impact: "high", source: "Rotoworld",       title: "Breece Hall losing goal-line work to Allen — TD upside capped", body: "Jets continue to use Braelon Allen inside the five-yard line. Hall remains a strong PPR play but ceiling is shrinking." },
   { id: 7, playerId: 29,  type: "injury",      mins: 168, impact: "high", source: "Houston Beat",    title: "Joe Mixon's ankle 'not improving,' may sit Sunday", body: "Texans not committing to Mixon for Week 11. If he sits, Dameon Pierce is a deep-league flex." },
   { id: 8, playerId: 55,  type: "analysis",    mins: 182, impact: "good", source: "Rams Beat",       title: "Puka Nacua eyes 12+ targets coming off bye", body: "Coach McVay said Nacua is 'ready for a full workload.' Routes were up to 95% pre-bye." },
-  { id: 9, playerId: 84,  type: "analysis",    mins: 220, impact: "med",  source: "KC Star",         title: "Kelce snap share holding, but red zone targets evaporating", body: "Mahomes increasingly leaning on Worthy and Rice. Kelce still a TE1, but ceiling has been Week 4." },
+  { id: 9,  playerId: 84,  type: "analysis",    mins: 220, impact: "med",  source: "KC Star",         title: "Kelce snap share holding, but red zone targets evaporating",         body: "Mahomes increasingly leaning on Worthy and Rice. Kelce still a TE1, but ceiling has been Week 4." },
+  // Multi-source updates — same players reported by different outlets
+  { id: 10, playerId: 1,   type: "injury",      mins: 22,  impact: "good", source: "ESPN",            title: "Josh Allen: Full participant Wednesday, no limitations",               body: "Bills QB Josh Allen was a full practice participant Wednesday with no listed limitations after hip soreness kept him limited early last week." },
+  { id: 11, playerId: 1,   type: "analysis",    mins: 145, impact: "good", source: "PFF Insider",     title: "Allen's rushing floor makes him ceiling-proof this week",              body: "With 7+ designed carries per game, Allen maintains a 20+ floor even when the air game sputters. PFF projects 26.1 pts vs MIA." },
+  { id: 12, playerId: 20,  type: "injury",      mins: 44,  impact: "high", source: "ESPN",            title: "CMC injury update: active but workload to be managed first half",      body: "Coach Shanahan confirmed McCaffrey will play vs Seattle but expects a reduced first-half load. Full usage expected after halftime." },
+  { id: 13, playerId: 20,  type: "analysis",    mins: 198, impact: "med",  source: "FantasyPros",     title: "CMC ownership slipping — buy-low window opening",                     body: "Ownership dropped 2.1% after Wednesday's injury designation. Consensus proj of 19.4 points still intact for a healthy CMC." },
+  { id: 14, playerId: 5,   type: "injury",      mins: 70,  impact: "med",  source: "Rotoworld",       title: "Bengals source: Burrow wrist is 'not a long-term concern'",           body: "A team insider tells Rotoworld the wrist wrap Burrow wore Wednesday is precautionary. He is expected to be a full go Sunday." },
+  { id: 15, playerId: 5,   type: "injury",      mins: 210, impact: "med",  source: "NFL Network",     title: "Burrow listed as Q but practice rep trend is positive",               body: "Ian Rapoport reports Burrow was limited Wednesday but increased Thursday. Expect him to be removed from the injury report by Saturday." },
+  { id: 16, playerId: 29,  type: "injury",      mins: 185, impact: "high", source: "ESPN",            title: "Mixon ankle still not improving — reps being scaled back",            body: "ESPN's Adam Schefter reports the Texans are managing Mixon's ankle day by day. A game-time decision is likely, opening the door for Dameon Pierce." },
+  { id: 17, playerId: 65,  type: "injury",      mins: 80,  impact: "med",  source: "NFL Network",     title: "DJ Moore gets green light for Thursday walkthroughs",                  body: "Moore returned to a limited walkthrough Thursday, a positive sign. Still officially Q with hamstring soft tissue." },
 ];
+
+// Source metadata — color used for badges across News, Players, etc.
+export const SOURCE_META = {
+  'Rotoworld':         { color: '#ff7a3a' },
+  'Adam Schefter':     { color: '#4ea8ff' },
+  'ESPN':              { color: '#d50000' },
+  'PFF Insider':       { color: '#9b59b6' },
+  'Fantasy Edge':      { color: '#4caf82' },
+  'Bears Insider':     { color: '#5887ba' },
+  'Beat Writer (CIN)': { color: '#fb4f14' },
+  'Houston Beat':      { color: '#03202f' },
+  'Rams Beat':         { color: '#003594' },
+  'KC Star':           { color: '#e31837' },
+  'Sleeper':           { color: '#1c8eaf' },
+  'nflverse':          { color: '#1a6b3c' },
+  'NFL Network':       { color: '#013369' },
+  'FantasyPros':       { color: '#c6ff3a' },
+};
 
 export const QUEUE = [82, 31, 6, 85, 63, 102];
 
@@ -251,15 +279,92 @@ export const FREE_DATA_SOURCES = [
   {
     id: "leaguelogs-api",
     name: "LeagueLogs API",
-    url: "https://www.leaguelogs.com/api",
+    url: "https://www.leaguelogs.com",
     rank: 3,
-    auth: "none",
-    authNote: "No auth required for public endpoints",
+    auth: "account",
+    authNote: "Free account required — sign up at leaguelogs.com, then use your API token",
     provides: ["Historical NFL player stats", "Season-by-season fantasy scoring", "Cross-platform league history"],
     docUrl: "https://www.leaguelogs.com/resources/api",
     color: "#2a9d8f",
     enabled: false,
     leagueIdRequired: false,
+  },
+  {
+    id: "nflverse",
+    name: "nflverse / nflreadr",
+    url: "https://github.com/nflverse/nflverse-data",
+    rank: 4,
+    auth: "none",
+    authNote: "No auth required — open GitHub data releases",
+    provides: ["Weekly player stats (CSV)", "Rosters & depth charts", "Next-gen stats", "Play-by-play data"],
+    docUrl: "https://nflverse.nflverse.com",
+    color: "#1a6b3c",
+    enabled: false,
+    leagueIdRequired: false,
+  },
+  {
+    id: "espn-nfl",
+    name: "ESPN NFL API",
+    url: "https://site.api.espn.com/apis/site/v2/sports/football/nfl",
+    rank: 5,
+    auth: "none",
+    authNote: "No auth required — public ESPN endpoints",
+    provides: ["Team rosters & schedules", "Player injury reports", "Game scores & stats", "Standings"],
+    docUrl: "https://gist.github.com/nntrn/ee26cb2a0716de0947a0a4e9a157bc1c",
+    color: "#d00",
+    enabled: false,
+    leagueIdRequired: false,
+  },
+];
+
+// Limited-free APIs: free tier with API key — used for targeted per-roster updates
+export const LIMITED_FREE_SOURCES = [
+  {
+    id: "apifootball",
+    name: "API-Football (American)",
+    url: "https://v1.american-football.api-sports.io",
+    keyHeader: "x-apisports-key",
+    authNote: "100 req/day free · api-sports.io account",
+    provides: ["Live game scores", "Player game stats", "Team rosters", "Season standings"],
+    docUrl: "https://www.api-football.com/documentation-american-football",
+    signupUrl: "https://dashboard.api-football.com/register",
+    color: "#e74c3c",
+  },
+  {
+    id: "tank01",
+    name: "Tank01 Fantasy Stats",
+    url: "https://tank01-fantasy-stats.p.rapidapi.com",
+    keyHeader: "x-rapidapi-key",
+    keyHost: "tank01-fantasy-stats.p.rapidapi.com",
+    authNote: "100 req/day free · RapidAPI account",
+    provides: ["Fantasy projections", "Player injury news", "Game-by-game stats", "DFS salaries"],
+    docUrl: "https://rapidapi.com/tank01/api/tank01-fantasy-stats",
+    signupUrl: "https://rapidapi.com/auth/sign-up",
+    color: "#e67e22",
+  },
+  {
+    id: "sportsdb",
+    name: "The Sports DB",
+    url: "https://www.thesportsdb.com/api/v1/json",
+    keyHeader: null,
+    keyInUrl: true,
+    defaultKey: "3",
+    authNote: "Free sandbox key '3' — no signup needed",
+    provides: ["Player bios & photos", "Team info", "Event results", "Venue data"],
+    docUrl: "https://www.thesportsdb.com/api.php",
+    signupUrl: "https://www.thesportsdb.com/register.php",
+    color: "#9b59b6",
+  },
+  {
+    id: "mysportsfeeds",
+    name: "MySportsFeeds",
+    url: "https://api.mysportsfeeds.com/v2.1",
+    keyHeader: "Authorization",
+    authNote: "Rookie plan free — 1,000 req/month for historical seasons · mysportsfeeds.com",
+    provides: ["Historical game logs", "Player season stats", "Injury reports", "Season standings"],
+    docUrl: "https://www.mysportsfeeds.com/data-feeds/api-docs/",
+    signupUrl: "https://www.mysportsfeeds.com/",
+    color: "#1a73e8",
   },
 ];
 
@@ -675,7 +780,7 @@ export const ROSTER_CONFIG = {
     { slot: 'RB',   count: 1, eligible: ['RB'] },
     { slot: 'WR',   count: 1, eligible: ['WR'] },
     { slot: 'TE',   count: 1, eligible: ['TE'] },
-    { slot: 'FLEX', count: 3, eligible: ['RB', 'WR'] },
+    { slot: 'FLEX', count: 3, eligible: ['RB', 'WR', 'TE'] },
     { slot: 'DST',  count: 1, eligible: ['DST'] },
   ],
   rosterLimits: { QB: 2 },   // all other positions: no limit
@@ -707,7 +812,7 @@ function buildTeamRosters() {
     const yr = hist[2025];
     if (!yr?.picks) continue;
     // Dedicated starter slots per actual league rules
-    const dedicated = { QB: 1, RB: 1, WR: 1, TE: 1, DST: 1 };
+    const dedicated = { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 };
     const used = {};
     const slots = [];
     let flexUsed = 0;
@@ -720,7 +825,7 @@ function buildTeamRosters() {
         // Fill dedicated slot for this position
         slots.push({ slot: pos, playerId: pid });
         used[pos] = dedUsed + 1;
-      } else if (flexUsed < 3 && (pos === 'RB' || pos === 'WR')) {
+      } else if (flexUsed < 3 && (pos === 'RB' || pos === 'WR' || pos === 'TE')) {
         // Fill FLEX slot (only RB or WR allowed)
         slots.push({ slot: 'FLEX', playerId: pid });
         flexUsed++;
@@ -733,6 +838,60 @@ function buildTeamRosters() {
   return rosters;
 }
 export const TEAM_ROSTERS = buildTeamRosters();
+
+// ─── Settings-based roster frame helpers ──────────────────────────────────────
+const _KEY_TO_SLOT = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', RBWR: 'FLEX', DST: 'DST', K: 'K' };
+const _DEFAULT_POSITIONS = [
+  { key: 'QB',   activeMax: 1 },
+  { key: 'RB',   activeMax: 1 },
+  { key: 'WR',   activeMax: 1 },
+  { key: 'TE',   activeMax: 1 },
+  { key: 'RBWR', activeMax: 3 },
+  { key: 'DST',  activeMax: 1 },
+];
+const _FLEX_ELIGIBLE = ['RB', 'WR', 'TE'];
+
+export function buildRosterFrame(settings) {
+  const positions  = settings?.positions ?? _DEFAULT_POSITIONS;
+  const benchCount = settings?.roster?.bench?.max ?? 6;
+  const frame = [];
+  for (const pos of positions) {
+    const slotName = _KEY_TO_SLOT[pos.key] ?? pos.key;
+    const count    = pos.activeMax ?? 1;
+    for (let i = 0; i < count; i++) frame.push(slotName);
+  }
+  for (let i = 0; i < benchCount; i++) frame.push('BENCH');
+  return frame;
+}
+
+export function assignRoster(frame, playerIds, slotOverrides = {}) {
+  const entries  = frame.map(slot => ({ slot, playerId: null }));
+  const ids      = [...(playerIds || [])].filter(Boolean);
+  const unplaced = [];
+
+  // First pass: honour explicit slot overrides
+  for (const pid of ids) {
+    const override = slotOverrides[pid];
+    if (override !== undefined) {
+      const idx = entries.findIndex(e => e.slot === override && !e.playerId);
+      if (idx >= 0) { entries[idx] = { slot: override, playerId: pid }; continue; }
+    }
+    unplaced.push(pid);
+  }
+
+  // Second pass: auto-assign by player position → dedicated slot → FLEX → BENCH
+  for (const pid of unplaced) {
+    const p = findPlayer(pid);
+    if (!p) continue;
+    let idx = entries.findIndex(e => !e.playerId && e.slot === p.pos);
+    if (idx < 0 && _FLEX_ELIGIBLE.includes(p.pos))
+      idx = entries.findIndex(e => !e.playerId && e.slot === 'FLEX');
+    if (idx < 0)
+      idx = entries.findIndex(e => !e.playerId && e.slot === 'BENCH');
+    if (idx >= 0) entries[idx] = { ...entries[idx], playerId: pid };
+  }
+  return entries;
+}
 
 // CBS rankings (computed from player data)
 function buildCBSRankings() {

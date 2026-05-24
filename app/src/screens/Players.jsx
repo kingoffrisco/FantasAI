@@ -1,28 +1,94 @@
 import React from 'react';
-import { PLAYERS, findPlayer, MY_ROSTER, DRAFT_PICKS, TEAM_ROSTERS, findTeam, NFL_TEAMS, NEWS, FREE_DATA_SOURCES, RANKING_SOURCES } from '../lib/data.js';
+import { PLAYERS, findPlayer, MY_ROSTER, DRAFT_PICKS, TEAM_ROSTERS, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES } from '../lib/data.js';
 
 const FREE_DATA_SOURCES_LIST = FREE_DATA_SOURCES.map(s => ({ id: s.id, name: s.name, defaultEnabled: s.enabled }));
 const FEED_NAMES = Object.fromEntries(RANKING_SOURCES.map(s => [s.id, s.name.replace(' (ECR)', '').replace(' Fantasy', '').replace(' Sports Rankings', '').replace(' Rankings', '')]));
 
-import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint } from '../components/ui.jsx';
+import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge } from '../components/ui.jsx';
 import { useApi } from '../hooks.js';
-import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
+import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats } from '../lib/sleeper.js';
 
 const WORKER = (import.meta.env?.VITE_WORKER_URL || '').replace(/\/$/, '');
 
-export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new Set(), onAddPlayer, user, watchlistIds = new Set(), onToggleWatch }) {
+function formatWaiverExpiry(isoStr) {
+  const d   = new Date(isoStr);
+  const now = new Date();
+  const diffH = (d - now) / 3_600_000;
+  if (diffH < 24) return `Tonight ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow night';
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Build once — maps playerId → owning teamId from the base roster data
+const PLAYER_OWNER_MAP = (() => {
+  const map = {};
+  for (const [teamId, entries] of Object.entries(TEAM_ROSTERS)) {
+    for (const entry of entries) {
+      if (entry.playerId) map[entry.playerId] = Number(teamId);
+    }
+  }
+  return map;
+})();
+
+export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new Set(), onAddPlayer, onTradePlayer, user, watchlistIds = new Set(), onToggleWatch, waiverQueue = {} }) {
   const [pos, setPos] = React.useState('ALL');
   const [search, setSearch] = React.useState('');
   const [sort, setSort] = React.useState('proj');
   const [avail, setAvail] = React.useState('all');
   const [selected, setSelected] = React.useState(null);
+  const [depthData, setDepthData] = React.useState({});
+  const [snapsData, setSnapsData] = React.useState({});
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function loadDepthAndSnaps() {
+      try {
+        const [map, weekStats] = await Promise.all([
+          getPlayerMap(),
+          fetchBulkWeekStats(2025, 18),
+        ]);
+        if (cancelled) return;
+        const depths = {};
+        const snaps = {};
+        for (const [sid, p] of Object.entries(map)) {
+          if (!p.full_name && !p.first_name) continue;
+          const name = (p.full_name || `${p.first_name} ${p.last_name}`).toLowerCase().trim();
+          if (p.depth_chart_order && p.depth_chart_position) {
+            depths[name] = `${p.depth_chart_position}${p.depth_chart_order}`;
+          }
+          if (weekStats) {
+            const s = weekStats[sid];
+            const snpVal = s?.off_snp ?? s?.snp;
+            if (snpVal != null) snaps[name] = Math.round(snpVal);
+          }
+        }
+        setDepthData(depths);
+        setSnapsData(snaps);
+      } catch {
+        // Sleeper unavailable — columns remain empty
+      }
+    }
+    loadDepthAndSnaps();
+    return () => { cancelled = true; };
+  }, []);
 
   const draftedIds = new Set(DRAFT_PICKS.filter(p => p.playerId).map(p => p.playerId));
 
+  const now = new Date();
+  const activeWaivers = new Set(
+    Object.entries(waiverQueue)
+      .filter(([, v]) => new Date(v.expiresAt) > now)
+      .map(([id]) => Number(id))
+  );
+
   let players = PLAYERS.filter(p => {
-    if (pos !== 'ALL' && p.pos !== pos) return false;
+    if (pos === 'FLEX' && !['RB', 'WR', 'TE'].includes(p.pos)) return false;
+    if (pos !== 'ALL' && pos !== 'FLEX' && p.pos !== pos) return false;
     if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (avail === 'free' && draftedIds.has(p.id)) return false;
+    if (avail === 'free' && (draftedIds.has(p.id) || activeWaivers.has(p.id))) return false;
+    if (avail === 'waivers' && !activeWaivers.has(p.id)) return false;
+    if (avail === 'rostered' && !draftedIds.has(p.id) && !myRosterIds.has(p.id)) return false;
     return true;
   });
 
@@ -52,14 +118,21 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
 
       <div className="toolbar">
         <div className="chips">
-          {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => (
+          {['ALL', 'QB', 'RB', 'WR', 'TE', 'FLEX', 'K', 'DST'].map(p => (
             <div key={p} className={`chip ${pos === p ? 'accent active' : ''}`} onClick={() => setPos(p)}>{p}</div>
           ))}
         </div>
         <input className="input search" placeholder="Filter by name" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 220 }} />
         <div className="chips">
-          {[['all', 'All'], ['free', 'Available'], ['rostered', 'Rostered']].map(([k, v]) => (
-            <div key={k} className={`chip ${avail === k ? 'active' : ''}`} onClick={() => setAvail(k)}>{v}</div>
+          {[
+            ['all', 'All'],
+            ['free', 'Available'],
+            ['waivers', `Waivers${activeWaivers.size > 0 ? ` (${activeWaivers.size})` : ''}`],
+            ['rostered', 'Rostered'],
+          ].map(([k, v]) => (
+            <div key={k} className={`chip ${avail === k ? 'active' : ''}`}
+              style={k === 'waivers' && activeWaivers.size > 0 ? { color: '#ff9500', borderColor: 'rgba(255,149,0,.4)' } : undefined}
+              onClick={() => setAvail(k)}>{v}</div>
           ))}
         </div>
         <select className="input" value={sort} onChange={e => setSort(e.target.value)}>
@@ -87,18 +160,26 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               <th className="num">Trend</th>
               <th className={`num ${sort === 'owned' ? 'sorted' : ''}`} onClick={() => setSort('owned')}>%Own</th>
               <th className={`num ${sort === 'adp' ? 'sorted' : ''}`} onClick={() => setSort('adp')}>ADP</th>
+              <th className="num">Depth</th>
+              <th className="num">Snaps</th>
               <th>Status</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {players.map((p, i) => {
-              const isOnMyRoster = myRosterIds.has(p.id);
-              const isAvail = !draftedIds.has(p.id) && !isOnMyRoster;
+              const isOnMyRoster  = myRosterIds.has(p.id);
+              const waiverEntry   = waiverQueue[p.id];
+              const isOnWaivers   = !!(waiverEntry && new Date(waiverEntry.expiresAt) > new Date());
+              const isAvail       = !draftedIds.has(p.id) && !isOnMyRoster && !isOnWaivers;
               const aiPick = aiMode !== 'subtle' ? null :
                 (p.id === 65 ? 'fade — hammy' : p.id === 62 ? 'BUY' : p.id === 80 ? 'TE1 lock' : null);
+              const pKey = p.name.toLowerCase();
+              const depthLabel = depthData[pKey];
+              const snapCount  = snapsData[pKey];
               return (
-                <tr key={p.id} className={selected === p.id ? 'selected' : ''} onClick={() => setSelected(p.id)}>
+                <tr key={p.id} className={selected === p.id ? 'selected' : ''} onClick={() => setSelected(p.id)}
+                  style={isOnWaivers ? { background: 'rgba(255,149,0,.04)' } : undefined}>
                   <td className="rank">{i + 1}</td>
                   <td onClick={(e) => { e.stopPropagation(); onOpenPlayer(p.id); }} style={{ cursor: 'pointer' }}>
                     <PlayerCell player={p} watched={watchlistIds.has(p.id)} />
@@ -116,12 +197,36 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                   <td className="num"><Sparkline data={p.trend} /></td>
                   <td className="num">{p.owned.toFixed(1)}%</td>
                   <td className="num faint">{p.adp.toFixed(1)}</td>
+                  <td className="num">
+                    {depthLabel
+                      ? <span style={{
+                          fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700,
+                          color: depthLabel.endsWith('1') ? 'var(--accent)' : depthLabel.endsWith('2') ? 'var(--accent-2)' : 'var(--text-faint)',
+                        }}>{depthLabel}</span>
+                      : <span className="faint" style={{ fontSize: 11 }}>—</span>}
+                  </td>
+                  <td className="num mono" style={{ fontSize: 11 }}>
+                    {snapCount != null ? snapCount : <span className="faint">—</span>}
+                  </td>
                   <td>
-                    {p.status !== 'OK' && <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>}
+                    {isOnWaivers ? (
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)',
+                        color: '#ff9500',
+                        background: 'rgba(255,149,0,.12)',
+                        border: '1px solid rgba(255,149,0,.35)',
+                        borderRadius: 4, padding: '2px 7px', whiteSpace: 'nowrap',
+                      }}>
+                        ⏳ Waiver Queue · Clears {formatWaiverExpiry(waiverEntry.expiresAt)}
+                      </span>
+                    ) : p.status !== 'OK' ? (
+                      <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>
+                    ) : null}
                     {aiPick && <div><AIHint>{aiPick}</AIHint></div>}
                   </td>
                   <td>
-                    <div className="flex gap-8">
+                    <div className="flex gap-8" style={{ alignItems: 'center' }}>
                       <button
                         className={`btn sm icon${watchlistIds.has(p.id) ? ' watch-active' : ''}`}
                         title={watchlistIds.has(p.id) ? 'Remove from watchlist' : 'Add to watchlist'}
@@ -129,11 +234,45 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                       >{watchlistIds.has(p.id) ? '★' : '☆'}</button>
                       {isOnMyRoster ? (
                         <button className="btn sm success" disabled onClick={e => e.stopPropagation()}>✓ Rostered</button>
-                      ) : isAvail ? (
+                      ) : isOnWaivers ? (() => {
+                        const dropTeam = waiverEntry.teamId ? findTeam(waiverEntry.teamId) : null;
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
+                            <span style={{
+                              fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)',
+                              color: '#ff9500', background: 'rgba(255,149,0,.12)',
+                              border: '1px solid rgba(255,149,0,.35)',
+                              borderRadius: 3, padding: '1px 5px', letterSpacing: '.04em',
+                            }}>WAIVERS</span>
+                            {dropTeam && (
+                              <span style={{ fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                                Dropped by {dropTeam.name} · {new Date(waiverEntry.droppedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })() : isAvail ? (
                         <button className="btn sm primary" onClick={e => { e.stopPropagation(); onAddPlayer?.(p.id); }}>+ Add</button>
-                      ) : (
-                        <button className="btn sm ghost" disabled onClick={e => e.stopPropagation()}>Taken</button>
-                      )}
+                      ) : (() => {
+                        const ownerTeamId = PLAYER_OWNER_MAP[p.id];
+                        const ownerTeam   = ownerTeamId ? findTeam(ownerTeamId) : null;
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+                            {ownerTeam && (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                                <span style={{ width: 7, height: 7, borderRadius: '50%', background: ownerTeam.color, flexShrink: 0, display: 'inline-block' }} />
+                                {ownerTeam.name}
+                              </span>
+                            )}
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button className="btn sm ghost" disabled onClick={e => e.stopPropagation()}
+                                style={{ opacity: .65 }}>On Roster</button>
+                              <button className="btn sm ghost" onClick={e => { e.stopPropagation(); onTradePlayer?.(p.id, ownerTeamId); }}
+                                style={{ color: 'var(--accent-2)', borderColor: 'rgba(78,168,255,.35)' }}>Trade</button>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </td>
                 </tr>
@@ -257,6 +396,54 @@ function SeasonStatBar({ label, val, max }) {
       </div>
       <div style={{ height: 3, background:'var(--panel-3)', borderRadius: 2 }}>
         <div style={{ width:`${pct}%`, height:'100%', background:'var(--accent-2)', borderRadius: 2, transition:'width .4s' }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── PlayerNewsCard ───────────────────────────────────────────────────────────
+function PlayerNewsCard({ player }) {
+  const items = NEWS.filter(n => n.playerId === player.id).sort((a, b) => a.mins - b.mins);
+  const fallback = items.length === 0;
+  const sources = [...new Set(items.map(n => n.source))];
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title">News · {player.name}</div>
+        {sources.length > 0 && (
+          <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+            {sources.map(s => <SourceBadge key={s} source={s} />)}
+          </div>
+        )}
+      </div>
+      <div className="card-body" style={{ padding: 0 }}>
+        {fallback ? (
+          <div style={{ padding:'12px 16px', fontSize:12, lineHeight:1.6, color:'var(--text-dim)' }}>
+            {player.news || 'No recent updates.'}
+          </div>
+        ) : (
+          items.map((n, i) => (
+            <div key={n.id} style={{
+              padding:'10px 16px',
+              borderTop: i > 0 ? '1px solid var(--border)' : 'none',
+              background: i % 2 !== 0 ? 'rgba(255,255,255,.015)' : 'transparent',
+            }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
+                <SourceBadge source={n.source} />
+                <span style={{ fontSize:10, color:'var(--accent)', fontFamily:'var(--font-mono)' }}>
+                  {n.mins < 60 ? `${n.mins}m ago` : `${Math.floor(n.mins/60)}h ago`}
+                </span>
+                <span style={{ flex:1 }} />
+                <span className={`news-impact impact-${n.impact}`} style={{ fontSize:9, padding:'1px 6px' }}>
+                  {n.impact === 'good' ? 'BOOST' : n.impact?.toUpperCase()}
+                </span>
+              </div>
+              <div style={{ fontSize:12, fontWeight:600, marginBottom:3, lineHeight:1.4 }}>{n.title}</div>
+              <div style={{ fontSize:11, color:'var(--text-dim)', lineHeight:1.6 }}>{n.body}</div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -507,18 +694,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                 </div>
               </div>
 
-              <div className="card">
-                <div className="card-head"><div className="card-title">Latest News · {player.name}</div></div>
-                <div className="card-body">
-                  <div style={{ fontSize:12, lineHeight:1.6 }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
-                      <span className="mono dim" style={{ fontSize:11 }}>2h ago · Beat Writer</span>
-                      <span className="news-impact impact-med">MED</span>
-                    </div>
-                    {player.news}. Full participation Thursday expected.
-                  </div>
-                </div>
-              </div>
+              <PlayerNewsCard player={player} />
             </React.Fragment>
           )}
 
