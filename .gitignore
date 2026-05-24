@@ -23,6 +23,13 @@ ENV/
 # Never overwritten by git; keeps league data safe across code changes
 app/public/league-seed.json
 
+# Dependencies
+node_modules/
+app/node_modules/
+
+# Claude Code internal files
+.claude/
+
 # IDEs and editors
 .vscode/
 .idea/
