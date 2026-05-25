@@ -1,5 +1,5 @@
 import React from 'react';
-import { CBS_RANKINGS, findPlayer } from '../lib/data.js';
+import { CBS_RANKINGS, PLAYERS, findPlayer } from '../lib/data.js';
 import { PosBadge, PlayerCell } from './ui.jsx';
 
 export function CBSConnectModal({ onClose, onConnected, mode }) {
@@ -354,6 +354,134 @@ export function CBSRankingsScreen({ onOpenPlayer }) {
   );
 }
 
+export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
+  const [tab, setTab] = React.useState('cbs');
+  const [personalRanks, setPersonalRanks] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_personal_rankings') || '[]'); } catch { return []; }
+  });
+  const [prPos, setPrPos] = React.useState('ALL');
+  const [prSearch, setPrSearch] = React.useState('');
+
+  const saveRanks = (ranks) => {
+    setPersonalRanks(ranks);
+    localStorage.setItem('fantasai_personal_rankings', JSON.stringify(ranks));
+  };
+
+  const addPlayer = (id) => {
+    if (personalRanks.includes(id)) return;
+    saveRanks([...personalRanks, id]);
+  };
+
+  const removePlayer = (id) => saveRanks(personalRanks.filter(x => x !== id));
+
+  const moveUp = (i) => {
+    if (i === 0) return;
+    const n = [...personalRanks];
+    [n[i - 1], n[i]] = [n[i], n[i - 1]];
+    saveRanks(n);
+  };
+
+  const moveDown = (i) => {
+    if (i === personalRanks.length - 1) return;
+    const n = [...personalRanks];
+    [n[i], n[i + 1]] = [n[i + 1], n[i]];
+    saveRanks(n);
+  };
+
+  const rankedSet = new Set(personalRanks);
+  let pool = PLAYERS.filter(p => !rankedSet.has(p.id)).sort((a, b) => a.ecr - b.ecr);
+  if (prPos !== 'ALL') pool = pool.filter(p => p.pos === prPos);
+  if (prSearch) pool = pool.filter(p => p.name.toLowerCase().includes(prSearch.toLowerCase()));
+
+  return (
+    <div className="col" style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div className="page-head" style={{ flexShrink: 0 }}>
+        <div>
+          <h1>Player Draft Rankings</h1>
+          <div className="sub">CBS expert rankings + your personal cheat sheet</div>
+        </div>
+        <div className="flex gap-8">
+          {[{ id: 'cbs', label: '▦ CBS Rankings' }, { id: 'personal', label: '★ Personal Rankings' }].map(t => (
+            <button key={t.id} className={`btn ${tab === t.id ? 'primary' : 'ghost'}`} onClick={() => setTab(t.id)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === 'cbs' ? (
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <CBSRankingsScreen onOpenPlayer={onOpenPlayer} />
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflow: 'hidden', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+          {/* Left: player pool */}
+          <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8 }}>Player Pool · {pool.length} available</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => (
+                  <div key={p} className={`chip ${prPos === p ? 'accent active' : ''}`} style={{ fontSize: 11 }} onClick={() => setPrPos(p)}>{p}</div>
+                ))}
+              </div>
+              <input className="input search" placeholder="Search players" value={prSearch} onChange={e => setPrSearch(e.target.value)} style={{ width: '100%', fontSize: 12 }} />
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              {pool.slice(0, 80).map(p => (
+                <div key={p.id} style={{ padding: '6px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                  <span className="mono faint" style={{ fontSize: 10, width: 28, flexShrink: 0 }}>#{p.ecr}</span>
+                  <span className={`pos-badge pos-${p.pos.toLowerCase()}`}>{p.pos}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                    <div className="faint" style={{ fontSize: 10 }}>{p.team} · ADP {p.adp.toFixed(1)}</div>
+                  </div>
+                  <button className="btn sm icon" title="Add to my rankings" onClick={() => addPlayer(p.id)} style={{ flexShrink: 0 }}>+</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Right: personal ranked list */}
+          <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, flex: 1 }}>My Rankings · {personalRanks.length} players</div>
+              {personalRanks.length > 0 && (
+                <button className="btn ghost sm" style={{ fontSize: 11 }} onClick={() => saveRanks([])}>Clear All</button>
+              )}
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              {personalRanks.length === 0 && (
+                <div style={{ padding: 24, color: 'var(--text-faint)', fontSize: 12, textAlign: 'center', lineHeight: 1.8 }}>
+                  No players ranked yet.<br />Add players from the pool on the left.
+                </div>
+              )}
+              {personalRanks.map((id, i) => {
+                const p = findPlayer(id);
+                if (!p) return null;
+                return (
+                  <div key={id} style={{ padding: '6px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                    <span style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', fontWeight: 900, fontSize: 16, color: 'var(--accent)', width: 28, flexShrink: 0, textAlign: 'right' }}>{i + 1}</span>
+                    <span className={`pos-badge pos-${p.pos.toLowerCase()}`}>{p.pos}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                      <div className="faint" style={{ fontSize: 10 }}>{p.team} · ECR #{p.ecr}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                      <button className="btn sm icon ghost" title="Move up" onClick={() => moveUp(i)} disabled={i === 0} style={{ fontSize: 10, padding: '2px 5px' }}>▲</button>
+                      <button className="btn sm icon ghost" title="Move down" onClick={() => moveDown(i)} disabled={i === personalRanks.length - 1} style={{ fontSize: 10, padding: '2px 5px' }}>▼</button>
+                      <button className="btn sm icon ghost" title="Remove" onClick={() => removePlayer(id)} style={{ fontSize: 10, padding: '2px 5px', color: 'var(--danger)' }}>✕</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Movement({ value, prev }) {
   if (value === 0) return <span className="faint mono">—</span>;
   const up = value > 0;
@@ -387,13 +515,9 @@ export function WorkerConfig() {
       const res = await fetch(u, { headers });
       const data = await res.json();
       setHealthData(data);
-      if (data.ok && data.hasCookie) {
+      if (data.ok) {
         setStatus('ok');
-        setStatusMsg('Worker live, CBS cookie present. Try fetching league data below.');
-        save(url, key);
-      } else if (data.ok && !data.hasCookie) {
-        setStatus('warn');
-        setStatusMsg('Worker is reachable but CBS_COOKIE is not set. SSH into the worker: `wrangler secret put CBS_COOKIE`');
+        setStatusMsg('Worker live' + (data.awsConfigured ? ' · S3 connected' : '') + (data.emailConfigured ? ' · email ready' : '') + '. Try fetching league data below.');
         save(url, key);
       } else {
         setStatus('err');
@@ -492,11 +616,14 @@ export function WorkerConfig() {
               <div className="card-mini-label">PROBE ENDPOINTS · check parsers are working</div>
               <div className="probe-buttons">
                 {[
-                  { label: '/api/cbs/league', path: '/api/cbs/league' },
-                  { label: '/api/cbs/teams', path: '/api/cbs/teams' },
-                  { label: '/api/cbs/rankings', path: '/api/cbs/rankings' },
-                  { label: '/api/cbs/draft?year=2024', path: '/api/cbs/draft?year=2024' },
-                  { label: '/api/cbs/transactions', path: '/api/cbs/transactions' },
+                  { label: '/api/v1/league', path: '/api/v1/league' },
+                  { label: '/api/v1/rosters', path: '/api/v1/rosters' },
+                  { label: '/api/v1/injuries', path: '/api/v1/injuries' },
+                  { label: '/api/v1/draft?year=2025', path: '/api/v1/draft?year=2025' },
+                  { label: '/api/v1/storage/test', path: '/api/v1/storage/test' },
+                  { label: '/api/v1/nfl/scoreboard', path: '/api/v1/nfl/scoreboard?week=1&season=2025' },
+                  { label: '/api/v1/nfl/schedule', path: '/api/v1/nfl/schedule?week=1&season=2025' },
+                  { label: '/api/v1/nfl/news', path: '/api/v1/nfl/news?limit=5' },
                 ].map(b => (
                   <button key={b.path} className="btn sm ghost" onClick={() => callEndpoint(b.path, setLeagueResult)}>
                     {b.label}

@@ -19,3 +19,14 @@ export function clearLeagueData()     { _store = null; }
 export function getLiveTeams()        { return _store?.teams    ?? null; }
 export function getLiveSettings()     { return _store?.settings ?? null; }
 export function getLeagueId()         { return _store?.leagueId ?? 'tau'; }
+
+// Per-user team customizations stored locally (logo, color, name overrides).
+export function getMyTeamPrefs() {
+  try { return JSON.parse(localStorage.getItem('fantasai_team_prefs') || 'null'); } catch { return null; }
+}
+export function saveMyTeamPrefs(prefs) {
+  localStorage.setItem('fantasai_team_prefs', JSON.stringify(prefs));
+}
+export function clearMyTeamPrefs() {
+  localStorage.removeItem('fantasai_team_prefs');
+}

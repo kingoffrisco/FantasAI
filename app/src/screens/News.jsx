@@ -13,7 +13,7 @@ export default function NewsScreen({ onOpenPlayer }) {
   const [search,  setSearch]  = React.useState('');
   const [grouped, setGrouped] = React.useState(false);
 
-  let news = NEWS.slice();
+  let news = NEWS.slice().sort((a, b) => b.mins - a.mins);
   if (filter !== 'all') news = news.filter(n => n.type === filter);
   if (impact !== 'all') news = news.filter(n => n.impact === impact);
   if (pos === 'FLEX')   news = news.filter(n => ['RB', 'WR', 'TE'].includes(findPlayer(n.playerId)?.pos));

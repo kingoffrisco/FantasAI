@@ -1,5 +1,5 @@
 // Mock data — converted from vanilla prototype to ES module exports
-import { getLiveTeams } from './leagueStore.js';
+import { getLiveTeams, getMyTeamPrefs } from './leagueStore.js';
 
 export const NFL_TEAMS = [
   { abbr: "BAL", color: "#241773" }, { abbr: "BUF", color: "#00338D" },
@@ -138,9 +138,106 @@ export const PLAYERS = [
   { id: 132, name: "Chargers D/ST",     pos: "DST", team: "LAC", num: 0, age: 0,  status: "OK", bye: 5,  adp: 132.4, ecr: 128, tier: 2, proj: 7.4,  last: 9.0,  avg: 7.6,  owned: 70.4, trend: [6,8,10,7,6,9],   news: "Harmon bringing pressure",                opp: "KC",  oppRank: 14 },
   { id: 133, name: "Lions D/ST",        pos: "DST", team: "DET", num: 0, age: 0,  status: "OK", bye: 5,  adp: 134.4, ecr: 130, tier: 2, proj: 7.2,  last: 7.0,  avg: 7.4,  owned: 68.2, trend: [6,6,8,8,6,7],   news: "Schoen's D improving each week",          opp: "GB",  oppRank: 14 },
   { id: 134, name: "Bears D/ST",        pos: "DST", team: "CHI", num: 0, age: 0,  status: "OK", bye: 7,  adp: 138.4, ecr: 134, tier: 3, proj: 6.8,  last: 5.0,  avg: 7.0,  owned: 62.4, trend: [6,4,8,6,4,5],   news: "Rebuilding — matchup dependent",          opp: "ARI", oppRank: 20 },
+  // Waiver-wire depth RBs
+  { id: 47,  name: "Travis Etienne Jr.", pos: "RB", team: "JAX", num: 1,  age: 25, status: "OK", bye: 12, adp: 92.4,  ecr: 88,  tier: 4, proj: 11.2, last: 13.4, avg: 11.8, owned: 82.4, trend: [10,14,12,9,11,13],  news: "Volume back — lead role secured",         opp: "HOU", oppRank: 14 },
+  { id: 48,  name: "Zach Charbonnet",    pos: "RB", team: "SEA", num: 26, age: 24, status: "OK", bye: 5,  adp: 96.2,  ecr: 92,  tier: 4, proj: 10.8, last: 11.6, avg: 10.4, owned: 78.6, trend: [8,12,10,11,8,12],   news: "Emerging with Walker banged up",           opp: "SF",  oppRank: 16 },
+  { id: 49,  name: "Jaylen Warren",      pos: "RB", team: "PIT", num: 30, age: 25, status: "OK", bye: 9,  adp: 98.4,  ecr: 94,  tier: 4, proj: 8.6,  last: 10.2, avg: 8.4,  owned: 74.2, trend: [6,10,8,9,6,10],    news: "Strong pass-catcher behind Harris",        opp: "CLE", oppRank: 8  },
+  { id: 155, name: "Dameon Pierce",      pos: "RB", team: "HOU", num: 31, age: 24, status: "OK", bye: 6,  adp: 102.4, ecr: 98,  tier: 4, proj: 8.4,  last: 7.6,  avg: 8.0,  owned: 70.4, trend: [8,6,10,7,6,8],    news: "Handcuff — spot value if Mixon sits",     opp: "IND", oppRank: 20 },
+  { id: 156, name: "Roschon Johnson",    pos: "RB", team: "CHI", num: 23, age: 23, status: "OK", bye: 7,  adp: 108.6, ecr: 104, tier: 5, proj: 7.8,  last: 9.4,  avg: 7.6,  owned: 66.2, trend: [6,10,8,9,6,9],    news: "Limited role — TD upside only",           opp: "ARI", oppRank: 22 },
+  { id: 157, name: "Miles Sanders",      pos: "RB", team: "CAR", num: 4,  age: 27, status: "Q",  bye: 11, adp: 112.2, ecr: 108, tier: 5, proj: 7.6,  last: 6.4,  avg: 7.2,  owned: 62.4, trend: [6,8,8,6,4,6],    news: "Hamstring (LP) — gametime call",          opp: "ATL", oppRank: 10 },
+  { id: 158, name: "Patrick Taylor",     pos: "RB", team: "GB",  num: 42, age: 27, status: "OK", bye: 5,  adp: 116.4, ecr: 112, tier: 5, proj: 7.2,  last: 8.8,  avg: 7.0,  owned: 58.4, trend: [4,8,6,9,4,9],    news: "Jacobs handcuff worth a roster spot",     opp: "DET", oppRank: 20 },
+  { id: 159, name: "Ty Chandler",        pos: "RB", team: "MIN", num: 32, age: 25, status: "OK", bye: 6,  adp: 118.6, ecr: 114, tier: 5, proj: 7.4,  last: 8.2,  avg: 7.0,  owned: 56.2, trend: [6,8,8,8,6,8],    news: "Flashed upside in preseason",             opp: "GB",  oppRank: 14 },
+  { id: 160, name: "Elijah Mitchell",    pos: "RB", team: "SF",  num: 25, age: 26, status: "Q",  bye: 9,  adp: 120.4, ecr: 116, tier: 5, proj: 8.8,  last: 10.4, avg: 8.4,  owned: 72.4, trend: [6,10,8,10,6,10],  news: "CMC handcuff — spot starter upside",      opp: "SEA", oppRank: 16 },
+  { id: 161, name: "Chris Rodriguez Jr.",pos: "RB", team: "WAS", num: 23, age: 24, status: "OK", bye: 14, adp: 122.4, ecr: 118, tier: 5, proj: 7.6,  last: 6.8,  avg: 7.2,  owned: 54.6, trend: [6,6,8,6,6,7],    news: "No-frills early-down back in WAS",        opp: "PHI", oppRank: 15 },
+  { id: 162, name: "Ameer Abdullah",     pos: "RB", team: "LV",  num: 22, age: 32, status: "OK", bye: 10, adp: 148.6, ecr: 144, tier: 6, proj: 6.4,  last: 4.8,  avg: 6.2,  owned: 42.4, trend: [4,6,6,6,4,5],    news: "Veteran committee role",                  opp: "DEN", oppRank: 20 },
+  { id: 163, name: "Craig Reynolds",     pos: "RB", team: "DET", num: 46, age: 26, status: "OK", bye: 5,  adp: 152.4, ecr: 148, tier: 6, proj: 6.8,  last: 7.2,  avg: 6.4,  owned: 44.6, trend: [4,6,8,6,4,7],    news: "Depth piece in Lions loaded backfield",   opp: "GB",  oppRank: 21 },
+  { id: 164, name: "Eric Gray",          pos: "RB", team: "NYG", num: 20, age: 24, status: "OK", bye: 11, adp: 144.6, ecr: 140, tier: 6, proj: 7.0,  last: 8.4,  avg: 6.8,  owned: 46.4, trend: [6,8,8,8,6,8],    news: "Sneaky upside with Giants improving",     opp: "DAL", oppRank: 16 },
+  { id: 165, name: "Zamir White",        pos: "RB", team: "LV",  num: 35, age: 24, status: "Q",  bye: 10, adp: 126.4, ecr: 122, tier: 5, proj: 8.2,  last: 7.6,  avg: 7.8,  owned: 68.4, trend: [8,8,8,8,6,8],    news: "Ankle (LP) — Jeanty's handcuff",          opp: "DEN", oppRank: 18 },
+  { id: 166, name: "Kareem Hunt",        pos: "RB", team: "KC",  num: 29, age: 30, status: "OK", bye: 10, adp: 104.2, ecr: 100, tier: 4, proj: 8.6,  last: 9.8,  avg: 8.2,  owned: 74.6, trend: [8,10,8,9,8,10],  news: "Veteran depth — TD vulture role",         opp: "LAC", oppRank: 12 },
+  // Waiver-wire WRs
+  { id: 167, name: "Tyler Boyd",         pos: "WR", team: "TEN", num: 83, age: 30, status: "OK", bye: 5,  adp: 98.4,  ecr: 94,  tier: 4, proj: 10.2, last: 8.4,  avg: 9.8,  owned: 72.6, trend: [10,8,10,8,8,8],  news: "Reliable slot — volume floor",            opp: "IND", oppRank: 10 },
+  { id: 168, name: "Quentin Johnston",   pos: "WR", team: "LAC", num: 1,  age: 23, status: "OK", bye: 5,  adp: 104.2, ecr: 100, tier: 4, proj: 9.6,  last: 11.2, avg: 9.4,  owned: 68.4, trend: [8,12,10,9,8,11],  news: "Year-2 breakout building steam",          opp: "KC",  oppRank: 14 },
+  { id: 169, name: "Khalil Shakir",      pos: "WR", team: "BUF", num: 10, age: 25, status: "OK", bye: 12, adp: 108.6, ecr: 104, tier: 5, proj: 9.8,  last: 10.4, avg: 9.6,  owned: 70.2, trend: [8,10,10,10,8,10], news: "Allen's trusted slot option",             opp: "MIA", oppRank: 18 },
+  { id: 170, name: "Dontayvion Wicks",  pos: "WR", team: "GB",  num: 13, age: 23, status: "OK", bye: 5,  adp: 114.4, ecr: 110, tier: 5, proj: 9.2,  last: 11.8, avg: 9.0,  owned: 64.4, trend: [6,12,8,12,6,12],  news: "Boom-bust upside in GB offense",          opp: "DET", oppRank: 12 },
+  // Waiver-wire TEs
+  { id: 171, name: "Cole Kmet",          pos: "TE", team: "CHI", num: 85, age: 25, status: "OK", bye: 7,  adp: 98.4,  ecr: 94,  tier: 3, proj: 7.6,  last: 9.2,  avg: 7.4,  owned: 68.4, trend: [6,10,8,9,6,9],   news: "Safe floor with Williams system",         opp: "ARI", oppRank: 16 },
+  { id: 172, name: "Cade Otton",         pos: "TE", team: "TB",  num: 88, age: 25, status: "OK", bye: 11, adp: 104.6, ecr: 100, tier: 3, proj: 7.2,  last: 8.4,  avg: 7.0,  owned: 64.6, trend: [6,8,8,8,6,8],   news: "Consistent role in Tampa offense",        opp: "NO",  oppRank: 14 },
 ];
 
 export const findPlayer = (id) => PLAYERS.find(p => p.id === id);
+
+// Advanced stats overlay: [depth-chart pos, targetShare %, routes/game]
+// Applied after declaration so player objects stay concise above.
+;((adv) => {
+  PLAYERS.forEach(p => {
+    const a = adv[p.id] || [1, 0, 0];
+    p.depth = a[0]; p.targetShare = a[1]; p.routes = a[2];
+  });
+})({
+  // QBs (depth only)
+  1:[1,0,0], 2:[1,0,0], 3:[1,0,0], 4:[1,0,0], 5:[1,0,0], 6:[1,0,0], 7:[1,0,0], 8:[1,0,0],
+  9:[1,0,0], 10:[1,0,0], 11:[1,0,0], 12:[1,0,0], 13:[1,0,0], 14:[1,0,0], 15:[1,0,0],
+  16:[1,0,0], 17:[1,0,0], 18:[1,0,0], 19:[1,0,0],
+  // RBs
+  20:[1,14.2,22], 21:[1,12.8,18], 22:[1,13.6,20], 23:[1,16.4,26], 24:[1,15.8,24],
+  25:[1,8.4,12],  26:[1,12.2,18], 27:[1,9.8,14],  28:[1,8.6,12],  29:[1,10.4,16],
+  30:[1,11.2,17], 31:[1,9.6,15],  32:[1,18.4,28], 33:[1,9.2,13],  34:[1,10.6,15],
+  35:[1,11.4,17], 36:[2,9.2,14],  37:[2,7.8,11],  38:[1,8.4,12],  39:[1,9.6,14],
+  40:[1,8.2,11],  41:[1,7.4,10],  42:[1,12.6,19], 43:[2,7.2,10],  44:[1,6.8,9],
+  45:[1,8.4,12],  46:[2,11.8,18], 47:[1,10.6,15], 48:[1,9.8,14],  49:[2,8.4,12],
+  155:[2,6.4,9],  156:[3,5.8,8],  157:[1,8.0,11], 158:[2,6.2,9],  159:[2,7.2,10],
+  160:[2,8.8,13], 161:[2,7.4,11], 162:[2,6.6,9],  163:[3,5.4,8],  164:[2,7.8,12],
+  165:[2,6.0,9],  166:[2,7.6,11],
+  // WRs
+  50:[1,26.4,42], 51:[1,28.2,44], 52:[1,24.6,40], 53:[1,22.8,38], 54:[1,26.0,44],
+  55:[1,22.4,40], 56:[1,20.8,36], 57:[1,18.6,34], 58:[1,16.4,32], 59:[1,19.2,36],
+  60:[1,16.8,30], 61:[1,14.6,28], 62:[1,15.4,30], 63:[1,14.8,28], 64:[2,13.2,26],
+  65:[1,14.6,28], 66:[1,12.8,26], 67:[1,18.4,34], 68:[2,16.2,30], 69:[1,14.4,28],
+  70:[2,12.8,24], 71:[2,13.6,26], 72:[2,14.2,28], 73:[2,12.4,25], 74:[2,14.8,28],
+  75:[2,12.2,24], 76:[2,11.4,22], 77:[2,11.8,22], 78:[2,10.6,20], 79:[3,10.2,20],
+  167:[2,10.4,20], 168:[2,9.8,18], 169:[2,11.2,22], 170:[2,10.0,19],
+  // TEs
+  80:[1,22.4,32], 81:[1,18.6,28], 82:[1,14.8,24], 83:[2,12.4,20], 84:[1,14.6,24],
+  85:[2,10.2,18], 86:[2,12.8,22], 87:[1,14.4,24], 88:[2,10.6,18], 89:[2,8.8,15],
+  90:[2,9.4,16],  91:[3,8.2,14],  171:[2,11.4,20], 172:[2,10.2,18],
+});
+
+// Game weather keyed by opponent team abbr (mock data for current week).
+// Dome = indoor stadium; wind 0. Cold/Rain affects K/DST/passing game.
+export const GAME_WEATHER = {
+  BUF: { cond: 'Cold/Windy', temp: 31, wind: 18, icon: '🌬️' },
+  MIA: { cond: 'Clear',      temp: 80, wind: 8,  icon: '☀️'  },
+  NE:  { cond: 'Cold',       temp: 38, wind: 12, icon: '🌥️' },
+  NYJ: { cond: 'Cold',       temp: 40, wind: 15, icon: '🌥️' },
+  BAL: { cond: 'Clear',      temp: 50, wind: 9,  icon: '⛅'  },
+  CIN: { cond: 'Cloudy',     temp: 48, wind: 8,  icon: '🌥️' },
+  CLE: { cond: 'Cold',       temp: 35, wind: 12, icon: '🌬️' },
+  PIT: { cond: 'Cold',       temp: 36, wind: 10, icon: '🌥️' },
+  HOU: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  IND: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  JAX: { cond: 'Clear',      temp: 72, wind: 6,  icon: '☀️'  },
+  TEN: { cond: 'Clear',      temp: 54, wind: 7,  icon: '⛅'  },
+  KC:  { cond: 'Clear',      temp: 45, wind: 12, icon: '⛅'  },
+  LAC: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  LV:  { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  DEN: { cond: 'Clear',      temp: 52, wind: 6,  icon: '☀️'  },
+  DAL: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  NYG: { cond: 'Cloudy',     temp: 44, wind: 16, icon: '🌥️' },
+  PHI: { cond: 'Cloudy',     temp: 46, wind: 11, icon: '🌥️' },
+  WAS: { cond: 'Cloudy',     temp: 46, wind: 10, icon: '🌥️' },
+  CHI: { cond: 'Cold',       temp: 40, wind: 14, icon: '🌬️' },
+  DET: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  GB:  { cond: 'Cold',       temp: 29, wind: 14, icon: '🌬️' },
+  MIN: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  ATL: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  CAR: { cond: 'Cloudy',     temp: 52, wind: 9,  icon: '⛅'  },
+  NO:  { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  TB:  { cond: 'Clear',      temp: 76, wind: 8,  icon: '☀️'  },
+  ARI: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
+  LAR: { cond: 'Clear',      temp: 68, wind: 7,  icon: '☀️'  },
+  SF:  { cond: 'Foggy',      temp: 56, wind: 14, icon: '🌫️' },
+  SEA: { cond: 'Rain',       temp: 48, wind: 14, icon: '🌧️' },
+};
 
 // Real CBS team names (id maps directly to CBS team id; id 8 = Armed Rodgery = user's team)
 export const LEAGUE_TEAMS = [
@@ -158,7 +255,21 @@ export const LEAGUE_TEAMS = [
   { id: 12, cbsId: "12", name: "DJ 8 Trak",                owner: "Kirk King & Kyle King",    email: "kirkkingre@yahoo.com",      logo: "DJ", color: "#ff5a6e", record: "2-8",  pf: 988.4,  pa: 1344.6 },
 ];
 
-export const findTeam = (id) => (getLiveTeams() ?? LEAGUE_TEAMS).find(t => t.id === id);
+export function findTeam(id) {
+  const base = (getLiveTeams() ?? LEAGUE_TEAMS).find(t => t.id === id);
+  if (!base) return base;
+  try {
+    // Apply admin-level per-team overrides (name, email, logoImg, etc.)
+    const adminCfg = JSON.parse(localStorage.getItem('fantasai_owners_config') || '{}');
+    const adminOv  = adminCfg[id] || {};
+    // Merge logged-in user's own prefs on top when viewing their own team
+    const user = JSON.parse(localStorage.getItem('fantasai_user') || 'null');
+    const myPrefs = user?.teamId === id ? (getMyTeamPrefs() || {}) : {};
+    const merged = { ...base, ...adminOv, ...myPrefs };
+    return merged;
+  } catch {}
+  return base;
+}
 
 export const MY_ROSTER = [
   { slot: "QB",   playerId: 1 },

@@ -82,7 +82,8 @@ function buildStandings(cbsRaw) {
     const l = ct.l ?? ct.losses ?? 0;
     const pf = ct.pf ?? ct.points_for ?? 0;
     const pa = ct.pa ?? ct.points_against ?? 0;
-    return { id: mock?.id, name: ct.name || mock?.name || '—', logo: mock?.logo || '??', color: mock?.color || '#555', w, l, pf, pa, me: mock?.me };
+    const liveTeam = mock?.id ? findTeam(mock.id) : null;
+    return { id: mock?.id, name: ct.name || mock?.name || '—', logo: mock?.logo || '??', logoImg: liveTeam?.logoImg || null, color: mock?.color || '#555', w, l, pf, pa, me: mock?.me };
   }).sort((a, b) => b.w - a.w || b.pf - a.pf);
 }
 
@@ -96,7 +97,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const isPre       = currentWeek.pre;
 
   // Load commissioner message + media + league name from league settings
-  const commishData = React.useMemo(() => {
+  const [commishData, setCommishData] = React.useState(() => {
     try {
       const saved      = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
       const media      = JSON.parse(localStorage.getItem('fantasai_commish_media') || 'null');
@@ -104,7 +105,61 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
       const leagueName = saved?.leagueName ?? 'ATO Tau League';
       return { text, media, leagueName };
     } catch { return { text: null, media: null, leagueName: 'ATO Tau League' }; }
-  }, []);
+  });
+
+  const canEditCommish = user?.isAdmin || user?.isCommissioner;
+  const [editingCommish, setEditingCommish] = React.useState(false);
+  const [commishTextDraft, setCommishTextDraft] = React.useState('');
+  const [commishMediaDraft, setCommishMediaDraft] = React.useState(null);
+  const [commishUrlDraft, setCommishUrlDraft] = React.useState('');
+  const commishMediaRef = React.useRef(null);
+
+  function getCommishEmbedUrl(raw) {
+    try {
+      const u = new URL(raw);
+      if (u.hostname.includes('youtube.com') && u.searchParams.get('v'))
+        return `https://www.youtube.com/embed/${u.searchParams.get('v')}`;
+      if (u.hostname === 'youtu.be')
+        return `https://www.youtube.com/embed${u.pathname}`;
+      if (u.hostname.includes('vimeo.com'))
+        return `https://player.vimeo.com/video/${u.pathname.split('/').filter(Boolean).pop()}`;
+    } catch {}
+    return raw;
+  }
+
+  function startEditCommish() {
+    setCommishTextDraft(commishData.text || '');
+    setCommishMediaDraft(commishData.media ? { ...commishData.media } : null);
+    setCommishUrlDraft(commishData.media?.videoUrl || '');
+    setEditingCommish(true);
+  }
+
+  function saveCommishMessage() {
+    const url = commishUrlDraft.trim();
+    const finalMedia = commishMediaDraft
+      ? { ...commishMediaDraft, ...(url ? { videoUrl: url } : {}) }
+      : url ? { videoUrl: url } : null;
+    if (finalMedia && !url) delete finalMedia.videoUrl;
+    try {
+      const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || '{}');
+      localStorage.setItem('fantasai_league_settings', JSON.stringify({ ...saved, commishMessage: commishTextDraft }));
+      if (finalMedia) localStorage.setItem('fantasai_commish_media', JSON.stringify(finalMedia));
+      else localStorage.removeItem('fantasai_commish_media');
+    } catch {}
+    setCommishData(d => ({ ...d, text: commishTextDraft, media: finalMedia }));
+    setEditingCommish(false);
+  }
+
+  function handleCommishMediaUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isImage) return;
+    const reader = new FileReader();
+    reader.onload = ev => setCommishMediaDraft({ url: ev.target.result, type: isVideo ? 'video' : 'image', name: file.name });
+    reader.readAsDataURL(file);
+  }
 
   // Resolve owner info from logged-in user
   const teamId   = user?.teamId || 1;
@@ -434,7 +489,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
             <div style={{ borderTop: '1px solid rgba(255,215,0,.12)', padding: '10px 14px' }}>
               {editingChampions ? (
                 <div>
-                  {champions.map((c, i) => (
+                  {champDraft.map((c, i) => (
                     <div key={c.year} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 6, alignItems: 'center', marginBottom: 6 }}>
                       <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#FFD700', minWidth: 38 }}>{c.year}</span>
                       <input
@@ -512,47 +567,84 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
         {/* Commissioner Message — center column */}
         <div className="card" style={{ borderLeft: '3px solid var(--accent)', alignSelf: 'start' }}>
-          <div className="card-head" style={{ paddingBottom: commishData.media ? 8 : 6 }}>
+          <div className="card-head" style={{ paddingBottom: 6 }}>
             <div className="card-title" style={{ fontSize: 12 }}>
               <span style={{ marginRight: 6 }}>📢</span>Commissioner Message
             </div>
+            {canEditCommish && !editingCommish && (
+              <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 8px' }} onClick={startEditCommish}>Edit</button>
+            )}
           </div>
-          {commishData.media?.url && (
-            <div style={{ padding: '0 16px 8px' }}>
-              {commishData.media.type === 'image'
-                ? <img src={commishData.media.url} alt="Commissioner media" style={{ width: '100%', maxHeight: 200, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
-                : <video src={commishData.media.url} controls style={{ width: '100%', maxHeight: 180, borderRadius: 6, display: 'block' }} />
-              }
-            </div>
-          )}
-          {commishData.media?.videoUrl && (() => {
-            const raw = commishData.media.videoUrl;
-            let embed = raw;
-            try {
-              const u = new URL(raw);
-              if (u.hostname.includes('youtube.com') && u.searchParams.get('v'))
-                embed = `https://www.youtube.com/embed/${u.searchParams.get('v')}`;
-              else if (u.hostname === 'youtu.be')
-                embed = `https://www.youtube.com/embed${u.pathname}`;
-              else if (u.hostname.includes('vimeo.com'))
-                embed = `https://player.vimeo.com/video/${u.pathname.split('/').filter(Boolean).pop()}`;
-            } catch {}
-            return (
-              <div style={{ padding: '0 16px 8px' }}>
-                <iframe
-                  src={embed}
-                  style={{ width: '100%', height: 180, borderRadius: 6, border: 'none', display: 'block' }}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  title="Commissioner Video"
-                />
+
+          {editingCommish ? (
+            <div style={{ padding: '0 16px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* Media preview while editing */}
+              {commishMediaDraft?.url && (
+                <div style={{ position: 'relative' }}>
+                  {commishMediaDraft.type === 'image'
+                    ? <img src={commishMediaDraft.url} alt="" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                    : <video src={commishMediaDraft.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 140, borderRadius: 6, display: 'block' }} />
+                  }
+                  <button
+                    onClick={() => setCommishMediaDraft(null)}
+                    style={{ position: 'absolute', top: 5, right: 5, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}
+                  >✕ Remove</button>
+                </div>
+              )}
+              {/* Message textarea */}
+              <textarea
+                className="input"
+                rows={4}
+                value={commishTextDraft}
+                onChange={e => setCommishTextDraft(e.target.value)}
+                style={{ resize: 'vertical', fontSize: 12, lineHeight: 1.6, width: '100%', boxSizing: 'border-box' }}
+                placeholder="Type your commissioner message…"
+              />
+              {/* Video URL */}
+              <input
+                className="input"
+                placeholder="YouTube / Vimeo URL (optional)…"
+                value={commishUrlDraft}
+                onChange={e => setCommishUrlDraft(e.target.value)}
+                style={{ fontSize: 12 }}
+              />
+              {/* File upload + actions */}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input ref={commishMediaRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCommishMediaUpload} />
+                <button className="btn ghost sm" onClick={() => commishMediaRef.current?.click()} style={{ fontSize: 11 }}>
+                  📷 {commishMediaDraft?.url ? 'Replace File' : 'Upload Image / Video'}
+                </button>
+                <button className="btn primary sm" onClick={saveCommishMessage}>Save</button>
+                <button className="btn ghost sm" onClick={() => setEditingCommish(false)}>Cancel</button>
               </div>
-            );
-          })()}
-          {commishData.text && (
-            <div style={{ padding: '4px 16px 14px', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.65 }}>
-              {commishData.text}
             </div>
+          ) : (
+            <>
+              {commishData.media?.url && (
+                <div style={{ padding: '0 16px 8px' }}>
+                  {commishData.media.type === 'image'
+                    ? <img src={commishData.media.url} alt="Commissioner media" style={{ width: '100%', maxHeight: 200, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                    : <video src={commishData.media.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 180, borderRadius: 6, display: 'block' }} />
+                  }
+                </div>
+              )}
+              {commishData.media?.videoUrl && (
+                <div style={{ padding: '0 16px 8px' }}>
+                  <iframe
+                    src={getCommishEmbedUrl(commishData.media.videoUrl)}
+                    style={{ width: '100%', height: 180, borderRadius: 6, border: 'none', display: 'block' }}
+                    allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    title="Commissioner Video"
+                  />
+                </div>
+              )}
+              {commishData.text && (
+                <div style={{ padding: '4px 16px 14px', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.65 }}>
+                  {commishData.text}
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -673,12 +765,15 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               <tr><th style={{ width: 32 }}>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">PF</th><th className="num">PA</th></tr>
             </thead>
             <tbody>
-              {(standings || LEAGUE_TEAMS.map(t => ({ ...t, w: 0, l: 0, pf: 0, pa: 0 }))).map((row, i) => (
+              {(standings || LEAGUE_TEAMS.map(t => { const lt = findTeam(t.id); return { ...t, ...lt, w: 0, l: 0, pf: 0, pa: 0 }; })).map((row, i) => (
                 <tr key={row.id || i} style={row.me ? { background: 'rgba(198,255,58,.04)' } : {}}>
                   <td className="mono dim" style={{ fontSize: 12 }}>{i + 1}</td>
                   <td>
                     <div className="flex gap-8" style={{ alignItems: 'center' }}>
-                      <span className="logo" style={{ background: row.color, width: 22, height: 22, fontSize: 8 }}>{row.logo}</span>
+                      {row.logoImg
+                        ? <img src={row.logoImg} alt={row.logo} style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'cover', flexShrink: 0 }} />
+                        : <span className="logo" style={{ background: row.color, width: 22, height: 22, fontSize: 8 }}>{row.logo}</span>
+                      }
                       <span style={row.me ? { color: 'var(--accent)', fontWeight: 700 } : {}}>{row.name}</span>
                       {row.me && <span className="mono faint" style={{ fontSize: 9 }}>YOU</span>}
                     </div>

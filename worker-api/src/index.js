@@ -1,6 +1,7 @@
 // FantasAI API Worker — api.fantasai.net
 //
 // GET  /api/health
+// GET  /api/v1/storage/test              — live S3 connectivity check (read + write probe)
 // GET  /api/v1/owners/config              — read owner map from S3 (no auth)
 // POST /api/v1/owners/config              — write owner map to S3  (no auth)
 // POST /api/v1/owners/reset-request       — generate token + send reset email
@@ -19,6 +20,9 @@
 // GET  /api/v1/league-settings            — read all league settings from S3 (public)
 // POST /api/v1/league-settings            — write all league settings to S3 (commissioner)
 // GET  /api/v1/proxy?url=<encoded>        — server-side fetch proxy (CORS bypass for whitelisted hosts)
+// GET  /api/v1/nfl/scoreboard?week=N&season=Y&type=pre|regular|post — ESPN live scores (public)
+// GET  /api/v1/nfl/schedule?week=N&season=Y  — ESPN weekly schedule (public)
+// GET  /api/v1/nfl/news?limit=N              — ESPN NFL news feed (public)
 
 const S3_KEY              = 'fantasai/owners-config.json';
 const S3_LEAGUE_KEY       = 'fantasai/league-config.json';
@@ -62,6 +66,7 @@ export default {
 
       // ── Public GET routes ────────────────────────────────────────────────
       if (url.pathname === '/api/health')                  return json(handleHealth(env), 200);
+      if (url.pathname === '/api/v1/storage/test')         return handleStorageTest(env);
       if (url.pathname === '/api/v1/owners/config')        return handleOwnersConfigGet(env);
       if (url.pathname === '/api/v1/owners/reset-verify')  return handleResetVerify(url, env);
       if (url.pathname === '/api/v1/week/current')         return handleWeekGet(env);
@@ -69,6 +74,9 @@ export default {
       if (url.pathname === '/api/v1/schedule')             return handleScheduleLoad(env);
       if (url.pathname === '/api/v1/league-settings')     return handleLeagueSettingsLoad(url, env);
       if (url.pathname === '/api/v1/proxy')               return handleProxy(url);
+      if (url.pathname === '/api/v1/nfl/scoreboard')      return handleNflScoreboard(url);
+      if (url.pathname === '/api/v1/nfl/schedule')        return handleNflSchedule(url);
+      if (url.pathname === '/api/v1/nfl/news')            return handleNflNews(url);
 
       // ── Authenticated GET routes ─────────────────────────────────────────
       if (env.FANTASAI_KEY) {
@@ -259,6 +267,52 @@ function handleHealth(env) {
   };
 }
 
+async function handleStorageTest(env) {
+  const result = {
+    awsConfigured: !!env.AWS_ACCESS_KEY_ID,
+    bucketConfigured: !!env.S3_BUCKET,
+    bucket: env.S3_BUCKET || 'aws-kingoffisco-s3-bucket',
+    region: env.AWS_REGION || 'us-east-2',
+    testedAt: new Date().toISOString(),
+    read: null,
+    write: null,
+    error: null,
+  };
+
+  if (!result.awsConfigured) {
+    result.error = 'AWS_ACCESS_KEY_ID secret not set — run: wrangler secret put AWS_ACCESS_KEY_ID';
+    return json(result, 200);
+  }
+
+  // Read test — GET the settings file (expected to exist or return 404; both are valid S3 responses)
+  try {
+    const readRes = await s3Fetch(env, 'GET', S3_SETTINGS_KEY, null);
+    result.read = { status: readRes.status, ok: readRes.status === 200 || readRes.status === 404 };
+    if (!result.read.ok) result.read.error = `Unexpected HTTP ${readRes.status}`;
+  } catch (err) {
+    result.read = { ok: false, error: err.message };
+  }
+
+  // Write test — PUT a tiny probe file, then DELETE it
+  const probeKey = 'fantasai/_storage_probe.json';
+  try {
+    const writeRes = await s3Fetch(env, 'PUT', probeKey, { probe: true, at: result.testedAt });
+    result.write = { status: writeRes.status, ok: writeRes.ok };
+    if (!writeRes.ok) {
+      const body = await writeRes.text().catch(() => '');
+      result.write.error = body || `HTTP ${writeRes.status}`;
+    } else {
+      // Clean up probe file
+      await s3Fetch(env, 'DELETE', probeKey, null).catch(() => {});
+    }
+  } catch (err) {
+    result.write = { ok: false, error: err.message };
+  }
+
+  result.allGood = !!(result.read?.ok && result.write?.ok);
+  return json(result, 200);
+}
+
 async function handleInjuries(url, env) {
   const players = await sleeperFetch(env, '/players/nfl');
   const injured = Object.entries(players)
@@ -367,6 +421,125 @@ async function handleRosterReset(request, env) {
   const put = await s3Fetch(env, 'PUT', S3_ROSTERS_KEY, reset);
   if (!put.ok) throw new Error(`S3 PUT ${put.status}`);
   return json({ ok: true, resetAt: reset.resetAt }, 200);
+}
+
+// ── ESPN / NFL Public APIs ────────────────────────────────────────────────────
+
+const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl';
+const ESPN_CACHE = { cacheTtl: 60, cacheEverything: true };
+
+function espnSeasonType(type) {
+  return type === 'pre' ? 1 : type === 'post' ? 3 : 2;
+}
+
+async function espnFetch(path) {
+  const res = await fetch(`${ESPN_BASE}${path}`, {
+    headers: { Accept: 'application/json' },
+    cf: ESPN_CACHE,
+  });
+  if (!res.ok) throw new Error(`ESPN ${path} → ${res.status}`);
+  return res.json();
+}
+
+function normalizeGame(event) {
+  const comp = event.competitions?.[0];
+  const competitors = (comp?.competitors || []).map(c => ({
+    id:       c.team?.id,
+    name:     c.team?.displayName,
+    abbr:     c.team?.abbreviation,
+    logo:     c.team?.logo,
+    score:    c.score ?? null,
+    homeAway: c.homeAway,
+    winner:   c.winner ?? false,
+    record:   c.records?.[0]?.summary ?? null,
+  }));
+  const home = competitors.find(c => c.homeAway === 'home');
+  const away = competitors.find(c => c.homeAway === 'away');
+  const status = event.status?.type;
+  return {
+    id:          event.id,
+    date:        event.date,
+    name:        event.name,
+    shortName:   event.shortName,
+    home,
+    away,
+    venue:       comp?.venue?.fullName ?? null,
+    status: {
+      state:     status?.state ?? 'pre',   // pre | in | post
+      completed: status?.completed ?? false,
+      description: status?.description ?? '',
+      clock:     event.status?.displayClock ?? null,
+      period:    event.status?.period ?? null,
+    },
+    broadcasts:  (comp?.broadcasts || []).flatMap(b => b.names || []),
+    odds:        comp?.odds?.[0]?.details ?? null,
+  };
+}
+
+async function handleNflScoreboard(url) {
+  const { week, season, type } = resolveWeekParams(url);
+  const seasonType = espnSeasonType(type);
+  const data = await espnFetch(`/scoreboard?seasontype=${seasonType}&week=${week}&season=${season}`);
+  // NFL season runs Aug–Jan; filter to only games that belong to the requested season year
+  // so ESPN can't silently return prior-season data when the new season hasn't dropped yet.
+  const seasonFloor = new Date(`${season}-07-01`);
+  const seasonCeil  = new Date(`${season + 1}-03-01`);
+  const allGames    = (data.events || []).map(normalizeGame);
+  const games       = allGames.filter(g => {
+    const d = new Date(g.date);
+    return d >= seasonFloor && d < seasonCeil;
+  });
+  return json({
+    source:          'espn',
+    fetchedAt:       new Date().toISOString(),
+    season,
+    week,
+    type,
+    gameCount:       games.length,
+    games,
+    seasonAvailable: games.length > 0,
+  }, 200);
+}
+
+async function handleNflSchedule(url) {
+  const { week, season, type } = resolveWeekParams(url);
+  const seasonType = espnSeasonType(type);
+  const data = await espnFetch(`/scoreboard?seasontype=${seasonType}&week=${week}&season=${season}`);
+  const games = (data.events || []).map(e => {
+    const comp = e.competitions?.[0];
+    const competitors = (comp?.competitors || []).map(c => ({
+      name:     c.team?.displayName,
+      abbr:     c.team?.abbreviation,
+      homeAway: c.homeAway,
+    }));
+    return {
+      id:        e.id,
+      date:      e.date,
+      name:      e.shortName,
+      venue:     comp?.venue?.fullName ?? null,
+      home:      competitors.find(c => c.homeAway === 'home'),
+      away:      competitors.find(c => c.homeAway === 'away'),
+      completed: e.status?.type?.completed ?? false,
+      broadcasts: (comp?.broadcasts || []).flatMap(b => b.names || []),
+    };
+  });
+  return json({ source: 'espn', fetchedAt: new Date().toISOString(), season, week, type, games }, 200);
+}
+
+async function handleNflNews(url) {
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
+  const data = await espnFetch(`/news?limit=${limit}`);
+  const articles = (data.articles || []).map(a => ({
+    id:          a.dataSourceIdentifier || a.id,
+    headline:    a.headline,
+    description: a.description,
+    published:   a.published,
+    byline:      a.byline ?? null,
+    category:    a.categories?.find(c => c.type === 'team')?.description ?? null,
+    image:       a.images?.[0]?.url ?? null,
+    link:        a.links?.web?.href ?? null,
+  }));
+  return json({ source: 'espn', fetchedAt: new Date().toISOString(), count: articles.length, articles }, 200);
 }
 
 // ── Proxy (CORS bypass for whitelisted third-party APIs) ─────────────────────

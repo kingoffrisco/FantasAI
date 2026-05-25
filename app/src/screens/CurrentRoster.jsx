@@ -897,7 +897,7 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ fontSize: 12, color: 'var(--text-faint)', cursor: 'grab', paddingRight: 2 }}>⠿</span>
-                        <span className="roster-slot-tag" style={{ background: slotColor(entry.slot) }}>
+                        <span className="roster-slot-tag" style={{ background: isBench ? '#505050' : slotColor(entry.slot) }}>
                           {entry.slot}
                         </span>
                       </div>

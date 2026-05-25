@@ -45,6 +45,26 @@ Deployed to `fantasai-cbs.fantasai.workers.dev`. Authenticates with CBS Sports u
 
 Requires secret: `CBS_COOKIE` (set via `wrangler secret put CBS_COOKIE`)
 
+#### Updating the CBS Cookie
+
+The cookie expires when your CBS session expires. When Sources → Live Backend shows **NEEDS COOKIE**:
+
+1. Go to **cbssports.com** and log in to your fantasy league
+2. Press **F12** → open the **Console** tab
+3. Run this and press Enter:
+   ```javascript
+   copy(document.cookie)
+   ```
+4. The full cookie string is now on your clipboard
+5. In PowerShell (off VPN):
+   ```powershell
+   cd d:\Project\Fantasy\worker-api
+   npx wrangler secret put CBS_COOKIE
+   ```
+6. Paste (Ctrl+V) when prompted → press Enter
+7. Redeploy: `npx wrangler deploy`
+8. In the app go to **Sources → Live Backend** → click **↻ Resync** — status flips to **LIVE**
+
 ### Frontend (`app/`)
 React + Vite app deployed to Cloudflare Pages (`fantasai-app`). Connects to the CBS Worker for live league data.
 

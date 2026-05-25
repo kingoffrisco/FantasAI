@@ -120,16 +120,38 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
         <WorkerConfig />
 
         <div className="src-other-grid">
-          {INTEGRATIONS.filter(i => i.id !== 'cbs').map(i => (
-            <div key={i.id} className="src-other">
-              <div className="src-platform-tag sm" style={{ background: i.color }}>{i.platform.split(' ')[0].slice(0, 3).toUpperCase()}</div>
-              <div className="flex-1">
-                <div style={{ fontWeight: 600, fontSize: 12 }}>{i.platform}</div>
-                <div className="faint mono" style={{ fontSize: 10 }}>Not connected</div>
+          {INTEGRATIONS.filter(i => i.id !== 'cbs').map(i => {
+            const isPublic = ['sleeper', 'espn', 'nfl'].includes(i.id);
+            const label = i.id === 'sleeper'
+              ? 'Player stats · projections · injuries'
+              : i.id === 'espn' || i.id === 'nfl'
+              ? 'Live scores · schedule · news'
+              : null;
+            return (
+              <div key={i.id} className="src-other">
+                <div className="src-platform-tag sm" style={{ background: i.color }}>{i.platform.split(' ')[0].slice(0, 3).toUpperCase()}</div>
+                <div className="flex-1">
+                  <div style={{ fontWeight: 600, fontSize: 12 }}>{i.platform}</div>
+                  {isPublic
+                    ? <div style={{ fontSize: 10, color: '#4caf82', fontWeight: 700 }}>✓ Connected · {label}</div>
+                    : <div className="faint mono" style={{ fontSize: 10 }}>Not connected</div>
+                  }
+                </div>
+                {isPublic
+                  ? <span style={{ fontSize: 10, color: '#4caf82', fontWeight: 700, padding: '4px 8px' }}>LIVE</span>
+                  : (
+                    <button
+                      className="btn sm ghost"
+                      title={`${i.platform} requires OAuth — coming soon`}
+                      onClick={() => alert(`${i.platform} connection requires OAuth 2.0 and is coming in a future update.`)}
+                    >
+                      Connect
+                    </button>
+                  )
+                }
               </div>
-              <button className="btn sm ghost">Connect</button>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="section-head" style={{ marginTop: 32 }}>

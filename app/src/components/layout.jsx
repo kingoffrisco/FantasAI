@@ -1,5 +1,22 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, findPlayer } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, findPlayer, findTeam } from '../lib/data.js';
+
+function getDraftStatus() {
+  try {
+    const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+    const draft = s?.draft || {};
+    const picks = Array.isArray(draft.picks) ? draft.picks : [];
+    if (picks.length >= 192) return { badge: 'COMPLETE', live: false };
+    const d = draft.date ? new Date(draft.date) : null;
+    const now = new Date();
+    if (d && d <= now) return { badge: 'LIVE', live: true };
+    if (d) {
+      const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return { badge: label, live: false };
+    }
+    return { badge: 'SOON', live: false };
+  } catch { return { badge: 'SOON', live: false }; }
+}
 
 const H2H_SEASON_START = new Date('2026-09-09');
 const H2H_WEEKS = 14;
@@ -133,13 +150,14 @@ export const Sidebar = ({ active, onNav, user }) => {
     { id: 'news',      label: 'News & Updates',   icon: '📰', badge: '9', live: true },
     { id: 'waivers',   label: 'Waivers',           icon: '📑' },
     { group: 'Tools' },
+    { id: 'account',   label: 'My Account / Team', icon: '⊙' },
     { id: 'compare',   label: 'Compare',           icon: '⚖' },
     { id: 'watchlist', label: 'Watchlist',          icon: '★', badge: '8' },
     { id: 'trade',     label: 'Trade Analyzer',    icon: '↔' },
     { group: 'Draft' },
-    { id: 'draft',     label: 'Draft Room',        icon: '●', badge: 'LIVE', live: true },
+    { id: 'draft',     label: 'Draft Room',        icon: '●', ...(() => { const ds = getDraftStatus(); return { badge: ds.badge, live: ds.live }; })() },
     { id: 'owners',    label: 'Owner Intel',       icon: '◉', badge: '12' },
-    { id: 'cbs',       label: 'CBS Rankings',      icon: '▦', badge: '432' },
+    { id: 'cbs',       label: 'Player Draft Rankings',      icon: '▦', badge: '432' },
     { group: 'Setup' },
     { id: 'sources',  label: 'Sources',          icon: '⌁', badge: 'CBS' },
     { id: 'settings', label: 'Rules & Settings',  icon: '📋' },
@@ -151,15 +169,29 @@ export const Sidebar = ({ active, onNav, user }) => {
 
   return (
     <div className="side">
-      <div className="team-card">
-        <div className="label">My Team</div>
-        <div className="name">Armed Rodgery</div>
-        <div className="stats">
-          <div><div className="k">Rec</div><div className="v">7–3</div></div>
-          <div><div className="k">PF</div><div className="v">1,284.6</div></div>
-          <div><div className="k">Rank</div><div className="v">#3</div></div>
-        </div>
-      </div>
+      {(() => {
+        const myTeam = findTeam(user?.teamId || 1) || LEAGUE_TEAMS[0];
+        return (
+          <div className="team-card">
+            <div className="label">My Team</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+              {myTeam.logoImg ? (
+                <img src={myTeam.logoImg} alt="logo" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
+              ) : (
+                <span style={{ width: 28, height: 28, borderRadius: 6, background: myTeam.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 900, color: '#000', flexShrink: 0 }}>
+                  {myTeam.logo}
+                </span>
+              )}
+              <div className="name" style={{ margin: 0 }}>{myTeam.name}</div>
+            </div>
+            <div className="stats">
+              <div><div className="k">Rec</div><div className="v">{myTeam.record || '0–0'}</div></div>
+              <div><div className="k">PF</div><div className="v">{(myTeam.pf || 0).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</div></div>
+              <div><div className="k">Rank</div><div className="v">#3</div></div>
+            </div>
+          </div>
+        );
+      })()}
       {items.map((it, i) => it.group ? (
         <div key={i} className="nav-section">{it.group}</div>
       ) : it.id === 'h2h' ? (
@@ -173,15 +205,17 @@ export const Sidebar = ({ active, onNav, user }) => {
             {h2hInfo && (() => {
               const color = h2hInfo.isWinning ? '#4caf82' : '#ff9500';
               const verb  = h2hInfo.isWinning ? 'Beating' : 'Losing to';
-              const opp   = h2hInfo.oppTeam?.name || 'Opponent';
+              const opp   = h2hInfo.oppTeam?.logo || '??';
               return (
-                <div style={{
-                  fontSize: 10, fontWeight: 700, color,
-                  marginTop: 3, lineHeight: 1.3,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  Wk{h2hInfo.week} · {verb} {opp}
-                  <span style={{ marginLeft: 5, opacity: .85 }}>{h2hInfo.winPct}%</span>
+                <div style={{ fontSize: 10, fontWeight: 700, color, marginTop: 3, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span>Wk{h2hInfo.week} · {verb} {opp}</span>
+                  <span style={{
+                    fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 800,
+                    background: h2hInfo.isWinning ? 'rgba(76,175,130,.25)' : 'rgba(255,149,0,.2)',
+                    color: h2hInfo.isWinning ? '#4caf82' : '#ff9500',
+                    border: `1px solid ${h2hInfo.isWinning ? 'rgba(76,175,130,.4)' : 'rgba(255,149,0,.35)'}`,
+                    borderRadius: 4, padding: '1px 5px', flexShrink: 0,
+                  }}>{h2hInfo.winPct}%</span>
                 </div>
               );
             })()}
@@ -229,7 +263,7 @@ const BASE_SECTIONS = [
     items: [
       { id: 'draft',     label: 'Draft Room',      icon: '●',  badge: 'LIVE', live: true },
       { id: 'owners',    label: 'Owner Intel',     icon: '◉',  badge: '12' },
-      { id: 'cbs',       label: 'CBS Rankings',    icon: '▦',  badge: '432' },
+      { id: 'cbs',       label: 'Player Draft Rankings',    icon: '▦',  badge: '432' },
     ],
   },
   {

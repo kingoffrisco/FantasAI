@@ -135,6 +135,21 @@ const DEFAULTS = {
     additionalRules: 'Waivers run Wednesday–Saturday night.\nWaiver order does not reset. Dropped players on waivers for 1 day minimum.',
   },
 
+  // Draft Settings
+  draft: {
+    format: 'Snake',
+    date: '',
+  },
+
+  // League Fees
+  fees: {
+    method: '',    // venmo | paypal | cashapp | zelle | other
+    handle: '',
+    amount: '',
+    link: '',
+    note: '',
+  },
+
   // Playoff Rules
   playoffRules: {
     startDate: '',
@@ -241,6 +256,10 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
   const [commishUrlDraft, setCommishUrlDraft] = React.useState('');
   const mediaInputRef = React.useRef(null);
 
+  // League Fees state
+  const [editingFees, setEditingFees] = React.useState(false);
+  const [feesDraft, setFeesDraft]     = React.useState({});
+
   // Weekly-events editor state (used in Schedule tab)
   const [evtDraft,     setEvtDraft]     = React.useState({ day: 'Sunday', time: '', label: '', type: 'game' });
   const [editEvtId,    setEditEvtId]    = React.useState(null);
@@ -323,6 +342,20 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
         flash();
       }
     } catch {}
+  }
+
+  async function testS3() {
+    setS3TestState('loading');
+    setS3TestResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/storage/test`);
+      const data = await res.json();
+      setS3TestResult(data);
+      setS3TestState(data.allGood ? 'done' : 'error');
+    } catch (err) {
+      setS3TestResult({ error: err.message });
+      setS3TestState('error');
+    }
   }
 
   function handleResetRosters() {
@@ -468,6 +501,10 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
   // Waiver Rules tab state
   const [editingWaiver, setEditingWaiver]       = React.useState(false);
   const [waiverDraft, setWaiverDraft]           = React.useState({});
+  const [editingDraft, setEditingDraft]         = React.useState(false);
+  const [draftSettingsDraft, setDraftSettingsDraft] = React.useState({});
+  const [s3TestState, setS3TestState]           = React.useState('idle'); // 'idle'|'loading'|'done'|'error'
+  const [s3TestResult, setS3TestResult]         = React.useState(null);
 
   // Playoff Rules tab state
   const [editingPlayoffSettings, setEditingPlayoffSettings] = React.useState(false);
@@ -705,7 +742,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               <div style={{ padding: '0 16px 10px', position: 'relative' }}>
                 {commishMedia.type === 'image'
                   ? <img src={commishMedia.url} alt={commishMedia.name} style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
-                  : <video src={commishMedia.url} controls style={{ width: '100%', maxHeight: 200, borderRadius: 6, display: 'block' }} />
+                  : <video src={commishMedia.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 200, borderRadius: 6, display: 'block' }} />
                 }
                 {canEdit && (
                   <button onClick={removeMedia} style={{ position: 'absolute', top: 6, right: 22, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}>✕ Remove</button>
@@ -718,7 +755,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                 <iframe
                   src={getEmbedUrl(commishMedia.videoUrl)}
                   style={{ width: '100%', height: 200, borderRadius: 6, border: 'none', display: 'block' }}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
                   title="Commissioner Video"
                 />
@@ -770,50 +807,137 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               </div>
             )}
           </Card>
-          <Card title="Current Week">
-            {editingWeek ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
-                <div>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', display: 'block', marginBottom: 4 }}>Week</label>
-                  <select className="input" value={weekDraft.week} onChange={e => setWeekDraft(d => ({ ...d, week: Number(e.target.value) }))} style={{ width: 80 }}>
-                    {Array.from({ length: 18 }, (_, i) => i + 1).map(w => <option key={w} value={w}>Week {w}</option>)}
-                  </select>
+          <Card title="Draft Settings">
+            {editingDraft ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>Draft Format</label>
+                    <select
+                      className="input"
+                      style={{ fontSize: 13, minWidth: 180 }}
+                      value={draftSettingsDraft.format}
+                      onChange={e => setDraftSettingsDraft(d => ({ ...d, format: e.target.value }))}
+                    >
+                      {['Snake', 'Auction', '3rd Round Reversal', 'Linear', 'Salary Cap'].map(f => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>Draft Date &amp; Time</label>
+                    <input
+                      type="datetime-local"
+                      className="input"
+                      style={{ fontSize: 13 }}
+                      value={draftSettingsDraft.date}
+                      onChange={e => setDraftSettingsDraft(d => ({ ...d, date: e.target.value }))}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', display: 'block', marginBottom: 4 }}>Season</label>
-                  <input className="input" type="number" value={weekDraft.season} onChange={e => setWeekDraft(d => ({ ...d, season: Number(e.target.value) }))} style={{ width: 90 }} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', display: 'block', marginBottom: 4 }}>Type</label>
-                  <select className="input" value={weekDraft.type} onChange={e => setWeekDraft(d => ({ ...d, type: e.target.value }))} style={{ width: 110 }}>
-                    <option value="pre">Pre-Season</option>
-                    <option value="regular">Regular</option>
-                    <option value="post">Playoffs</option>
-                  </select>
-                </div>
-                <div style={{ display: 'flex', gap: 6, paddingBottom: 2 }}>
-                  <button className="btn primary sm" onClick={saveWeek}>Save</button>
-                  <button className="btn ghost sm" onClick={() => setEditingWeek(false)}>Cancel</button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn primary sm" onClick={() => {
+                    const next = { ...data, draft: { ...data.draft, ...draftSettingsDraft } };
+                    persist(next); setData(next); setEditingDraft(false); flash();
+                  }}>Save Draft Settings</button>
+                  <button className="btn ghost sm" onClick={() => setEditingDraft(false)}>Cancel</button>
                 </div>
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <div style={{ flex: 1, display: 'flex', gap: 24 }}>
-                  <span style={{ fontSize: 13 }}><span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Week</span><strong>{weekData.week}</strong></span>
-                  <span style={{ fontSize: 13 }}><span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Season</span><strong>{weekData.season}</strong></span>
-                  <span style={{ fontSize: 13 }}><span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Type</span><strong style={{ textTransform: 'capitalize' }}>{weekData.type}</strong></span>
+                  <span style={{ fontSize: 13 }}>
+                    <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Format</span>
+                    <strong>{data.draft?.format || 'Not set'}</strong>
+                  </span>
+                  <span style={{ fontSize: 13 }}>
+                    <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Date</span>
+                    <strong>{data.draft?.date ? new Date(data.draft.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not scheduled'}</strong>
+                  </span>
                 </div>
                 {canEdit && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
-                    <button className="btn ghost sm" onClick={() => { setWeekDraft({ ...weekData }); setEditingWeek(true); }}>Edit</button>
+                    <button className="btn ghost sm" onClick={() => { setDraftSettingsDraft({ format: data.draft?.format || 'Snake', date: data.draft?.date || '' }); setEditingDraft(true); }}>Edit</button>
                   </div>
                 )}
               </div>
             )}
           </Card>
-          <Card title="Draft Settings">
-            <Row label="Draft Format" value="Draft has not been set up." />
+
+          {/* ── League Fees ── */}
+          <Card title="League Fees">
+            {editingFees && canEdit ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', display: 'block', marginBottom: 4 }}>Payment Method</label>
+                    <select className="input" style={{ width: 130 }} value={feesDraft.method} onChange={e => setFeesDraft(d => ({ ...d, method: e.target.value }))}>
+                      <option value="">None</option>
+                      <option value="venmo">Venmo</option>
+                      <option value="paypal">PayPal</option>
+                      <option value="cashapp">Cash App</option>
+                      <option value="zelle">Zelle</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', display: 'block', marginBottom: 4 }}>Handle / Username</label>
+                    <input className="input" style={{ width: 160 }} placeholder="@yourhandle" value={feesDraft.handle} onChange={e => setFeesDraft(d => ({ ...d, handle: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', display: 'block', marginBottom: 4 }}>Fee Amount</label>
+                    <input className="input" style={{ width: 90 }} placeholder="$50" value={feesDraft.amount} onChange={e => setFeesDraft(d => ({ ...d, amount: e.target.value }))} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', display: 'block', marginBottom: 4 }}>Note to Members (optional)</label>
+                  <input className="input" style={{ width: '100%', maxWidth: 460 }} placeholder="Pay by Aug 1 · include your team name" value={feesDraft.note} onChange={e => setFeesDraft(d => ({ ...d, note: e.target.value }))} />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn primary sm" onClick={() => {
+                    const next = { ...data, fees: feesDraft };
+                    persist(next); setData(next); setEditingFees(false); flash();
+                  }}>Save</button>
+                  <button className="btn ghost sm" onClick={() => setEditingFees(false)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                {data.fees?.method ? (() => {
+                  const f = data.fees;
+                  const METHOD_ICONS = { venmo: '💳', paypal: '🅿', cashapp: '💵', zelle: '⚡', other: '💰' };
+                  const payUrl = f.method === 'venmo'   ? `https://venmo.com/${f.handle.replace('@','')}?txn=pay&note=${encodeURIComponent(data.leagueName + ' League Fees')}&amount=${f.amount.replace(/[^0-9.]/g,'')}` :
+                                 f.method === 'paypal'  ? `https://paypal.me/${f.handle.replace('@','')}/${f.amount.replace(/[^0-9.]/g,'')}` :
+                                 f.method === 'cashapp' ? `https://cash.app/$${f.handle.replace(/[@$]/g,'')}` : null;
+                  return (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 14 }}>{METHOD_ICONS[f.method]}</span>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>{f.method.charAt(0).toUpperCase() + f.method.slice(1)}</span>
+                        {f.handle && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--accent)' }}>{f.handle}</span>}
+                        {f.amount && <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>· {f.amount} per team</span>}
+                        {payUrl && (
+                          <a href={payUrl} target="_blank" rel="noreferrer"
+                            style={{ fontSize: 12, fontWeight: 700, padding: '4px 14px', borderRadius: 6, background: 'var(--accent)', color: 'var(--accent-ink)', textDecoration: 'none' }}>
+                            Pay Now ↗
+                          </a>
+                        )}
+                      </div>
+                      {f.note && <div style={{ fontSize: 12, color: 'var(--text-faint)', fontStyle: 'italic' }}>{f.note}</div>}
+                    </div>
+                  );
+                })() : (
+                  <span style={{ fontSize: 13, color: 'var(--text-faint)' }}>No payment info configured.</span>
+                )}
+                {canEdit && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
+                    <button className="btn ghost sm" onClick={() => { setFeesDraft(data.fees || {}); setEditingFees(true); }}>Edit</button>
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
         </div>
       )}
@@ -949,12 +1073,79 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
             </ul>
           </Card>
 
+          {user?.isAdmin && (
+            <Card title="S3 Storage Test">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                  Verify that the Cloudflare Worker can read from and write to S3. Run this if league settings or roster resets are failing.
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <button
+                    className="btn ghost sm"
+                    disabled={s3TestState === 'loading'}
+                    onClick={testS3}
+                  >
+                    {s3TestState === 'loading' ? 'Testing…' : '⟳ Test S3 Connection'}
+                  </button>
+                  {s3TestState === 'done' && (
+                    <span style={{ fontSize: 12, color: 'var(--good)', fontWeight: 700 }}>✓ S3 read + write OK</span>
+                  )}
+                  {s3TestState === 'error' && (
+                    <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>✕ S3 connection failed — see details below</span>
+                  )}
+                </div>
+                {s3TestResult && (
+                  <div style={{ background: 'var(--panel-1)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', fontSize: 12, fontFamily: 'var(--font-mono)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <span style={{ color: 'var(--text-faint)', minWidth: 120 }}>AWS key set</span>
+                      <span style={{ color: s3TestResult.awsConfigured ? 'var(--good)' : 'var(--danger)', fontWeight: 700 }}>
+                        {s3TestResult.awsConfigured ? '✓ yes' : '✕ no'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <span style={{ color: 'var(--text-faint)', minWidth: 120 }}>Bucket</span>
+                      <span style={{ color: 'var(--text-dim)' }}>{s3TestResult.bucket} ({s3TestResult.region})</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <span style={{ color: 'var(--text-faint)', minWidth: 120 }}>S3 read</span>
+                      <span style={{ color: s3TestResult.read?.ok ? 'var(--good)' : 'var(--danger)', fontWeight: 700 }}>
+                        {s3TestResult.read?.ok ? `✓ HTTP ${s3TestResult.read.status}` : `✕ ${s3TestResult.read?.error || 'failed'}`}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <span style={{ color: 'var(--text-faint)', minWidth: 120 }}>S3 write</span>
+                      <span style={{ color: s3TestResult.write?.ok ? 'var(--good)' : 'var(--danger)', fontWeight: 700 }}>
+                        {s3TestResult.write?.ok ? '✓ probe written + deleted' : `✕ ${s3TestResult.write?.error || 'failed'}`}
+                      </span>
+                    </div>
+                    {!s3TestResult.awsConfigured && (
+                      <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(255,80,80,.07)', border: '1px solid rgba(255,80,80,.2)', borderRadius: 6 }}>
+                        <div style={{ color: 'var(--danger)', fontWeight: 700, marginBottom: 4 }}>Fix: set Worker secrets</div>
+                        <div style={{ color: 'var(--text-dim)', fontSize: 11, lineHeight: 1.7 }}>
+                          cd worker-api<br />
+                          wrangler secret put AWS_ACCESS_KEY_ID<br />
+                          wrangler secret put AWS_SECRET_ACCESS_KEY<br />
+                          wrangler secret put RESEND_API_KEY
+                        </div>
+                      </div>
+                    )}
+                    {s3TestResult.error && (
+                      <div style={{ color: 'var(--danger)', marginTop: 4 }}>Error: {s3TestResult.error}</div>
+                    )}
+                    <div style={{ color: 'var(--text-faint)', fontSize: 10, marginTop: 2 }}>Tested at {s3TestResult.testedAt || '—'}</div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
+
           {canEdit && (
             <Card title="Season Roster Reset">
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 220 }}>
                   <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
                     Wipe all team rosters and return every player to the free-agent pool. Use this at the start of a new season before the draft.
+                    {' '}If the reset fails below, run the <strong>Test S3 Connection</strong> above to diagnose.
                   </div>
                   {data.rostersResetSeason && (
                     <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
@@ -1185,7 +1376,11 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
                 {schedSaveState === 'saving' && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Saving to S3…</span>}
                 {schedSaveState === 'saved'  && <span style={{ fontSize: 11, color: 'var(--good)', fontWeight: 700 }}>✓ Saved to S3</span>}
-                {schedSaveState === 'error'  && <span style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 700 }}>S3 save failed</span>}
+                {schedSaveState === 'error'  && (
+                  <span style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 700 }} title="Worker not yet deployed — run: cd worker-api && npx wrangler deploy (off VPN)">
+                    S3 save failed — schedule saved locally ✓
+                  </span>
+                )}
                 {canEdit ? (
                   <button
                     className="btn primary"

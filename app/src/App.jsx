@@ -15,13 +15,14 @@ import WatchlistScreen from './screens/Watchlist.jsx';
 import TradeScreen from './screens/Trade.jsx';
 import DraftRoom from './screens/DraftRoom.jsx';
 import OwnerIntelScreen from './screens/OwnerIntel.jsx';
-import { CBSRankingsScreen } from './components/CBSConnectModal.jsx';
+import { PlayerDraftRankingsScreen } from './components/CBSConnectModal.jsx';
 import SourcesScreen from './screens/Sources.jsx';
 import AdminOwners from './screens/AdminOwners.jsx';
 import LeagueSettings from './screens/LeagueSettings.jsx';
 import CurrentRosterScreen from './screens/CurrentRoster.jsx';
 import WaiversScreen from './screens/Waivers.jsx';
 import HeadToHeadScreen from './screens/HeadToHead.jsx';
+import AccountEditScreen from './screens/AccountEdit.jsx';
 
 function loadLeagueSettings() {
   try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
@@ -153,7 +154,7 @@ const CRUMBS = {
   trade:     ['Tools', 'Trade Analyzer'],
   draft:     ['Draft', 'Live Draft Room'],
   owners:    ['Draft', 'Owner Intel · Draft DNA'],
-  cbs:       ['Draft', 'CBS Sports Rankings'],
+  cbs:       ['Draft', 'Player Draft Rankings'],
   sources:       ['Setup', 'Sources & Connections'],
   'admin-owners': ['Admin', 'Owner Management'],
   settings:       ['Setup', 'Rules & League Settings'],
@@ -427,16 +428,17 @@ export default function App() {
           {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} />}
           {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'roster'    && <CurrentRosterScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} />}
-          {active === 'waivers'   && <WaiversScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} />}
+          {active === 'waivers'   && <WaiversScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} />}
           {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'compare'   && <CompareScreen />}
           {active === 'watchlist' && <WatchlistScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} />}
-          {active === 'draft'     && <DraftRoom aiMode={aiMode} />}
+          {active === 'draft'     && <DraftRoom aiMode={aiMode} user={user} onNav={setActive} />}
           {active === 'owners'    && <OwnerIntelScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
-          {active === 'cbs'       && <CBSRankingsScreen onOpenPlayer={setOpenPlayer} />}
+          {active === 'cbs'       && <PlayerDraftRankingsScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} user={user} myRosterIds={myRosterIds} />}
           {active === 'admin-owners'  && <AdminOwners />}
+          {active === 'account'       && <AccountEditScreen user={user} />}
           {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} />}
         </div>
 
