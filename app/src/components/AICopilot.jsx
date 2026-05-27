@@ -1,10 +1,56 @@
 import React from 'react';
+import { findPlayer, LEAGUE_TEAMS } from '../lib/data.js';
 
-export default function AICopilot({ active, aiMode }) {
+const API_BASE = 'https://api.fantasai.net';
+
+async function callChat(question, context, rosterPlayers) {
+  const res = await fetch(`${API_BASE}/api/v1/chat`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ question, context, rosterPlayers }),
+    signal:  AbortSignal.timeout(35000),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+  return data.answer;
+}
+
+function buildRosterContext(user, myRosterIds) {
+  const team    = LEAGUE_TEAMS.find(t => t.id === user?.teamId);
+  const players = [...(myRosterIds || [])].map(id => findPlayer(id)).filter(Boolean);
+
+  const byPos = {};
+  for (const p of players) {
+    if (!byPos[p.pos]) byPos[p.pos] = [];
+    byPos[p.pos].push(p);
+  }
+
+  const posOrder = ['QB', 'RB', 'WR', 'TE', 'K', 'DST'];
+  const rosterLines = posOrder
+    .filter(pos => byPos[pos])
+    .flatMap(pos => byPos[pos].map(p =>
+      `  ${pos}: ${p.name} (${p.team})${p.status !== 'OK' ? ` [${p.status}]` : ''} | Proj: ${p.proj} | Avg: ${p.avg} | Last: ${p.last}`
+    ))
+    .join('\n');
+
+  return `You are FantasAI, an expert fantasy football assistant for the TAU Fantasy League.
+
+The user's team is: ${team?.name || 'Unknown Team'}
+Their team ID is: ${user?.teamId ?? 'N/A'}
+
+CURRENT ROSTER (${players.length} players):
+${rosterLines || '  (No roster data available)'}
+
+Use this roster data to answer questions specifically about this team. When asked about players on the roster, only refer to the players listed above.`;
+}
+
+export default function AICopilot({ active, aiMode, user, myRosterIds }) {
   const [messages, setMessages] = React.useState([
     { type: 'system', text: "I'm watching your roster, the waiver wire, and league news. Ask anything." },
   ]);
-  const [input, setInput] = React.useState('');
+  const [input, setInput]     = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const bodyRef = React.useRef(null);
 
   const contextNotes = {
     dashboard: [
@@ -41,10 +87,38 @@ export default function AICopilot({ active, aiMode }) {
 
   const notes = contextNotes[active] || [];
 
-  function send() {
-    if (!input.trim()) return;
-    setMessages([...messages, { type: 'user', text: input }, { type: 'ai', text: 'Looking into that — give me a sec while I run the model...' }]);
+  React.useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [messages]);
+
+  async function send(questionOverride) {
+    const q = (questionOverride ?? input).trim();
+    if (!q || loading) return;
     setInput('');
+    const thinking = { type: 'ai', text: '◆ Thinking…', pending: true };
+    setMessages(prev => [...prev, { type: 'user', text: q }, thinking]);
+    setLoading(true);
+    try {
+      const context       = buildRosterContext(user, myRosterIds);
+      const rosterPlayers = [...(myRosterIds || [])].map(id => findPlayer(id)).filter(Boolean)
+        .map(p => ({ name: p.name, pos: p.pos, team: p.team, id: p.id }));
+      const answer = await callChat(q, context, rosterPlayers);
+      setMessages(prev => {
+        const next = [...prev];
+        const idx  = next.findLastIndex(m => m.pending);
+        if (idx !== -1) next[idx] = { type: 'ai', text: answer };
+        return next;
+      });
+    } catch (err) {
+      setMessages(prev => {
+        const next = [...prev];
+        const idx  = next.findLastIndex(m => m.pending);
+        if (idx !== -1) next[idx] = { type: 'ai', text: `Sorry, couldn't reach the AI: ${err.message}` };
+        return next;
+      });
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -58,7 +132,7 @@ export default function AICopilot({ active, aiMode }) {
         <div className="live">LIVE</div>
       </div>
 
-      <div className="ai-body">
+      <div className="ai-body" ref={bodyRef}>
         <div className="mono faint" style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Watching this view</div>
         {notes.map((n, i) => (
           <div key={i} className="ai-msg note">
@@ -70,8 +144,10 @@ export default function AICopilot({ active, aiMode }) {
         <div className="mono faint" style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginTop: 8 }}>Conversation</div>
         {messages.map((m, i) => (
           <div key={i} className={`ai-msg ${m.type === 'ai' || m.type === 'system' ? 'note' : ''}`}>
-            <div className="label">{m.type === 'user' ? 'YOU' : 'FANTASAI'}</div>
-            <div>{m.text}</div>
+            <div className="label" style={m.pending ? { color: 'var(--accent)', opacity: 0.6 } : {}}>
+              {m.type === 'user' ? 'YOU' : 'FANTASAI'}
+            </div>
+            <div style={m.pending ? { color: 'var(--text-faint)', fontStyle: 'italic' } : {}}>{m.text}</div>
           </div>
         ))}
 
@@ -79,15 +155,24 @@ export default function AICopilot({ active, aiMode }) {
           <div className="mono faint" style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 6 }}>Quick Asks</div>
           <div className="flex" style={{ gap: 6, flexWrap: 'wrap' }}>
             {['Optimize my lineup', 'Top 3 waiver targets', 'Grade my roster', 'Who should I trade?'].map(q => (
-              <button key={q} className="btn sm ghost" onClick={() => setMessages([...messages, { type: 'user', text: q }])} style={{ fontSize: 10 }}>{q}</button>
+              <button key={q} className="btn sm ghost" onClick={() => send(q)} disabled={loading} style={{ fontSize: 10 }}>{q}</button>
             ))}
           </div>
         </div>
       </div>
 
       <div className="ai-input">
-        <input className="input" placeholder="Ask FantasAI anything..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} />
-        <button className="btn ai" onClick={send}>↗</button>
+        <input
+          className="input"
+          placeholder={loading ? 'Waiting for FantasAI…' : 'Ask FantasAI anything...'}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && send()}
+          disabled={loading}
+        />
+        <button className="btn ai" onClick={() => send()} disabled={loading}>
+          {loading ? '…' : '↗'}
+        </button>
       </div>
     </div>
   );

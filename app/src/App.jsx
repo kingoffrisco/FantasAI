@@ -1,5 +1,5 @@
 import React from 'react';
-import { findPlayer, findTeam, MY_ROSTER, TEAM_ROSTERS, PLAYERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES } from './lib/data.js';
+import { findPlayer, findTeam, MY_ROSTER, TEAM_ROSTERS, PLAYERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster } from './lib/data.js';
 import { applyLeagueData, clearLeagueData } from './lib/leagueStore.js';
 import { Sidebar, TopBar, MobileNav } from './components/layout.jsx';
 import AICopilot from './components/AICopilot.jsx';
@@ -23,6 +23,7 @@ import CurrentRosterScreen from './screens/CurrentRoster.jsx';
 import WaiversScreen from './screens/Waivers.jsx';
 import HeadToHeadScreen from './screens/HeadToHead.jsx';
 import AccountEditScreen from './screens/AccountEdit.jsx';
+import LineupDecisions from './screens/LineupDecisions.jsx';
 
 function loadLeagueSettings() {
   try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
@@ -147,6 +148,7 @@ const CRUMBS = {
   players:   ['League', 'Players'],
   news:      ['League', 'Player News'],
   roster:    ['League', 'Current Roster'],
+  lineup:    ['League', 'Lineup Decisions'],
   waivers:   ['League', 'Waivers'],
   h2h:       ['League', 'Head to Head'],
   compare:   ['Tools', 'Compare'],
@@ -162,6 +164,21 @@ const CRUMBS = {
 
 export default function App() {
   const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+  // Auto-detect mobile device. Matches the CSS breakpoint so JS state always
+  // agrees with the media query that hides the sidebar and shows MobileNav.
+  const [isMobileDevice, setIsMobileDevice] = React.useState(
+    () => window.matchMedia('(max-width: 900px)').matches
+  );
+  React.useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const handler = e => setIsMobileDevice(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  // Merge: either the manual desktop-preview toggle or an actual mobile device.
+  const showMobile = tweaks.showMobile || isMobileDevice;
+
   const [active, setActive] = React.useState('dashboard');
   const [openPlayer, setOpenPlayer] = React.useState(null);
   const [user, setUser] = React.useState(() => {
@@ -186,6 +203,18 @@ export default function App() {
     setRosterSlotOverrides(overrides);
     localStorage.setItem('fantasai_slot_overrides', JSON.stringify(overrides));
   }
+
+  // Count starters with injury/questionable status — drives the sidebar badge on Lineup Decisions
+  const lineupAlertCount = React.useMemo(() => {
+    const settings  = loadLeagueSettings();
+    const slotFrame = buildRosterFrame(settings);
+    const starters  = assignRoster(slotFrame, myRosterIds, rosterSlotOverrides)
+      .filter(e => e.slot !== 'BENCH' && e.playerId);
+    return starters.filter(e => {
+      const p = findPlayer(e.playerId);
+      return p && p.status && p.status !== 'OK';
+    }).length;
+  }, [myRosterIds, rosterSlotOverrides]);
 
   const [needsPasswordChange, setNeedsPasswordChange] = React.useState(false);
   const [resetToken, setResetToken] = React.useState(() => {
@@ -289,6 +318,39 @@ export default function App() {
     } catch { return {}; }
   });
 
+  const [tradeOffers, setTradeOffers] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_trade_offers') || '[]'); } catch { return []; }
+  });
+
+  function handleSendTradeOffer({ fromTeamId, toTeamId, giveIds, getIds }) {
+    const offer = { id: Date.now(), fromTeamId, toTeamId, giveIds, getIds, sentAt: new Date().toISOString(), status: 'pending' };
+    setTradeOffers(prev => {
+      const next = [...prev, offer];
+      localStorage.setItem('fantasai_trade_offers', JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function handleRespondTradeOffer(offerId, response) {
+    const offer = tradeOffers.find(o => o.id === offerId);
+    if (offer && response === 'accepted') {
+      setMyRosterIds(prev => {
+        const next = new Set(prev);
+        // Give away the receiver's players the sender wanted
+        offer.getIds.forEach(id => next.delete(id));
+        // Receive the sender's players
+        offer.giveIds.forEach(id => next.add(id));
+        if (userRef.current?.teamId) syncRosterToS3(userRef.current.teamId, next);
+        return next;
+      });
+    }
+    setTradeOffers(prev => {
+      const next = prev.map(o => o.id === offerId ? { ...o, status: response } : o);
+      localStorage.setItem('fantasai_trade_offers', JSON.stringify(next));
+      return next;
+    });
+  }
+
   const handleDropPlayer = React.useCallback(id => {
     setMyRosterIds(prev => {
       const n = new Set(prev);
@@ -385,7 +447,7 @@ export default function App() {
 
   const aiMode = tweaks.aiMode;
   const showAI = tweaks.showChat;
-  const shellClass = `shell ${showAI ? 'has-ai' : ''} ${tweaks.showMobile ? 'mobile-mode' : ''}`;
+  const shellClass = `shell ${showAI ? 'has-ai' : ''} ${showMobile ? 'mobile-mode' : ''}`;
   const playerObj = openPlayer ? findPlayer(openPlayer) : null;
 
   if (resetToken) return (
@@ -399,14 +461,14 @@ export default function App() {
 
   return (
     <React.Fragment>
-      <div className={shellClass} style={tweaks.showMobile ? { maxWidth: 414, margin: '0 auto', boxShadow: '0 0 60px rgba(0,0,0,.6)' } : {}}>
+      <div className={shellClass} style={tweaks.showMobile && !isMobileDevice ? { maxWidth: 414, margin: '0 auto', boxShadow: '0 0 60px rgba(0,0,0,.6)' } : {}}>
         <div className="logo-area">
           <span className="logo-dot"></span>
           <span className="logo"><span className="ai-mark">AI</span>FANTAS</span>
         </div>
         <TopBar
           crumbs={CRUMBS[active] || ['FantasAI']}
-          showMobile={tweaks.showMobile}
+          showMobile={showMobile}
           onToggleView={v => setTweak('showMobile', v)}
           showChat={tweaks.showChat}
           onToggleChat={() => setTweak('showChat', !tweaks.showChat)}
@@ -421,19 +483,26 @@ export default function App() {
             </div>
           }
         />
-        <Sidebar active={active} onNav={setActive} user={user} />
+        <Sidebar active={active} onNav={setActive} user={user} lineupAlertCount={lineupAlertCount} />
 
         <div className="main">
-          {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} />}
+          {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} tradeOffers={tradeOffers} />}
           {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} />}
-          {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} />}
-          {active === 'roster'    && <CurrentRosterScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} />}
+          {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} />}
+          {active === 'roster'    && <CurrentRosterScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} />}
+          {active === 'lineup'    && <LineupDecisions myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} onOpenPlayer={setOpenPlayer} />}
           {active === 'waivers'   && <WaiversScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} />}
           {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'compare'   && <CompareScreen />}
           {active === 'watchlist' && <WatchlistScreen onOpenPlayer={setOpenPlayer} />}
-          {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} />}
-          {active === 'draft'     && <DraftRoom aiMode={aiMode} user={user} onNav={setActive} />}
+          {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} onSendTradeOffer={handleSendTradeOffer} />}
+          {active === 'draft'     && <DraftRoom aiMode={aiMode} user={user} onNav={setActive} onDraftPick={id => {
+            setMyRosterIds(prev => {
+              const next = new Set([...prev, id]);
+              if (userRef.current?.teamId) syncRosterToS3(userRef.current.teamId, next);
+              return next;
+            });
+          }} />}
           {active === 'owners'    && <OwnerIntelScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'cbs'       && <PlayerDraftRankingsScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} user={user} myRosterIds={myRosterIds} />}
@@ -442,8 +511,8 @@ export default function App() {
           {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} />}
         </div>
 
-        {showAI && <AICopilot active={active} aiMode={aiMode} />}
-        <MobileNav active={active} onNav={setActive} user={user} />
+        {showAI && <AICopilot active={active} aiMode={aiMode} user={user} myRosterIds={myRosterIds} />}
+        <MobileNav active={active} onNav={setActive} user={user} lineupAlertCount={lineupAlertCount} />
       </div>
 
       {playerObj && <PlayerDetail player={playerObj} onClose={() => setOpenPlayer(null)} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} sourcesState={sourcesState} />}

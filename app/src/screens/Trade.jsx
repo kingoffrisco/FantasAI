@@ -6,7 +6,7 @@ function getTeamAllPlayerIds(teamId) {
   return (TEAM_ROSTERS[teamId] || []).filter(r => r.playerId).map(r => r.playerId);
 }
 
-export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRosterIds = new Set(), user }) {
+export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRosterIds = new Set(), user, onSendTradeOffer }) {
   const myTeamObj = (user?.teamId ? findTeam(user.teamId) : null) ?? LEAGUE_TEAMS.find(t => t.me);
   const myTeamId  = myTeamObj?.id;
 
@@ -54,10 +54,19 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
     setMyGet(prev => prev.filter(id => newRoster.has(id)));
   }
 
+  const [offerSent, setOfferSent] = React.useState(false);
+
   function reset() {
     setOtherTeam(defaultOther);
     setMyGive([]);
     setMyGet(initGetIds.filter(id => findPlayer(id)));
+    setOfferSent(false);
+  }
+
+  function sendOffer() {
+    if (!bothSided) return;
+    onSendTradeOffer?.({ fromTeamId: myTeamId, toTeamId: otherTeam, giveIds: myGive, getIds: myGet });
+    setOfferSent(true);
   }
 
   return (
@@ -67,9 +76,16 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
           <h1>Trade Analyzer</h1>
           <div className="sub">Build a multi-player offer · FantasAI grades the deal</div>
         </div>
-        <div className="flex gap-8">
+        <div className="flex gap-8" style={{ alignItems: 'center' }}>
+          {offerSent && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#4caf82', display: 'flex', alignItems: 'center', gap: 5 }}>
+              ✓ Offer sent to {otherTeamObj?.name}
+            </span>
+          )}
           <button className="btn ghost" onClick={reset}>Reset</button>
-          <button className="btn primary" disabled={!bothSided}>Send Offer</button>
+          <button className="btn primary" disabled={!bothSided || offerSent} onClick={sendOffer}>
+            {offerSent ? 'Offer Sent' : 'Send Offer'}
+          </button>
         </div>
       </div>
 

@@ -179,7 +179,7 @@ function slotColor(slot) {
 const WORKER   = (import.meta.env?.VITE_WORKER_URL || '').replace(/\/$/, '');
 const API_BASE = 'https://api.fantasai.net';
 
-export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, onDropPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange }) {
+export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, onDropPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange, tradeOffers = [], onRespondTradeOffer }) {
   const [dropConfirm, setDropConfirm] = React.useState(null);
   const [addFilter, setAddFilter] = React.useState('ALL');
   const [addSearch, setAddSearch] = React.useState('');
@@ -217,15 +217,66 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
   const totalProj = starters.reduce((s, r) => s + (findPlayer(r.playerId)?.proj || 0), 0);
 
   const [swapError, setSwapError] = React.useState(null);
-  // liveData[playerId] = { note: string|null, proj: number|null, source: string }
+  // liveData[playerId] = [{ note, proj, source, sourceId, liveStatus }, ...]  — one entry per API source
   const [liveData,          setLiveData]          = React.useState({});
+
+  const STATUS_MAP = { Questionable: 'Q', Doubtful: 'D', Out: 'O', Injured_Reserve: 'IR', Non_Football_Injury: 'NFI', Practice_Squad: 'PS' };
+  const STATUS_RANK = { IR: 4, O: 3, D: 2, Q: 1 };
+  function deriveStatus(playerId) {
+    let worst = 'OK';
+    for (const entry of (liveData[playerId] || [])) {
+      let s = 'OK';
+      if (entry.liveStatus) {
+        s = STATUS_MAP[entry.liveStatus] || entry.liveStatus;
+      } else if (entry.note) {
+        const n = entry.note.toLowerCase();
+        if (n.includes('injured reserve') || /\bir\b/.test(n)) s = 'IR';
+        else if (/\bout\b/.test(n)) s = 'O';
+        else if (n.includes('doubtful'))     s = 'D';
+        else if (n.includes('questionable')) s = 'Q';
+      }
+      if ((STATUS_RANK[s] || 0) > (STATUS_RANK[worst] || 0)) worst = s;
+    }
+    return worst;
+  }
   const [fetchingSourceIds, setFetchingSourceIds] = React.useState(new Set());
   const [lastFetched,       setLastFetched]       = React.useState({});
+  const [refreshResults,    setRefreshResults]    = React.useState({});  // { [srcId]: { updated, total } }
+
+  // Sleeper-sourced total projection for starters
+  const sleeperColor    = '#1c8eaf';
+  const sleeperProjTotal = starters.reduce((sum, r) => {
+    const p = findPlayer(r.playerId);
+    if (!p) return sum;
+    const entry = (liveData[p.id] || []).find(e => e.sourceId === 'sleeper-api' && e.proj != null);
+    return sum + (entry ? entry.proj : p.proj);
+  }, 0);
+  const hasSleeperProj = starters.some(r => {
+    const p = findPlayer(r.playerId);
+    return p && (liveData[p.id] || []).some(e => e.sourceId === 'sleeper-api' && e.proj != null);
+  });
+
+  // CBS News count — how many roster players have a CBS news entry
+  const cbsNewsColor = '#0d4ea2';
+  const cbsNewsCount = fullRoster.filter(r => {
+    if (!r.playerId) return false;
+    const p = findPlayer(r.playerId);
+    return p && (liveData[p.id] || []).some(e => e.sourceId === 'cbs-news' && e.note);
+  }).length;
+  const cbsTotalCount = fullRoster.filter(r => r.playerId).length;
+
+  // CBS News is always available as a native source for this league
+  const CBS_NEWS_SRC = React.useMemo(
+    () => ({ ...FREE_DATA_SOURCES.find(s => s.id === 'cbs-news'), kind: 'free' }),
+    [],
+  );
 
   // Which sources are currently activated (free toggle ON or limited enabled+key set)
+  // CBS News is always included first regardless of Sources toggle state
   const activatedSources = React.useMemo(() => {
-    const result = [];
+    const result = [CBS_NEWS_SRC];
     for (const src of FREE_DATA_SOURCES) {
+      if (src.id === 'cbs-news') continue; // already added above
       if (sourcesState?.freeApis?.[src.id]) result.push({ ...src, kind: 'free' });
     }
     try {
@@ -236,9 +287,21 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
       }
     } catch {}
     return result;
-  }, [sourcesState]);
+  }, [sourcesState, CBS_NEWS_SRC]);
 
   const sleeperEnabled = sourcesState?.freeApis?.['sleeper-api'] !== false;
+
+  // Auto-fetch all activated sources once the roster has players
+  const activatedSourcesRef = React.useRef(activatedSources);
+  activatedSourcesRef.current = activatedSources;
+  const didAutoFetch = React.useRef(false);
+  React.useEffect(() => {
+    const rosterSize = fullRoster.filter(r => r.playerId).length;
+    if (rosterSize > 0 && !didAutoFetch.current) {
+      didAutoFetch.current = true;
+      activatedSourcesRef.current.forEach(src => handleRefreshSource(src));
+    }
+  }, [fullRoster]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleRefreshSource(src) {
     if (fetchingSourceIds.has(src.id)) return;
@@ -258,28 +321,140 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
           if (r.status !== 'fulfilled' || !r.value?.found) return;
           const d = r.value;
           const p = targets[i];
+          const liveStatus = d.status && d.status !== 'Active' ? d.status : null;
           const noteParts = [];
-          if (d.status && d.status !== 'Active') noteParts.push(d.status);
+          if (liveStatus) noteParts.push(liveStatus);
           if (d.injuryBodyPart) noteParts.push(d.injuryBodyPart);
           const proj = d.projection?.pts_half_ppr ?? d.projection?.pts_std ?? null;
-          data[p.id] = { note: noteParts.join(' · ') || null, proj: proj != null ? Number(proj) : null, source: src.name };
+          data[p.id] = { note: noteParts.join(' · ') || null, proj: proj != null ? Number(proj) : null, source: src.name, liveStatus };
         });
       }
 
       else if (src.id === 'espn-nfl') {
-        // ESPN public injury endpoint — no key needed
-        const res = await fetch('https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/injuries?limit=400', { signal: AbortSignal.timeout(9000) });
+        // Scan ESPN NFL news via worker proxy for roster player name mentions
+        const res = await fetch(`${API_BASE}/api/v1/nfl/news?limit=50`, { signal: AbortSignal.timeout(10000) });
         if (res.ok) {
-          const json = await res.json();
-          for (const item of (json.items || [])) {
-            const name = item.athlete?.displayName || item.athlete?.fullName || '';
-            if (!name) continue;
-            const match = targets.find(p => p.name.toLowerCase() === name.toLowerCase());
-            if (!match) continue;
-            const note = item.status || item.type?.text || null;
-            if (note) data[match.id] = { note, proj: null, source: src.name };
+          const { articles = [] } = await res.json();
+          for (const article of articles) {
+            const text = `${article.headline || ''} ${article.description || ''}`;
+            for (const p of targets) {
+              if (data[p.id]) continue;
+              const parts = p.name.split(' ');
+              const first = parts[0];
+              const last  = parts.slice(1).join(' ');
+              if (last.length > 3 && text.includes(first) && text.includes(last)) {
+                data[p.id] = { note: article.headline, proj: null, source: src.name };
+              }
+            }
           }
         }
+      }
+
+      else if (src.id === 'cbs-news') {
+        // Fetch full player list with RotoWire news from our CBS Worker proxy
+        const res = await fetch(`${API_BASE}/api/v1/cbs/players`, { signal: AbortSignal.timeout(20000) });
+        if (res.ok) {
+          const { players: cbsPlayers = [] } = await res.json();
+          for (const cp of cbsPlayers) {
+            if (!cp.news) continue;
+            // Match by name: exact first, then last-name + first-initial fallback
+            const cpName = cp.name.toLowerCase();
+            const match = targets.find(p => {
+              const pn = p.name.toLowerCase();
+              if (cpName === pn) return true;
+              const cpParts = cpName.split(' ');
+              const pParts  = pn.split(' ');
+              return cpParts[cpParts.length - 1] === pParts[pParts.length - 1] && cpParts[0][0] === pParts[0][0];
+            });
+            if (!match) continue;
+            const cbsStatus = cp.status && cp.status !== 'Active' ? cp.status : null;
+            const newsText  = cp.news || (cbsStatus ? `Status: ${cbsStatus}` : null);
+            if (!newsText && !cbsStatus) continue;
+            data[match.id] = { note: (newsText || '').slice(0, 250), proj: null, source: src.name, liveStatus: cbsStatus };
+          }
+        }
+      }
+
+      else if (src.id === 'nflverse') {
+        // Fetch nflverse injury designations CSV from GitHub releases
+        const year = new Date().getFullYear();
+        let csvText = null;
+        for (const y of [year, year - 1]) {
+          const rawUrl   = `https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_${y}.csv`;
+          const proxyUrl = `${API_BASE}/api/v1/proxy?url=${encodeURIComponent(rawUrl)}`;
+          try {
+            const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(20000) });
+            if (res.ok) { csvText = await res.text(); break; }
+          } catch {}
+        }
+        if (csvText) {
+          const lines   = csvText.split('\n').filter(Boolean);
+          const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+          const rows    = lines.slice(1).map(line => {
+            const vals = line.split(',').map(v => v.replace(/"/g, '').trim());
+            const row  = {};
+            headers.forEach((h, i) => { row[h] = vals[i] ?? ''; });
+            return row;
+          });
+          // Keep most recent week's entry per player
+          const latest = {};
+          for (const row of rows) {
+            const name = row.full_name;
+            if (!name) continue;
+            const key = (parseInt(row.season) || 0) * 100 + (parseInt(row.week) || 0);
+            if (!latest[name] || latest[name]._key < key) latest[name] = { ...row, _key: key };
+          }
+          for (const p of targets) {
+            const row = latest[p.name] ?? latest[Object.keys(latest).find(n => n.toLowerCase() === p.name.toLowerCase())];
+            if (!row) continue;
+            const status = row.report_status || row.practice_status || '';
+            if (status && !['', 'Active', 'Full Participation', 'DNE'].includes(status)) {
+              const injury = row.report_primary_injury || row.practice_primary_injury || '';
+              data[p.id] = { note: injury ? `${status} · ${injury}` : status, proj: null, source: src.name };
+            }
+          }
+        }
+      }
+
+      else if (src.id === 'leaguelogs-api') {
+        // LeagueLogs: fetch public NFL player stats — requires a free account token
+        const proxyUrl = `${API_BASE}/api/v1/proxy?url=${encodeURIComponent('https://api.leaguelogs.com/v1/nfl/players?limit=500')}`;
+        try {
+          const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+          if (res.ok) {
+            const json = await res.json();
+            const list = json.players || json.data || json.results || [];
+            for (const item of list) {
+              const name = item.name || item.player_name || item.full_name || '';
+              if (!name) continue;
+              const match = targets.find(p => p.name.toLowerCase() === name.toLowerCase());
+              if (!match) continue;
+              const note = item.status || item.injury_status || null;
+              if (note && note !== 'Active') data[match.id] = { note, proj: null, source: src.name };
+            }
+          }
+        } catch {}
+      }
+
+      else if (src.id === 'apifootball') {
+        // API-Football: single batch call to injuries endpoint (key required)
+        const season = new Date().getFullYear() - 1; // current NFL season year
+        const url = `https://v1.american-football.api-sports.io/injuries?league=1&season=${season}`;
+        const proxyUrl = `${API_BASE}/api/v1/proxy?url=${encodeURIComponent(url)}&keyHeader=${encodeURIComponent(src.keyHeader)}&keyValue=${encodeURIComponent(src.apiKey || '')}`;
+        try {
+          const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(12000) });
+          if (res.ok) {
+            const json = await res.json();
+            for (const item of (json.response || [])) {
+              const name = item.player?.name || item.player?.fullname || '';
+              if (!name) continue;
+              const match = targets.find(p => p.name.toLowerCase() === name.toLowerCase());
+              if (!match || data[match.id]) continue;
+              const note = item.status || item.type || null;
+              if (note) data[match.id] = { note, proj: null, source: src.name };
+            }
+          }
+        } catch {}
       }
 
       else if (src.kind === 'limited') {
@@ -290,9 +465,6 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
           if (src.id === 'tank01') {
             const url = `https://tank01-fantasy-stats.p.rapidapi.com/getNFLPlayerInfo?playerName=${encodeURIComponent(p.name)}&getStats=true`;
             probeUrl = `${API_BASE}/api/v1/proxy?url=${encodeURIComponent(url)}&keyHeader=${encodeURIComponent(src.keyHeader)}&keyValue=${encodeURIComponent(src.apiKey)}&keyHost=${encodeURIComponent(src.keyHost || '')}`;
-          } else if (src.id === 'apifootball') {
-            const url = `https://v1.american-football.api-sports.io/players?name=${encodeURIComponent(p.name)}&league=1&season=2025`;
-            probeUrl = `${API_BASE}/api/v1/proxy?url=${encodeURIComponent(url)}&keyHeader=${encodeURIComponent(src.keyHeader)}&keyValue=${encodeURIComponent(src.apiKey)}`;
           } else if (src.id === 'sportsdb') {
             const url = `https://www.thesportsdb.com/api/v1/json/${src.apiKey || '3'}/searchplayers.php?p=${encodeURIComponent(p.name)}`;
             probeUrl = `${API_BASE}/api/v1/proxy?url=${encodeURIComponent(url)}`;
@@ -325,7 +497,23 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
       }
     } catch {}
 
-    if (Object.keys(data).length) setLiveData(prev => ({ ...prev, ...data }));
+    const updatedCount = Object.keys(data).length;
+    if (updatedCount > 0) {
+      setLiveData(prev => {
+        const next = { ...prev };
+        for (const [pid, entry] of Object.entries(data)) {
+          const existing = next[pid] || [];
+          const filtered = existing.filter(e => e.sourceId !== src.id);
+          if (entry.note || entry.proj != null || entry.liveStatus) {
+            next[pid] = [...filtered, { ...entry, sourceId: src.id }];
+          } else {
+            next[pid] = filtered;
+          }
+        }
+        return next;
+      });
+    }
+    setRefreshResults(prev => ({ ...prev, [src.id]: { updated: updatedCount, total: targets.length } }));
     setLastFetched(prev => ({ ...prev, [src.id]: Date.now() }));
     setFetchingSourceIds(prev => { const n = new Set(prev); n.delete(src.id); return n; });
   }
@@ -421,13 +609,13 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
     ...syntheticNews,
   ].sort((a, b) => {
     // Injury/high-impact first, then by recency
-    const aUrgent = a.impact === 'high' || (findPlayer(a.playerId)?.status !== 'OK');
-    const bUrgent = b.impact === 'high' || (findPlayer(b.playerId)?.status !== 'OK');
+    const aUrgent = a.impact === 'high' || deriveStatus(a.playerId) !== 'OK';
+    const bUrgent = b.impact === 'high' || deriveStatus(b.playerId) !== 'OK';
     if (aUrgent !== bUrgent) return aUrgent ? -1 : 1;
     return a.mins - b.mins;
   });
 
-  const injuryCount = rosterPlayers.filter(p => p.status !== 'OK').length;
+  const injuryCount = rosterPlayers.filter(p => deriveStatus(p.id) !== 'OK').length;
 
   // Position roster-total maxes from League Settings (e.g. QB → 2, RB → Infinity)
   const posMaxMap = React.useMemo(() => {
@@ -468,46 +656,90 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
 
       {/* Page header */}
       <div className="page-head">
-        <div>
-          <h1>Current Roster</h1>
-          <div className="sub" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span
-              style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: team?.color || 'var(--accent)', flexShrink: 0 }}
-            />
-            {team?.name || 'My Team'} · {fullRoster.length} players
+        {/* Left — logo + title + projected scores */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%', flexShrink: 0,
+            background: team?.color || 'var(--accent)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 24, border: '2px solid rgba(255,255,255,.14)',
+          }}>
+            {team?.logo || '🏈'}
+          </div>
+          <div>
+            <h1 style={{ marginBottom: 2 }}>Current Roster</h1>
+            <div className="sub" style={{ marginBottom: 8 }}>
+              {team?.name || 'My Team'} · {fullRoster.length} players
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20 }}>
+              <div>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 1 }}>Base Proj</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 22, color: 'var(--accent)', lineHeight: 1 }}>
+                  {totalProj.toFixed(1)}
+                </div>
+              </div>
+              {hasSleeperProj && (
+                <div>
+                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: sleeperColor, marginBottom: 1 }}>Sleeper Proj</div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 22, color: sleeperColor, lineHeight: 1 }}>
+                    {sleeperProjTotal.toFixed(1)}
+                  </div>
+                </div>
+              )}
+              {cbsNewsCount > 0 && (
+                <div>
+                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: cbsNewsColor, marginBottom: 1 }}>CBS News</div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 22, color: cbsNewsColor, lineHeight: 1 }}>
+                    {cbsNewsCount}/{cbsTotalCount}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-          {/* Per-source refresh buttons — one for every activated API */}
+          {/* Per-source refresh buttons — CBS is always shown; others appear when toggled on in Sources */}
           {activatedSources.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              {activatedSources.map(src => {
-                const isFetching = fetchingSourceIds.has(src.id);
-                const ts = lastFetched[src.id];
-                const ago = ts ? Math.round((Date.now() - ts) / 60000) : null;
-                return (
-                  <button
-                    key={src.id}
-                    className="btn sm ghost"
-                    style={{ fontSize: 10, borderColor: src.color, color: isFetching ? 'var(--text-faint)' : src.color, whiteSpace: 'nowrap' }}
-                    disabled={isFetching}
-                    onClick={() => handleRefreshSource(src)}
-                    title={`Fetch live data for your ${fullRoster.filter(r => r.playerId).length} rostered players from ${src.name}${src.kind === 'limited' ? ` (rate-limited · up to 8 players/refresh)` : ''}`}
-                  >
-                    {isFetching
-                      ? `⟳ Fetching ${src.name}…`
-                      : `↻ Refresh my ${src.name}${ago != null ? ` · ${ago}m ago` : ''}`}
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', textAlign: 'right', marginBottom: 4 }}>
+                Data Source News Refresh
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {activatedSources.map(src => {
+                  const isFetching = fetchingSourceIds.has(src.id);
+                  const ts = lastFetched[src.id];
+                  const ago = ts ? Math.round((Date.now() - ts) / 60000) : null;
+                  return (
+                    <button
+                      key={src.id}
+                      className="btn sm ghost"
+                      style={{ fontSize: 10, borderColor: src.color, color: isFetching ? 'var(--text-faint)' : src.color, whiteSpace: 'nowrap' }}
+                      disabled={isFetching}
+                      onClick={() => handleRefreshSource(src)}
+                      title={`Fetch live data for your ${fullRoster.filter(r => r.playerId).length} rostered players from ${src.name}${src.kind === 'limited' ? ` (rate-limited · up to 8 players/refresh)` : ''}`}
+                    >
+                      {isFetching
+                        ? `⟳ ${src.name}…`
+                        : `↻ ${src.name}${ago != null ? ` · ${ago}m ago` : ''}`}
+                    </button>
+                  );
+                })}
+              </div>
+              {activatedSources.some(src => refreshResults[src.id]) && (
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end', marginTop: 3 }}>
+                  {activatedSources.filter(src => refreshResults[src.id]).map(src => {
+                    const { updated, total } = refreshResults[src.id];
+                    return (
+                      <span key={src.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontFamily: 'var(--font-mono)' }}>
+                        <span style={{ color: updated > 0 ? src.color : 'var(--text-faint)', fontWeight: 700 }}>{src.name}</span>
+                        <span style={{ color: updated > 0 ? src.color : 'var(--text-faint)', opacity: 0.85 }}>{updated}/{total}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em' }}>Projected</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 24, color: 'var(--accent)', lineHeight: 1 }}>
-              {totalProj.toFixed(1)}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -536,6 +768,73 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
       {/* Roster tab */}
       {tab === 'roster' && (
         <div style={{ flex: 1, overflow: 'auto' }}>
+          {/* Incoming trade offers */}
+          {(() => {
+            const incoming = tradeOffers.filter(o => o.toTeamId === (user?.teamId) && o.status === 'pending');
+            if (!incoming.length) return null;
+            return (
+              <div style={{ margin: '10px 18px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {incoming.map(offer => {
+                  const fromTeam = findTeam(offer.fromTeamId);
+                  const givePlayers = offer.giveIds.map(id => findPlayer(id)).filter(Boolean);
+                  const getPlayers  = offer.getIds.map(id => findPlayer(id)).filter(Boolean);
+                  return (
+                    <div key={offer.id} style={{ borderRadius: 8, border: '1px solid rgba(255,215,0,.4)', background: 'rgba(255,215,0,.07)', padding: '10px 14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span style={{ fontSize: 13, fontWeight: 800 }}>↔ Trade Offer</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>from</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#FFD700' }}>{fromTeam?.name || `Team ${offer.fromTeamId}`}</span>
+                        <span style={{ fontSize: 10, color: 'var(--text-faint)', marginLeft: 'auto', fontFamily: 'var(--font-mono)' }}>
+                          {new Date(offer.sentAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 16, marginBottom: 10, flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 140 }}>
+                          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--good)', marginBottom: 4 }}>You Receive</div>
+                          {givePlayers.map(p => (
+                            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 3 }}>
+                              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'rgba(76,175,130,.15)', color: 'var(--good)', border: '1px solid rgba(76,175,130,.3)', borderRadius: 3, padding: '0 4px' }}>{p.pos}</span>
+                              <span style={{ fontWeight: 600 }}>{p.name}</span>
+                              <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>{p.team} · {p.avg.toFixed(1)}</span>
+                            </div>
+                          ))}
+                          {givePlayers.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>—</span>}
+                        </div>
+                        <div style={{ width: 1, background: 'rgba(255,215,0,.2)' }} />
+                        <div style={{ flex: 1, minWidth: 140 }}>
+                          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--danger)', marginBottom: 4 }}>You Give Up</div>
+                          {getPlayers.map(p => (
+                            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 3 }}>
+                              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'rgba(255,90,110,.12)', color: 'var(--danger)', border: '1px solid rgba(255,90,110,.3)', borderRadius: 3, padding: '0 4px' }}>{p.pos}</span>
+                              <span style={{ fontWeight: 600 }}>{p.name}</span>
+                              <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>{p.team} · {p.avg.toFixed(1)}</span>
+                            </div>
+                          ))}
+                          {getPlayers.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>—</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="btn primary sm"
+                          style={{ background: 'var(--good)', color: '#042210', borderColor: 'var(--good)' }}
+                          onClick={() => onRespondTradeOffer?.(offer.id, 'accepted')}
+                        >
+                          ✓ Accept Trade
+                        </button>
+                        <button
+                          className="btn ghost sm"
+                          style={{ color: 'var(--danger)', borderColor: 'rgba(255,90,110,.4)' }}
+                          onClick={() => onRespondTradeOffer?.(offer.id, 'declined')}
+                        >
+                          ✕ Decline
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
           {swapError && (
             <div style={{
               margin: '8px 18px 0', padding: '8px 14px', borderRadius: 6,
@@ -825,7 +1124,7 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
           <table className="data-table">
             <thead>
               <tr>
-                <th>Slot</th>
+                <th style={{ paddingRight: 4, width: 1, whiteSpace: 'nowrap' }}>Slot</th>
                 <th>Player</th>
                 <th className="num" style={{ whiteSpace: 'nowrap' }}>
                   Proj
@@ -839,6 +1138,15 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                 <th className="num">Avg</th>
                 <th>Opp</th>
                 <th>Status</th>
+                <th style={{ maxWidth: 180 }}>
+                  News
+                  {Object.keys(liveData).length > 0 && (
+                    <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '.06em', marginTop: 1 }}>
+                      Live
+                    </div>
+                  )}
+                </th>
+                <th style={{ fontSize: 9, color: 'var(--text-faint)' }}>▶</th>
                 <th></th>
               </tr>
             </thead>
@@ -852,7 +1160,8 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                 const isDragTarget = p && dragOver === p.id;
 
                 const emptyKey = `empty-${entry.slot}-${i}`;
-                const isInjured = p && p.status !== 'OK';
+                const liveStatus = p ? deriveStatus(p.id) : 'OK';
+                const isInjured = liveStatus !== 'OK';
 
                 if (!p) {
                   const isEmptyTarget = dragOver === emptyKey;
@@ -868,12 +1177,12 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                         outline: isEmptyTarget ? '1px solid rgba(198,255,58,.3)' : undefined,
                       }}
                     >
-                      <td>
+                      <td style={{ paddingRight: 4, width: 1 }}>
                         <span className="roster-slot-tag" style={{ background: slotColor(entry.slot) }}>
                           {entry.slot}
                         </span>
                       </td>
-                      <td colSpan={7} className="dim" style={{ fontSize: 12 }}>Empty slot · drop here</td>
+                      <td colSpan={8} className="dim" style={{ fontSize: 12 }}>Empty slot · drop here</td>
                     </tr>
                   );
                 }
@@ -890,13 +1199,13 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                     style={{
                       opacity: isDragging ? 0.4 : isBench ? 0.78 : 1,
                       cursor: 'grab',
-                      background: isDragTarget ? 'rgba(198,255,58,.07)' : isInjured ? 'rgba(255,59,48,.04)' : undefined,
+                      background: isDragTarget ? 'rgba(198,255,58,.07)' : liveStatus === 'Q' ? 'rgba(255,140,0,.13)' : (liveStatus === 'O' || liveStatus === 'IR') ? 'rgba(255,40,40,.18)' : isInjured ? 'rgba(255,59,48,.10)' : undefined,
                       outline: isDragTarget ? '1px solid rgba(198,255,58,.3)' : undefined,
                     }}
                   >
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 12, color: 'var(--text-faint)', cursor: 'grab', paddingRight: 2 }}>⠿</span>
+                    <td style={{ paddingRight: 4, width: 1, whiteSpace: 'nowrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-faint)', cursor: 'grab' }}>⠿</span>
                         <span className="roster-slot-tag" style={{ background: isBench ? '#505050' : slotColor(entry.slot) }}>
                           {entry.slot}
                         </span>
@@ -911,9 +1220,9 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                         <div>
                           <div style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 }}>
                             {isWatched && <span style={{ color: '#ffd700', fontSize: 11 }}>★</span>}
-                            <span style={{ color: isWatched ? '#ffd700' : isInjured ? 'var(--danger)' : undefined }}>{p.name}</span>
+                            <span style={{ color: isWatched ? '#ffd700' : liveStatus === 'Q' ? '#ff8c00' : isInjured ? 'var(--danger)' : undefined }}>{p.name}</span>
                           </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <div style={{ fontSize: 11, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                             <PosBadge pos={p.pos} /> {p.team} · #{p.num}
                             <span style={{
                               fontSize: 9, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 3,
@@ -923,19 +1232,32 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                             }}>
                               {isDrafted ? '⬆ Drafted' : '+ Free Agency'}
                             </span>
+                            {(() => {
+                              const req = tradeOffers.find(o => o.status === 'pending' && o.getIds.includes(p.id));
+                              if (!req) return null;
+                              const fromTeam = findTeam(req.fromTeamId);
+                              return (
+                                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '1px 6px', borderRadius: 3, background: 'rgba(255,215,0,.15)', color: '#FFD700', border: '1px solid rgba(255,215,0,.35)' }}>
+                                  ↔ Trade Requested from {fromTeam?.name || `Team ${req.fromTeamId}`}
+                                </span>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
                     </td>
                     <td className="num" style={{ fontWeight: 600 }}>
-                      {liveData[p.id]?.proj != null ? (
-                        <span>
-                          <span style={{ color: 'var(--accent-2)' }}>{liveData[p.id].proj.toFixed(1)}</span>
-                          <div style={{ fontSize: 8, color: 'var(--accent-2)', fontFamily: 'var(--font-mono)', marginTop: 1 }} title={liveData[p.id].source}>{(liveData[p.id].source || 'LIVE').split(' ')[0].toUpperCase()}</div>
-                        </span>
-                      ) : (
-                        <span style={{ color: 'var(--accent)' }}>{p.proj.toFixed(1)}</span>
-                      )}
+                      {(() => {
+                        const liveProj = (liveData[p.id] || []).find(e => e.proj != null);
+                        return liveProj ? (
+                          <span>
+                            <span style={{ color: 'var(--accent-2)' }}>{liveProj.proj.toFixed(1)}</span>
+                            <div style={{ fontSize: 8, color: 'var(--accent-2)', fontFamily: 'var(--font-mono)', marginTop: 1 }} title={liveProj.source}>{(liveProj.source || 'LIVE').split(' ')[0].toUpperCase()}</div>
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--accent)' }}>{p.proj.toFixed(1)}</span>
+                        );
+                      })()}
                     </td>
                     <td className="num">{p.last.toFixed(1)}</td>
                     <td className="num">{p.avg.toFixed(1)}</td>
@@ -944,24 +1266,46 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                       <div className="mono faint" style={{ fontSize: 10 }}>D #{p.oppRank}</div>
                     </td>
                     <td>
-                      {(p.status !== 'OK' || liveData[p.id]?.note) && (
-                        <div>
-                          {p.status !== 'OK' && <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>}
-                          <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 3, lineHeight: 1.3, maxWidth: 140 }}>
-                            {liveData[p.id]?.note
-                              ? (
-                                <span>
-                                  {liveData[p.id].note}
-                                  <span style={{ marginLeft: 4, fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--accent-2)' }} title={liveData[p.id].source}>
-                                    {(liveData[p.id].source || 'LIVE').split(' ')[0].toUpperCase()}
-                                  </span>
-                                </span>
-                              )
-                              : p.news || null
-                            }
-                          </div>
-                        </div>
+                      {liveStatus !== 'OK' && (
+                        <span className="status-pill"><StatusDot status={liveStatus} /> {liveStatus}</span>
                       )}
+                    </td>
+                    <td style={{ maxWidth: 180 }}>
+                      {(() => {
+                        const liveNotes = (liveData[p.id] || []).filter(e => e.note);
+                        if (!p.news && !liveNotes.length) return null;
+                        return (
+                          <div style={{ fontSize: 11, lineHeight: 1.5, whiteSpace: 'normal', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {p.news && (
+                              <div>
+                                <span style={{ color: '#ffd700' }}>{p.news}</span>
+                                <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', color: 'var(--text-faint)' }}>BEAT WRITER</span>
+                              </div>
+                            )}
+                            {liveNotes.map((entry, i) => {
+                              const srcColor = activatedSources.find(s => s.id === entry.sourceId)?.color || 'var(--accent-2)';
+                              return (
+                                <div key={i}>
+                                  <span style={{ color: srcColor }}>{entry.note}</span>
+                                  <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', color: srcColor, opacity: 0.75 }}>
+                                    {(entry.source || 'LIVE').toUpperCase()}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    <td>
+                      <a
+                        href={`https://www.youtube.com/results?search_query=${encodeURIComponent(p.name + ' NFL highlights')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Watch ${p.name} highlights on YouTube`}
+                        onClick={e => e.stopPropagation()}
+                        style={{ fontSize: 14, color: '#ff0000', opacity: 0.75, textDecoration: 'none', display: 'block', textAlign: 'center' }}
+                      >▶</a>
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -1118,7 +1462,8 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                 {allRosterNews.map(n => {
                   const p = findPlayer(n.playerId);
                   if (!p) return null;
-                  const isInjured = p.status !== 'OK';
+                  const playerStatus = deriveStatus(n.playerId);
+                  const isInjured = playerStatus !== 'OK';
                   const impactColor = n.impact === 'high' ? 'var(--danger)' : n.impact === 'good' ? 'var(--good)' : n.impact === 'med' ? 'var(--warn)' : 'var(--text-faint)';
                   return (
                     <div
@@ -1137,7 +1482,7 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                           <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
                             {p.name}
                             <PosBadge pos={p.pos} />
-                            {isInjured && <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>}
+                            {isInjured && <span className="status-pill"><StatusDot status={playerStatus} /> {playerStatus}</span>}
                           </div>
                           <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{p.team} · #{p.num}</div>
                         </div>

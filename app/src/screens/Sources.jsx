@@ -331,10 +331,15 @@ const API_PREVIEW = {
     })),
   },
   'leaguelogs-api': {
-    // Probe the homepage (via proxy) to confirm site is up — actual API requires an account token
+    // LeagueLogs has no public API — hitting the stats endpoint without auth returns 401/403.
+    // We probe the public homepage just to confirm the domain is up.
     probe: `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent('https://www.leaguelogs.com/')}`,
-    label: 'Connectivity check',
-    parse: () => [{ key: 0, col1: 'leaguelogs.com', col2: 'Site reachable ✓' }],
+    label: 'Auth required — no public API',
+    parse: () => [
+      { key: 0, col1: 'LeagueLogs', col2: 'Private API — account token needed' },
+      { key: 1, col1: 'Status',     col2: 'Site reachable but data requires login' },
+      { key: 2, col1: 'Next step',  col2: 'Contact LeagueLogs for API access' },
+    ],
   },
   'nflverse': {
     // GitHub releases API — public, CORS-allowed, no auth needed

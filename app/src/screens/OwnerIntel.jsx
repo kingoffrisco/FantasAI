@@ -1,5 +1,5 @@
 import React from 'react';
-import { OWNER_PROFILES, findOwner, LEAGUE_TEAMS, findTeam, findPlayer, PLAYERS, TEAMS_ORDER, CBS_DRAFT_HISTORY, TEAM_ROSTERS } from '../lib/data.js';
+import { OWNER_PROFILES, findOwner, LEAGUE_TEAMS, findTeam, findPlayer, PLAYERS, TEAMS_ORDER, CBS_DRAFT_HISTORY, TEAM_ROSTERS, buildRosterFrame, assignRoster } from '../lib/data.js';
 import { runMockDraft } from '../lib/draft.js';
 import { PosBadge, PlayerAvatar } from '../components/ui.jsx';
 import { api } from '../api.js';
@@ -332,19 +332,14 @@ export default function OwnerIntelScreen({ onOpenPlayer, user, myRosterIds, slot
 const SLOT_ORDER = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'FLEX', 'FLEX', 'DST', 'BENCH', 'BENCH', 'BENCH', 'BENCH', 'BENCH', 'BENCH'];
 
 function OwnerRoster({ teamId, onOpenPlayer, isMyTeam, myRosterIds, slotOverrides }) {
-  const baseRoster = TEAM_ROSTERS[teamId] || [];
-
   let roster;
   if (isMyTeam && myRosterIds) {
-    const liveBase = baseRoster.filter(r => !r.playerId || myRosterIds.has(r.playerId));
-    const baseIds  = new Set(baseRoster.map(r => r.playerId).filter(Boolean));
-    const added    = [...myRosterIds].filter(id => !baseIds.has(id)).map(id => ({ slot: 'BENCH', playerId: id }));
-    roster = [...liveBase, ...added];
-    if (slotOverrides) {
-      roster = roster.map(r => r.playerId && slotOverrides[r.playerId] ? { ...r, slot: slotOverrides[r.playerId] } : r);
-    }
+    const settings  = (() => { try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch { return null; } })();
+    const slotFrame = buildRosterFrame(settings);
+    // Only show filled slots so count matches the other teams' display
+    roster = assignRoster(slotFrame, myRosterIds, slotOverrides || {}).filter(e => e.playerId);
   } else {
-    roster = baseRoster;
+    roster = TEAM_ROSTERS[teamId] || [];
   }
 
   const starters = roster.filter(r => r.slot !== 'BENCH');

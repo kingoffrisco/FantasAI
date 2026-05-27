@@ -99,7 +99,7 @@ export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showCh
   </div>
 );
 
-export const Sidebar = ({ active, onNav, user }) => {
+export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0 }) => {
   const isAdmin = user?.isAdmin;
 
   const h2hInfo = React.useMemo(() => {
@@ -149,6 +149,7 @@ export const Sidebar = ({ active, onNav, user }) => {
     { id: 'players',   label: 'Players',          icon: '👥', badge: 'All' },
     { id: 'news',      label: 'News & Updates',   icon: '📰', badge: '9', live: true },
     { id: 'waivers',   label: 'Waivers',           icon: '📑' },
+    { id: 'lineup',    label: 'Lineup Decisions',  icon: '⚡', badge: lineupAlertCount > 0 ? String(lineupAlertCount) : undefined, alert: lineupAlertCount > 0 },
     { group: 'Tools' },
     { id: 'account',   label: 'My Account / Team', icon: '⊙' },
     { id: 'compare',   label: 'Compare',           icon: '⚖' },
@@ -174,15 +175,15 @@ export const Sidebar = ({ active, onNav, user }) => {
         return (
           <div className="team-card">
             <div className="label">My Team</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
               {myTeam.logoImg ? (
-                <img src={myTeam.logoImg} alt="logo" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
+                <img src={myTeam.logoImg} alt="logo" style={{ width: 52, height: 52, borderRadius: 10, objectFit: 'cover', flexShrink: 0, boxShadow: '0 2px 10px rgba(0,0,0,.35)' }} />
               ) : (
-                <span style={{ width: 28, height: 28, borderRadius: 6, background: myTeam.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 900, color: '#000', flexShrink: 0 }}>
+                <span style={{ width: 52, height: 52, borderRadius: 10, background: myTeam.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900, color: '#000', flexShrink: 0, boxShadow: '0 2px 10px rgba(0,0,0,.35)' }}>
                   {myTeam.logo}
                 </span>
               )}
-              <div className="name" style={{ margin: 0 }}>{myTeam.name}</div>
+              <div className="name" style={{ margin: 0, lineHeight: 1.2 }}>{myTeam.name}</div>
             </div>
             <div className="stats">
               <div><div className="k">Rec</div><div className="v">{myTeam.record || '0–0'}</div></div>
@@ -226,8 +227,15 @@ export const Sidebar = ({ active, onNav, user }) => {
           className={`nav-item ${active === it.id ? 'active' : ''} ${it.live ? 'live' : ''}`}
           onClick={() => onNav(it.id)}>
           <span className="icon">{it.icon}</span>
-          <span>{it.label}</span>
-          {it.badge && <span className="badge">{it.badge}</span>}
+          <span style={{ flex: 1 }}>{it.label}</span>
+          {it.badge && (
+            <span
+              className="badge"
+              style={it.alert ? { background: 'var(--danger)', color: '#fff', fontWeight: 900, animation: 'pulse 2s infinite' } : undefined}
+            >
+              {it.badge}
+            </span>
+          )}
         </div>
       ))}
       <div style={{ padding: '20px 14px', borderTop: '1px solid var(--border)', marginTop: 20 }}>
@@ -248,6 +256,7 @@ const BASE_SECTIONS = [
       { id: 'players',   label: 'Players',         icon: '👥', badge: 'All' },
       { id: 'news',      label: 'News & Updates',  icon: '📰', badge: '9',  live: true },
       { id: 'waivers',   label: 'Waivers',          icon: '📑' },
+      { id: 'lineup',    label: 'Lineup Decisions', icon: '⚡' },
     ],
   },
   {
@@ -275,13 +284,21 @@ const BASE_SECTIONS = [
   },
 ];
 
-export const MobileNav = ({ active, onNav, user }) => {
+export const MobileNav = ({ active, onNav, user, lineupAlertCount = 0 }) => {
   const [showMore, setShowMore] = React.useState(false);
   const isAdmin = user?.isAdmin;
-  const MORE_SECTIONS = [
-    ...BASE_SECTIONS,
-    ...(isAdmin ? [{ group: 'Admin', items: [{ id: 'admin-owners', label: 'Owners', icon: '👤' }] }] : []),
-  ];
+  // Inject the dynamic lineup alert badge into the static BASE_SECTIONS
+  const MORE_SECTIONS = React.useMemo(() => {
+    const sections = BASE_SECTIONS.map(sec => ({
+      ...sec,
+      items: sec.items.map(it =>
+        it.id === 'lineup' && lineupAlertCount > 0
+          ? { ...it, badge: String(lineupAlertCount), alert: true }
+          : it
+      ),
+    }));
+    return [...sections, ...(isAdmin ? [{ group: 'Admin', items: [{ id: 'admin-owners', label: 'Owners', icon: '👤' }] }] : [])];
+  }, [isAdmin, lineupAlertCount]);
 
   const tabs = [
     { id: 'dashboard', label: 'Home',    icon: '🏈' },
@@ -329,7 +346,10 @@ export const MobileNav = ({ active, onNav, user }) => {
                     <span className="mob-menu-icon">{it.icon}</span>
                     <span className="mob-menu-label">{it.label}</span>
                     {it.badge && (
-                      <span className={`mob-menu-badge ${it.live ? 'live' : ''}`}>{it.badge}</span>
+                      <span
+                        className={`mob-menu-badge ${it.live ? 'live' : ''}`}
+                        style={it.alert ? { background: 'var(--danger)', color: '#fff', fontWeight: 900 } : undefined}
+                      >{it.badge}</span>
                     )}
                     {active === it.id && <span style={{ marginLeft: 'auto', color: 'var(--accent)', fontSize: 14 }}>●</span>}
                   </div>

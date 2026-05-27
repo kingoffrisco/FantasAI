@@ -23,16 +23,9 @@ async function fetchS3Config() {
     ]);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const s3data = await res.json();
-    // Merge: preserve locally-set passwords not yet synced to S3
-    const local = loadOwnerConfig();
-    const merged = { ...s3data };
-    for (const [teamId, localCfg] of Object.entries(local)) {
-      if (localCfg.passwordSet && !s3data[teamId]?.passwordSet) {
-        merged[teamId] = { ...(s3data[teamId] || {}), ...localCfg };
-      }
-    }
-    localStorage.setItem(OWNERS_KEY, JSON.stringify(merged));
-    return merged;
+    // S3 is authoritative — cache it locally so offline fallback stays fresh
+    localStorage.setItem(OWNERS_KEY, JSON.stringify(s3data));
+    return s3data;
   } catch {
     return loadOwnerConfig(); // fall back to local cache
   }
@@ -85,7 +78,12 @@ export default function Login({ onLogin }) {
       }
     }
     if (!team) {
+      // Email not stored in S3 config — find via static data, then check overrides for password by team ID
       team = LEAGUE_TEAMS.find(t => (t.email || '').toLowerCase() === trimmed);
+      if (team) {
+        const ov = overrides[String(team.id)] || overrides[team.id] || {};
+        if (ov.password) expectedPassword = ov.password;
+      }
     }
 
     if (!team) { setLoading(false); setError('No account found for that email address.'); return; }
@@ -118,13 +116,6 @@ export default function Login({ onLogin }) {
     setResetSent(true);
     setResetLoading(false);
   }
-
-  // Build display list (merge overrides into LEAGUE_TEAMS)
-  const overrides    = loadOwnerConfig();
-  const displayTeams = LEAGUE_TEAMS.map(t => {
-    const ov = overrides[t.id] || {};
-    return { ...t, name: ov.name || t.name, email: ov.email || t.email };
-  });
 
   return (
     <div className="login-bg">
@@ -253,28 +244,6 @@ export default function Login({ onLogin }) {
           </div>
         )}
 
-        {view === 'login' && (
-          <>
-            <div className="login-hint">
-              Default password: <span className="mono" style={{ color: 'var(--accent)' }}>{DEFAULT_PASSWORD}</span>
-            </div>
-
-            <div className="login-teams-section">
-              <div className="login-teams-header">League Members — click to autofill</div>
-              {displayTeams.map(t => (
-                <div
-                  key={t.id}
-                  className="login-team-row"
-                  onClick={() => { setEmail(t.email || ''); setError(''); }}
-                >
-                  <span className="login-team-dot" style={{ background: t.color }} />
-                  <span className="login-team-name">{t.name}</span>
-                  <span className="login-team-email">{t.email}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
 
       </div>
     </div>

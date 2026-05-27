@@ -1,5 +1,5 @@
 import React from 'react';
-import { PLAYERS, findPlayer, MY_ROSTER, DRAFT_PICKS, TEAM_ROSTERS, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES } from '../lib/data.js';
+import { PLAYERS, findPlayer, MY_ROSTER, DRAFT_PICKS, TEAM_ROSTERS, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster } from '../lib/data.js';
 
 const FREE_DATA_SOURCES_LIST = FREE_DATA_SOURCES.map(s => ({ id: s.id, name: s.name, defaultEnabled: s.enabled }));
 const FEED_NAMES = Object.fromEntries(RANKING_SOURCES.map(s => [s.id, s.name.replace(' (ECR)', '').replace(' Fantasy', '').replace(' Sports Rankings', '').replace(' Rankings', '')]));
@@ -8,7 +8,8 @@ import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delt
 import { useApi } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats } from '../lib/sleeper.js';
 
-const WORKER = (import.meta.env?.VITE_WORKER_URL || '').replace(/\/$/, '');
+const WORKER   = (import.meta.env?.VITE_WORKER_URL || '').replace(/\/$/, '');
+const API_BASE = 'https://api.fantasai.net';
 
 function formatWaiverExpiry(isoStr) {
   const d   = new Date(isoStr);
@@ -37,8 +38,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   const [sort, setSort] = React.useState('proj');
   const [avail, setAvail] = React.useState('all');
   const [selected, setSelected] = React.useState(null);
-  const [depthData, setDepthData] = React.useState({});
-  const [snapsData, setSnapsData] = React.useState({});
+  const [depthData,  setDepthData]  = React.useState({});
+  const [snapsData,  setSnapsData]  = React.useState({});
+  const [injuryData, setInjuryData] = React.useState({});
 
   React.useEffect(() => {
     let cancelled = false;
@@ -49,8 +51,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           fetchBulkWeekStats(2025, 18),
         ]);
         if (cancelled) return;
-        const depths = {};
-        const snaps = {};
+        const depths  = {};
+        const snaps   = {};
+        const injuries = {};
         for (const [sid, p] of Object.entries(map)) {
           if (!p.full_name && !p.first_name) continue;
           const name = (p.full_name || `${p.first_name} ${p.last_name}`).toLowerCase().trim();
@@ -62,9 +65,17 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
             const snpVal = s?.off_snp ?? s?.snp;
             if (snpVal != null) snaps[name] = Math.round(snpVal);
           }
+          if (p.injury_status && p.injury_status !== 'Na') {
+            injuries[name] = {
+              status:   p.injury_status,
+              bodyPart: p.injury_body_part  || null,
+              notes:    p.injury_notes      || null,
+            };
+          }
         }
         setDepthData(depths);
         setSnapsData(snaps);
+        setInjuryData(injuries);
       } catch {
         // Sleeper unavailable — columns remain empty
       }
@@ -175,8 +186,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               const aiPick = aiMode !== 'subtle' ? null :
                 (p.id === 65 ? 'fade — hammy' : p.id === 62 ? 'BUY' : p.id === 80 ? 'TE1 lock' : null);
               const pKey = p.name.toLowerCase();
-              const depthLabel = depthData[pKey];
-              const snapCount  = snapsData[pKey];
+              const depthLabel  = depthData[pKey];
+              const snapCount   = snapsData[pKey];
+              const injuryEntry = injuryData[pKey];
               return (
                 <tr key={p.id} className={selected === p.id ? 'selected' : ''} onClick={() => setSelected(p.id)}
                   style={isOnWaivers ? { background: 'rgba(255,149,0,.04)' } : undefined}>
@@ -221,7 +233,14 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                         ⏳ Waiver Queue · Clears {formatWaiverExpiry(waiverEntry.expiresAt)}
                       </span>
                     ) : p.status !== 'OK' ? (
-                      <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>
+                        {injuryEntry && (injuryEntry.bodyPart || injuryEntry.notes) && (
+                          <span style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.4, maxWidth: 160 }}>
+                            {[injuryEntry.bodyPart, injuryEntry.notes].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
+                      </div>
                     ) : null}
                     {aiPick && <div><AIHint>{aiPick}</AIHint></div>}
                   </td>
@@ -289,23 +308,21 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
 
 // ─── RosterPanel ─────────────────────────────────────────────────────────────
 
-const SLOT_ORDER = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'DST', 'BENCH'];
-
 function RosterPanel({ teamId, myRosterIds, onOpenPlayer }) {
   const team = findTeam(teamId);
-  const base = TEAM_ROSTERS[teamId] || [];
-  const baseIds = new Set(base.map(r => r.playerId).filter(Boolean));
-  const extraIds = [...myRosterIds].filter(id => id && !baseIds.has(id));
-  const fullRoster = [
-    ...base,
-    ...extraIds.map(id => ({ slot: 'BENCH', playerId: id })),
-  ].sort((a, b) => {
-    const ai = SLOT_ORDER.indexOf(a.slot); const bi = SLOT_ORDER.indexOf(b.slot);
-    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
-  });
 
-  const starters = fullRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
-  const totalProj = starters.reduce((s, r) => s + (findPlayer(r.playerId)?.proj || 0), 0);
+  const rosterSettings = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch { return null; }
+  }, []);
+
+  const slotFrame  = React.useMemo(() => buildRosterFrame(rosterSettings), [rosterSettings]);
+  const fullRoster = React.useMemo(
+    () => assignRoster(slotFrame, myRosterIds, {}),
+    [slotFrame, myRosterIds],
+  );
+
+  const starters   = fullRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
+  const totalProj  = starters.reduce((s, r) => s + (findPlayer(r.playerId)?.proj || 0), 0);
 
   return (
     <div className="roster-panel">
@@ -402,48 +419,67 @@ function SeasonStatBar({ label, val, max }) {
 }
 
 // ─── PlayerNewsCard ───────────────────────────────────────────────────────────
-function PlayerNewsCard({ player }) {
-  const items = NEWS.filter(n => n.playerId === player.id).sort((a, b) => a.mins - b.mins);
-  const fallback = items.length === 0;
+function PlayerNewsCard({ items = [], loading = false, playerName = '' }) {
+  if (loading) {
+    return (
+      <div className="card">
+        <div className="card-head">
+          <div className="card-title">News · {playerName}</div>
+        </div>
+        <div style={{ padding:'12px 16px', display:'flex', alignItems:'center', gap:8 }}>
+          <div className="ai-orb" style={{ width:14, height:14 }} />
+          <span className="dim" style={{ fontSize:12 }}>Fetching news from all sources…</span>
+        </div>
+      </div>
+    );
+  }
   const sources = [...new Set(items.map(n => n.source))];
-
   return (
     <div className="card">
       <div className="card-head">
-        <div className="card-title">News · {player.name}</div>
+        <div className="card-title">News · {playerName}</div>
         {sources.length > 0 && (
           <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
             {sources.map(s => <SourceBadge key={s} source={s} />)}
           </div>
         )}
       </div>
-      <div className="card-body" style={{ padding: 0 }}>
-        {fallback ? (
-          <div style={{ padding:'12px 16px', fontSize:12, lineHeight:1.6, color:'var(--text-dim)' }}>
-            {player.news || 'No recent updates.'}
+      <div className="card-body" style={{ padding:0 }}>
+        {items.length === 0 ? (
+          <div style={{ padding:'12px 16px', fontSize:12, color:'var(--text-faint)' }}>
+            No recent news found. Try refreshing your data sources.
           </div>
-        ) : (
-          items.map((n, i) => (
-            <div key={n.id} style={{
-              padding:'10px 16px',
-              borderTop: i > 0 ? '1px solid var(--border)' : 'none',
-              background: i % 2 !== 0 ? 'rgba(255,255,255,.015)' : 'transparent',
-            }}>
+        ) : items.map((n, i) => {
+          const color = n.sourceColor || SOURCE_META[n.source]?.color || 'var(--accent-2)';
+          const minsAgo = n.fetchedAt ? Math.round((Date.now() - n.fetchedAt) / 60000) : null;
+          return (
+            <div key={i} style={{ padding:'10px 16px', borderTop: i > 0 ? '1px solid var(--border)' : 'none', background: i % 2 !== 0 ? 'rgba(255,255,255,.015)' : 'transparent' }}>
               <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
-                <SourceBadge source={n.source} />
-                <span style={{ fontSize:10, color:'var(--accent)', fontFamily:'var(--font-mono)' }}>
-                  {n.mins < 60 ? `${n.mins}m ago` : `${Math.floor(n.mins/60)}h ago`}
+                <span style={{ fontSize:9, fontFamily:'var(--font-mono)', fontWeight:700, padding:'2px 6px', borderRadius:3, background:`${color}22`, color, border:`1px solid ${color}55`, whiteSpace:'nowrap' }}>
+                  {n.source}
                 </span>
+                {minsAgo != null && (
+                  <span style={{ fontSize:10, color:'var(--accent)', fontFamily:'var(--font-mono)' }}>
+                    {minsAgo < 1 ? 'just now' : `${minsAgo}m ago`}
+                  </span>
+                )}
+                {n.mins != null && minsAgo == null && (
+                  <span style={{ fontSize:10, color:'var(--text-faint)', fontFamily:'var(--font-mono)' }}>
+                    {n.mins < 60 ? `${n.mins}m ago` : `${Math.floor(n.mins/60)}h ago`}
+                  </span>
+                )}
                 <span style={{ flex:1 }} />
-                <span className={`news-impact impact-${n.impact}`} style={{ fontSize:9, padding:'1px 6px' }}>
-                  {n.impact === 'good' ? 'BOOST' : n.impact?.toUpperCase()}
-                </span>
+                {n.impact && n.impact !== 'low' && (
+                  <span className={`news-impact impact-${n.impact}`} style={{ fontSize:9, padding:'1px 6px' }}>
+                    {n.impact === 'good' ? 'BOOST' : n.impact?.toUpperCase()}
+                  </span>
+                )}
               </div>
-              <div style={{ fontSize:12, fontWeight:600, marginBottom:3, lineHeight:1.4 }}>{n.title}</div>
-              <div style={{ fontSize:11, color:'var(--text-dim)', lineHeight:1.6 }}>{n.body}</div>
+              {n.title && <div style={{ fontSize:12, fontWeight:600, marginBottom:n.body ? 3 : 0, lineHeight:1.4 }}>{n.title}</div>}
+              {n.body  && <div style={{ fontSize:11, color:'var(--text-dim)', lineHeight:1.6 }}>{n.body}</div>}
             </div>
-          ))
-        )}
+          );
+        })}
       </div>
     </div>
   );
@@ -455,8 +491,75 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   if (!player) return null;
   const [activeTab, setTab] = React.useState('overview');
   const [added, setAdded] = React.useState(false);
+  const [fetchedNewsItems, setFetchedNewsItems] = React.useState([]);
+  const [newsLoading, setNewsLoading] = React.useState(true);
 
   React.useEffect(() => { setAdded(false); }, [player.id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setFetchedNewsItems([]);
+    setNewsLoading(true);
+    async function fetchPlayerNews() {
+      const items = [];
+      const nameParts = player.name.trim().split(' ');
+      const firstName = nameParts[0];
+      const lastName  = nameParts.slice(1).join(' ');
+      const now = Date.now();
+      try {
+        const [cbsRes, espnRes] = await Promise.allSettled([
+          fetch(`${API_BASE}/api/v1/cbs/players`).then(r => r.ok ? r.json() : null),
+          fetch(`${API_BASE}/api/v1/nfl/news?limit=50`).then(r => r.ok ? r.json() : null),
+        ]);
+        if (cancelled) return;
+
+        if (cbsRes.status === 'fulfilled' && cbsRes.value?.players) {
+          const fl = firstName.toLowerCase();
+          const ll = lastName.toLowerCase();
+          const match = cbsRes.value.players.find(p => {
+            const n = (p.name || '').toLowerCase();
+            return n.includes(fl) && n.includes(ll);
+          });
+          if (match && (match.newsTitle || match.news)) {
+            items.push({
+              source: 'CBS Sports',
+              sourceColor: '#0d4ea2',
+              title: match.newsTitle || null,
+              body:  match.news     || null,
+              fetchedAt: now,
+              impact: /^out$/i.test(match.status||'') ? 'bad'
+                : /questionable/i.test(match.status||'') ? 'medium'
+                : 'low',
+            });
+          }
+        }
+
+        if (espnRes.status === 'fulfilled' && espnRes.value?.articles) {
+          const fl = firstName.toLowerCase();
+          const ll = lastName.toLowerCase();
+          for (const art of espnRes.value.articles) {
+            const text = `${art.headline||''} ${art.description||''}`.toLowerCase();
+            if (text.includes(fl) && text.includes(ll)) {
+              items.push({
+                source: 'ESPN',
+                sourceColor: '#cc0000',
+                title: art.headline    || null,
+                body:  art.description || null,
+                fetchedAt: art.published ? new Date(art.published).getTime() : now,
+                impact: 'low',
+              });
+            }
+          }
+        }
+      } catch { /* network error — show whatever we have */ }
+      if (!cancelled) {
+        setFetchedNewsItems(items);
+        setNewsLoading(false);
+      }
+    }
+    fetchPlayerNews();
+    return () => { cancelled = true; };
+  }, [player.id]);
 
   const isOnRoster = myRosterIds.has(player.id);
   const sleeperEnabled = sourcesState?.freeApis?.['sleeper-api'] !== false;
@@ -477,6 +580,49 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
 
   const hasLive = !loading && live?.found && live.weeklyStats && Object.keys(live.weeklyStats).length > 0;
   const statusFromLive = live?.status && live.status !== 'Active' ? live.status : null;
+
+  const playerNewsItems = React.useMemo(() => {
+    const items = [...fetchedNewsItems];
+    if (!loading && live?.status && !['Active','OK','Na',''].includes(live.status)) {
+      const isBad = ['Out','Injured_Reserve','IR','Non_Football_Injury','NFI'].includes(live.status);
+      items.unshift({
+        source: 'Sleeper',
+        sourceColor: '#7c5cbf',
+        title: `${live.status}${live.injuryBodyPart ? ` — ${live.injuryBodyPart}` : ''}`,
+        body: null,
+        fetchedAt: Date.now(),
+        impact: isBad ? 'bad' : live.status === 'Questionable' || live.status === 'Doubtful' ? 'medium' : 'low',
+      });
+    }
+    // Fall back to static news when live APIs returned nothing
+    if (!newsLoading && items.length === 0) {
+      const staticItems = NEWS.filter(n => n.playerId === player.id);
+      for (const n of staticItems) {
+        items.push({
+          source: n.source || 'Beat Writer',
+          sourceColor: '#888',
+          title: n.title || null,
+          body:  n.body  || null,
+          mins:  n.mins  || null,
+          impact: n.impact === 'high' ? 'bad' : n.impact || 'low',
+        });
+      }
+      if (player.news && items.length === 0) {
+        items.push({
+          source: 'Beat Writer',
+          sourceColor: '#888',
+          title: player.news,
+          body: player.status && player.status !== 'OK'
+            ? `${player.name} listed as ${player.status}. Monitor practice reports.`
+            : null,
+          fetchedAt: Date.now() - 3_600_000,
+          impact: player.status && player.status !== 'OK' ? 'medium' : 'low',
+        });
+      }
+    }
+    return items;
+  }, [fetchedNewsItems, live, loading, newsLoading, player]);
+
   const sleeperAvatarUrl = live?.sleeperId
     ? `https://sleepercdn.com/avatars/${live.sleeperId}`
     : null;
@@ -694,7 +840,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                 </div>
               </div>
 
-              <PlayerNewsCard player={player} />
+              <PlayerNewsCard items={playerNewsItems} loading={newsLoading || loading} playerName={player.name} />
             </React.Fragment>
           )}
 
@@ -755,20 +901,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
 
           {/* ── News ── */}
           {activeTab === 'news' && (
-            <div>
-              {NEWS.filter(n => n.playerId === player.id).concat([
-                { id:90, mins:480, impact:'low', source:'Pre-season', title:`${player.name} expected to lead position group in snaps`, body:'Reports out of camp consistent with usage projections.' }
-              ]).map(n => (
-                <div key={n.id} className="muted-card" style={{ marginBottom:10 }}>
-                  <div className="flex gap-8" style={{ justifyContent:'space-between', marginBottom:6 }}>
-                    <span className="mono dim" style={{ fontSize:11 }}>{n.mins < 60 ? `${n.mins}m` : `${Math.floor(n.mins/60)}h`} ago · {n.source}</span>
-                    <span className={`news-impact impact-${n.impact}`}>{n.impact}</span>
-                  </div>
-                  <div style={{ fontWeight:600, marginBottom:4 }}>{n.title}</div>
-                  <div className="dim" style={{ fontSize:12 }}>{n.body}</div>
-                </div>
-              ))}
-            </div>
+            <PlayerNewsCard items={playerNewsItems} loading={newsLoading || loading} playerName={player.name} />
           )}
 
           {/* ── Matchup ── */}

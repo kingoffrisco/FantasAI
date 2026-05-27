@@ -3,18 +3,18 @@ import { LEAGUE_TEAMS, findTeam } from '../lib/data.js';
 import { getMyTeamPrefs, saveMyTeamPrefs, clearMyTeamPrefs } from '../lib/leagueStore.js';
 
 const LIGHT_SURFACE_VARS = {
-  '--bg': '#f4f5f8', '--bg-2': '#eceef4', '--panel': '#ffffff',
-  '--panel-2': '#f0f1f6', '--panel-3': '#e7eaf2',
-  '--border': '#d3d7e8', '--border-strong': '#b6bbcf', '--hover': '#e4e7f0',
-  '--text': '#191c2e', '--text-dim': '#4a5270', '--text-faint': '#8890aa',
+  '--bg': '#b8bfd4', '--bg-2': '#aeb5ca', '--panel': '#c4cbde',
+  '--panel-2': '#bec5da', '--panel-3': '#b6bdd2',
+  '--border': '#7e88a8', '--border-strong': '#626c90', '--hover': '#b2b9d0',
+  '--text': '#070a1c', '--text-dim': '#1a2038', '--text-faint': '#343c62',
 };
 
 const THEMES = [
-  { id: 'sportsbook-dark', label: 'Sportsbook Dark', accent: '#c6ff3a', bg: '#060912' },
-  { id: 'midnight-gold',   label: 'Midnight Gold',   accent: '#ffd700', bg: '#080808' },
-  { id: 'raven-purple',    label: 'Raven Purple',    accent: '#b78bff', bg: '#07050f' },
-  { id: 'gridiron-green',  label: 'Gridiron Green',  accent: '#00e676', bg: '#050c08' },
-  { id: 'blitz-red',       label: 'Blitz Red',       accent: '#ff4d6d', bg: '#0c0608' },
+  { id: 'sportsbook-dark', label: 'Sportsbook Dark', accent: '#c6ff3a', accent2: '#4ea8ff', bg: '#060912' },
+  { id: 'steel-city',      label: 'Steel City',      accent: '#ffb800', accent2: '#00aaff', bg: '#0a0c10' },
+  { id: 'coastal-dusk',    label: 'Coastal Dusk',    accent: '#00e0c8', accent2: '#ff6050', bg: '#04101e' },
+  { id: 'ember',           label: 'Ember',            accent: '#ff7c20', accent2: '#00cfff', bg: '#0e0c08' },
+  { id: 'royal-crimson',   label: 'Royal Crimson',   accent: '#e53338', accent2: '#ffd700', bg: '#0c0808' },
 ];
 
 const THEME_VARS = {
@@ -23,25 +23,25 @@ const THEME_VARS = {
     '--panel-3': '#1c2540', '--border': '#1f2740', '--border-strong': '#2c365a', '--hover': '#19223b',
     '--accent': '#c6ff3a', '--accent-ink': '#0a1300', '--accent-2': '#4ea8ff',
   },
-  'midnight-gold': {
-    '--bg': '#080808', '--bg-2': '#0d0d0d', '--panel': '#141414', '--panel-2': '#1a1a1a',
-    '--panel-3': '#212121', '--border': '#2a2a2a', '--border-strong': '#3c3c3c', '--hover': '#1f1f1f',
-    '--accent': '#ffd700', '--accent-ink': '#1a1200', '--accent-2': '#ffa733',
+  'steel-city': {
+    '--bg': '#0a0c10', '--bg-2': '#0e1118', '--panel': '#141820', '--panel-2': '#1a2030',
+    '--panel-3': '#202840', '--border': '#282e42', '--border-strong': '#36405a', '--hover': '#1c2234',
+    '--accent': '#ffb800', '--accent-ink': '#1a1000', '--accent-2': '#00aaff',
   },
-  'raven-purple': {
-    '--bg': '#07050f', '--bg-2': '#0c0918', '--panel': '#110d20', '--panel-2': '#17112b',
-    '--panel-3': '#1d1535', '--border': '#271f42', '--border-strong': '#382c5c', '--hover': '#1a1430',
-    '--accent': '#b78bff', '--accent-ink': '#120040', '--accent-2': '#ff8bcc',
+  'coastal-dusk': {
+    '--bg': '#04101e', '--bg-2': '#071628', '--panel': '#0c1d34', '--panel-2': '#122442',
+    '--panel-3': '#192d52', '--border': '#1e3460', '--border-strong': '#2a4480', '--hover': '#0e2040',
+    '--accent': '#00e0c8', '--accent-ink': '#001a16', '--accent-2': '#ff6050',
   },
-  'gridiron-green': {
-    '--bg': '#050c08', '--bg-2': '#091410', '--panel': '#0c1610', '--panel-2': '#111e16',
-    '--panel-3': '#16261b', '--border': '#1e3427', '--border-strong': '#2b4d38', '--hover': '#132019',
-    '--accent': '#00e676', '--accent-ink': '#001a0d', '--accent-2': '#ffb700',
+  'ember': {
+    '--bg': '#0e0c08', '--bg-2': '#141008', '--panel': '#1a140a', '--panel-2': '#201a10',
+    '--panel-3': '#282016', '--border': '#342810', '--border-strong': '#4a3820', '--hover': '#1e1810',
+    '--accent': '#ff7c20', '--accent-ink': '#1a0a00', '--accent-2': '#00cfff',
   },
-  'blitz-red': {
-    '--bg': '#0c0608', '--bg-2': '#150a0d', '--panel': '#1a0e11', '--panel-2': '#211218',
-    '--panel-3': '#27161e', '--border': '#361e27', '--border-strong': '#502c3d', '--hover': '#1f1015',
-    '--accent': '#ff4d6d', '--accent-ink': '#1a0010', '--accent-2': '#ffb547',
+  'royal-crimson': {
+    '--bg': '#0c0808', '--bg-2': '#140c0c', '--panel': '#1a1010', '--panel-2': '#221414',
+    '--panel-3': '#2a1818', '--border': '#381c1c', '--border-strong': '#502828', '--hover': '#1e1414',
+    '--accent': '#e53338', '--accent-ink': '#1a0002', '--accent-2': '#ffd700',
   },
 };
 
@@ -81,12 +81,63 @@ export default function AccountEditScreen({ user }) {
   const [logoImg, setLogoImg]     = React.useState(savedPrefs.logoImg ?? null);
   const [saved, setSaved]         = React.useState(false);
   const [dragOver, setDragOver]   = React.useState(false);
-  const [activeTheme, setActiveTheme] = React.useState(localStorage.getItem('fantasai_theme') || 'sportsbook-dark');
+  const VALID_THEME_IDS = new Set(THEMES.map(t => t.id));
+  const storedTheme = localStorage.getItem('fantasai_theme') || 'sportsbook-dark';
+  const [activeTheme, setActiveTheme] = React.useState(VALID_THEME_IDS.has(storedTheme) ? storedTheme : 'sportsbook-dark');
   const [lightMode, setLightMode] = React.useState(localStorage.getItem('fantasai_light_mode') === 'true');
   const [aiPrompt, setAiPrompt]   = React.useState('');
   const [aiImgUrl, setAiImgUrl]   = React.useState('');
   const [promptCopied, setPromptCopied] = React.useState(false);
   const fileRef = React.useRef(null);
+
+  // ── Change Password state ──
+  const [currentPass, setCurrentPass]   = React.useState('');
+  const [newPass, setNewPass]           = React.useState('');
+  const [confirmPass, setConfirmPass]   = React.useState('');
+  const [showCurrent, setShowCurrent]   = React.useState(false);
+  const [showNew, setShowNew]           = React.useState(false);
+  const [showConfirm, setShowConfirm]   = React.useState(false);
+  const [passError, setPassError]       = React.useState('');
+  const [passStatus, setPassStatus]     = React.useState(null); // null | 'saving' | 'saved' | 'error'
+
+  const API_BASE = 'https://api.fantasai.net';
+  const OWNERS_KEY = 'fantasai_owners_config';
+  const DEFAULT_PASSWORD = 'fantasy2025';
+
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    setPassError('');
+    setPassStatus(null);
+
+    const overrides = (() => { try { return JSON.parse(localStorage.getItem(OWNERS_KEY) || '{}'); } catch { return {}; } })();
+    const myOverride = overrides[teamId] || {};
+    const expected = myOverride.password || DEFAULT_PASSWORD;
+
+    if (currentPass !== expected) { setPassError('Current password is incorrect.'); return; }
+    if (newPass.length < 8)       { setPassError('New password must be at least 8 characters.'); return; }
+    if (newPass !== confirmPass)  { setPassError('New passwords do not match.'); return; }
+
+    setPassStatus('saving');
+    const next = { ...overrides, [teamId]: { ...myOverride, password: newPass, passwordSet: true } };
+    localStorage.setItem(OWNERS_KEY, JSON.stringify(next));
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/owners/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) throw new Error('Server error');
+      setPassStatus('saved');
+      setCurrentPass('');
+      setNewPass('');
+      setConfirmPass('');
+      setTimeout(() => setPassStatus(null), 3000);
+    } catch {
+      setPassStatus('error');
+      setPassError('Saved locally but failed to sync to server. Try again.');
+    }
+  }
 
   function handleFile(file) {
     if (!file || !file.type.startsWith('image/')) return;
@@ -125,8 +176,7 @@ export default function AccountEditScreen({ user }) {
   }
 
   function applyTheme(themeId, isLight) {
-    const vars = THEME_VARS[themeId];
-    if (!vars) return;
+    const vars = THEME_VARS[themeId] ?? THEME_VARS['sportsbook-dark'];
     const merged = isLight ?? lightMode
       ? { ...vars, ...LIGHT_SURFACE_VARS }
       : vars;
@@ -231,17 +281,21 @@ export default function AccountEditScreen({ user }) {
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
-                  border: `2px solid ${activeTheme === t.id ? t.accent : 'var(--border)'}`,
-                  background: t.bg, color: '#e8ecf7',
+                  border: `2px solid ${activeTheme === t.id ? t.accent : 'rgba(255,255,255,.12)'}`,
+                  background: t.bg, color: '#e0e4f0',
                   fontFamily: 'var(--font-body)', fontSize: 12,
                   fontWeight: activeTheme === t.id ? 700 : 400,
                   transition: 'border-color .15s, box-shadow .15s',
-                  boxShadow: activeTheme === t.id ? `0 0 0 1px ${t.accent}44, 0 0 12px ${t.accent}22` : 'none',
+                  boxShadow: activeTheme === t.id ? `0 0 0 1px ${t.accent}55, 0 0 16px ${t.accent}28` : '0 2px 8px rgba(0,0,0,.4)',
                 }}
               >
-                <div style={{ width: 14, height: 14, borderRadius: 3, background: t.accent, flexShrink: 0 }} />
+                {/* Dual-color swatch */}
+                <div style={{ display: 'flex', flexShrink: 0, borderRadius: 4, overflow: 'hidden', border: '1px solid rgba(255,255,255,.12)' }}>
+                  <div style={{ width: 10, height: 16, background: t.accent }} />
+                  <div style={{ width: 10, height: 16, background: t.accent2 }} />
+                </div>
                 {t.label}
-                {activeTheme === t.id && <span style={{ fontSize: 10, color: t.accent, marginLeft: 2 }}>✓</span>}
+                {activeTheme === t.id && <span style={{ fontSize: 11, color: t.accent, marginLeft: 2 }}>✓</span>}
               </button>
             ))}
           </div>
@@ -453,6 +507,95 @@ export default function AccountEditScreen({ user }) {
             Changes saved — refresh any screen to see your updated logo and name.
           </div>
         )}
+
+        {/* ── Change Password ── */}
+        <div style={{ maxWidth: 640, marginTop: 40, paddingTop: 32, borderTop: '1px solid var(--border)' }}>
+          <label style={labelStyle}>Change Password</label>
+          <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 18, lineHeight: 1.6 }}>
+            Update your login password. Changes are saved to your browser and synced to the league server.
+          </div>
+          <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+            {/* Current password */}
+            <div>
+              <label style={labelStyle}>Current Password</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  className="input"
+                  type={showCurrent ? 'text' : 'password'}
+                  value={currentPass}
+                  onChange={e => { setCurrentPass(e.target.value); setPassError(''); }}
+                  placeholder="Enter your current password"
+                  style={{ width: '100%', paddingRight: 40 }}
+                />
+                <button type="button" onClick={() => setShowCurrent(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 15, padding: 0, lineHeight: 1 }}>
+                  {showCurrent ? '🙈' : '👁'}
+                </button>
+              </div>
+            </div>
+
+            {/* New password row */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <label style={labelStyle}>New Password</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    className="input"
+                    type={showNew ? 'text' : 'password'}
+                    value={newPass}
+                    onChange={e => { setNewPass(e.target.value); setPassError(''); }}
+                    placeholder="Min. 8 characters"
+                    style={{ width: '100%', paddingRight: 40 }}
+                  />
+                  <button type="button" onClick={() => setShowNew(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 15, padding: 0, lineHeight: 1 }}>
+                    {showNew ? '🙈' : '👁'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label style={labelStyle}>Confirm New Password</label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    className="input"
+                    type={showConfirm ? 'text' : 'password'}
+                    value={confirmPass}
+                    onChange={e => { setConfirmPass(e.target.value); setPassError(''); }}
+                    placeholder="Repeat new password"
+                    style={{ width: '100%', paddingRight: 40 }}
+                  />
+                  <button type="button" onClick={() => setShowConfirm(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 15, padding: 0, lineHeight: 1 }}>
+                    {showConfirm ? '🙈' : '👁'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {passError && (
+              <div style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>{passError}</div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <button
+                className="btn primary"
+                type="submit"
+                disabled={passStatus === 'saving' || !currentPass || !newPass || !confirmPass}
+                style={{ minWidth: 160 }}
+              >
+                {passStatus === 'saving' ? 'Saving…' : passStatus === 'saved' ? '✓ Password Updated' : 'Change Password'}
+              </button>
+              {passStatus === 'saved' && (
+                <span style={{ fontSize: 12, color: 'var(--good)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                  Synced to server
+                </span>
+              )}
+              {passStatus === 'error' && (
+                <span style={{ fontSize: 12, color: 'var(--warn)', fontFamily: 'var(--font-mono)' }}>
+                  Saved locally · server sync failed
+                </span>
+              )}
+            </div>
+          </form>
+        </div>
 
       </div>
     </div>

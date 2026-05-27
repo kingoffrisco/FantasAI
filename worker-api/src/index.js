@@ -1,5 +1,6 @@
 // FantasAI API Worker — api.fantasai.net
 //
+// POST /api/v1/chat                         — proxy to Databricks FantasAI chat endpoint (public, rate-limited by CF)
 // GET  /api/health
 // GET  /api/v1/storage/test              — live S3 connectivity check (read + write probe)
 // GET  /api/v1/owners/config              — read owner map from S3 (no auth)
@@ -23,6 +24,8 @@
 // GET  /api/v1/nfl/scoreboard?week=N&season=Y&type=pre|regular|post — ESPN live scores (public)
 // GET  /api/v1/nfl/schedule?week=N&season=Y  — ESPN weekly schedule (public)
 // GET  /api/v1/nfl/news?limit=N              — ESPN NFL news feed (public)
+// GET  /api/v1/players?limit=N&pos=QB,...   — Sleeper player pool ranked by search_rank (public, 1h cache)
+// GET  /api/v1/cbs/players                 — CBS league player list with RotoWire news (requires CBS_WORKER_URL)
 
 const S3_KEY              = 'fantasai/owners-config.json';
 const S3_LEAGUE_KEY       = 'fantasai/league-config.json';
@@ -51,6 +54,7 @@ export default {
     try {
       // ── POST routes (no auth — called directly by the app) ──────────────
       if (method === 'POST') {
+        if (url.pathname === '/api/v1/chat')                  return handleChat(request, env);
         if (url.pathname === '/api/v1/owners/config')         return handleOwnersConfigPost(request, env);
         if (url.pathname === '/api/v1/owners/reset-request')  return handleResetRequest(request, env);
         if (url.pathname === '/api/v1/owners/reset-complete') return handleResetComplete(request, env);
@@ -77,6 +81,9 @@ export default {
       if (url.pathname === '/api/v1/nfl/scoreboard')      return handleNflScoreboard(url);
       if (url.pathname === '/api/v1/nfl/schedule')        return handleNflSchedule(url);
       if (url.pathname === '/api/v1/nfl/news')            return handleNflNews(url);
+      if (url.pathname === '/api/v1/players')             return handlePlayers(url);
+      if (url.pathname === '/api/v1/cbs/players')         return await handleCbsPlayers(env);
+      if (url.pathname === '/api/v1/cbs/rankings')        return await handleCbsRankings(url, env);
 
       // ── Authenticated GET routes ─────────────────────────────────────────
       if (env.FANTASAI_KEY) {
@@ -349,6 +356,62 @@ async function handleDraft(url, env) {
   return cbsFetch(env, `/api/cbs/draft?year=${year}`);
 }
 
+async function handleCbsRankings(url, env) {
+  if (!env.CBS_WORKER_URL) return json({ error: 'CBS_WORKER_URL not configured', rankings: [], source: 'cbs' }, 503);
+  const pos  = url.searchParams.get('pos') || 'ALL';
+  const data = await cbsFetch(env, `/api/cbs/rankings?pos=${pos}`);
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { ...corsHeaders(), 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=900' },
+  });
+}
+
+async function handleCbsPlayers(env) {
+  if (!env.CBS_WORKER_URL) return json({ error: 'CBS_WORKER_URL not configured', players: [], count: 0, source: 'cbs' }, 503);
+  const data = await cbsFetch(env, '/api/cbs/players');
+  return new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { ...corsHeaders(), 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' },
+  });
+}
+
+// ── Players (public, cached 1 h) ──────────────────────────────────────────────
+
+async function handlePlayers(url) {
+  const limit     = Math.min(parseInt(url.searchParams.get('limit') || '300', 10), 500);
+  const posFilter = (url.searchParams.get('pos') || 'QB,RB,WR,TE,K,DEF').split(',');
+
+  const base = 'https://api.sleeper.app/v1';
+  const res  = await fetch(`${base}/players/nfl`, {
+    headers: { Accept: 'application/json' },
+    cf: { cacheTtl: 3600, cacheEverything: true },
+  });
+  if (!res.ok) throw new Error(`Sleeper /players/nfl → ${res.status}`);
+
+  const raw = await res.json();
+  const players = Object.entries(raw)
+    .filter(([, p]) => p.active && posFilter.includes(p.position) && p.search_rank != null)
+    .map(([sleeperId, p]) => ({
+      id:     sleeperId,
+      name:   p.full_name || [p.first_name, p.last_name].filter(Boolean).join(' '),
+      pos:    p.position,
+      team:   p.team || 'FA',
+      num:    p.number   || null,
+      age:    p.age      || null,
+      status: p.injury_status && p.injury_status !== 'Na' ? p.injury_status : 'OK',
+      ecr:    p.search_rank,
+      adp:    p.search_rank,
+      owned:  parseFloat(Math.max(0, 100 - p.search_rank * 0.28).toFixed(1)),
+    }))
+    .sort((a, b) => a.ecr - b.ecr)
+    .slice(0, limit);
+
+  return new Response(JSON.stringify({ players, fetchedAt: new Date().toISOString(), source: 'sleeper' }), {
+    status: 200,
+    headers: { ...corsHeaders(), 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' },
+  });
+}
+
 // ── Sleeper ───────────────────────────────────────────────────────────────────
 
 async function sleeperFetch(env, path) {
@@ -512,15 +575,26 @@ async function handleNflSchedule(url) {
       abbr:     c.team?.abbreviation,
       homeAway: c.homeAway,
     }));
+    const rawOdds = comp?.odds?.[0];
+    const odds = rawOdds ? {
+      details:    rawOdds.details  ?? null,
+      overUnder:  rawOdds.overUnder != null ? Number(rawOdds.overUnder) : null,
+      spread:     rawOdds.spread   != null ? Number(rawOdds.spread)    : null,
+      homeML:     rawOdds.homeTeamOdds?.moneyLine ?? null,
+      awayML:     rawOdds.awayTeamOdds?.moneyLine ?? null,
+    } : null;
     return {
-      id:        e.id,
-      date:      e.date,
-      name:      e.shortName,
-      venue:     comp?.venue?.fullName ?? null,
-      home:      competitors.find(c => c.homeAway === 'home'),
-      away:      competitors.find(c => c.homeAway === 'away'),
-      completed: e.status?.type?.completed ?? false,
-      broadcasts: (comp?.broadcasts || []).flatMap(b => b.names || []),
+      id:          e.id,
+      date:        e.date,
+      name:        e.shortName,
+      statusState: e.status?.type?.state ?? 'pre',          // pre | in | post
+      statusDetail:e.status?.type?.shortDetail ?? null,     // e.g. "8:20 PM ET"
+      venue:       comp?.venue?.fullName ?? null,
+      home:        competitors.find(c => c.homeAway === 'home'),
+      away:        competitors.find(c => c.homeAway === 'away'),
+      completed:   e.status?.type?.completed ?? false,
+      broadcasts:  (comp?.broadcasts || []).flatMap(b => b.names || []),
+      odds,
     };
   });
   return json({ source: 'espn', fetchedAt: new Date().toISOString(), season, week, type, games }, 200);
@@ -555,7 +629,12 @@ const PROXY_WHITELIST = [
   'tank01-fantasy-stats.p.rapidapi.com',
   'www.thesportsdb.com',
   'api.github.com',
+  'github.com',
+  'raw.githubusercontent.com',
+  'objects.githubusercontent.com',
   'api.mysportsfeeds.com',
+  'www.fantasypros.com',
+  'partners.fantasypros.com',
 ];
 
 async function handleProxy(url) {
@@ -738,6 +817,124 @@ function resolveWeekParams(url) {
   const type   = url.searchParams.get('type') || 'regular';
   return { week, season, type };
 }
+
+// ── FantasAI Chat (Databricks proxy) ─────────────────────────────────────────
+async function handleChat(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+
+  const question      = (body.question || '').trim();
+  if (!question) return json({ error: 'question is required' }, 400);
+
+  const context       = (body.context || '').trim();
+  const rosterPlayers = Array.isArray(body.rosterPlayers) ? body.rosterPlayers : [];
+
+  const workspaceUrl = (env.DATABRICKS_URL || '').replace(/\/$/, '');
+  const token        = env.DATABRICKS_TOKEN;
+  if (!workspaceUrl || !token) {
+    return json({ error: 'AI endpoint not configured — set DATABRICKS_URL and DATABRICKS_TOKEN secrets' }, 503);
+  }
+
+  // #2 — Server-side live enrichment: fetch real-time injury data for roster players
+  let liveEnrichment = '';
+  if (rosterPlayers.length > 0) {
+    try { liveEnrichment = await buildLiveEnrichment(rosterPlayers, env); }
+    catch (err) { console.warn('Live enrichment skipped:', err.message); }
+  }
+
+  const enrichedContext = liveEnrichment ? `${context}\n\n${liveEnrichment}` : context;
+  const fullQuestion    = enrichedContext ? `${enrichedContext}\n\nUser question: ${question}` : question;
+
+  // #3 — CF Cache: check before hitting Databricks
+  const cacheKey = await chatCacheKey(fullQuestion);
+  const cache    = caches.default;
+  const cached   = await cache.match(cacheKey);
+  if (cached) {
+    const data = await cached.json();
+    return new Response(JSON.stringify({ ...data, cached: true }), {
+      status: 200,
+      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    });
+  }
+
+  // #1 — Retry logic: up to 3 attempts with backoff (handles Databricks cold starts)
+  const endpointUrl = `${workspaceUrl}/serving-endpoints/fantasai-chat-api/invocations`;
+  let answer, lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await sleep(1500 * attempt);
+    try {
+      const res = await fetch(endpointUrl, {
+        method:  'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ inputs: { question: [fullQuestion] } }),
+        signal:  AbortSignal.timeout(28000),
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`Databricks ${res.status}: ${detail.slice(0, 200)}`);
+      }
+      const data = await res.json();
+      const raw  = data?.predictions?.[0];
+      answer  = typeof raw === 'string' ? raw : (raw?.answer ?? JSON.stringify(raw));
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`Databricks attempt ${attempt + 1}/3 failed: ${err.message}`);
+    }
+  }
+
+  if (lastErr) return json({ error: `Databricks unreachable: ${lastErr.message}` }, 502);
+
+  // #3 — Store in CF Cache for 5 minutes
+  const payload      = { answer };
+  const cacheResponse = new Response(JSON.stringify(payload), {
+    status:  200,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' },
+  });
+  await cache.put(cacheKey, cacheResponse);
+
+  return json(payload, 200);
+}
+
+async function buildLiveEnrichment(rosterPlayers, env) {
+  const base = env.SLEEPER_BASE || 'https://api.sleeper.app/v1';
+  const res  = await fetch(`${base}/players/nfl`, {
+    headers: { Accept: 'application/json' },
+    cf: { cacheTtl: 600, cacheEverything: true },
+  });
+  if (!res.ok) throw new Error(`Sleeper /players/nfl → ${res.status}`);
+  const allPlayers = await res.json();
+
+  // Build name → Sleeper player map
+  const byName = {};
+  for (const p of Object.values(allPlayers)) {
+    const name = p.full_name || [p.first_name, p.last_name].filter(Boolean).join(' ');
+    if (name) byName[name.toLowerCase()] = p;
+  }
+
+  const lines = [];
+  for (const rp of rosterPlayers) {
+    const sp = byName[rp.name?.toLowerCase()];
+    if (!sp) continue;
+    const status   = sp.injury_status && sp.injury_status !== 'Na' ? sp.injury_status : 'Active';
+    const injNote  = sp.injury_notes ? ` — ${sp.injury_notes}` : '';
+    const injPart  = sp.injury_body_part ? ` (${sp.injury_body_part})` : '';
+    lines.push(`  ${rp.pos}: ${rp.name} (${rp.team}) — Status: ${status}${injPart}${injNote}`);
+  }
+
+  return lines.length > 0
+    ? `LIVE INJURY DATA (real-time):\n${lines.join('\n')}`
+    : '';
+}
+
+async function chatCacheKey(prompt) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(prompt));
+  const hex  = [...new Uint8Array(hash)].map(x => x.toString(16).padStart(2, '0')).join('');
+  return `https://cache.fantasai.internal/chat/${hex}`;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function corsHeaders() {
   return {

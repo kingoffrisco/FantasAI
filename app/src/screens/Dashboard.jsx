@@ -5,6 +5,8 @@ import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 
+const API_BASE = 'https://api.fantasai.net';
+
 const NFL_SCHEDULE = [
   { key: 'hof',  label: 'Hall of Fame Game',  start: '2026-08-06', end: '2026-08-12', pre: true },
   { key: 'pre1', label: 'Preseason Week 1',   start: '2026-08-13', end: '2026-08-19', pre: true },
@@ -87,7 +89,7 @@ function buildStandings(cbsRaw) {
   }).sort((a, b) => b.w - a.w || b.pf - a.pf);
 }
 
-export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new Set(), sourcesState, slotOverrides = {}, watchlistIds = new Set() }) {
+export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new Set(), sourcesState, slotOverrides = {}, watchlistIds = new Set(), tradeOffers = [] }) {
   const { data: cbsTeams } = useApi(() => api.teams(), []);
   const standings = React.useMemo(() => buildStandings(cbsTeams), [cbsTeams]);
   const currentWeek = React.useMemo(getCurrentWeek, []);
@@ -170,6 +172,11 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   // 2026 season record from live standings (0-0 until games are played)
   const myStanding = standings?.find(s => s.me) ?? null;
   const record2026 = myStanding ? `${myStanding.w}-${myStanding.l}` : '0-0';
+
+  // Waiver priority = inverse of standings rank (last place picks first = priority #1)
+  const totalTeams = LEAGUE_TEAMS.length;
+  const myStandingsRank = standings ? standings.findIndex(s => s.me) + 1 : null;
+  const waiverPosition  = myStandingsRank ? (totalTeams - myStandingsRank + 1) : null;
 
   // Build starting lineup from league settings frame (stays in sync with CurrentRoster)
   const rosterSettings = React.useMemo(() => {
@@ -308,9 +315,31 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   return (
     <div className="col" style={{ height: '100%', overflow: 'auto' }}>
       <div className="page-head">
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
           <div>
-            <h1>{weekLabel} Dashboard</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <h1 style={{ margin: 0 }}>{weekLabel} Dashboard</h1>
+              {(() => {
+                const pending = tradeOffers.filter(o => o.status === 'pending' && (o.fromTeamId === teamId || o.toTeamId === teamId));
+                if (!pending.length) return null;
+                const incoming = pending.filter(o => o.toTeamId === teamId);
+                const outgoing = pending.filter(o => o.fromTeamId === teamId);
+                return (
+                  <span
+                    onClick={() => onNav('roster')}
+                    style={{ cursor: 'pointer', fontSize: 12, fontWeight: 900, color: '#1a0d00', background: '#FFD700', borderRadius: 6, padding: '3px 10px', letterSpacing: '.02em', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
+                    title="Click to view trade offers on your roster"
+                  >
+                    ↔ TRADE PENDING
+                    {(incoming.length + outgoing.length) > 1 && (
+                      <span style={{ background: 'rgba(0,0,0,.2)', borderRadius: 4, padding: '0 5px', fontSize: 10 }}>
+                        {incoming.length + outgoing.length}
+                      </span>
+                    )}
+                  </span>
+                );
+              })()}
+            </div>
             <div className="sub">{subLine}</div>
           </div>
           <span style={{ fontSize: 22, fontWeight: 900, color: '#FFD700', letterSpacing: '-.01em', lineHeight: 1 }}>
@@ -322,6 +351,122 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           <button className="btn primary" onClick={() => onNav('draft')}>▶ Open Draft Room</button>
         </div>
       </div>
+
+      {/* ── Live H2H Scoreboard ──────────────────────────────────────────────── */}
+      {(() => {
+        const wkNum = currentWeek.num;
+        if (!wkNum) return null; // offseason / preseason — no matchup
+        const opp = getOpponent(teamId, wkNum);
+        if (!opp) return null;
+
+        // My score: prefer sum of Sleeper live projections, fall back to totalProj
+        const mySleeperTotal = starters.reduce((s, r) => {
+          const live = sleeperRosterData[r.playerId];
+          return live?.proj != null ? s + live.proj : s + (findPlayer(r.playerId)?.proj || 0);
+        }, 0);
+        const myScore = mySleeperTotal;
+
+        // Opponent's score: sum of their starters' avg + deterministic week seed
+        const oppRoster    = TEAM_ROSTERS[opp.id] || [];
+        const oppStarters  = oppRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
+        const oppBase      = oppStarters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
+        const oppSeed      = Math.sin(opp.id * 7.3 + wkNum * 3.1) * 18 + Math.cos(opp.id * 2.1 + wkNum * 5.7) * 8;
+        const oppScore     = Math.max(0, Math.round((oppBase + oppSeed) * 10) / 10);
+
+        const diff       = myScore - oppScore;
+        const isWinning  = diff >= 0;
+        const winColor   = isWinning ? 'var(--good)' : 'var(--danger)';
+        const winPct     = myScore + oppScore > 0 ? Math.round((myScore / (myScore + oppScore)) * 100) : 50;
+        const isLiveWeek = !isOffseason && !isPre;
+
+        return (
+          <div style={{ padding: '0 24px 16px' }}>
+            <div style={{
+              borderRadius: 12,
+              border: `1px solid ${isWinning ? 'rgba(76,175,130,.35)' : 'rgba(255,90,110,.3)'}`,
+              background: isWinning ? 'rgba(76,175,130,.06)' : 'rgba(255,90,110,.06)',
+              padding: '14px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0,
+            }}>
+              {/* Label */}
+              <div style={{ minWidth: 100 }}>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 3 }}>
+                  Week {wkNum} · H2H
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  {isLiveWeek && (
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--good)', boxShadow: '0 0 6px var(--good)', flexShrink: 0, animation: 'pulse 2s infinite' }} />
+                  )}
+                  <span style={{ fontSize: 10, fontWeight: 700, color: isLiveWeek ? 'var(--good)' : 'var(--text-faint)' }}>
+                    {isLiveWeek ? 'LIVE' : 'PROJECTED'}
+                  </span>
+                </div>
+              </div>
+
+              {/* My team */}
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
+                {team?.logoImg ? (
+                  <img src={team.logoImg} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+                ) : (
+                  <span style={{ width: 36, height: 36, borderRadius: 8, background: team?.color || 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
+                    {team?.logo || '??'}
+                  </span>
+                )}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{teamName}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>{sleeperOn ? 'Sleeper proj' : 'FantasAI proj'}</div>
+                </div>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: isWinning ? 'var(--good)' : 'var(--text)', lineHeight: 1, marginLeft: 'auto' }}>
+                  {myScore.toFixed(1)}
+                </div>
+              </div>
+
+              {/* VS + diff */}
+              <div style={{ padding: '0 20px', textAlign: 'center', flexShrink: 0 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 4 }}>vs</div>
+                <div style={{
+                  fontSize: 13, fontWeight: 900, color: winColor,
+                  background: isWinning ? 'rgba(76,175,130,.15)' : 'rgba(255,90,110,.15)',
+                  border: `1px solid ${isWinning ? 'rgba(76,175,130,.3)' : 'rgba(255,90,110,.3)'}`,
+                  borderRadius: 6, padding: '2px 8px', fontFamily: 'var(--font-mono)',
+                }}>
+                  {diff >= 0 ? '+' : ''}{diff.toFixed(1)}
+                </div>
+                <div style={{ fontSize: 9, color: 'var(--text-faint)', marginTop: 4 }}>{winPct}% win</div>
+              </div>
+
+              {/* Opponent */}
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, flexDirection: 'row-reverse' }}>
+                {opp.logoImg ? (
+                  <img src={opp.logoImg} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+                ) : (
+                  <span style={{ width: 36, height: 36, borderRadius: 8, background: opp.color || '#555', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
+                    {opp.logo || '??'}
+                  </span>
+                )}
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{opp.name}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>{oppStarters.length} starters</div>
+                </div>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: !isWinning ? 'var(--danger)' : 'var(--text-dim)', lineHeight: 1, marginRight: 'auto' }}>
+                  {oppScore.toFixed(1)}
+                </div>
+              </div>
+
+              {/* Nav button */}
+              <button
+                className="btn ghost sm"
+                onClick={() => onNav('h2h')}
+                style={{ marginLeft: 16, flexShrink: 0, fontSize: 11 }}
+              >
+                Full H2H →
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       <div style={{ padding: 24, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         <div className="stat">
@@ -337,11 +482,16 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
       <div style={{ padding: '0 24px 24px', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 16 }}>
         <div className="card">
           <div className="card-head">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1 }}>
+              {team?.logoImg ? (
+                <img src={team.logoImg} alt="logo" style={{ width: 56, height: 56, borderRadius: 10, objectFit: 'cover', flexShrink: 0, boxShadow: '0 2px 12px rgba(0,0,0,.4)' }} />
+              ) : (
+                <span style={{ width: 56, height: 56, borderRadius: 10, background: team?.color || 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 900, color: '#000', flexShrink: 0, boxShadow: '0 2px 12px rgba(0,0,0,.4)' }}>
+                  {team?.logo || '??'}
+                </span>
+              )}
             <div>
               <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span
-                  style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: team?.color || 'var(--accent)', flexShrink: 0 }}
-                />
                 Starting Lineup — {teamName}
                 {(() => {
                   const wkNum  = currentWeek.num;
@@ -381,6 +531,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                   )}
                 </span>
               </div>
+            </div>
             </div>
             <button className="btn sm ghost" onClick={() => onNav('roster')}>Edit →</button>
           </div>
@@ -434,8 +585,138 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           </table>
         </div>
 
-        {/* ── Middle column: Champions Corner above Commissioner Message ── */}
+        {/* ── Middle column: Commissioner Message then Lineup Decisions ── */}
         <div className="col gap-12" style={{ alignSelf: 'start' }}>
+
+        {/* Commissioner Message — center column */}
+        <div className="card" style={{ borderLeft: '3px solid var(--accent)', alignSelf: 'start' }}>
+          <div className="card-head" style={{ paddingBottom: 6 }}>
+            <div className="card-title" style={{ fontSize: 12 }}>
+              <span style={{ marginRight: 6 }}>📢</span>Commissioner Message
+            </div>
+            {canEditCommish && !editingCommish && (
+              <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 8px' }} onClick={startEditCommish}>Edit</button>
+            )}
+          </div>
+
+          {editingCommish ? (
+            <div style={{ padding: '0 16px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* Media preview while editing */}
+              {commishMediaDraft?.url && (
+                <div style={{ position: 'relative' }}>
+                  {commishMediaDraft.type === 'image'
+                    ? <img src={commishMediaDraft.url} alt="" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                    : <video src={commishMediaDraft.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 140, borderRadius: 6, display: 'block' }} />
+                  }
+                  <button
+                    onClick={() => setCommishMediaDraft(null)}
+                    style={{ position: 'absolute', top: 5, right: 5, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}
+                  >✕ Remove</button>
+                </div>
+              )}
+              {/* Message textarea */}
+              <textarea
+                className="input"
+                rows={4}
+                value={commishTextDraft}
+                onChange={e => setCommishTextDraft(e.target.value)}
+                style={{ resize: 'vertical', fontSize: 12, lineHeight: 1.6, width: '100%', boxSizing: 'border-box' }}
+                placeholder="Type your commissioner message…"
+              />
+              {/* Video URL */}
+              <input
+                className="input"
+                placeholder="YouTube / Vimeo URL (optional)…"
+                value={commishUrlDraft}
+                onChange={e => setCommishUrlDraft(e.target.value)}
+                style={{ fontSize: 12 }}
+              />
+              {/* File upload + actions */}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input ref={commishMediaRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCommishMediaUpload} />
+                <button className="btn ghost sm" onClick={() => commishMediaRef.current?.click()} style={{ fontSize: 11 }}>
+                  📷 {commishMediaDraft?.url ? 'Replace File' : 'Upload Image / Video'}
+                </button>
+                <button className="btn primary sm" onClick={saveCommishMessage}>Save</button>
+                <button className="btn ghost sm" onClick={() => setEditingCommish(false)}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {commishData.media?.url && (
+                <div style={{ padding: '0 16px 8px' }}>
+                  {commishData.media.type === 'image'
+                    ? <img src={commishData.media.url} alt="Commissioner media" style={{ width: '100%', maxHeight: 200, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                    : <video src={commishData.media.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 180, borderRadius: 6, display: 'block' }} />
+                  }
+                </div>
+              )}
+              {commishData.media?.videoUrl && (
+                <div style={{ padding: '0 16px 8px' }}>
+                  <iframe
+                    src={getCommishEmbedUrl(commishData.media.videoUrl)}
+                    style={{ width: '100%', height: 180, borderRadius: 6, border: 'none', display: 'block' }}
+                    allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    title="Commissioner Video"
+                  />
+                </div>
+              )}
+              {commishData.text && (
+                <div style={{ padding: '4px 16px 14px', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.65 }}>
+                  {commishData.text}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Lineup Decisions — below Commissioner Message */}
+        {(() => {
+            const allRostered = new Set(
+              LEAGUE_TEAMS.flatMap(t => (TEAM_ROSTERS[t.id] || []).map(r => r.playerId).filter(Boolean))
+            );
+            const watchlistAvailable = PLAYERS
+              .filter(p => watchlistIds.has(p.id) && !allRostered.has(p.id))
+              .sort((a, b) => b.proj - a.proj)
+              .slice(0, 3);
+
+            return (
+              <div className="muted-card" style={{ borderLeft: '3px solid var(--accent-2)' }}>
+                <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 8 }}>
+                  <div className="ai-orb" style={{ width: 22, height: 22 }}></div>
+                  <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--accent-2)' }}>Lineup Decisions</span>
+                </div>
+                <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+                  <div style={{ marginBottom: 8 }}><strong className="accent">FLEX:</strong> Start Cook over Gibbs (matchup edge, +1.4 proj)</div>
+                  <div style={{ marginBottom: 8 }}><strong className="accent">TE:</strong> Bowers locked. McBride upside higher but variance ±9.</div>
+                  <div><strong style={{ color: 'var(--warn)' }}>CMC watch:</strong> If listed Out by Saturday, Cook moves to RB2 and Achane to FLEX.</div>
+                </div>
+                {watchlistAvailable.length > 0 && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent-2)', letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 6 }}>
+                      ★ Watchlist · Available Now
+                    </div>
+                    {watchlistAvailable.map(p => (
+                      <div key={p.id} onClick={() => onOpenPlayer(p.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5, cursor: 'pointer' }}>
+                        <PosBadge pos={p.pos} />
+                        <span style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{p.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{p.team}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{p.proj.toFixed(1)}</span>
+                        <button className="btn primary sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={e => { e.stopPropagation(); onNav('roster'); }}>Add</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button className="btn ai sm" style={{ marginTop: 10 }}>Apply suggestions</button>
+              </div>
+            );
+          })()}
+
+        </div>{/* end middle column */}
+
+        {/* Right column: Champions Corner + News */}
+        <div className="col gap-12">
 
         {/* ── Champions Corner — expandable card ── */}
         <div style={{
@@ -565,135 +846,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           )}
         </div>
 
-        {/* Commissioner Message — center column */}
-        <div className="card" style={{ borderLeft: '3px solid var(--accent)', alignSelf: 'start' }}>
-          <div className="card-head" style={{ paddingBottom: 6 }}>
-            <div className="card-title" style={{ fontSize: 12 }}>
-              <span style={{ marginRight: 6 }}>📢</span>Commissioner Message
-            </div>
-            {canEditCommish && !editingCommish && (
-              <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 8px' }} onClick={startEditCommish}>Edit</button>
-            )}
-          </div>
-
-          {editingCommish ? (
-            <div style={{ padding: '0 16px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {/* Media preview while editing */}
-              {commishMediaDraft?.url && (
-                <div style={{ position: 'relative' }}>
-                  {commishMediaDraft.type === 'image'
-                    ? <img src={commishMediaDraft.url} alt="" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
-                    : <video src={commishMediaDraft.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 140, borderRadius: 6, display: 'block' }} />
-                  }
-                  <button
-                    onClick={() => setCommishMediaDraft(null)}
-                    style={{ position: 'absolute', top: 5, right: 5, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}
-                  >✕ Remove</button>
-                </div>
-              )}
-              {/* Message textarea */}
-              <textarea
-                className="input"
-                rows={4}
-                value={commishTextDraft}
-                onChange={e => setCommishTextDraft(e.target.value)}
-                style={{ resize: 'vertical', fontSize: 12, lineHeight: 1.6, width: '100%', boxSizing: 'border-box' }}
-                placeholder="Type your commissioner message…"
-              />
-              {/* Video URL */}
-              <input
-                className="input"
-                placeholder="YouTube / Vimeo URL (optional)…"
-                value={commishUrlDraft}
-                onChange={e => setCommishUrlDraft(e.target.value)}
-                style={{ fontSize: 12 }}
-              />
-              {/* File upload + actions */}
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                <input ref={commishMediaRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCommishMediaUpload} />
-                <button className="btn ghost sm" onClick={() => commishMediaRef.current?.click()} style={{ fontSize: 11 }}>
-                  📷 {commishMediaDraft?.url ? 'Replace File' : 'Upload Image / Video'}
-                </button>
-                <button className="btn primary sm" onClick={saveCommishMessage}>Save</button>
-                <button className="btn ghost sm" onClick={() => setEditingCommish(false)}>Cancel</button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {commishData.media?.url && (
-                <div style={{ padding: '0 16px 8px' }}>
-                  {commishData.media.type === 'image'
-                    ? <img src={commishData.media.url} alt="Commissioner media" style={{ width: '100%', maxHeight: 200, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
-                    : <video src={commishData.media.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 180, borderRadius: 6, display: 'block' }} />
-                  }
-                </div>
-              )}
-              {commishData.media?.videoUrl && (
-                <div style={{ padding: '0 16px 8px' }}>
-                  <iframe
-                    src={getCommishEmbedUrl(commishData.media.videoUrl)}
-                    style={{ width: '100%', height: 180, borderRadius: 6, border: 'none', display: 'block' }}
-                    allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    title="Commissioner Video"
-                  />
-                </div>
-              )}
-              {commishData.text && (
-                <div style={{ padding: '4px 16px 14px', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.65 }}>
-                  {commishData.text}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        </div>{/* end middle column */}
-
-        {/* Right column: AI decisions + News */}
-        <div className="col gap-12">
-          {(() => {
-            // Build set of all rostered player IDs across the whole league
-            const allRostered = new Set(
-              LEAGUE_TEAMS.flatMap(t => (TEAM_ROSTERS[t.id] || []).map(r => r.playerId).filter(Boolean))
-            );
-            // Watchlist players that are free agents (not on any roster)
-            const watchlistAvailable = PLAYERS
-              .filter(p => watchlistIds.has(p.id) && !allRostered.has(p.id))
-              .sort((a, b) => b.proj - a.proj)
-              .slice(0, 3);
-
-            return (
-              <div className="muted-card" style={{ borderLeft: '3px solid var(--accent-2)' }}>
-                <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 8 }}>
-                  <div className="ai-orb" style={{ width: 22, height: 22 }}></div>
-                  <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--accent-2)' }}>Lineup Decisions</span>
-                </div>
-                <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-                  <div style={{ marginBottom: 8 }}><strong className="accent">FLEX:</strong> Start Cook over Gibbs (matchup edge, +1.4 proj)</div>
-                  <div style={{ marginBottom: 8 }}><strong className="accent">TE:</strong> Bowers locked. McBride upside higher but variance ±9.</div>
-                  <div><strong style={{ color: 'var(--warn)' }}>CMC watch:</strong> If listed Out by Saturday, Cook moves to RB2 and Achane to FLEX.</div>
-                </div>
-                {watchlistAvailable.length > 0 && (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent-2)', letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 6 }}>
-                      ★ Watchlist · Available Now
-                    </div>
-                    {watchlistAvailable.map(p => (
-                      <div key={p.id} onClick={() => onOpenPlayer(p.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5, cursor: 'pointer' }}>
-                        <PosBadge pos={p.pos} />
-                        <span style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{p.name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{p.team}</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{p.proj.toFixed(1)}</span>
-                        <button className="btn primary sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={e => { e.stopPropagation(); onNav('roster'); }}>Add</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <button className="btn ai sm" style={{ marginTop: 10 }}>Apply suggestions</button>
-              </div>
-            );
-          })()}
           <div className="card">
             <div className="card-head">
               <div className="card-title">
@@ -787,7 +939,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
             </tbody>
           </table>
         </div>
-        <WeeklyCalendar weekLabel={weekLabel} />
+        <WeeklyCalendar weekLabel={weekLabel} waiverPosition={waiverPosition} totalTeams={totalTeams} />
       </div>
     </div>
   );
@@ -807,13 +959,77 @@ const DEFAULT_EVENTS = [
   { id: 'sun-lock',  day: 'Sunday',    time: '12:55 PM ET', label: 'Lineup Lock',             type: 'lock'   },
 ];
 
-function WeeklyCalendar({ weekLabel }) {
+// Maps broadcast names to event slot keys (primetime games only)
+const BROADCAST_SLOT = {
+  'TNF': 'thu-tnf', 'PRIME VIDEO': 'thu-tnf', 'AMAZON PRIME': 'thu-tnf', 'AMAZON': 'thu-tnf',
+  'NBC': 'sun-snf',
+  'ESPN': 'mon-mnf', 'ABC': 'mon-mnf', 'ESPN2': 'mon-mnf',
+};
+
+const INJURY_STATUS_SHORT = {
+  Questionable: 'Q', Doubtful: 'D', Out: 'O', Injured_Reserve: 'IR',
+  Non_Football_Injury: 'NFI', Suspended: 'SUS', 'Physically Unable to Perform': 'PUP',
+};
+const INJURY_COLOR = { Q: '#ff8c00', D: 'var(--warn)', O: 'var(--danger)', IR: 'var(--danger)', SUS: '#cc44ff', NFI: '#aaa', PUP: '#aaa' };
+
+function formatGameTime(isoDate) {
+  if (!isoDate) return null;
+  try {
+    return new Date(isoDate).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', hour12: true }) + ' ET';
+  } catch { return null; }
+}
+
+function formatSpread(odds, away, home) {
+  if (!odds?.details) return null;
+  // ESPN "details" is already formatted, e.g. "KC -3" or "PK"
+  return odds.details;
+}
+
+function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams }) {
   const events = React.useMemo(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
       return saved?.weeklyEvents ?? DEFAULT_EVENTS;
     } catch { return DEFAULT_EVENTS; }
   }, []);
+
+  const [nflGames,      setNflGames]      = React.useState([]);
+  const [injuryByTeam,  setInjuryByTeam]  = React.useState({});  // { [teamAbbr]: [{name, pos, status}] }
+
+  React.useEffect(() => {
+    fetch(`${API_BASE}/api/v1/nfl/schedule`, { signal: AbortSignal.timeout(8000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.games) setNflGames(d.games); })
+      .catch(() => {});
+
+    // Fetch Sleeper player pool for league-wide injury data (top 500 by ECR, status field mapped)
+    fetch(`${API_BASE}/api/v1/players?limit=500`, { signal: AbortSignal.timeout(12000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d?.players) return;
+        const byTeam = {};
+        for (const p of d.players) {
+          if (!p.status || p.status === 'OK' || !p.team || p.team === 'FA') continue;
+          const abbr = p.team.toUpperCase();
+          if (!byTeam[abbr]) byTeam[abbr] = [];
+          byTeam[abbr].push({ name: p.name || '', pos: p.pos || '', status: p.status });
+        }
+        setInjuryByTeam(byTeam);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Map broadcast slot → full game object (first match wins)
+  const slotGame = React.useMemo(() => {
+    const map = {};
+    for (const g of nflGames) {
+      for (const b of (g.broadcasts || [])) {
+        const key = BROADCAST_SLOT[b.toUpperCase()];
+        if (key && !map[key]) map[key] = g;
+      }
+    }
+    return map;
+  }, [nflGames]);
 
   // Today's day of week for highlighting
   const todayDay = new Date().toLocaleDateString('en-US', { weekday: 'long' });
@@ -842,34 +1058,115 @@ function WeeklyCalendar({ weekLabel }) {
           return (
             <div key={day} style={{ borderTop: '1px solid var(--border)' }}>
               <div style={{
-                padding: '6px 14px 4px',
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: '.1em',
-                textTransform: 'uppercase',
+                padding: '6px 14px 4px', fontSize: 10, fontWeight: 700,
+                letterSpacing: '.1em', textTransform: 'uppercase',
                 color: isToday ? 'var(--accent)' : 'var(--text-faint)',
                 background: isToday ? 'rgba(198,255,58,.06)' : undefined,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
+                display: 'flex', alignItems: 'center', gap: 6,
               }}>
                 {day}
                 {isToday && <span style={{ fontSize: 8, background: 'var(--accent)', color: '#0a1300', borderRadius: 3, padding: '1px 5px', fontWeight: 800 }}>TODAY</span>}
               </div>
-              {dayEvts.map(evt => (
-                <div key={evt.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 14px 5px 18px' }}>
-                  <span style={{
-                    fontSize: 9,
-                    fontFamily: 'var(--font-mono)',
-                    fontWeight: 700,
-                    color: TYPE_COLOR[evt.type] ?? TYPE_COLOR.other,
-                    flexShrink: 0,
-                    width: 44,
-                  }}>{TYPE_LABEL[evt.type] ?? 'EVENT'}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-dim)', flex: 1 }}>{evt.label}</span>
-                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', flexShrink: 0 }}>{evt.time}</span>
-                </div>
-              ))}
+
+              {dayEvts.map(evt => {
+                const game     = slotGame[evt.id];
+                const isWaiver = evt.type === 'waiver';
+                const typeColor = TYPE_COLOR[evt.type] ?? TYPE_COLOR.other;
+
+                // For non-game events or events without live data — compact row
+                if (!game) {
+                  return (
+                    <div key={evt.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 14px 5px 18px' }}>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, flexShrink: 0, width: 44 }}>
+                        {TYPE_LABEL[evt.type] ?? 'EVENT'}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{evt.label}</span>
+                        {isWaiver && waiverPosition && (
+                          <span style={{ marginLeft: 7, fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--warn)' }}>
+                            #{waiverPosition}{totalTeams ? ` of ${totalTeams}` : ''} priority
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', flexShrink: 0 }}>{evt.time}</span>
+                    </div>
+                  );
+                }
+
+                // Rich game card for primetime matchups with live ESPN data
+                const awayAbbr   = game.away?.abbr?.toUpperCase() ?? '';
+                const homeAbbr   = game.home?.abbr?.toUpperCase() ?? '';
+                const awayName   = game.away?.name ?? awayAbbr;
+                const homeName   = game.home?.name ?? homeAbbr;
+                const gameTime   = formatGameTime(game.date);
+                const spread     = formatSpread(game.odds, game.away, game.home);
+                const overUnder  = game.odds?.overUnder != null ? `O/U ${game.odds.overUnder}` : null;
+                const network    = game.broadcasts?.filter(b => b && b.trim()).join(' · ') || null;
+                const awayInjuries = (injuryByTeam[awayAbbr] || []).slice(0, 4);
+                const homeInjuries = (injuryByTeam[homeAbbr] || []).slice(0, 4);
+                const hasInjuries  = awayInjuries.length > 0 || homeInjuries.length > 0;
+
+                return (
+                  <div key={evt.id} style={{ margin: '4px 10px 6px', borderRadius: 7, border: `1px solid rgba(78,168,255,.18)`, background: 'rgba(78,168,255,.04)', overflow: 'hidden' }}>
+                    {/* Header row: label + time */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px 4px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, flexShrink: 0 }}>
+                        {TYPE_LABEL[evt.type] ?? 'GAME'}
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', flex: 1 }}>{evt.label}</span>
+                      {gameTime && (
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', flexShrink: 0 }}>{gameTime}</span>
+                      )}
+                    </div>
+
+                    {/* Matchup + network + odds */}
+                    <div style={{ padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 13, color: 'var(--accent-2)', letterSpacing: '.03em' }}>
+                        {awayAbbr} <span style={{ color: 'var(--text-faint)', fontWeight: 400, fontSize: 10 }}>@</span> {homeAbbr}
+                      </span>
+                      {network && (
+                        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#fff', background: 'rgba(78,168,255,.25)', border: '1px solid rgba(78,168,255,.4)', borderRadius: 3, padding: '1px 5px', flexShrink: 0 }}>
+                          {network}
+                        </span>
+                      )}
+                      {spread && (
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', flexShrink: 0 }}>
+                          {spread}
+                        </span>
+                      )}
+                      {overUnder && (
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', flexShrink: 0 }}>
+                          {overUnder}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Injury report */}
+                    {hasInjuries && (
+                      <div style={{ padding: '0 10px 7px', display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                        {[[awayAbbr, awayInjuries], [homeAbbr, homeInjuries]].map(([abbr, list]) =>
+                          list.length === 0 ? null : (
+                            <div key={abbr}>
+                              <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-faint)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 3 }}>{abbr}</div>
+                              {list.map((inj, i) => {
+                                const code  = INJURY_STATUS_SHORT[inj.status] || inj.status;
+                                const color = INJURY_COLOR[code] || 'var(--text-faint)';
+                                return (
+                                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                                    <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, color, background: `${color}22`, border: `1px solid ${color}55`, borderRadius: 2, padding: '1px 4px', flexShrink: 0 }}>{code}</span>
+                                    <span style={{ fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>{inj.name}</span>
+                                    <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{inj.pos}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
