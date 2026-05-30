@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FantasAI — ATO Tau League</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62.5..125,100..900;1,62.5..125,100..900&family=Inter+Tight:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <script>
+      (function () {
+        var THEME_VARS = {
+          'sportsbook-dark': { '--bg':'#060912','--bg-2':'#0a0f1d','--panel':'#0f1424','--panel-2':'#161d33','--panel-3':'#1c2540','--border':'#1f2740','--border-strong':'#2c365a','--hover':'#19223b','--accent':'#c6ff3a','--accent-ink':'#0a1300','--accent-2':'#4ea8ff' },
+          'midnight-gold':   { '--bg':'#080808','--bg-2':'#0d0d0d','--panel':'#141414','--panel-2':'#1a1a1a','--panel-3':'#212121','--border':'#2a2a2a','--border-strong':'#3c3c3c','--hover':'#1f1f1f','--accent':'#ffd700','--accent-ink':'#1a1200','--accent-2':'#ffa733' },
+          'raven-purple':    { '--bg':'#07050f','--bg-2':'#0c0918','--panel':'#110d20','--panel-2':'#17112b','--panel-3':'#1d1535','--border':'#271f42','--border-strong':'#382c5c','--hover':'#1a1430','--accent':'#b78bff','--accent-ink':'#120040','--accent-2':'#ff8bcc' },
+          'gridiron-green':  { '--bg':'#050c08','--bg-2':'#091410','--panel':'#0c1610','--panel-2':'#111e16','--panel-3':'#16261b','--border':'#1e3427','--border-strong':'#2b4d38','--hover':'#132019','--accent':'#00e676','--accent-ink':'#001a0d','--accent-2':'#ffb700' },
+          'blitz-red':       { '--bg':'#0c0608','--bg-2':'#150a0d','--panel':'#1a0e11','--panel-2':'#211218','--panel-3':'#27161e','--border':'#361e27','--border-strong':'#502c3d','--hover':'#1f1015','--accent':'#ff4d6d','--accent-ink':'#1a0010','--accent-2':'#ffb547' },
+        };
+        var LIGHT = { '--bg':'#d6d9e4','--bg-2':'#cdd1de','--panel':'#e2e5ef','--panel-2':'#d9dce8','--panel-3':'#cfd3e0','--border':'#b4b9cc','--border-strong':'#9198b0','--hover':'#c8ccda','--text':'#0e1120','--text-dim':'#353a52','--text-faint':'#636880' };
+        try {
+          var themeId = localStorage.getItem('fantasai_theme') || 'sportsbook-dark';
+          var isLight = localStorage.getItem('fantasai_light_mode') === 'true';
+          var vars = Object.assign({}, THEME_VARS[themeId] || THEME_VARS['sportsbook-dark']);
+          if (isLight) Object.assign(vars, LIGHT);
+          var root = document.documentElement;
+          Object.keys(vars).forEach(function (k) { root.style.setProperty(k, vars[k]); });
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

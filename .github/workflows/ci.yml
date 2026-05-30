@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if app exists
+        id: app_check
+        run: |
+          if [ -f "app/package.json" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "app/ not in repo yet — skipping build"
+          fi
+
+      - name: Set up Node.js
+        if: steps.app_check.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        if: steps.app_check.outputs.exists == 'true'
+        run: npm ci
+        working-directory: app
+
+      - name: Build
+        if: steps.app_check.outputs.exists == 'true'
+        run: npm run build
+        working-directory: app

@@ -1,0 +1,7 @@
+{
+  "leagueId": "tau",
+  "teams": [
+    { "id": 1,  "name": "Team Name Here", "color": "#c6ff3a", "logo": "TN", "record": "0-0", "pf": 0.0, "pa": 0.0 }
+  ],
+  "savedAt": "2026-01-01T00:00:00.000Z"
+}

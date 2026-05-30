@@ -1,0 +1,22 @@
+name = "fantasai-api"
+main = "src/index.js"
+compatibility_date = "2024-11-12"
+account_id = "a121da9c5331b463f2c3651bd2e6e789"
+
+workers_dev = true
+
+routes = [
+  { pattern = "api.fantasai.net/*", zone_name = "fantasai.net" }
+]
+
+[vars]
+SLEEPER_BASE    = "https://api.sleeper.app/v1"
+CBS_WORKER_URL  = "https://fantasai-cbs.fantasai.workers.dev"
+S3_BUCKET       = "aws-kingoffisco-s3-bucket"
+AWS_REGION      = "us-east-2"
+
+# Secrets — add with: wrangler secret put <NAME> --name fantasai-api
+#   FANTASAI_KEY          optional shared key for protected GET routes
+#   AWS_ACCESS_KEY_ID     IAM key with s3:GetObject + s3:PutObject on the bucket
+#   AWS_SECRET_ACCESS_KEY paired secret
+#   RESEND_API_KEY        from resend.com — enables password reset emails
