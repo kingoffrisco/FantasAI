@@ -4,12 +4,65 @@ import { PLAYERS, findPlayer, MY_ROSTER, DRAFT_PICKS, TEAM_ROSTERS, findTeam, NF
 const FREE_DATA_SOURCES_LIST = FREE_DATA_SOURCES.map(s => ({ id: s.id, name: s.name, defaultEnabled: s.enabled }));
 const FEED_NAMES = Object.fromEntries(RANKING_SOURCES.map(s => [s.id, s.name.replace(' (ECR)', '').replace(' Fantasy', '').replace(' Sports Rankings', '').replace(' Rankings', '')]));
 
-import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge } from '../components/ui.jsx';
+import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
 import { useApi } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats } from '../lib/sleeper.js';
+import { api } from '../api.js';
 
 const WORKER   = (import.meta.env?.VITE_WORKER_URL || '').replace(/\/$/, '');
 const API_BASE = 'https://api.fantasai.net';
+
+// Fields where a lower value is better (invert when normalizing)
+const LOWER_IS_BETTER = new Set(['ecr', 'adp', 'tier', 'oppRank']);
+
+function loadScoringWeights() {
+  try {
+    const raw = localStorage.getItem('fantasai_scoring_weights');
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function computeSleeperScores(playerList, weights) {
+  if (!weights) return {};
+  // Group by position for per-position normalization
+  const byPos = {};
+  for (const p of playerList) {
+    if (!byPos[p.pos]) byPos[p.pos] = [];
+    byPos[p.pos].push(p);
+  }
+  // Compute min/max per feature per position
+  const ranges = {};
+  for (const [pos, players] of Object.entries(byPos)) {
+    const posWeights = weights[pos];
+    if (!posWeights) continue;
+    ranges[pos] = {};
+    for (const { key } of posWeights) {
+      const vals = players.map(p => p[key] ?? 0);
+      ranges[pos][key] = { min: Math.min(...vals), max: Math.max(...vals) };
+    }
+  }
+  // Score each player
+  const scores = {};
+  for (const p of playerList) {
+    const posWeights = weights[p.pos];
+    if (!posWeights || !ranges[p.pos]) { scores[p.id] = 0; continue; }
+    let total = 0;
+    let totalWeight = 0;
+    for (const { key, weight } of posWeights) {
+      if (!weight) continue;
+      const { min, max } = ranges[p.pos][key] || { min: 0, max: 1 };
+      const span = max - min || 1;
+      const raw = p[key] ?? 0;
+      const norm = LOWER_IS_BETTER.has(key)
+        ? (max - raw) / span
+        : (raw - min) / span;
+      total += norm * weight;
+      totalWeight += weight;
+    }
+    scores[p.id] = totalWeight > 0 ? total / totalWeight : 0;
+  }
+  return scores;
+}
 
 function formatWaiverExpiry(isoStr) {
   const d   = new Date(isoStr);
@@ -37,6 +90,60 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   const [search, setSearch] = React.useState('');
   const [sort, setSort] = React.useState('proj');
   const [avail, setAvail] = React.useState('all');
+  const [useSleeperSort, setUseSleeperSort] = React.useState(false);
+
+  const sleeperWeights = React.useMemo(() => loadScoringWeights(), []);
+
+  const [dynamicExtras, setDynamicExtras] = React.useState([]);
+  React.useEffect(() => {
+    api.allPlayers(2000).then(raw => {
+      const arr = Array.isArray(raw) ? raw : Object.values(raw || {});
+      const staticNames = new Set(PLAYERS.map(p => p.name.toLowerCase().trim()));
+      const staticDstTeams = new Set(
+        PLAYERS.filter(p => p.pos === 'DST').map(p => p.team.toUpperCase())
+      );
+      const extras = [];
+      for (const p of arr) {
+        if (!p.team || p.status === 'Inactive') continue;
+        let name;
+        if (p.position === 'DEF') {
+          const t = p.team.toUpperCase();
+          if (staticDstTeams.has(t)) continue;
+          name = `${t} DST`;
+        } else {
+          name = (p.full_name || `${p.first_name || ''} ${p.last_name || ''}`).trim();
+          if (!name || staticNames.has(name.toLowerCase())) continue;
+        }
+        const pos = p.position === 'DEF' ? 'DST' : (p.position || '');
+        if (!['QB', 'RB', 'WR', 'TE', 'K', 'DST'].includes(pos)) continue;
+        extras.push({
+          id: p.player_id || p.id || name,
+          name,
+          pos,
+          team: p.team,
+          opp: '', oppRank: 0,
+          status: p.injury_status === 'Questionable' ? 'Q'
+                : p.injury_status === 'Doubtful'      ? 'D'
+                : p.injury_status === 'Out'            ? 'Out'
+                : p.injury_status === 'Injured_Reserve' ? 'IR'
+                : 'OK',
+          proj: 0, last: 0, avg: 0,
+          trend: [0, 0, 0, 0, 0, 0],
+          owned: 0, adp: 999, ecr: 999, tier: 0,
+          num: p.number || 0, age: p.age || 0,
+          news: '',
+        });
+      }
+      setDynamicExtras(extras);
+    }).catch(() => {});
+  }, []);
+
+  const allPlayersList = React.useMemo(() => [...PLAYERS, ...dynamicExtras], [dynamicExtras]);
+
+  const sleeperScores  = React.useMemo(
+    () => useSleeperSort ? computeSleeperScores(allPlayersList, sleeperWeights) : {},
+    [useSleeperSort, sleeperWeights, allPlayersList],
+  );
   const [selected, setSelected] = React.useState(null);
   const [depthData,  setDepthData]  = React.useState({});
   const [snapsData,  setSnapsData]  = React.useState({});
@@ -93,37 +200,43 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       .map(([id]) => Number(id))
   );
 
-  let players = PLAYERS.filter(p => {
+  let players = allPlayersList.filter(p => {
     if (pos === 'FLEX' && !['RB', 'WR', 'TE'].includes(p.pos)) return false;
     if (pos !== 'ALL' && pos !== 'FLEX' && p.pos !== pos) return false;
     if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (avail === 'free' && (draftedIds.has(p.id) || activeWaivers.has(p.id))) return false;
+    if (avail === 'free' && (draftedIds.has(p.id) || activeWaivers.has(p.id) || PLAYER_OWNER_MAP[p.id] != null || myRosterIds.has(p.id))) return false;
     if (avail === 'waivers' && !activeWaivers.has(p.id)) return false;
-    if (avail === 'rostered' && !draftedIds.has(p.id) && !myRosterIds.has(p.id)) return false;
+    if (avail === 'rostered' && !draftedIds.has(p.id) && !myRosterIds.has(p.id) && PLAYER_OWNER_MAP[p.id] == null) return false;
     return true;
   });
 
-  players.sort((a, b) => {
-    if (sort === 'proj') return b.proj - a.proj;
-    if (sort === 'last') return b.last - a.last;
-    if (sort === 'avg') return b.avg - a.avg;
-    if (sort === 'owned') return b.owned - a.owned;
-    if (sort === 'adp') return a.adp - b.adp;
-    if (sort === 'rank') return a.ecr - b.ecr;
-    return 0;
-  });
+  if (useSleeperSort) {
+    players.sort((a, b) => (sleeperScores[b.id] ?? 0) - (sleeperScores[a.id] ?? 0));
+  } else {
+    players.sort((a, b) => {
+      if (sort === 'proj') return b.proj - a.proj;
+      if (sort === 'last') return b.last - a.last;
+      if (sort === 'avg') return b.avg - a.avg;
+      if (sort === 'owned') return b.owned - a.owned;
+      if (sort === 'adp') return a.adp - b.adp;
+      if (sort === 'rank') return a.ecr - b.ecr;
+      return 0;
+    });
+  }
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
     <div className="col" style={{ flex: 1, minWidth: 0, overflow: 'hidden', height: '100%' }}>
       <div className="page-head">
-        <div>
-          <h1>Players</h1>
-          <div className="sub">{players.length} of {PLAYERS.length} matching · Updated 2 min ago</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {user && <TeamLogoBadge team={user.teamId ? findTeam(user.teamId) : null} size={40} />}
+          <div>
+            <h1>Players</h1>
+            <div className="sub">{players.length} of {allPlayersList.length} matching · Updated 2 min ago</div>
+          </div>
         </div>
         <div className="flex gap-8">
           <button className="btn ghost"><span>⇣</span> Export</button>
-          <button className="btn ai"><span>◆</span> Ask FantasAI</button>
         </div>
       </div>
 
@@ -146,7 +259,24 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               onClick={() => setAvail(k)}>{v}</div>
           ))}
         </div>
-        <select className="input" value={sort} onChange={e => setSort(e.target.value)}>
+        <button
+          onClick={() => setUseSleeperSort(s => !s)}
+          style={{
+            padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700,
+            cursor: 'pointer', border: `1px solid ${useSleeperSort ? 'var(--accent)' : 'var(--border)'}`,
+            background: useSleeperSort ? 'rgba(198,255,58,.12)' : 'transparent',
+            color: useSleeperSort ? 'var(--accent)' : 'var(--text-dim)',
+            display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+            transition: 'all .15s',
+          }}
+          title={sleeperWeights ? 'Sort by your Sleeper Slider weights (Account → Sleeper tab)' : 'No Sleeper weights saved — configure them in Account → Sleeper tab'}
+        >
+          <span style={{ fontSize: 13 }}>😴</span>
+          Sleeper Slider
+          {useSleeperSort && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>ON</span>}
+          {!sleeperWeights && <span style={{ fontSize: 10, color: 'var(--warn)', fontFamily: 'var(--font-mono)' }}>!</span>}
+        </button>
+        <select className="input" value={sort} onChange={e => { setSort(e.target.value); setUseSleeperSort(false); }} disabled={useSleeperSort} style={{ opacity: useSleeperSort ? 0.4 : 1 }}>
           <option value="proj">Sort: Projection</option>
           <option value="last">Sort: Last Week</option>
           <option value="avg">Sort: Season Avg</option>
@@ -165,12 +295,13 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               <th>#</th>
               <th>Player</th>
               <th>Opp</th>
-              <th className={`num ${sort === 'proj' ? 'sorted' : ''}`} onClick={() => setSort('proj')}>Proj</th>
-              <th className={`num ${sort === 'last' ? 'sorted' : ''}`} onClick={() => setSort('last')}>Last</th>
-              <th className={`num ${sort === 'avg' ? 'sorted' : ''}`} onClick={() => setSort('avg')}>Avg</th>
+              {useSleeperSort && <th className="num sorted" style={{ color: 'var(--accent)' }}>Score</th>}
+              <th className={`num ${!useSleeperSort && sort === 'proj' ? 'sorted' : ''}`} onClick={() => { setSort('proj'); setUseSleeperSort(false); }}>Proj</th>
+              <th className={`num ${!useSleeperSort && sort === 'last' ? 'sorted' : ''}`} onClick={() => { setSort('last'); setUseSleeperSort(false); }}>Last</th>
+              <th className={`num ${!useSleeperSort && sort === 'avg' ? 'sorted' : ''}`} onClick={() => { setSort('avg'); setUseSleeperSort(false); }}>Avg</th>
               <th className="num">Trend</th>
-              <th className={`num ${sort === 'owned' ? 'sorted' : ''}`} onClick={() => setSort('owned')}>%Own</th>
-              <th className={`num ${sort === 'adp' ? 'sorted' : ''}`} onClick={() => setSort('adp')}>ADP</th>
+              <th className={`num ${!useSleeperSort && sort === 'owned' ? 'sorted' : ''}`} onClick={() => { setSort('owned'); setUseSleeperSort(false); }}>%Own</th>
+              <th className={`num ${!useSleeperSort && sort === 'adp' ? 'sorted' : ''}`} onClick={() => { setSort('adp'); setUseSleeperSort(false); }}>ADP</th>
               <th className="num">Depth</th>
               <th className="num">Snaps</th>
               <th>Status</th>
@@ -200,6 +331,13 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                     <span className="mono dim" style={{ fontSize: 11 }}>vs {p.opp}</span>
                     <div className="mono faint" style={{ fontSize: 10 }}>D #{p.oppRank}</div>
                   </td>
+                  {useSleeperSort && (
+                    <td className="num">
+                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: 'var(--accent)' }}>
+                        {((sleeperScores[p.id] ?? 0) * 100).toFixed(0)}
+                      </span>
+                    </td>
+                  )}
                   <td className="num">
                     <span style={{ fontWeight: 600 }}>{p.proj.toFixed(1)}</span>
                     <ProjBar value={p.proj} />

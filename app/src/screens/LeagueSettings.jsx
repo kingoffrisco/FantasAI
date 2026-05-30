@@ -1,5 +1,6 @@
 import React from 'react';
 import { LEAGUE_TEAMS } from '../lib/data.js';
+import { TeamLogoBadge } from '../components/ui.jsx';
 import { getLiveTeams, getLiveSettings, getLeagueId } from '../lib/leagueStore.js';
 
 const STORAGE_KEY = 'fantasai_league_settings';
@@ -172,14 +173,15 @@ function load() {
 function persist(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
 
 const TABS = [
-  { id: 'general',      label: 'General' },
-  { id: 'roster',       label: 'Roster' },
-  { id: 'scoring',      label: 'Scoring' },
-  { id: 'transactions', label: 'Transactions' },
-  { id: 'schedule',     label: 'Schedule' },
-  { id: 'matchups',     label: 'Matchups' },
-  { id: 'waivers',      label: 'Waiver Rules' },
-  { id: 'playoffs',     label: 'Playoff Rules' },
+  { id: 'general',        label: 'General' },
+  { id: 'roster',         label: 'Roster' },
+  { id: 'scoring',        label: 'Scoring' },
+  { id: 'transactions',   label: 'Transactions' },
+  { id: 'schedule',       label: 'Schedule' },
+  { id: 'matchups',       label: 'Matchups' },
+  { id: 'waivers',        label: 'Waiver Rules' },
+  { id: 'playoffs',       label: 'Playoff Rules' },
+  { id: 'league-message', label: 'League Message' },
 ];
 
 // ── Schedule generation helpers ────────────────────────────
@@ -680,10 +682,13 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     <div style={{ padding: '24px 28px', maxWidth: 860 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 2 }}>{data.leagueName}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            {data.numTeams} teams · {data.scoringPolicies?.system} · Entry fee ${data.entryFee}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TeamLogoBadge team={null} size={40} />
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 2 }}>{data.leagueName}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+              {data.numTeams} teams · {data.scoringPolicies?.system} · Entry fee ${data.entryFee}
+            </div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -736,77 +741,6 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               { label: 'Player Pool',          key: 'playerPool',  value: data.playerPool },
             ]}
           />
-          <Card title="Commissioner Message">
-            {/* Uploaded image/video preview */}
-            {commishMedia?.url && (
-              <div style={{ padding: '0 16px 10px', position: 'relative' }}>
-                {commishMedia.type === 'image'
-                  ? <img src={commishMedia.url} alt={commishMedia.name} style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
-                  : <video src={commishMedia.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 200, borderRadius: 6, display: 'block' }} />
-                }
-                {canEdit && (
-                  <button onClick={removeMedia} style={{ position: 'absolute', top: 6, right: 22, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}>✕ Remove</button>
-                )}
-              </div>
-            )}
-            {/* YouTube / video URL embed preview */}
-            {commishMedia?.videoUrl && (
-              <div style={{ padding: '0 16px 10px', position: 'relative' }}>
-                <iframe
-                  src={getEmbedUrl(commishMedia.videoUrl)}
-                  style={{ width: '100%', height: 200, borderRadius: 6, border: 'none', display: 'block' }}
-                  allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  title="Commissioner Video"
-                />
-                {canEdit && (
-                  <button onClick={removeVideoUrl} style={{ position: 'absolute', top: 6, right: 22, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}>✕ Remove URL</button>
-                )}
-              </div>
-            )}
-            {editField === 'commishMessage' ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <textarea className="input" value={fieldDraft} onChange={e => setFieldDraft(e.target.value)}
-                  rows={4} style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontSize: 13, lineHeight: 1.6 }} />
-                {/* Video URL input */}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input
-                    className="input"
-                    placeholder="YouTube / video URL (optional)…"
-                    value={commishUrlDraft}
-                    onChange={e => setCommishUrlDraft(e.target.value)}
-                    style={{ flex: 1, fontSize: 12 }}
-                  />
-                  <button className="btn ghost sm" onClick={saveVideoUrl} disabled={!commishUrlDraft.trim()}>
-                    Set URL
-                  </button>
-                </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button className="btn primary sm" onClick={() => saveField('commishMessage')}>Save Message</button>
-                  <button className="btn ghost sm" onClick={() => setEditField(null)}>Cancel</button>
-                  <input ref={mediaInputRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleMediaUpload} />
-                  <button className="btn ghost sm" onClick={() => mediaInputRef.current?.click()} style={{ marginLeft: 'auto' }}>
-                    {commishMedia?.url ? '📷 Replace File' : '📷 Upload Image / Video'}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                <p style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.7, margin: 0, flex: 1 }}>{data.commishMessage}</p>
-                {canEdit && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: editColor, whiteSpace: 'nowrap' }}>{editLabel}</span>
-                    <button className="btn ghost sm" onClick={() => { startFieldEdit('commishMessage', data.commishMessage); setCommishUrlDraft(commishMedia?.videoUrl || ''); }}>Edit</button>
-                    <input ref={mediaInputRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleMediaUpload} />
-                    {!commishMedia?.url && <button className="btn ghost sm" onClick={() => mediaInputRef.current?.click()}>+ File</button>}
-                    {!commishMedia?.videoUrl && (
-                      <button className="btn ghost sm" onClick={() => { startFieldEdit('commishMessage', data.commishMessage); setCommishUrlDraft(''); }}>+ URL</button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </Card>
           <Card title="Draft Settings">
             {editingDraft ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1921,6 +1855,72 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
           </div>
         );
       })()}
+
+      {/* ── League Message ── */}
+      {activeTab === 'league-message' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <Card title="League Message">
+            {commishMedia?.url && (
+              <div style={{ padding: '0 16px 10px', position: 'relative' }}>
+                {commishMedia.type === 'image'
+                  ? <img src={commishMedia.url} alt={commishMedia.name} style={{ width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                  : <video src={commishMedia.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 200, borderRadius: 6, display: 'block' }} />
+                }
+                {canEdit && (
+                  <button onClick={removeMedia} style={{ position: 'absolute', top: 6, right: 22, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}>✕ Remove</button>
+                )}
+              </div>
+            )}
+            {commishMedia?.videoUrl && (
+              <div style={{ padding: '0 16px 10px', position: 'relative' }}>
+                <iframe
+                  src={getEmbedUrl(commishMedia.videoUrl)}
+                  style={{ width: '100%', height: 200, borderRadius: 6, border: 'none', display: 'block' }}
+                  allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  title="Commissioner Video"
+                />
+                {canEdit && (
+                  <button onClick={removeVideoUrl} style={{ position: 'absolute', top: 6, right: 22, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}>✕ Remove URL</button>
+                )}
+              </div>
+            )}
+            {editField === 'commishMessage' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <textarea className="input" value={fieldDraft} onChange={e => setFieldDraft(e.target.value)}
+                  rows={6} style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', fontSize: 13, lineHeight: 1.6 }} />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input className="input" placeholder="YouTube / video URL (optional)…" value={commishUrlDraft} onChange={e => setCommishUrlDraft(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
+                  <button className="btn ghost sm" onClick={saveVideoUrl} disabled={!commishUrlDraft.trim()}>Set URL</button>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button className="btn primary sm" onClick={() => saveField('commishMessage')}>Save Message</button>
+                  <button className="btn ghost sm" onClick={() => setEditField(null)}>Cancel</button>
+                  <input ref={mediaInputRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleMediaUpload} />
+                  <button className="btn ghost sm" onClick={() => mediaInputRef.current?.click()} style={{ marginLeft: 'auto' }}>
+                    {commishMedia?.url ? '📷 Replace File' : '📷 Upload Image / Video'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <p style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.7, margin: 0, flex: 1 }}>{data.commishMessage}</p>
+                {canEdit && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: editColor, whiteSpace: 'nowrap' }}>{editLabel}</span>
+                    <button className="btn ghost sm" onClick={() => { startFieldEdit('commishMessage', data.commishMessage); setCommishUrlDraft(commishMedia?.videoUrl || ''); }}>Edit</button>
+                    <input ref={mediaInputRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleMediaUpload} />
+                    {!commishMedia?.url && <button className="btn ghost sm" onClick={() => mediaInputRef.current?.click()}>+ File</button>}
+                    {!commishMedia?.videoUrl && (
+                      <button className="btn ghost sm" onClick={() => { startFieldEdit('commishMessage', data.commishMessage); setCommishUrlDraft(''); }}>+ URL</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

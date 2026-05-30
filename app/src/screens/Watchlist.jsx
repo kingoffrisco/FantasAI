@@ -1,12 +1,15 @@
 import React from 'react';
 import { WATCHLIST, findPlayer } from '../lib/data.js';
-import { PlayerCell, Sparkline } from '../components/ui.jsx';
+import { PlayerCell, Sparkline, TeamLogoBadge } from '../components/ui.jsx';
 
 export default function WatchlistScreen({ onOpenPlayer }) {
   return (
     <div className="col" style={{ height: '100%', overflow: 'auto' }}>
       <div className="page-head">
-        <div><h1>Watchlist</h1><div className="sub">8 players across 3 groups · Auto-alert on news</div></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TeamLogoBadge team={null} size={40} />
+          <div><h1>Watchlist</h1><div className="sub">8 players across 3 groups · Auto-alert on news</div></div>
+        </div>
         <div className="flex gap-8">
           <button className="btn ghost">+ New Group</button>
           <button className="btn primary">+ Add Player</button>

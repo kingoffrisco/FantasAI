@@ -296,6 +296,43 @@ export const WATCHLIST = {
 
 export const NEWS = [];
 
+export const BEAT_WRITERS = [
+  // National NFL Reporters
+  { handle: 'AdamSchefter',    name: 'Adam Schefter',       category: 'national' },
+  { handle: 'RapSheet',        name: 'Ian Rapoport',        category: 'national' },
+  { handle: 'TomPelissero',    name: 'Tom Pelissero',       category: 'national' },
+  { handle: 'MikeGarafolo',    name: 'Mike Garafolo',       category: 'national' },
+  { handle: 'Schultz_Report',  name: 'Jordan Schultz',      category: 'national' },
+  { handle: 'MySportsUpdate',  name: 'Ari Meirov',          category: 'national' },
+  { handle: 'DMRussini',       name: 'Dianna Russini',      category: 'national' },
+  { handle: 'AlbertBreer',     name: 'Albert Breer',        category: 'national' },
+  { handle: 'FieldYates',      name: 'Field Yates',         category: 'national' },
+  { handle: 'JFowlerESPN',     name: 'Jeremy Fowler',       category: 'national' },
+  // Fantasy-Focused Analysts
+  { handle: 'MatthewBerryTMR', name: 'Matthew Berry',       category: 'fantasy' },
+  { handle: 'Ihartitz',        name: 'Ian Hartitz',         category: 'fantasy' },
+  { handle: 'dwainmcfarland',  name: 'Dwain McFarland',     category: 'fantasy' },
+  { handle: 'LateRoundQB',     name: 'JJ Zachariason',      category: 'fantasy' },
+  { handle: 'Pat_Thorman',     name: 'Pat Thorman',         category: 'fantasy' },
+  { handle: 'SigmundBloom',    name: 'Sigmund Bloom',       category: 'fantasy' },
+  { handle: 'LordReebs',       name: 'Rich Hribar',         category: 'fantasy' },
+  { handle: 'ScottBarrettDFB', name: 'Scott Barrett',       category: 'fantasy' },
+  // Team Beat Writers
+  { handle: 'jonmachota',      name: 'Jon Machota',         category: 'beat', team: 'DAL' },
+  { handle: 'clarencehilljr',  name: 'Clarence Hill Jr.',   category: 'beat', team: 'DAL' },
+  { handle: 'SlaterNFL',       name: 'Jane Slater',         category: 'beat', team: 'DAL' },
+  { handle: 'ByNateTaylor',    name: 'Nate Taylor',         category: 'beat', team: 'KC'  },
+  { handle: 'mattderrick',     name: 'Matt Derrick',        category: 'beat', team: 'KC'  },
+  { handle: 'JoeBuscaglia',    name: 'Joe Buscaglia',       category: 'beat', team: 'BUF' },
+  { handle: 'SalSports',       name: 'Sal Capaccio',        category: 'beat', team: 'BUF' },
+  { handle: 'ZBerm',           name: 'Zach Berman',         category: 'beat', team: 'PHI' },
+  { handle: 'JimmyKempski',    name: 'Jimmy Kempski',       category: 'beat', team: 'PHI' },
+  { handle: 'mattbarrows',     name: 'Matt Barrows',        category: 'beat', team: 'SF'  },
+  { handle: 'LombardiHimself', name: 'David Lombardi',      category: 'beat', team: 'SF'  },
+  { handle: 'davebirkett',     name: 'Dave Birkett',        category: 'beat', team: 'DET' },
+  { handle: 'colton_pouncy',   name: 'Colton Pouncy',       category: 'beat', team: 'DET' },
+];
+
 // Source metadata — color used for badges across News, Players, etc.
 export const SOURCE_META = {
   'Rotoworld':         { color: '#ff7a3a' },
@@ -403,6 +440,19 @@ export const FREE_DATA_SOURCES = [
     provides: ["Team rosters & schedules", "Player injury reports", "Game scores & stats", "Standings"],
     docUrl: "https://gist.github.com/nntrn/ee26cb2a0716de0947a0a4e9a157bc1c",
     color: "#d00",
+    enabled: false,
+    leagueIdRequired: false,
+  },
+  {
+    id: "beat-writers",
+    name: "Beat Writers",
+    url: "https://twitter.com",
+    rank: 7,
+    auth: "none",
+    authNote: "No API key required — scrapes public X/Twitter posts via Nitter RSS",
+    provides: ["Breaking NFL transactions", "Injury reports from beat reporters", "Fantasy-focused analysis", "32 team beat writers"],
+    docUrl: null,
+    color: "#1da1f2",
     enabled: false,
     leagueIdRequired: false,
   },

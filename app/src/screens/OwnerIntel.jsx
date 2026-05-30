@@ -1,7 +1,7 @@
 import React from 'react';
 import { OWNER_PROFILES, findOwner, LEAGUE_TEAMS, findTeam, findPlayer, PLAYERS, TEAMS_ORDER, CBS_DRAFT_HISTORY, TEAM_ROSTERS, buildRosterFrame, assignRoster } from '../lib/data.js';
 import { runMockDraft } from '../lib/draft.js';
-import { PosBadge, PlayerAvatar } from '../components/ui.jsx';
+import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 
@@ -270,11 +270,14 @@ export default function OwnerIntelScreen({ onOpenPlayer, user, myRosterIds, slot
   return (
     <div className="col" style={{ height: '100%', overflow: 'hidden' }}>
       <div className="page-head">
-        <div>
-          <h1>Owner Intel · Draft DNA</h1>
-          <div className="sub">
-            Built from league draft history. Predict picks. Plan trades. Read the room.
-            <span className="mono faint" style={{ marginLeft: 10, fontSize: 10 }}>{liveLabel}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TeamLogoBadge team={null} size={40} />
+          <div>
+            <h1>Owner Intel · Draft DNA</h1>
+            <div className="sub">
+              Built from league draft history. Predict picks. Plan trades. Read the room.
+              <span className="mono faint" style={{ marginLeft: 10, fontSize: 10 }}>{liveLabel}</span>
+            </div>
           </div>
         </div>
         <div className="flex gap-8">

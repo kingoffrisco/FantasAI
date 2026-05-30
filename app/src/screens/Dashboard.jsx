@@ -4,6 +4,101 @@ import { PlayerCell, StatusDot, Sparkline, PosBadge, SourceBadge } from '../comp
 import { api } from '../api.js';
 import { useApi } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
+const SLOT_ELIGIBLE = {
+  QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
+  K: ['K'], DST: ['DST'], FLEX: ['RB', 'WR', 'TE'],
+};
+
+function computeOptimalLineup(startingSlots, allPlayers) {
+  const byPos = {};
+  for (const p of allPlayers) {
+    if (!byPos[p.pos]) byPos[p.pos] = [];
+    byPos[p.pos].push(p);
+  }
+  for (const pos in byPos) byPos[pos].sort((a, b) => (b.proj ?? 0) - (a.proj ?? 0));
+  const assigned = new Set();
+  const result = [];
+  for (const { slot } of startingSlots) {
+    if (slot === 'FLEX') continue;
+    const eligible = (SLOT_ELIGIBLE[slot] || [slot]).flatMap(pos => byPos[pos] || []).filter(p => !assigned.has(p.id)).sort((a, b) => (b.proj ?? 0) - (a.proj ?? 0));
+    const best = eligible[0] ?? null;
+    result.push({ slot, playerId: best?.id ?? null });
+    if (best) assigned.add(best.id);
+  }
+  for (const { slot } of startingSlots) {
+    if (slot !== 'FLEX') continue;
+    const eligible = ['RB', 'WR', 'TE'].flatMap(pos => byPos[pos] || []).filter(p => !assigned.has(p.id)).sort((a, b) => (b.proj ?? 0) - (a.proj ?? 0));
+    const best = eligible[0] ?? null;
+    result.push({ slot, playerId: best?.id ?? null });
+    if (best) assigned.add(best.id);
+  }
+  return result;
+}
+
+function LineupSummaryCard({ myRosterIds, slotOverrides, onOpenPlayer }) {
+  const settings = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
+  }, []);
+  const frame = React.useMemo(() => buildRosterFrame(settings), [settings]);
+  const rosterEntries = React.useMemo(() => assignRoster(frame, [...myRosterIds], slotOverrides ?? {}), [frame, myRosterIds, slotOverrides]);
+  const startingSlots = rosterEntries.filter(e => e.slot !== 'BENCH');
+  const allPlayers = [...myRosterIds].map(id => findPlayer(id)).filter(Boolean);
+  const optimalSlots = computeOptimalLineup(startingSlots, allPlayers);
+
+  const optimalMap = {};
+  const counts = {};
+  for (const { slot, playerId } of optimalSlots) {
+    const idx = counts[slot] ?? 0;
+    optimalMap[`${slot}-${idx}`] = playerId;
+    counts[slot] = idx + 1;
+  }
+
+  const swaps = [];
+  const seen = {};
+  for (const cur of startingSlots) {
+    const idx = seen[cur.slot] ?? 0;
+    seen[cur.slot] = idx + 1;
+    const optId = optimalMap[`${cur.slot}-${idx}`];
+    if (optId && optId !== cur.playerId) {
+      const curP = cur.playerId ? findPlayer(cur.playerId) : null;
+      const optP = findPlayer(optId);
+      if (optP) {
+        const gain = (optP.proj ?? 0) - (curP?.proj ?? 0);
+        if (gain > 0.05) swaps.push({ curP, optP, gain, slot: cur.slot });
+      }
+    }
+  }
+
+  const totalGain = swaps.reduce((s, c) => s + c.gain, 0);
+
+  return (
+    <div className="card">
+      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10 }}>
+        Lineup Decisions
+      </div>
+      {swaps.length === 0 ? (
+        <div style={{ fontSize: 13, color: 'var(--good)', fontWeight: 600 }}>Lineup looks optimal — no changes needed.</div>
+      ) : (
+        <>
+          <ul style={{ margin: 0, padding: '0 0 0 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {swaps.map((s, i) => (
+              <li key={i} style={{ fontSize: 13, lineHeight: 1.4 }}>
+                Replace{' '}
+                <span style={{ fontWeight: 700, cursor: 'pointer', color: 'var(--text)' }} onClick={() => onOpenPlayer?.(s.curP?.id)}>{s.curP?.name ?? '—'}</span>
+                {' '}with{' '}
+                <span style={{ fontWeight: 700, cursor: 'pointer', color: 'var(--accent)' }} onClick={() => onOpenPlayer?.(s.optP.id)}>{s.optP.name}</span>
+                <span style={{ color: 'var(--good)', fontFamily: 'var(--font-mono)', fontSize: 12, marginLeft: 6 }}>+{s.gain.toFixed(1)} pts</span>
+              </li>
+            ))}
+          </ul>
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--text-dim)' }}>
+            Total upside: <span style={{ color: 'var(--good)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>+{totalGain.toFixed(1)} pts</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 const API_BASE = 'https://api.fantasai.net';
 
@@ -89,6 +184,173 @@ function buildStandings(cbsRaw) {
   }).sort((a, b) => b.w - a.w || b.pf - a.pf);
 }
 
+function getScoringRules() {
+  try {
+    const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+    if (s?.scoring) return s.scoring;
+  } catch {}
+  return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2 };
+}
+
+function calcFantasyPts(stats, rules) {
+  return Math.max(0,
+    (stats.passYards ?? 0) * (rules.passYd ?? 0.04) +
+    (stats.passTDs   ?? 0) * (rules.passTD  ?? 4)   +
+    (stats.passInts  ?? 0) * (rules.passInt  ?? -2)  +
+    (stats.rushYards ?? 0) * (rules.rushYd   ?? 0.1) +
+    (stats.rushTDs   ?? 0) * (rules.rushTD   ?? 6)   +
+    (stats.recYards  ?? 0) * (rules.recYd    ?? 0.1) +
+    (stats.recTDs    ?? 0) * (rules.recTD    ?? 6)   +
+    (stats.receptions?? 0) * (rules.rec      ?? 0.5) +
+    (stats.fumbleLost?? 0) * (rules.fumbleLost ?? -2)
+  );
+}
+
+function parseEspnBoxScore(boxscorePlayers, rules) {
+  const byPlayer = {};
+  for (const teamData of (boxscorePlayers ?? [])) {
+    for (const group of (teamData.statistics ?? [])) {
+      const cat  = (group.name ?? '').toLowerCase();
+      const keys = group.keys ?? [];
+      const idx  = k => keys.indexOf(k);
+      for (const ath of (group.athletes ?? [])) {
+        const name = (ath.athlete?.displayName ?? '').toLowerCase();
+        if (!name) continue;
+        if (!byPlayer[name]) byPlayer[name] = {};
+        const s = byPlayer[name];
+        const st = ath.stats ?? [];
+        const get = (...ks) => { for (const k of ks) { const i = idx(k); if (i >= 0) return parseFloat(st[i]) || 0; } return null; };
+        if (cat === 'passing')   { s.passYards = get('passingYards', 'yards') ?? s.passYards ?? 0; s.passTDs = get('passingTouchdowns', 'touchdowns') ?? s.passTDs ?? 0; s.passInts = get('interceptions') ?? s.passInts ?? 0; }
+        if (cat === 'rushing')   { s.rushYards = get('rushingYards', 'yards') ?? s.rushYards ?? 0; s.rushTDs = get('rushingTouchdowns', 'touchdowns') ?? s.rushTDs ?? 0; }
+        if (cat === 'receiving') { s.recYards = get('receivingYards', 'yards') ?? s.recYards ?? 0; s.recTDs = get('receivingTouchdowns', 'touchdowns') ?? s.recTDs ?? 0; s.receptions = get('receptions') ?? s.receptions ?? 0; }
+        if (cat === 'fumbles')   { s.fumbleLost = get('fumblesLost', 'lost') ?? s.fumbleLost ?? 0; }
+      }
+    }
+  }
+  const actuals = {};
+  for (const [name, stats] of Object.entries(byPlayer)) actuals[name] = calcFantasyPts(stats, rules);
+  return actuals;
+}
+
+function getGameProgress(gameInfo) {
+  if (!gameInfo || gameInfo.statusName === 'STATUS_SCHEDULED') return 0;
+  if (gameInfo.statusName === 'STATUS_FINAL') return 1;
+  const parts = (gameInfo.clock || '15:00').split(':');
+  const timeLeft = parseInt(parts[0] || '15') * 60 + parseInt(parts[1] || '0');
+  const qSecs    = 15 * 60;
+  const done     = Math.max(0, (gameInfo.period || 1) - 1) * qSecs + Math.max(0, qSecs - timeLeft);
+  return Math.min(0.99, done / (4 * qSecs));
+}
+
+function DraftCountdown({ canEdit }) {
+  const [draftDate, setDraftDate] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null')?.draftDate ?? null; } catch { return null; }
+  });
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft]     = React.useState('');
+  const [timeLeft, setTimeLeft] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!draftDate) { setTimeLeft(null); return; }
+    function tick() {
+      const diff = new Date(draftDate).getTime() - Date.now();
+      if (diff <= 0) { setTimeLeft({ done: true }); return; }
+      setTimeLeft({
+        done: false,
+        d: Math.floor(diff / 86400000),
+        h: Math.floor((diff % 86400000) / 3600000),
+        m: Math.floor((diff % 3600000) / 60000),
+        s: Math.floor((diff % 60000) / 1000),
+      });
+    }
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [draftDate]);
+
+  function save() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || '{}');
+      localStorage.setItem('fantasai_league_settings', JSON.stringify({ ...saved, draftDate: draft }));
+    } catch {}
+    setDraftDate(draft);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <input type="datetime-local" className="input" style={{ fontSize: 12, padding: '4px 8px' }}
+          value={draft} onChange={e => setDraft(e.target.value)} />
+        <button className="btn sm primary" onClick={save}>Save</button>
+        <button className="btn sm ghost" onClick={() => setEditing(false)}>✕</button>
+      </div>
+    );
+  }
+
+  if (!draftDate) {
+    if (!canEdit) return null;
+    return (
+      <button className="btn ghost" style={{ fontSize: 11 }}
+        onClick={() => { setDraft(''); setEditing(true); }}>
+        + Set Draft Date
+      </button>
+    );
+  }
+
+  if (timeLeft?.done) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--good)' }}>Draft Complete ✓</span>
+        {canEdit && (
+          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 13, padding: 0 }}
+            onClick={() => { setDraft(draftDate); setEditing(true); }} title="Edit draft date">✏</button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{
+        background: 'rgba(255,215,0,.1)', border: '1px solid rgba(255,215,0,.35)',
+        borderRadius: 8, padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <span style={{ fontSize: 10, fontWeight: 800, color: '#FFD700', textTransform: 'uppercase', letterSpacing: '.1em' }}>Draft In</span>
+        {timeLeft ? (
+          <div style={{ display: 'flex', gap: 5, alignItems: 'baseline' }}>
+            {timeLeft.d > 0 && (
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 800, color: '#FFD700' }}>
+                {timeLeft.d}<span style={{ fontSize: 9, marginLeft: 1, color: 'rgba(255,215,0,.7)' }}>d</span>
+              </span>
+            )}
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 800, color: '#FFD700' }}>
+              {String(timeLeft.h).padStart(2, '0')}<span style={{ fontSize: 9, marginLeft: 1, color: 'rgba(255,215,0,.7)' }}>h</span>
+            </span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 800, color: '#FFD700' }}>
+              {String(timeLeft.m).padStart(2, '0')}<span style={{ fontSize: 9, marginLeft: 1, color: 'rgba(255,215,0,.7)' }}>m</span>
+            </span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 800, color: '#FFD700' }}>
+              {String(timeLeft.s).padStart(2, '0')}<span style={{ fontSize: 9, marginLeft: 1, color: 'rgba(255,215,0,.7)' }}>s</span>
+            </span>
+          </div>
+        ) : (
+          <span className="faint" style={{ fontSize: 12 }}>—</span>
+        )}
+        {draftDate && (
+          <span style={{ fontSize: 10, color: 'rgba(255,215,0,.55)', fontFamily: 'var(--font-mono)' }}>
+            {new Date(draftDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+          </span>
+        )}
+      </div>
+      {canEdit && (
+        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 14, padding: 0, lineHeight: 1 }}
+          onClick={() => { setDraft(draftDate || ''); setEditing(true); }} title="Edit draft date">✏</button>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new Set(), sourcesState, slotOverrides = {}, watchlistIds = new Set(), tradeOffers = [] }) {
   const { data: cbsTeams } = useApi(() => api.teams(), []);
   const standings = React.useMemo(() => buildStandings(cbsTeams), [cbsTeams]);
@@ -168,6 +430,9 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const team     = findTeam(teamId);
   const ownerName = team?.owner || user?.teamName || 'Manager';
   const teamName  = team?.name || user?.teamName || 'My Team';
+  const logoTextColor = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_team_prefs') || 'null')?.logoTextColor ?? '#000000'; } catch { return '#000000'; }
+  }, []);
 
   // 2026 season record from live standings (0-0 until games are played)
   const myStanding = standings?.find(s => s.me) ?? null;
@@ -231,6 +496,53 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sleeperOn, allRosterIds]);
+
+  // ── ESPN game data + player actuals ─────────────────────────────────────────
+  const [espnGameMap, setEspnGameMap]         = React.useState({}); // TEAMABBR → { statusName, period, clock, eventId }
+  const [espnPlayerActuals, setEspnPlayerActuals] = React.useState({}); // playerName(lower) → actual pts
+
+  React.useEffect(() => {
+    const wkNum = currentWeek.num;
+    if (!wkNum) return;
+    const rules = getScoringRules();
+    fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?week=${wkNum}&seasontype=2`)
+      .then(r => r.json())
+      .then(data => {
+        const gameMap   = {};
+        const eventIds  = [];
+        for (const event of (data.events || [])) {
+          const comp       = event.competitions?.[0];
+          if (!comp) continue;
+          const statusName = event.status?.type?.name ?? 'STATUS_SCHEDULED';
+          const period     = event.status?.period ?? 0;
+          const clock      = event.status?.displayClock ?? '15:00';
+          const displayState = event.status?.type?.shortDetail ?? '';
+          for (const comp2 of (event.competitions || [])) {
+            for (const c of (comp2.competitors || [])) {
+              const abbr = (c.team?.abbreviation ?? '').toUpperCase();
+              if (abbr) gameMap[abbr] = { statusName, period, clock, displayState, eventId: event.id };
+            }
+          }
+          if (statusName !== 'STATUS_SCHEDULED') eventIds.push(event.id);
+        }
+        setEspnGameMap(gameMap);
+        if (!eventIds.length) return;
+        Promise.allSettled(eventIds.map(id =>
+          fetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${id}`)
+            .then(r => r.json())
+        )).then(results => {
+          let merged = {};
+          for (const r of results) {
+            if (r.status !== 'fulfilled') continue;
+            const partial = parseEspnBoxScore(r.value?.boxscore?.players, rules);
+            for (const [k, v] of Object.entries(partial)) merged[k] = (merged[k] ?? 0) + v;
+          }
+          setEspnPlayerActuals(merged);
+        });
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentWeek.num]);
 
   // Build projection columns
   const projCols = [
@@ -312,72 +624,96 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     setChampDraft(prev => prev.map((c, idx) => idx === i ? { ...c, ...patch } : c));
   }
 
+  // ── H2H win probability (shared between scoreboard card + stats grid) ──────
+  const h2hWinData = React.useMemo(() => {
+    const wkNum = currentWeek.num;
+    if (!wkNum) return null;
+    const opp = getOpponent(teamId, wkNum);
+    if (!opp) return null;
+    const myProj = starters.reduce((s, r) => {
+      const live = sleeperRosterData[r.playerId];
+      return s + (live?.proj != null ? live.proj : (findPlayer(r.playerId)?.proj || 0));
+    }, 0);
+    const oppRoster    = TEAM_ROSTERS[opp.id] || [];
+    const oppStarters  = oppRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
+    const oppProj      = oppStarters.reduce((s, e) => s + (findPlayer(e.playerId)?.proj || findPlayer(e.playerId)?.avg || 0), 0);
+    const myLive = starters.reduce((s, r) => {
+      const p = findPlayer(r.playerId);
+      if (!p) return s;
+      const proj     = sleeperRosterData[r.playerId]?.proj ?? p.proj ?? 0;
+      const gameInfo = espnGameMap[(p.team ?? '').toUpperCase()];
+      const actual   = espnPlayerActuals[(p.name ?? '').toLowerCase()] ?? null;
+      if (!gameInfo || gameInfo.statusName === 'STATUS_SCHEDULED') return s + proj;
+      const progress = getGameProgress(gameInfo);
+      if (actual != null) return s + (progress >= 1 ? actual : actual + proj * (1 - progress));
+      return s + proj;
+    }, 0);
+    const liveCount  = starters.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_IN_PROGRESS'; }).length;
+    const finalCount = starters.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_FINAL'; }).length;
+    const hasLive    = Object.keys(espnGameMap).length > 0;
+    const myScore    = hasLive ? myLive : myProj;
+    const oppScore   = hasLive ? oppProj : oppProj;
+    const diff       = myScore - oppScore;
+    const isWinning  = diff >= 0;
+    const winPct     = myScore + oppScore > 0 ? Math.round((myScore / (myScore + oppScore)) * 100) : 50;
+    return { opp, oppStarters, myProj, myLive, oppProj, myScore, oppScore, diff, isWinning, winPct, liveCount, finalCount, hasLive };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [starters, sleeperRosterData, espnGameMap, espnPlayerActuals, teamId, currentWeek]);
+
   return (
     <div className="col" style={{ height: '100%', overflow: 'auto' }}>
       <div className="page-head">
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <h1 style={{ margin: 0 }}>{weekLabel} Dashboard</h1>
-              {(() => {
-                const pending = tradeOffers.filter(o => o.status === 'pending' && (o.fromTeamId === teamId || o.toTeamId === teamId));
-                if (!pending.length) return null;
-                const incoming = pending.filter(o => o.toTeamId === teamId);
-                const outgoing = pending.filter(o => o.fromTeamId === teamId);
-                return (
-                  <span
-                    onClick={() => onNav('roster')}
-                    style={{ cursor: 'pointer', fontSize: 12, fontWeight: 900, color: '#1a0d00', background: '#FFD700', borderRadius: 6, padding: '3px 10px', letterSpacing: '.02em', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
-                    title="Click to view trade offers on your roster"
-                  >
-                    ↔ TRADE PENDING
-                    {(incoming.length + outgoing.length) > 1 && (
-                      <span style={{ background: 'rgba(0,0,0,.2)', borderRadius: 4, padding: '0 5px', fontSize: 10 }}>
-                        {incoming.length + outgoing.length}
-                      </span>
-                    )}
-                  </span>
-                );
-              })()}
-            </div>
-            <div className="sub">{subLine}</div>
-          </div>
-          <span style={{ fontSize: 22, fontWeight: 900, color: '#FFD700', letterSpacing: '-.01em', lineHeight: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          {/* League name — large, far left */}
+          <span style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', fontSize: 30, fontWeight: 900, color: '#FFD700', letterSpacing: '-.01em', lineHeight: 1, whiteSpace: 'nowrap' }}>
             {commishData.leagueName}
           </span>
+
+          {/* Trade pending badge — right of league name */}
+          {(() => {
+            const pending = tradeOffers.filter(o => o.status === 'pending' && (o.fromTeamId === teamId || o.toTeamId === teamId));
+            if (!pending.length) return null;
+            const incoming = pending.filter(o => o.toTeamId === teamId);
+            const outgoing = pending.filter(o => o.fromTeamId === teamId);
+            return (
+              <span
+                onClick={() => onNav('roster')}
+                style={{ cursor: 'pointer', fontSize: 12, fontWeight: 900, color: '#1a0d00', background: '#FFD700', borderRadius: 6, padding: '3px 10px', letterSpacing: '.02em', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
+                title="Click to view trade offers on your roster"
+              >
+                ↔ TRADE PENDING
+                {(incoming.length + outgoing.length) > 1 && (
+                  <span style={{ background: 'rgba(0,0,0,.2)', borderRadius: 4, padding: '0 5px', fontSize: 10 }}>
+                    {incoming.length + outgoing.length}
+                  </span>
+                )}
+              </span>
+            );
+          })()}
+
+          {/* Dashboard label — smaller, after badge */}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.12em', color: 'var(--text-dim)', lineHeight: 1 }}>
+              {weekLabel} Dashboard
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 3 }}>{subLine}</div>
+          </div>
         </div>
-        <div className="flex gap-8">
+        <div className="flex gap-8" style={{ alignItems: 'center' }}>
+          <DraftCountdown canEdit={canEditCommish} />
           <button className="btn ghost" onClick={() => onNav('roster')}>Set Lineup</button>
           <button className="btn primary" onClick={() => onNav('draft')}>▶ Open Draft Room</button>
         </div>
       </div>
 
       {/* ── Live H2H Scoreboard ──────────────────────────────────────────────── */}
-      {(() => {
-        const wkNum = currentWeek.num;
-        if (!wkNum) return null; // offseason / preseason — no matchup
-        const opp = getOpponent(teamId, wkNum);
-        if (!opp) return null;
-
-        // My score: prefer sum of Sleeper live projections, fall back to totalProj
-        const mySleeperTotal = starters.reduce((s, r) => {
-          const live = sleeperRosterData[r.playerId];
-          return live?.proj != null ? s + live.proj : s + (findPlayer(r.playerId)?.proj || 0);
-        }, 0);
-        const myScore = mySleeperTotal;
-
-        // Opponent's score: sum of their starters' avg + deterministic week seed
-        const oppRoster    = TEAM_ROSTERS[opp.id] || [];
-        const oppStarters  = oppRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
-        const oppBase      = oppStarters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
-        const oppSeed      = Math.sin(opp.id * 7.3 + wkNum * 3.1) * 18 + Math.cos(opp.id * 2.1 + wkNum * 5.7) * 8;
-        const oppScore     = Math.max(0, Math.round((oppBase + oppSeed) * 10) / 10);
-
-        const diff       = myScore - oppScore;
-        const isWinning  = diff >= 0;
-        const winColor   = isWinning ? 'var(--good)' : 'var(--danger)';
-        const winPct     = myScore + oppScore > 0 ? Math.round((myScore / (myScore + oppScore)) * 100) : 50;
+      {h2hWinData && (() => {
+        const { opp, oppStarters, myProj, myLive, oppProj, myScore, oppScore, diff, isWinning, winPct, liveCount, finalCount, hasLive } = h2hWinData;
+        const wkNum    = currentWeek.num;
+        const winColor = isWinning ? 'var(--good)' : 'var(--danger)';
         const isLiveWeek = !isOffseason && !isPre;
+        const liveLabel  = liveCount > 0 ? `${liveCount} LIVE` : finalCount > 0 ? `${finalCount} FINAL` : 'PROJECTED';
+        const liveColor  = liveCount > 0 ? 'var(--good)' : finalCount > 0 ? 'var(--accent)' : 'var(--text-faint)';
 
         return (
           <div style={{ padding: '0 24px 16px' }}>
@@ -391,17 +727,15 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               gap: 0,
             }}>
               {/* Label */}
-              <div style={{ minWidth: 100 }}>
+              <div style={{ minWidth: 110 }}>
                 <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 3 }}>
                   Week {wkNum} · H2H
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  {isLiveWeek && (
+                  {liveCount > 0 && (
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--good)', boxShadow: '0 0 6px var(--good)', flexShrink: 0, animation: 'pulse 2s infinite' }} />
                   )}
-                  <span style={{ fontSize: 10, fontWeight: 700, color: isLiveWeek ? 'var(--good)' : 'var(--text-faint)' }}>
-                    {isLiveWeek ? 'LIVE' : 'PROJECTED'}
-                  </span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: liveColor }}>{isLiveWeek ? liveLabel : 'PROJECTED'}</span>
                 </div>
               </div>
 
@@ -410,16 +744,25 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                 {team?.logoImg ? (
                   <img src={team.logoImg} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
                 ) : (
-                  <span style={{ width: 36, height: 36, borderRadius: 8, background: team?.color || 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
+                  <span style={{ width: 36, height: 36, borderRadius: 8, background: team?.color || 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, color: logoTextColor, flexShrink: 0 }}>
                     {team?.logo || '??'}
                   </span>
                 )}
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{teamName}</div>
-                  <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>{sleeperOn ? 'Sleeper proj' : 'FantasAI proj'}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>
+                    {hasLive ? `PROJ ${myProj.toFixed(1)}` : sleeperOn ? 'Sleeper proj' : 'FantasAI proj'}
+                  </div>
                 </div>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: isWinning ? 'var(--good)' : 'var(--text)', lineHeight: 1, marginLeft: 'auto' }}>
-                  {myScore.toFixed(1)}
+                <div style={{ textAlign: 'right', marginLeft: 'auto' }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: isWinning ? 'var(--good)' : 'var(--text)', lineHeight: 1 }}>
+                    {myScore.toFixed(1)}
+                  </div>
+                  {hasLive && myLive !== myProj && (
+                    <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', marginTop: 2 }}>
+                      LIVE ADJ
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -474,7 +817,17 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           <div className="v accent">{totalProj.toFixed(1)}</div>
           <div className="sub">{starters.length} of 8 slots filled</div>
         </div>
-        <div className="stat"><div className="k">Win Probability</div><div className="v">58.4%</div><div className="sub" style={{ color: 'var(--good)' }}>+2.4% since Tues</div></div>
+        {h2hWinData ? (
+          <div className="stat">
+            <div className="k">Win Probability</div>
+            <div className="v" style={{ color: h2hWinData.isWinning ? 'var(--good)' : 'var(--danger)' }}>{h2hWinData.winPct}%</div>
+            <div className="sub" style={{ color: h2hWinData.isWinning ? 'var(--good)' : 'var(--danger)' }}>
+              vs {h2hWinData.opp.name} · {h2hWinData.diff >= 0 ? '+' : ''}{h2hWinData.diff.toFixed(1)} pts
+            </div>
+          </div>
+        ) : (
+          <div className="stat"><div className="k">Win Probability</div><div className="v">—</div><div className="sub">No matchup</div></div>
+        )}
         <div className="stat"><div className="k">Season Avg</div><div className="v">128.5</div><div className="sub">2nd in league</div></div>
         <div className="stat"><div className="k">Playoff Odds</div><div className="v">84.2%</div><div className="sub">Top seed: 21.8%</div></div>
       </div>
@@ -486,7 +839,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               {team?.logoImg ? (
                 <img src={team.logoImg} alt="logo" style={{ width: 56, height: 56, borderRadius: 10, objectFit: 'cover', flexShrink: 0, boxShadow: '0 2px 12px rgba(0,0,0,.4)' }} />
               ) : (
-                <span style={{ width: 56, height: 56, borderRadius: 10, background: team?.color || 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 900, color: '#000', flexShrink: 0, boxShadow: '0 2px 12px rgba(0,0,0,.4)' }}>
+                <span style={{ width: 56, height: 56, borderRadius: 10, background: team?.color || 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 900, color: logoTextColor, flexShrink: 0, boxShadow: '0 2px 12px rgba(0,0,0,.4)' }}>
                   {team?.logo || '??'}
                 </span>
               )}
@@ -671,47 +1024,8 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           )}
         </div>
 
-        {/* Lineup Decisions — below Commissioner Message */}
-        {(() => {
-            const allRostered = new Set(
-              LEAGUE_TEAMS.flatMap(t => (TEAM_ROSTERS[t.id] || []).map(r => r.playerId).filter(Boolean))
-            );
-            const watchlistAvailable = PLAYERS
-              .filter(p => watchlistIds.has(p.id) && !allRostered.has(p.id))
-              .sort((a, b) => b.proj - a.proj)
-              .slice(0, 3);
-
-            return (
-              <div className="muted-card" style={{ borderLeft: '3px solid var(--accent-2)' }}>
-                <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 8 }}>
-                  <div className="ai-orb" style={{ width: 22, height: 22 }}></div>
-                  <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--accent-2)' }}>Lineup Decisions</span>
-                </div>
-                <div style={{ fontSize: 12, lineHeight: 1.6 }}>
-                  <div style={{ marginBottom: 8 }}><strong className="accent">FLEX:</strong> Start Cook over Gibbs (matchup edge, +1.4 proj)</div>
-                  <div style={{ marginBottom: 8 }}><strong className="accent">TE:</strong> Bowers locked. McBride upside higher but variance ±9.</div>
-                  <div><strong style={{ color: 'var(--warn)' }}>CMC watch:</strong> If listed Out by Saturday, Cook moves to RB2 and Achane to FLEX.</div>
-                </div>
-                {watchlistAvailable.length > 0 && (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent-2)', letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 6 }}>
-                      ★ Watchlist · Available Now
-                    </div>
-                    {watchlistAvailable.map(p => (
-                      <div key={p.id} onClick={() => onOpenPlayer(p.id)} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5, cursor: 'pointer' }}>
-                        <PosBadge pos={p.pos} />
-                        <span style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{p.name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{p.team}</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{p.proj.toFixed(1)}</span>
-                        <button className="btn primary sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={e => { e.stopPropagation(); onNav('roster'); }}>Add</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <button className="btn ai sm" style={{ marginTop: 10 }}>Apply suggestions</button>
-              </div>
-            );
-          })()}
+        {/* Lineup Decisions — bullet summary */}
+        <LineupSummaryCard myRosterIds={myRosterIds} slotOverrides={slotOverrides} onOpenPlayer={onOpenPlayer} />
 
         </div>{/* end middle column */}
 

@@ -102,3 +102,19 @@ export const Delta = ({ from, to }) => {
 };
 
 export const AIHint = ({ children }) => <span className="ai-inline">{children}</span>;
+
+export const TeamLogoBadge = ({ team, size = 36 }) => {
+  const prefs = (() => { try { return JSON.parse(localStorage.getItem('fantasai_team_prefs') || 'null') || {}; } catch { return {}; } })();
+  const color    = prefs.color    ?? team?.color ?? 'var(--accent)';
+  const logo     = prefs.logo     ?? team?.logo  ?? '??';
+  const logoImg  = prefs.logoImg  ?? team?.logoImg ?? null;
+  const textColor = prefs.logoTextColor ?? '#000000';
+  const radius = Math.round(size * 0.28);
+  return logoImg ? (
+    <img src={logoImg} alt={logo} style={{ width: size, height: size, borderRadius: radius, objectFit: 'cover', flexShrink: 0 }} />
+  ) : (
+    <span style={{ width: size, height: size, borderRadius: radius, background: color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.32), fontWeight: 900, color: textColor, flexShrink: 0, letterSpacing: '-0.04em' }}>
+      {(logo || '??').slice(0, 2).toUpperCase()}
+    </span>
+  );
+};

@@ -1,6 +1,7 @@
 import React from 'react';
-import { findPlayer, buildRosterFrame, assignRoster } from '../lib/data.js';
-import { PosBadge, PlayerAvatar } from '../components/ui.jsx';
+import { findPlayer, buildRosterFrame, assignRoster, PLAYERS } from '../lib/data.js';
+import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
+import { useR2Lineup, useR2Injuries } from '../hooks.js';
 
 const API_BASE = 'https://api.fantasai.net';
 
@@ -24,6 +25,124 @@ const STATUS_RANK  = { IR: 5, NFI: 4, O: 3, D: 2, Q: 1 };
 function mapStatus(raw) {
   if (!raw || raw === 'Active' || raw === 'OK') return 'OK';
   return STATUS_SLEEPER_MAP[raw] || raw;
+}
+
+// ── Databricks AI Analysis Panel ─────────────────────────────────────────────
+
+function DatabricksAIPanel({ myRosterIds }) {
+  const { data: lineupData, loading: lineupLoading, fetchedAt } = useR2Lineup();
+  const { data: injuryData } = useR2Injuries();
+  const [collapsed, setCollapsed] = React.useState(false);
+
+  // Nothing to show while loading or if Databricks hasn't written the file yet
+  if (lineupLoading) return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', color: 'var(--text-faint)', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+      <div className="ai-orb" style={{ width: 10, height: 10 }} />
+      Loading Databricks analysis…
+    </div>
+  );
+  if (!lineupData) return null;
+
+  // Filter recommendations to players on this user's roster
+  const recs = Array.isArray(lineupData)
+    ? lineupData.filter(r => {
+        const match = PLAYERS.find(p => p.name?.toLowerCase() === r.player_name?.toLowerCase());
+        return match && myRosterIds.has(match.id);
+      })
+    : [];
+
+  const starters = recs.filter(r => r.recommendation === 'Start');
+  const benchers = recs.filter(r => r.recommendation === 'Bench');
+  const injuryAlerts = Array.isArray(injuryData)
+    ? injuryData.filter(r => {
+        const match = PLAYERS.find(p => p.name?.toLowerCase() === r.player_name?.toLowerCase());
+        return match && myRosterIds.has(match.id) && r.status === 'Out';
+      })
+    : [];
+
+  if (recs.length === 0 && injuryAlerts.length === 0) return null;
+
+  const fmtTime = iso => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d)) return null;
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 14, padding: 0, border: '1px solid rgba(78,168,255,.25)', overflow: 'hidden' }}>
+      {/* Header */}
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', cursor: 'pointer', userSelect: 'none' }}
+        onClick={() => setCollapsed(c => !c)}
+      >
+        <div className="ai-orb" style={{ width: 12, height: 12, flexShrink: 0 }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent-2)', letterSpacing: '.03em' }}>
+            Databricks AI Analysis
+          </div>
+          {fetchedAt && (
+            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', marginTop: 1 }}>
+              Updated {fmtTime(fetchedAt)}
+            </div>
+          )}
+        </div>
+        {injuryAlerts.length > 0 && (
+          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: 4, background: 'rgba(255,80,80,.15)', color: 'var(--danger)', border: '1px solid rgba(255,80,80,.3)', fontWeight: 700 }}>
+            {injuryAlerts.length} OUT
+          </span>
+        )}
+        {starters.length > 0 && (
+          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: 4, background: 'rgba(198,255,58,.12)', color: 'var(--accent)', border: '1px solid rgba(198,255,58,.3)', fontWeight: 700 }}>
+            {starters.length} START
+          </span>
+        )}
+        <span style={{ fontSize: 12, color: 'var(--text-faint)', marginLeft: 4 }}>{collapsed ? '▶' : '▼'}</span>
+      </div>
+
+      {!collapsed && (
+        <div style={{ borderTop: '1px solid rgba(78,168,255,.15)', padding: '10px 16px 14px' }}>
+          {/* Injury alerts */}
+          {injuryAlerts.map((r, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--panel-3)' }}>
+              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(255,80,80,.15)', color: 'var(--danger)', border: '1px solid rgba(255,80,80,.3)', flexShrink: 0, marginTop: 1 }}>OUT</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>{r.player_name}</div>
+                {r.notes && <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{r.notes}</div>}
+              </div>
+            </div>
+          ))}
+
+          {/* Start recommendations */}
+          {starters.map((r, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--panel-3)' }}>
+              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(198,255,58,.12)', color: 'var(--accent)', border: '1px solid rgba(198,255,58,.3)', flexShrink: 0, marginTop: 1 }}>START</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>{r.player_name}</span>
+                  {r.projected_points != null && (
+                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent)', fontWeight: 700 }}>{Number(r.projected_points).toFixed(1)} proj</span>
+                  )}
+                </div>
+                {r.notes && <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{r.notes}</div>}
+              </div>
+            </div>
+          ))}
+
+          {/* Bench warnings */}
+          {benchers.map((r, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--panel-3)' }}>
+              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(148,163,184,.1)', color: 'var(--text-faint)', border: '1px solid rgba(148,163,184,.25)', flexShrink: 0, marginTop: 1 }}>BENCH</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)' }}>{r.player_name}</div>
+                {r.notes && <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>{r.notes}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Greedy optimal lineup: fill dedicated slots first, then FLEX.
@@ -180,9 +299,12 @@ export default function LineupDecisions({
   return (
     <div style={{ padding: 18 }}>
 
+      <DatabricksAIPanel myRosterIds={myRosterIds} />
+
       {/* ── Summary header ── */}
       <div className="card" style={{ marginBottom: 16, padding: '18px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, flexWrap: 'wrap' }}>
+          <TeamLogoBadge team={null} size={40} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10 }}>
               Lineup Optimizer · {startingSlots.length} starters

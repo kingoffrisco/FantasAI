@@ -331,7 +331,15 @@ export default function App() {
     });
   }
 
-  function handleRespondTradeOffer(offerId, response) {
+  function handleDeleteTradeOffer(offerId) {
+    setTradeOffers(prev => {
+      const next = prev.filter(o => o.id !== offerId);
+      localStorage.setItem('fantasai_trade_offers', JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function handleRespondTradeOffer(offerId, response, comment = '') {
     const offer = tradeOffers.find(o => o.id === offerId);
     if (offer && response === 'accepted') {
       setMyRosterIds(prev => {
@@ -345,7 +353,9 @@ export default function App() {
       });
     }
     setTradeOffers(prev => {
-      const next = prev.map(o => o.id === offerId ? { ...o, status: response } : o);
+      const patch = { status: response };
+      if (comment) patch.responseComment = comment;
+      const next = prev.map(o => o.id === offerId ? { ...o, ...patch } : o);
       localStorage.setItem('fantasai_trade_offers', JSON.stringify(next));
       return next;
     });
@@ -464,7 +474,7 @@ export default function App() {
       <div className={shellClass} style={tweaks.showMobile && !isMobileDevice ? { maxWidth: 414, margin: '0 auto', boxShadow: '0 0 60px rgba(0,0,0,.6)' } : {}}>
         <div className="logo-area">
           <span className="logo-dot"></span>
-          <span className="logo"><span className="ai-mark">AI</span>FANTAS</span>
+          <span className="logo">FANTAS<span className="ai-mark">AI</span></span>
         </div>
         <TopBar
           crumbs={CRUMBS[active] || ['FantasAI']}
@@ -483,19 +493,19 @@ export default function App() {
             </div>
           }
         />
-        <Sidebar active={active} onNav={setActive} user={user} lineupAlertCount={lineupAlertCount} />
+        <Sidebar active={active} onNav={setActive} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} />
 
         <div className="main">
           {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} tradeOffers={tradeOffers} />}
           {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} />}
-          {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} />}
+          {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} user={user} />}
           {active === 'roster'    && <CurrentRosterScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} />}
           {active === 'lineup'    && <LineupDecisions myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} onOpenPlayer={setOpenPlayer} />}
           {active === 'waivers'   && <WaiversScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} />}
           {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'compare'   && <CompareScreen />}
           {active === 'watchlist' && <WatchlistScreen onOpenPlayer={setOpenPlayer} />}
-          {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} onSendTradeOffer={handleSendTradeOffer} />}
+          {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} onSendTradeOffer={handleSendTradeOffer} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} onDeleteTradeOffer={handleDeleteTradeOffer} />}
           {active === 'draft'     && <DraftRoom aiMode={aiMode} user={user} onNav={setActive} onDraftPick={id => {
             setMyRosterIds(prev => {
               const next = new Set([...prev, id]);

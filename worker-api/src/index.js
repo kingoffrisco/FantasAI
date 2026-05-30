@@ -27,6 +27,66 @@
 // GET  /api/v1/players?limit=N&pos=QB,...   — Sleeper player pool ranked by search_rank (public, 1h cache)
 // GET  /api/v1/cbs/players                 — CBS league player list with RotoWire news (requires CBS_WORKER_URL)
 
+// ── Beat writer handles ────────────────────────────────────────────────────────
+const BEAT_WRITERS = [
+  { handle: 'AdamSchefter',    name: 'Adam Schefter',       category: 'national' },
+  { handle: 'RapSheet',        name: 'Ian Rapoport',        category: 'national' },
+  { handle: 'TomPelissero',    name: 'Tom Pelissero',       category: 'national' },
+  { handle: 'MikeGarafolo',    name: 'Mike Garafolo',       category: 'national' },
+  { handle: 'Schultz_Report',  name: 'Jordan Schultz',      category: 'national' },
+  { handle: 'MySportsUpdate',  name: 'Ari Meirov',          category: 'national' },
+  { handle: 'DMRussini',       name: 'Dianna Russini',      category: 'national' },
+  { handle: 'AlbertBreer',     name: 'Albert Breer',        category: 'national' },
+  { handle: 'FieldYates',      name: 'Field Yates',         category: 'national' },
+  { handle: 'JFowlerESPN',     name: 'Jeremy Fowler',       category: 'national' },
+  { handle: 'MatthewBerryTMR', name: 'Matthew Berry',       category: 'fantasy' },
+  { handle: 'Ihartitz',        name: 'Ian Hartitz',         category: 'fantasy' },
+  { handle: 'dwainmcfarland',  name: 'Dwain McFarland',     category: 'fantasy' },
+  { handle: 'LateRoundQB',     name: 'JJ Zachariason',      category: 'fantasy' },
+  { handle: 'Pat_Thorman',     name: 'Pat Thorman',         category: 'fantasy' },
+  { handle: 'SigmundBloom',    name: 'Sigmund Bloom',       category: 'fantasy' },
+  { handle: 'LordReebs',       name: 'Rich Hribar',         category: 'fantasy' },
+  { handle: 'ScottBarrettDFB', name: 'Scott Barrett',       category: 'fantasy' },
+  { handle: 'jonmachota',      name: 'Jon Machota',         category: 'beat', team: 'DAL' },
+  { handle: 'clarencehilljr',  name: 'Clarence Hill Jr.',   category: 'beat', team: 'DAL' },
+  { handle: 'SlaterNFL',       name: 'Jane Slater',         category: 'beat', team: 'DAL' },
+  { handle: 'ByNateTaylor',    name: 'Nate Taylor',         category: 'beat', team: 'KC'  },
+  { handle: 'mattderrick',     name: 'Matt Derrick',        category: 'beat', team: 'KC'  },
+  { handle: 'JoeBuscaglia',    name: 'Joe Buscaglia',       category: 'beat', team: 'BUF' },
+  { handle: 'SalSports',       name: 'Sal Capaccio',        category: 'beat', team: 'BUF' },
+  { handle: 'ZBerm',           name: 'Zach Berman',         category: 'beat', team: 'PHI' },
+  { handle: 'JimmyKempski',    name: 'Jimmy Kempski',       category: 'beat', team: 'PHI' },
+  { handle: 'mattbarrows',     name: 'Matt Barrows',        category: 'beat', team: 'SF'  },
+  { handle: 'LombardiHimself', name: 'David Lombardi',      category: 'beat', team: 'SF'  },
+  { handle: 'davebirkett',     name: 'Dave Birkett',        category: 'beat', team: 'DET' },
+  { handle: 'colton_pouncy',   name: 'Colton Pouncy',       category: 'beat', team: 'DET' },
+];
+
+const NITTER_INSTANCES = [
+  'https://nitter.kavin.rocks',
+  'https://nitter.unixfox.eu',
+  'https://nitter.it',
+  'https://nitter.nl',
+  'https://nitter.moomoo.me',
+  'https://nitter.rawbit.ninja',
+  'https://nitter.esmailelbob.xyz',
+  'https://nitter.tiekoetter.com',
+  'https://nitter.eu',
+  'https://nitter.d420.de',
+  'https://nitter.lunar.icu',
+  'https://nitter.privacydev.net',
+  'https://nitter.poast.org',
+  'https://nitter.1d4.us',
+  'https://bird.trom.tf',
+];
+
+// Stable NFL news RSS feeds used as fallback when all Nitter instances are down.
+// PFT and NFL.com aggregate content from the same national reporters.
+const BEAT_FALLBACK_RSS = [
+  { url: 'https://profootballtalk.nbcsports.com/feed/', handle: 'PFT', reporter: 'Pro Football Talk', category: 'national' },
+  { url: 'https://www.nfl.com/rss/rsslanding?searchString=news', handle: 'NFLcom', reporter: 'NFL.com News', category: 'national' },
+];
+
 const S3_KEY              = 'fantasai/owners-config.json';
 const S3_LEAGUE_KEY       = 'fantasai/league-config.json';
 const S3_ROSTERS_KEY      = 'fantasai/rosters.json';
@@ -51,6 +111,11 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
+    // ── R2 Proxy for Databricks ──────────────────────────────────────────
+    if (url.pathname.startsWith('/api/v1/r2')) {
+      return handleR2Proxy(request, env, url);
+    }
+
     try {
       // ── POST routes (no auth — called directly by the app) ──────────────
       if (method === 'POST') {
@@ -60,6 +125,7 @@ export default {
         if (url.pathname === '/api/v1/owners/reset-complete') return handleResetComplete(request, env);
         if (url.pathname === '/api/v1/week/current')          return handleWeekSet(request, env);
         if (url.pathname === '/api/v1/rosters/save')          return handleRosterSave(request, env);
+        if (url.pathname === '/api/v1/rosters/bulk-save')     return handleRosterBulkSave(request, env);
         if (url.pathname === '/api/v1/rosters/reset')         return handleRosterReset(request, env);
         if (url.pathname === '/api/v1/schedule')              return handleScheduleSave(request, env);
         if (url.pathname === '/api/v1/league-settings')       return handleLeagueSettingsSave(request, env);
@@ -67,6 +133,7 @@ export default {
       }
 
       if (method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+
 
       // ── Public GET routes ────────────────────────────────────────────────
       if (url.pathname === '/api/health')                  return json(handleHealth(env), 200);
@@ -84,6 +151,14 @@ export default {
       if (url.pathname === '/api/v1/players')             return handlePlayers(url);
       if (url.pathname === '/api/v1/cbs/players')         return await handleCbsPlayers(env);
       if (url.pathname === '/api/v1/cbs/rankings')        return await handleCbsRankings(url, env);
+      if (url.pathname === '/api/v1/twitter/beat')        return await handleBeatWriterNews();
+      if (url.pathname.startsWith('/api/v1/player/'))   return await handlePlayerProfile(url, env);
+      if (url.pathname === '/api/v1/news/latest')        return await handleDbNews(env);
+      if (url.pathname === '/api/v1/news/critical')      return await handleDbCritical(env);
+      if (url.pathname === '/api/v1/leaderboard/live')   return await handleDbLeaderboard(env);
+      if (url.pathname === '/api/v1/games/active')       return await handleDbActiveGames(env);
+      if (url.pathname === '/api/v1/opportunity/rankings') return await handleDbOpportunity(env);
+      if (url.pathname === '/health' || url.pathname === '/') return json(handleHealth(env), 200);
 
       // ── Authenticated GET routes ─────────────────────────────────────────
       if (env.FANTASAI_KEY) {
@@ -267,7 +342,7 @@ function handleHealth(env) {
   return {
     ok: true,
     service: 'fantasai-api',
-    awsConfigured:   !!env.AWS_ACCESS_KEY_ID,
+    r2Configured:    !!env.BUCKET,
     emailConfigured: !!env.RESEND_API_KEY,
     cbsConfigured:   !!env.CBS_WORKER_URL,
     authRequired:    !!env.FANTASAI_KEY,
@@ -276,26 +351,23 @@ function handleHealth(env) {
 
 async function handleStorageTest(env) {
   const result = {
-    awsConfigured: !!env.AWS_ACCESS_KEY_ID,
-    bucketConfigured: !!env.S3_BUCKET,
-    bucket: env.S3_BUCKET || 'aws-kingoffisco-s3-bucket',
-    region: env.AWS_REGION || 'us-east-2',
+    r2Configured: !!env.BUCKET,
+    bucket: 'fantasai-r2',
     testedAt: new Date().toISOString(),
     read: null,
     write: null,
     error: null,
   };
 
-  if (!result.awsConfigured) {
-    result.error = 'AWS_ACCESS_KEY_ID secret not set — run: wrangler secret put AWS_ACCESS_KEY_ID';
+  if (!result.r2Configured) {
+    result.error = 'R2 binding BUCKET not configured — check wrangler.toml [[r2_buckets]]';
     return json(result, 200);
   }
 
-  // Read test — GET the settings file (expected to exist or return 404; both are valid S3 responses)
+  // Read test — GET the settings file (null = not found, both null and found are valid)
   try {
     const readRes = await s3Fetch(env, 'GET', S3_SETTINGS_KEY, null);
     result.read = { status: readRes.status, ok: readRes.status === 200 || readRes.status === 404 };
-    if (!result.read.ok) result.read.error = `Unexpected HTTP ${readRes.status}`;
   } catch (err) {
     result.read = { ok: false, error: err.message };
   }
@@ -306,10 +378,8 @@ async function handleStorageTest(env) {
     const writeRes = await s3Fetch(env, 'PUT', probeKey, { probe: true, at: result.testedAt });
     result.write = { status: writeRes.status, ok: writeRes.ok };
     if (!writeRes.ok) {
-      const body = await writeRes.text().catch(() => '');
-      result.write.error = body || `HTTP ${writeRes.status}`;
+      result.write.error = `HTTP ${writeRes.status}`;
     } else {
-      // Clean up probe file
       await s3Fetch(env, 'DELETE', probeKey, null).catch(() => {});
     }
   } catch (err) {
@@ -486,6 +556,31 @@ async function handleRosterReset(request, env) {
   return json({ ok: true, resetAt: reset.resetAt }, 200);
 }
 
+// Writes all team rosters in a single R2 PUT — avoids the race condition that
+// occurs when many concurrent /rosters/save calls all read-modify-write the same key.
+async function handleRosterBulkSave(request, env) {
+  const body = await request.json().catch(() => ({}));
+  // body.rosters: { "1": [playerId, ...], "2": [...], ... }
+  const incoming = body.rosters;
+  if (!incoming || typeof incoming !== 'object') {
+    return json({ error: 'rosters object required: { "teamId": [playerIds] }' }, 400);
+  }
+
+  const rosters = {};
+  for (const [teamId, playerIds] of Object.entries(incoming)) {
+    if (Array.isArray(playerIds)) {
+      rosters[String(teamId)] = playerIds.map(Number).filter(Boolean);
+    }
+  }
+
+  const payload = { rosters, savedAt: new Date().toISOString() };
+  const put = await s3Fetch(env, 'PUT', S3_ROSTERS_KEY, payload);
+  if (!put.ok) throw new Error(`R2 PUT ${put.status}`);
+
+  const counts = Object.fromEntries(Object.entries(rosters).map(([id, ids]) => [id, ids.length]));
+  return json({ ok: true, savedAt: payload.savedAt, teamCount: Object.keys(rosters).length, counts }, 200);
+}
+
 // ── ESPN / NFL Public APIs ────────────────────────────────────────────────────
 
 const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl';
@@ -601,7 +696,7 @@ async function handleNflSchedule(url) {
 }
 
 async function handleNflNews(url) {
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
   const data = await espnFetch(`/news?limit=${limit}`);
   const articles = (data.articles || []).map(a => ({
     id:          a.dataSourceIdentifier || a.id,
@@ -751,62 +846,92 @@ async function handleLeagueSettingsSave(request, env) {
   return json({ ok: true, savedAt: payload.savedAt }, 200);
 }
 
-// ── AWS S3 (inline Signature V4) ──────────────────────────────────────────────
+// ── R2 Proxy (raw object access for Databricks) ───────────────────────────────
 
-const _enc = s => new TextEncoder().encode(s);
-const _hex = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+async function handleR2Proxy(request, env, url) {
+  const method = request.method;
 
-async function _sha256hex(str) {
-  return _hex(await crypto.subtle.digest('SHA-256', _enc(str)));
+  if (env.FANTASAI_KEY) {
+    const k = request.headers.get('X-FantasAI-Key');
+    if (k !== env.FANTASAI_KEY) return json({ error: 'Unauthorized' }, 401);
+  }
+
+  if (!env.BUCKET) return json({ error: 'R2 binding not configured' }, 503);
+
+  // GET /api/v1/r2/list?prefix=fantasai/&limit=1000
+  if (url.pathname === '/api/v1/r2/list' && method === 'GET') {
+    const prefix = url.searchParams.get('prefix') || '';
+    const limit  = Math.min(parseInt(url.searchParams.get('limit') || '1000'), 5000);
+    const listed  = await env.BUCKET.list({ prefix, limit });
+    const objects = listed.objects.map(o => ({
+      key:         o.key,
+      size:        o.size,
+      uploaded:    o.uploaded.toISOString(),
+      contentType: o.httpMetadata?.contentType || null,
+    }));
+    return json({ objects, truncated: listed.truncated }, 200);
+  }
+
+  const key = decodeURIComponent(url.pathname.replace('/api/v1/r2/', ''));
+  if (!key || key === '/api/v1/r2') return json({ error: 'Object key required' }, 400);
+
+  if (method === 'GET') {
+    const obj = await env.BUCKET.get(key);
+    if (!obj) return json({ error: 'Not found' }, 404);
+    const headers = {
+      ...corsHeaders(),
+      'Content-Type':   obj.httpMetadata?.contentType || 'application/octet-stream',
+      'Content-Length': obj.size.toString(),
+      'X-R2-Uploaded':  obj.uploaded.toISOString(),
+    };
+    if (obj.httpMetadata?.contentEncoding) headers['Content-Encoding'] = obj.httpMetadata.contentEncoding;
+    return new Response(obj.body, { status: 200, headers });
+  }
+
+  if (method === 'PUT') {
+    const contentType = request.headers.get('Content-Type') || 'application/octet-stream';
+    await env.BUCKET.put(key, request.body, { httpMetadata: { contentType } });
+    return json({ ok: true, key }, 201);
+  }
+
+  if (method === 'DELETE') {
+    await env.BUCKET.delete(key);
+    return json({ ok: true, key }, 200);
+  }
+
+  if (method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
+
+  return json({ error: 'Method not allowed' }, 405);
 }
 
-async function _hmac(key, msg) {
-  const k = await crypto.subtle.importKey(
-    'raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
-  );
-  return new Uint8Array(await crypto.subtle.sign('HMAC', k, _enc(msg)));
-}
+// ── Cloudflare R2 (native binding) ───────────────────────────────────────────
+// Wraps env.BUCKET with the same call signature as the old s3Fetch so every
+// handler above stays unchanged: s3Fetch(env, 'GET'|'PUT'|'DELETE', key, body)
 
-async function s3Fetch(env, method, s3key, body) {
-  const bucket = env.S3_BUCKET || 'aws-kingoffisco-s3-bucket';
-  const region = env.AWS_REGION || 'us-east-2';
-  const keyId  = env.AWS_ACCESS_KEY_ID;
-  const secret = env.AWS_SECRET_ACCESS_KEY;
-  if (!keyId || !secret) throw new Error('AWS credentials not configured');
+async function s3Fetch(env, method, key, body) {
+  if (!env.BUCKET) throw new Error('R2 binding BUCKET not configured — check wrangler.toml [[r2_buckets]]');
 
-  const host     = `${bucket}.s3.${region}.amazonaws.com`;
-  const bodyStr  = body != null ? JSON.stringify(body) : '';
-  const bodyHash = await _sha256hex(bodyStr);
+  if (method === 'GET') {
+    const obj = await env.BUCKET.get(key);
+    if (!obj) {
+      return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
+    }
+    const text = await obj.text();
+    return { ok: true, status: 200, text: async () => text, json: async () => JSON.parse(text) };
+  }
 
-  const iso     = new Date().toISOString();
-  const amzDate = iso.slice(0, 19).replace(/[-:]/g, '') + 'Z'; // 20230801T120000Z
-  const day     = amzDate.slice(0, 8);
+  if (method === 'PUT' || method === 'POST') {
+    const bodyStr = body != null ? JSON.stringify(body) : '';
+    await env.BUCKET.put(key, bodyStr, { httpMetadata: { contentType: 'application/json' } });
+    return { ok: true, status: 200, text: async () => '' };
+  }
 
-  const hdrMap = {
-    host,
-    'x-amz-date': amzDate,
-    'x-amz-content-sha256': bodyHash,
-    ...(bodyStr ? { 'content-type': 'application/json' } : {}),
-  };
-  const sortedKeys   = Object.keys(hdrMap).sort();
-  const canonHeaders = sortedKeys.map(k => `${k}:${hdrMap[k]}\n`).join('');
-  const signedHdrs   = sortedKeys.join(';');
-  const canonReq     = [method, `/${s3key}`, '', canonHeaders, signedHdrs, bodyHash].join('\n');
-  const scope        = `${day}/${region}/s3/aws4_request`;
-  const strToSign    = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${await _sha256hex(canonReq)}`;
+  if (method === 'DELETE') {
+    await env.BUCKET.delete(key);
+    return { ok: true, status: 204, text: async () => '' };
+  }
 
-  let sigKey = _enc(`AWS4${secret}`);
-  for (const part of [day, region, 's3', 'aws4_request']) sigKey = await _hmac(sigKey, part);
-  const sig = _hex(await _hmac(sigKey, strToSign));
-
-  return fetch(`https://${host}/${s3key}`, {
-    method,
-    headers: {
-      ...hdrMap,
-      authorization: `AWS4-HMAC-SHA256 Credential=${keyId}/${scope}, SignedHeaders=${signedHdrs}, Signature=${sig}`,
-    },
-    body: bodyStr || undefined,
-  });
+  throw new Error(`Unsupported method: ${method}`);
 }
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -934,12 +1059,175 @@ async function chatCacheKey(prompt) {
   return `https://cache.fantasai.internal/chat/${hex}`;
 }
 
+// ── Beat Writers (Nitter RSS) ─────────────────────────────────────────────────
+
+function parseRSS(xml) {
+  const items = [];
+  const itemRe = /<item>([\s\S]*?)<\/item>/gi;
+  let m;
+  while ((m = itemRe.exec(xml)) !== null) {
+    const block = m[1];
+    const get = tag => {
+      const re = new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/${tag}>`, 'i');
+      return (re.exec(block)?.[1] || '').trim();
+    };
+    const rawTitle = get('title');
+    const pubDate  = get('pubDate') || get('updated');
+    const link     = get('link') || get('guid');
+    const text = rawTitle
+      .replace(/^[^:]+:\s*/, '')   // strip "handle: " prefix that Nitter adds
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+      .trim();
+    if (text && text.length > 10) {
+      items.push({ text, publishedAt: pubDate ? new Date(pubDate).toISOString() : null, url: link });
+    }
+  }
+  return items;
+}
+
+async function handleBeatWriterNews() {
+  const ua   = 'Mozilla/5.0 (compatible; FantasAI/1.0)';
+  const hdrs = { 'User-Agent': ua, 'Accept': 'application/rss+xml, application/xml, text/xml, */*' };
+
+  // ── 1. Try Nitter ────────────────────────────────────────────────────────────
+  let workingInstance = null;
+  let nitterItems = [];
+  const first = BEAT_WRITERS[0];
+
+  for (const inst of NITTER_INSTANCES) {
+    try {
+      const res = await fetch(`${inst}/${first.handle}/rss`, { signal: AbortSignal.timeout(4000), headers: hdrs });
+      if (res.ok) {
+        const parsed = parseRSS(await res.text());
+        if (parsed.length > 0) { workingInstance = inst; nitterItems = parsed; break; }
+      }
+    } catch {}
+  }
+
+  if (workingInstance) {
+    const settled = await Promise.allSettled(
+      BEAT_WRITERS.slice(1).map(async writer => {
+        try {
+          const res = await fetch(`${workingInstance}/${writer.handle}/rss`, { signal: AbortSignal.timeout(8000), headers: hdrs });
+          if (!res.ok) return null;
+          return { writer, items: parseRSS(await res.text()) };
+        } catch { return null; }
+      })
+    );
+    const allItems = nitterItems.slice(0, 20).map(i => ({
+      ...i, handle: first.handle, reporter: first.name, category: first.category, team: first.team || null,
+    }));
+    for (const f of settled) {
+      if (f.status !== 'fulfilled' || !f.value) continue;
+      const { writer, items } = f.value;
+      for (const item of items.slice(0, 20))
+        allItems.push({ ...item, handle: writer.handle, reporter: writer.name, category: writer.category, team: writer.team || null });
+    }
+    allItems.sort((a, b) => (new Date(b.publishedAt||0) - new Date(a.publishedAt||0)));
+    return json({ source: 'beat-writers', fetchedAt: new Date().toISOString(), via: 'nitter', instance: workingInstance, writerCount: BEAT_WRITERS.length, count: allItems.length, items: allItems.slice(0, 500) }, 200);
+  }
+
+  // ── 2. Nitter unavailable — fall back to stable NFL news RSS feeds ────────────
+  const fallbackSettled = await Promise.allSettled(
+    BEAT_FALLBACK_RSS.map(async feed => {
+      try {
+        const res = await fetch(feed.url, { signal: AbortSignal.timeout(10000), headers: hdrs });
+        if (!res.ok) return null;
+        const items = parseRSS(await res.text());
+        return { feed, items };
+      } catch { return null; }
+    })
+  );
+
+  const fallbackItems = [];
+  for (const f of fallbackSettled) {
+    if (f.status !== 'fulfilled' || !f.value) continue;
+    const { feed, items } = f.value;
+    for (const item of items.slice(0, 100)) {
+      fallbackItems.push({ ...item, handle: feed.handle, reporter: feed.reporter, category: feed.category, team: null });
+    }
+  }
+
+  if (fallbackItems.length === 0) {
+    return json({ source: 'beat-writers', fetchedAt: new Date().toISOString(), via: 'none', error: 'Nitter unavailable and fallback RSS feeds failed', writerCount: BEAT_WRITERS.length, items: [] }, 200);
+  }
+
+  fallbackItems.sort((a, b) => (new Date(b.publishedAt||0) - new Date(a.publishedAt||0)));
+  return json({ source: 'beat-writers', fetchedAt: new Date().toISOString(), via: 'rss-fallback', writerCount: BEAT_WRITERS.length, count: fallbackItems.length, items: fallbackItems.slice(0, 500) }, 200);
+}
+
+// ── Databricks SQL Warehouse ──────────────────────────────────────────────────
+
+async function queryDatabricks(sql, env) {
+  const host = (env.DATABRICKS_HOST || env.DATABRICKS_URL || '').replace(/\/$/, '');
+  const token = env.DATABRICKS_TOKEN;
+  const warehouseId = env.DATABRICKS_WAREHOUSE_ID;
+  if (!host || !token || !warehouseId) throw new Error('DATABRICKS_HOST, DATABRICKS_TOKEN, and DATABRICKS_WAREHOUSE_ID must be set');
+
+  const res = await fetch(`${host}/api/2.0/sql/statements`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ statement: sql, warehouse_id: warehouseId, wait_timeout: '30s' }),
+    signal: AbortSignal.timeout(35000),
+  });
+  const data = await res.json();
+  if (data.status?.state !== 'SUCCEEDED') {
+    throw new Error(`Query failed: ${data.status?.error?.message || JSON.stringify(data.status)}`);
+  }
+  const columns = data.manifest?.schema?.columns || [];
+  const rows    = data.result?.data_array || [];
+  return rows.map(row => {
+    const obj = {};
+    columns.forEach((col, idx) => { obj[col.name] = row[idx]; });
+    return obj;
+  });
+}
+
+async function handlePlayerProfile(url, env) {
+  const raw  = url.pathname.split('/').pop();
+  const name = decodeURIComponent(raw).replace(/'/g, "''"); // escape single quotes
+  const rows = await queryDatabricks(
+    `SELECT * FROM main.fantasai_news.api_player_profile WHERE player_name = '${name}' LIMIT 1`, env
+  );
+  return json({ status: 'success', data: rows[0] || null, metadata: { timestamp: new Date().toISOString() } }, 200);
+}
+
+async function handleDbNews(env) {
+  const rows = await queryDatabricks(`SELECT * FROM main.fantasai_news.api_news_feed LIMIT 20`, env);
+  return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
+}
+
+async function handleDbCritical(env) {
+  const rows = await queryDatabricks(`SELECT * FROM main.fantasai_news.api_critical_alerts LIMIT 20`, env);
+  return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
+}
+
+async function handleDbLeaderboard(env) {
+  const rows = await queryDatabricks(`SELECT * FROM main.fantasai_news.api_live_leaderboard LIMIT 50`, env);
+  return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
+}
+
+async function handleDbActiveGames(env) {
+  const rows = await queryDatabricks(
+    `SELECT DISTINCT game_id, game_status, quarter, time_remaining FROM main.fantasai_news.live_game_stats WHERE game_status IN ('in progress', 'halftime')`, env
+  );
+  return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
+}
+
+async function handleDbOpportunity(env) {
+  const rows = await queryDatabricks(
+    `SELECT player_name, position, team, opportunity_score, opportunity_tier as tier FROM main.fantasai.player_opportunity_scores ORDER BY opportunity_score DESC LIMIT 100`, env
+  );
+  return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
+}
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin':  '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-FantasAI-Key',
     'Access-Control-Max-Age':       '86400',
   };

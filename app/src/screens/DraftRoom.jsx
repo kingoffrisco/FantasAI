@@ -1,7 +1,7 @@
 import React from 'react';
 import { PLAYERS, findPlayer, LEAGUE_TEAMS, DRAFT_PICKS, TEAMS_ORDER, QUEUE as INIT_QUEUE, CHAT_MESSAGES } from '../lib/data.js';
 import { predictPicks } from '../lib/draft.js';
-import { PosBadge, PlayerAvatar, PlayerCell } from '../components/ui.jsx';
+import { PosBadge, PlayerAvatar, PlayerCell, TeamLogoBadge } from '../components/ui.jsx';
 
 export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
   const REAL_currentPickNum = 40;
@@ -18,6 +18,16 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
   const [mockSetup, setMockSetup]             = React.useState(false);
   const [mockTeamsOrder, setMockTeamsOrder]   = React.useState([...TEAMS_ORDER]);
   const [mockSlotIndex, setMockSlotIndex]     = React.useState(null); // 0-based slot the user chose
+
+  // ── Scheduled mock drafts ──────────────────────────────────────────────────
+  const [mockSchedule, setMockSchedule] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_mock_schedule') || '[]'); }
+    catch { return []; }
+  });
+  const [showScheduleModal, setShowScheduleModal] = React.useState(false);
+  const [scheduleDraft, setScheduleDraft] = React.useState({ date: '', rounds: 16, format: 'Snake' });
+  const [joinDraftId, setJoinDraftId]     = React.useState(null);
+  const [joinSlot, setJoinSlot]           = React.useState(null);
 
   function startMockDraft() {
     setMockPicks([]);
@@ -161,6 +171,75 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
       try { localStorage.setItem('fantasai_mock_picks_saved', JSON.stringify(mockPicks)); } catch {}
     }
   }, [mockPicks, mockPickNum, mockActive]);
+
+  React.useEffect(() => {
+    try { localStorage.setItem('fantasai_mock_schedule', JSON.stringify(mockSchedule)); } catch {}
+  }, [mockSchedule]);
+
+  // ── Scheduled mock draft helpers ───────────────────────────────────────────
+  function createScheduledMock() {
+    if (!scheduleDraft.date) return;
+    const myTeamId = user?.teamId || 1;
+    setMockSchedule(prev => [...prev, {
+      id:          `mock_${Date.now()}`,
+      hostTeamId:  myTeamId,
+      date:        scheduleDraft.date,
+      rounds:      scheduleDraft.rounds,
+      format:      scheduleDraft.format,
+      maxSlots:    12,
+      participants: [{ teamId: myTeamId, slot: 0 }],
+      status:      'scheduled',
+      createdAt:   new Date().toISOString(),
+    }]);
+    setShowScheduleModal(false);
+    setScheduleDraft({ date: '', rounds: 16, format: 'Snake' });
+  }
+
+  function joinScheduledMock(draftId, slot) {
+    const myTeamId = user?.teamId || 1;
+    setMockSchedule(prev => prev.map(d => {
+      if (d.id !== draftId) return d;
+      const others = d.participants.filter(p => p.teamId !== myTeamId);
+      return { ...d, participants: [...others, { teamId: myTeamId, slot }] };
+    }));
+    setJoinDraftId(null);
+    setJoinSlot(null);
+  }
+
+  function leaveScheduledMock(draftId) {
+    const myTeamId = user?.teamId || 1;
+    setMockSchedule(prev => prev.map(d =>
+      d.id !== draftId ? d : { ...d, participants: d.participants.filter(p => p.teamId !== myTeamId) }
+    ));
+  }
+
+  function cancelScheduledMock(draftId) {
+    setMockSchedule(prev => prev.filter(d => d.id !== draftId));
+  }
+
+  function launchScheduledMock(draft) {
+    const myTeamId = user?.teamId || 1;
+    // Build a 12-slot order: human participants fill their chosen slots, AI teams fill the rest
+    const order = new Array(draft.maxSlots).fill(null);
+    for (const p of draft.participants) {
+      if (p.slot < draft.maxSlots) order[p.slot] = p.teamId;
+    }
+    const participantIds = new Set(draft.participants.map(p => p.teamId));
+    const aiTeams = TEAMS_ORDER.filter(id => !participantIds.has(id));
+    let ai = 0;
+    for (let i = 0; i < draft.maxSlots; i++) {
+      if (order[i] === null) order[i] = aiTeams[ai++] ?? TEAMS_ORDER[i];
+    }
+    setMockPicks([]);
+    setMockPickNum(1);
+    try { localStorage.removeItem('fantasai_mock_picks_wip'); } catch {}
+    setMockTeamsOrder(order);
+    setMockUserTeamId(myTeamId);
+    setMockSetup(false);
+    setMockActive(true);
+    setPaused(false);
+    setMockSchedule(prev => prev.map(d => d.id === draft.id ? { ...d, status: 'in_progress' } : d));
+  }
 
   // Fetch live player pool from worker (Sleeper-backed, 1h cached)
   function fetchApiPlayers() {
@@ -552,7 +631,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
 
     const leftPanel = (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, padding: hasMockResults ? '32px 28px' : 40, textAlign: 'center' }}>
-        <div style={{ fontSize: 48 }}>📋</div>
+        <TeamLogoBadge team={null} size={48} />
         <div style={{ fontWeight: 900, fontSize: 22, color: 'var(--text)', letterSpacing: '-.01em' }}>Draft Room Not Yet Open</div>
         <div style={{ fontSize: 14, color: 'var(--text-dim)', maxWidth: 340, lineHeight: 1.6 }}>
           The {draftSettings.format || 'Snake'} draft is scheduled for:
@@ -567,32 +646,210 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
             Rules &amp; Settings → Draft Settings
           </button>
         </div>
-        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-          <button className="btn primary" style={{ fontSize: 14, padding: '10px 28px', letterSpacing: '.03em' }} onClick={startMockDraft}>
-            ▶ Start Mock Draft
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, width: '100%', maxWidth: 280 }}>
+          <button className="btn primary" style={{ fontSize: 14, padding: '10px 28px', letterSpacing: '.03em', width: '100%' }} onClick={startMockDraft}>
+            ▶ Start Solo Mock
           </button>
-          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Practice with AI opponents — picks reset when you exit</div>
+          <button className="btn ghost" style={{ fontSize: 13, padding: '8px 20px', width: '100%' }} onClick={() => setShowScheduleModal(true)}>
+            📅 Schedule Multi-Team Mock
+          </button>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', textAlign: 'center' }}>Solo: AI opponents only · Multi: invite league teammates</div>
         </div>
       </div>
     );
 
-    if (!hasMockResults) {
+    const activeMocks    = mockSchedule.filter(d => d.status === 'scheduled');
+    const hasRightContent = hasMockResults || activeMocks.length > 0;
+
+    // ── Schedule modal ──────────────────────────────────────────────────────
+    const scheduleModal = showScheduleModal && (
+      <div className="drawer-overlay" onClick={() => setShowScheduleModal(false)}>
+        <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 14, padding: 28, width: 400, maxWidth: 'calc(100vw - 32px)', zIndex: 400 }} onClick={e => e.stopPropagation()}>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 18, marginBottom: 16 }}>Schedule Mock Draft</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', display: 'block', marginBottom: 6 }}>Date &amp; Time</label>
+              <input type="datetime-local" className="input" style={{ width: '100%' }} value={scheduleDraft.date} onChange={e => setScheduleDraft(p => ({ ...p, date: e.target.value }))} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', display: 'block', marginBottom: 6 }}>Rounds</label>
+                <select className="input" style={{ width: '100%' }} value={scheduleDraft.rounds} onChange={e => setScheduleDraft(p => ({ ...p, rounds: Number(e.target.value) }))}>
+                  {[8, 10, 12, 14, 16, 18, 20].map(r => <option key={r} value={r}>{r} rounds</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', display: 'block', marginBottom: 6 }}>Format</label>
+                <select className="input" style={{ width: '100%' }} value={scheduleDraft.format} onChange={e => setScheduleDraft(p => ({ ...p, format: e.target.value }))}>
+                  <option value="Snake">Snake</option>
+                  <option value="Linear">Linear</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 20, display: 'flex', gap: 10 }}>
+            <button className="btn primary" style={{ flex: 1 }} disabled={!scheduleDraft.date} onClick={createScheduledMock}>Create Lobby</button>
+            <button className="btn ghost" onClick={() => setShowScheduleModal(false)}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+
+    // ── Join slot picker modal ──────────────────────────────────────────────
+    // ── Lobby card — inline slot picker ───────────────────────────────────
+    function LobbyCard({ draft }) {
+      const myTeamId = user?.teamId || 1;
+      const myEntry  = draft.participants.find(p => p.teamId === myTeamId);
+      const isHost   = draft.hostTeamId === myTeamId;
+      const joined   = !!myEntry;
+      const hostTeam = LEAGUE_TEAMS.find(t => t.id === draft.hostTeamId);
+      const draftTime = new Date(draft.date);
+      const timeLabel = draftTime.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      const filled    = draft.participants.length;
+
+      function handleSlotClick(slotIdx) {
+        const occupant = draft.participants.find(p => p.slot === slotIdx);
+        if (occupant && occupant.teamId !== myTeamId) return; // taken by someone else
+        joinScheduledMock(draft.id, slotIdx); // join or move to this slot
+      }
+
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-          {leftPanel}
+        <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--panel-1)' }}>
+
+          {/* Header */}
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: hostTeam?.color || 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>{hostTeam?.logo || '?'}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{hostTeam?.name || 'Unknown'}&apos;s Mock Draft</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{timeLabel} · {draft.format} · {draft.rounds} rounds</div>
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: filled >= draft.maxSlots ? 'var(--good)' : 'var(--accent)' }}>
+              {filled}/{draft.maxSlots} joined
+            </div>
+          </div>
+
+          {/* Instruction hint */}
+          <div style={{ padding: '8px 16px 2px', fontSize: 11, color: 'var(--text-faint)' }}>
+            {joined
+              ? `You're in slot #${(myEntry.slot ?? 0) + 1} — click any open slot to move`
+              : 'Click a slot below to claim your draft position'}
+          </div>
+
+          {/* Slot grid — 6 × 2, directly clickable */}
+          <div style={{ padding: '8px 16px 12px', display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 }}>
+            {Array.from({ length: draft.maxSlots }, (_, i) => {
+              const occupant   = draft.participants.find(p => p.slot === i);
+              const t          = occupant ? LEAGUE_TEAMS.find(x => x.id === occupant.teamId) : null;
+              const isMe       = occupant?.teamId === myTeamId;
+              const isOpen     = !occupant;
+              const clickable  = isOpen || isMe; // can click open slots or your own (to leave — handled by leave btn)
+
+              return (
+                <div
+                  key={i}
+                  onClick={() => isOpen ? handleSlotClick(i) : undefined}
+                  title={isOpen ? `Take slot #${i + 1}` : isMe ? 'Your slot' : `${t?.name ?? 'Team'} — slot taken`}
+                  style={{
+                    borderRadius: 9,
+                    border: `2px solid ${isMe ? 'var(--accent)' : isOpen ? 'rgba(255,255,255,.1)' : 'var(--border)'}`,
+                    background: isMe ? 'rgba(198,255,58,.14)' : isOpen ? 'var(--panel-2)' : 'var(--panel-3)',
+                    cursor: isOpen ? 'pointer' : 'default',
+                    padding: '10px 6px 8px',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                    opacity: !isOpen && !isMe ? 0.85 : 1,
+                    transition: 'border-color .12s, background .12s',
+                  }}
+                  onMouseEnter={e => { if (isOpen) e.currentTarget.style.borderColor = 'var(--accent)'; }}
+                  onMouseLeave={e => { if (isOpen) e.currentTarget.style.borderColor = 'rgba(255,255,255,.1)'; }}
+                >
+                  <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: isMe ? 'var(--accent)' : 'var(--text-faint)', fontWeight: isMe ? 700 : 400 }}>
+                    Pick #{i + 1}
+                  </span>
+                  {t ? (
+                    <>
+                      <div style={{ width: 30, height: 30, borderRadius: 7, background: t.color || 'var(--panel-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>
+                        {t.logo}
+                      </div>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: isMe ? 'var(--accent)' : 'var(--text-dim)', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
+                        {isMe ? 'YOU' : (t.name?.split(' ').pop() ?? t.name)}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ width: 30, height: 30, borderRadius: 7, border: '1px dashed rgba(255,255,255,.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,.25)', fontSize: 18 }}>+</div>
+                      <span style={{ fontSize: 9, color: 'var(--text-faint)', textAlign: 'center' }}>Open</span>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Actions footer */}
+          <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {isHost && (
+              <button className="btn ai sm" disabled={!joined} onClick={() => launchScheduledMock(draft)}>
+                <span>▶</span> Start Now
+              </button>
+            )}
+            {joined && !isHost && (
+              <button className="btn ghost sm" style={{ color: 'var(--danger)' }} onClick={() => leaveScheduledMock(draft.id)}>
+                Leave
+              </button>
+            )}
+            {isHost && (
+              <button className="btn ghost sm" style={{ color: 'var(--danger)', marginLeft: 'auto' }} onClick={() => cancelScheduledMock(draft.id)}>
+                Cancel Draft
+              </button>
+            )}
+            {!isHost && (
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)' }}>
+                {joined ? `You're in slot #${(myEntry?.slot ?? 0) + 1}` : `${draft.maxSlots - filled} slots still open`}
+              </span>
+            )}
+          </div>
         </div>
       );
     }
 
-    return (
-      <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-        {/* Left: countdown + start mock */}
-        <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0, minWidth: 300 }}>
-          {leftPanel}
-        </div>
+    if (!hasRightContent) {
+      return (
+        <>
+          {scheduleModal}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+            {leftPanel}
+          </div>
+        </>
+      );
+    }
 
-        {/* Right: mock draft results */}
-        <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+    return (
+      <>
+        {scheduleModal}
+        <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+          {/* Left: countdown + start mock */}
+          <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexShrink: 0, minWidth: 300 }}>
+            {leftPanel}
+          </div>
+
+          {/* Right: lobby + optional mock draft results */}
+          <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+
+            {/* Scheduled mock lobby */}
+            {activeMocks.length > 0 && (
+              <div style={{ padding: '16px 24px', borderBottom: hasMockResults ? '1px solid var(--border)' : 'none', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div style={{ fontWeight: 900, fontSize: 15, letterSpacing: '-.01em' }}>Mock Draft Lobby</div>
+                  <button className="btn ghost sm" onClick={() => setShowScheduleModal(true)}>+ Schedule New</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {activeMocks.map(d => <LobbyCard key={d.id} draft={d} />)}
+                </div>
+              </div>
+            )}
+
+            {/* Mock Draft Results (if any previous mock was completed) */}
+            {hasMockResults && <>
           {/* Header with grade */}
           <div style={{ padding: '16px 24px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0, background: 'var(--panel-1)' }}>
             <div style={{ flex: 1 }}>
@@ -690,8 +947,10 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
               </table>
             </div>
           </div>
+          </>}
         </div>
-      </div>
+        </div>
+      </>
     );
   }
 

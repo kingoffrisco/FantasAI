@@ -1,5 +1,5 @@
 import React from 'react';
-import { LEAGUE_TEAMS } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS } from '../lib/data.js';
 
 const STORAGE_KEY = 'fantasai_owners_config';
 const API_BASE    = 'https://api.fantasai.net';
@@ -74,6 +74,53 @@ export default function AdminOwners() {
   }
 
   const commissionerCount = LEAGUE_TEAMS.filter(t => overrides[t.id]?.isCommissioner).length;
+
+  // ── Sync all rosters ──────────────────────────────────────────────────────
+  const [syncState,   setSyncState]   = React.useState('idle'); // idle | syncing | done | error
+  const [syncResults, setSyncResults] = React.useState([]);
+
+  async function syncAllRosters() {
+    setSyncState('syncing');
+    setSyncResults([]);
+
+    const teams = LEAGUE_TEAMS.map(t => ({
+      teamId:   String(t.id),
+      teamName: t.name,
+      playerIds: (TEAM_ROSTERS[t.id] || []).map(r => r.playerId).filter(Boolean),
+    }));
+
+    // Single bulk request — one R2 write, no race conditions
+    const rostersPayload = Object.fromEntries(teams.map(t => [t.teamId, t.playerIds]));
+
+    try {
+      const res  = await fetch(`${API_BASE}/api/v1/rosters/bulk-save`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ rosters: rostersPayload }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.ok) {
+        const results = teams.map(t => ({
+          teamId:   t.teamId,
+          teamName: t.teamName,
+          ok:       true,
+          count:    data.counts?.[t.teamId] ?? t.playerIds.length,
+          error:    null,
+        }));
+        setSyncResults(results);
+        setSyncState('done');
+      } else {
+        setSyncResults([{ teamId: '0', teamName: 'All teams', ok: false, count: 0, error: data.error || `HTTP ${res.status}` }]);
+        setSyncState('error');
+      }
+    } catch (err) {
+      setSyncResults([{ teamId: '0', teamName: 'All teams', ok: false, count: 0, error: err.message }]);
+      setSyncState('error');
+    }
+
+    setTimeout(() => setSyncState('idle'), 8000);
+  }
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 780 }}>
@@ -223,6 +270,50 @@ export default function AdminOwners() {
             </div>
           );
         })}
+      </div>
+
+      {/* ── Sync All Rosters ── */}
+      <div style={{ marginTop: 32, padding: '20px 22px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>Sync All Rosters to R2</div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.55, maxWidth: 460 }}>
+              Pushes every team's current roster from local data to R2 storage so all {LEAGUE_TEAMS.length} teams are persisted.
+              Run this after importing CBS league data or resetting the draft.
+            </div>
+          </div>
+          <button
+            className={`btn ${syncState === 'done' ? 'success' : syncState === 'error' ? 'ghost' : 'primary'} sm`}
+            style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+            onClick={syncAllRosters}
+            disabled={syncState === 'syncing'}
+          >
+            {syncState === 'syncing' ? '⏳ Syncing…' : syncState === 'done' ? '✓ Synced' : syncState === 'error' ? '⚠ Retry Sync' : `↑ Sync ${LEAGUE_TEAMS.length} Rosters`}
+          </button>
+        </div>
+
+        {syncResults.length > 0 && (
+          <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 6 }}>
+            {syncResults.map(r => (
+              <div key={r.teamId} style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '6px 10px',
+                background: r.ok ? 'rgba(76,175,130,.08)' : 'rgba(255,90,110,.08)',
+                border: `1px solid ${r.ok ? 'rgba(76,175,130,.25)' : 'rgba(255,90,110,.25)'}`,
+                borderRadius: 7, fontSize: 11,
+              }}>
+                <span style={{ color: r.ok ? 'var(--good)' : 'var(--danger)', fontWeight: 800, flexShrink: 0 }}>
+                  {r.ok ? '✓' : '✗'}
+                </span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {r.teamName}
+                </span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)', flexShrink: 0 }}>
+                  {r.ok ? `${r.count}p` : r.error?.slice(0, 20)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

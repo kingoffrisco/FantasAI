@@ -1,6 +1,6 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, findPlayer, buildRosterFrame, assignRoster } from '../lib/data.js';
-import { PosBadge } from '../components/ui.jsx';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, findPlayer, buildRosterFrame, assignRoster, findTeam } from '../lib/data.js';
+import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 
 const NUM_WEEKS = 14;
 
@@ -52,7 +52,8 @@ function parseRecord(r = '0-0') {
 
 export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slotOverrides }) {
   const [week, setWeek] = React.useState(CURRENT_WEEK);
-  const [expanded, setExpanded] = React.useState(null);
+  const [expanded, setExpanded] = React.useState(0);
+  const [showAll, setShowAll] = React.useState(false);
 
   const myTeamId = user?.teamId ?? LEAGUE_TEAMS.find(t => t.me)?.id;
 
@@ -69,7 +70,10 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     return buildSchedule(LEAGUE_TEAMS.map(t => t.id), NUM_WEEKS);
   }, []);
 
-  const matchups = schedule[week - 1] || [];
+  const allMatchups = schedule[week - 1] || [];
+  const matchups = showAll
+    ? allMatchups
+    : allMatchups.filter(([a, b]) => a === myTeamId || b === myTeamId);
 
   // Build the live roster from Current Roster's pipeline
   const rosterSettings = React.useMemo(() => {
@@ -91,10 +95,32 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   return (
     <div style={{ padding: '20px 24px', maxWidth: 1100, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="page-head" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
-        <div>
-          <h1 style={{ marginBottom: 2 }}>Head to Head</h1>
-          <div className="sub">Weekly matchup results · rosters pulled from Current Roster settings</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TeamLogoBadge team={findTeam(myTeamId)} size={40} />
+          <div>
+            <h1 style={{ marginBottom: 2 }}>Head to Head</h1>
+            <div className="sub">Weekly matchup results · rosters pulled from Current Roster settings</div>
+          </div>
         </div>
+      </div>
+
+      {/* View toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: 'var(--panel)', borderRadius: 8, padding: 3, alignSelf: 'flex-start' }}>
+        {[{ label: 'My H2H', val: false }, { label: 'All Matchups', val: true }].map(opt => (
+          <button
+            key={String(opt.val)}
+            onClick={() => { setShowAll(opt.val); setExpanded(opt.val ? null : 0); }}
+            style={{
+              padding: '6px 16px', borderRadius: 6, fontSize: 12, fontWeight: showAll === opt.val ? 700 : 500,
+              cursor: 'pointer', border: 'none',
+              background: showAll === opt.val ? 'var(--accent)' : 'transparent',
+              color: showAll === opt.val ? 'var(--accent-ink)' : 'var(--text-dim)',
+              transition: 'background .15s, color .15s',
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
 
       {/* Week tabs */}
@@ -102,7 +128,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
         {Array.from({ length: NUM_WEEKS }, (_, i) => i + 1).map(w => (
           <button
             key={w}
-            onClick={() => { setWeek(w); setExpanded(null); }}
+            onClick={() => { setWeek(w); setExpanded(showAll ? null : 0); }}
             style={{
               flexShrink: 0, padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600,
               cursor: 'pointer', border: '1px solid var(--border)',
@@ -153,8 +179,8 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
 }
 
 function MatchupCard({ homeId, awayId, week, isLive, isFinal, expanded, onToggle, onOpenPlayer, myTeamId, myLiveRoster, homeRecord, awayRecord }) {
-  const home = LEAGUE_TEAMS.find(t => t.id === homeId);
-  const away = LEAGUE_TEAMS.find(t => t.id === awayId);
+  const home = findTeam(homeId);
+  const away = findTeam(awayId);
 
   // Use live roster for the user's team; fall back to TEAM_ROSTERS for others
   const homeRoster = homeId === myTeamId && myLiveRoster ? myLiveRoster : (TEAM_ROSTERS[homeId] || []);
@@ -174,9 +200,9 @@ function MatchupCard({ homeId, awayId, week, isLive, isFinal, expanded, onToggle
     <div className="card" style={{ overflow: 'hidden', borderLeft: isMyMatchup ? '3px solid #4caf82' : undefined, background: isMyMatchup ? 'rgba(76,175,130,.06)' : undefined }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, cursor: 'pointer' }} onClick={onToggle}>
         <TeamScore team={home} pts={homePts} win={homeWin} side="home" showPts={isLive || isFinal} isMe={homeId === myTeamId} rosterOk={homeRosterOk} record={homeRecord} />
-        <div style={{ flexShrink: 0, textAlign: 'center', padding: '0 12px', minWidth: 70 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: labelColor, letterSpacing: '.08em', marginBottom: 2 }}>{label}</div>
-          {(isLive || isFinal) && <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>vs</div>}
+        <div style={{ flexShrink: 0, textAlign: 'center', padding: '0 14px', minWidth: 80 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: labelColor, letterSpacing: '.08em', marginBottom: 4 }}>{label}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-faint)' }}>vs</div>
         </div>
         <TeamScore team={away} pts={awayPts} win={awayWin} side="away" showPts={isLive || isFinal} isMe={awayId === myTeamId} rosterOk={awayRosterOk} record={awayRecord} />
         <div style={{ marginLeft: 'auto', paddingRight: 14, color: 'var(--text-faint)', fontSize: 12 }}>
@@ -197,20 +223,23 @@ function MatchupCard({ homeId, awayId, week, isLive, isFinal, expanded, onToggle
 function TeamScore({ team, pts, win, side, showPts, isMe, rosterOk, record }) {
   if (!team) return null;
   const isRight = side === 'away';
+  const logoSize = team.logoImg ? 64 : 56;
   return (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', flexDirection: isRight ? 'row-reverse' : 'row', background: isMe ? 'rgba(76,175,130,.08)' : 'transparent' }}>
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 14, padding: '20px 22px', flexDirection: isRight ? 'row-reverse' : 'row', background: isMe ? 'rgba(76,175,130,.08)' : 'transparent' }}>
       {team.logoImg
-        ? <img src={team.logoImg} alt={team.logo} style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
-        : <span style={{ width: 36, height: 36, borderRadius: 8, background: team.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900, color: '#000', flexShrink: 0 }}>{team.logo}</span>
+        ? <img src={team.logoImg} alt={team.logo} style={{ width: logoSize, height: logoSize, borderRadius: 10, objectFit: 'cover', flexShrink: 0, boxShadow: '0 2px 10px rgba(0,0,0,.35)' }} />
+        : <span style={{ width: logoSize, height: logoSize, borderRadius: 10, background: team.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900, color: '#000', flexShrink: 0, letterSpacing: '-0.03em', boxShadow: `0 2px 10px ${team.color}55` }}>{team.logo}</span>
       }
       <div style={{ flex: 1, minWidth: 0, textAlign: isRight ? 'right' : 'left' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexDirection: isRight ? 'row-reverse' : 'row' }}>
-          <span style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isMe ? '#4caf82' : 'var(--text)' }}>{team.name}</span>
-          {isMe && <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: '#fff', background: '#4caf82', borderRadius: 3, padding: '1px 4px', fontWeight: 800, flexShrink: 0 }}>YOU</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexDirection: isRight ? 'row-reverse' : 'row' }}>
+          <span style={{ fontSize: 15, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isMe ? '#4caf82' : 'var(--text)', letterSpacing: '-.01em' }}>{team.name}</span>
+          {isMe && <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: '#fff', background: '#4caf82', borderRadius: 3, padding: '1px 5px', fontWeight: 800, flexShrink: 0 }}>YOU</span>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexDirection: isRight ? 'row-reverse' : 'row', marginTop: 2 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{team.owner}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexDirection: isRight ? 'row-reverse' : 'row', marginTop: 3 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{team.owner}</span>
           {record && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-faint)', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 5px', flexShrink: 0 }}>{record}</span>}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexDirection: isRight ? 'row-reverse' : 'row', marginTop: 4 }}>
           {rosterOk ? (
             <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--good)', background: 'rgba(76,175,130,.15)', border: '1px solid rgba(76,175,130,.35)', borderRadius: 3, padding: '1px 5px', flexShrink: 0 }}>
               Valid Roster
@@ -223,8 +252,9 @@ function TeamScore({ team, pts, win, side, showPts, isMe, rosterOk, record }) {
         </div>
       </div>
       {showPts && (
-        <div style={{ flexShrink: 0, fontSize: 22, fontWeight: 900, fontFamily: 'var(--font-display)', color: rosterOk ? (win ? 'var(--accent)' : 'var(--text)') : 'var(--danger)', minWidth: 60, textAlign: isRight ? 'left' : 'right' }}>
-          {rosterOk ? pts.toFixed(1) : '—'}
+        <div style={{ flexShrink: 0, fontFamily: 'var(--font-display)', fontStretch: '75%', color: rosterOk ? (win ? 'var(--accent)' : 'var(--text)') : 'var(--danger)', textAlign: isRight ? 'left' : 'right' }}>
+          <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>{rosterOk ? pts.toFixed(1) : '—'}</div>
+          {win && rosterOk && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', letterSpacing: '.06em', marginTop: 2 }}>WIN</div>}
         </div>
       )}
     </div>

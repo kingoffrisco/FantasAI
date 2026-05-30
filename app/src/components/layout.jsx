@@ -1,5 +1,5 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, findPlayer, findTeam } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, findPlayer, findTeam, buildRosterFrame, assignRoster } from '../lib/data.js';
 
 function getDraftStatus() {
   try {
@@ -99,7 +99,7 @@ export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showCh
   </div>
 );
 
-export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0 }) => {
+export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds }) => {
   const isAdmin = user?.isAdmin;
 
   const h2hInfo = React.useMemo(() => {
@@ -133,13 +133,28 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0 }) => {
     const oppId = pair[0] === teamId ? pair[1] : pair[0];
     const oppTeam = LEAGUE_TEAMS.find(t => t.id === oppId);
 
-    const myProj  = h2hProj(teamId, week);
+    // Compute user's projection from live roster (myRosterIds prop) for accuracy.
+    // TEAM_ROSTERS[teamId] may be missing if the team has no draft history.
+    let myProj;
+    if (myRosterIds && myRosterIds.size > 0) {
+      try {
+        const settings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+        const slotFrame = buildRosterFrame(settings);
+        const liveRoster = assignRoster(slotFrame, myRosterIds, {});
+        const starters = liveRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
+        const base = starters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
+        myProj = Math.max(0, base + h2hSeed(teamId, week));
+      } catch { myProj = h2hProj(teamId, week); }
+    } else {
+      myProj = h2hProj(teamId, week);
+    }
+
     const oppProj = h2hProj(oppId, week);
     const isWinning = myProj >= oppProj;
     const winPct = myProj + oppProj > 0 ? Math.round((myProj / (myProj + oppProj)) * 100) : 50;
 
-    return { week, oppTeam, isWinning, winPct };
-  }, [user?.teamId]);
+    return { week, oppTeam, isWinning, winPct, myProj: Math.round(myProj * 10) / 10, oppProj: Math.round(oppProj * 10) / 10 };
+  }, [user?.teamId, myRosterIds]);
 
   const items = [
     { group: 'League' },
@@ -160,7 +175,7 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0 }) => {
     { id: 'owners',    label: 'Owner Intel',       icon: '◉', badge: '12' },
     { id: 'cbs',       label: 'Player Draft Rankings',      icon: '▦', badge: '432' },
     { group: 'Setup' },
-    { id: 'sources',  label: 'Sources',          icon: '⌁', badge: 'CBS' },
+    { id: 'sources',  label: 'Sources',          icon: '⌁' },
     { id: 'settings', label: 'Rules & Settings',  icon: '📋' },
     ...(isAdmin ? [
       { group: 'Admin' },
@@ -278,7 +293,7 @@ const BASE_SECTIONS = [
   {
     group: 'Setup',
     items: [
-      { id: 'sources',  label: 'Sources',          icon: '⌁', badge: 'CBS' },
+      { id: 'sources',  label: 'Sources',          icon: '⌁' },
       { id: 'settings', label: 'Rules & Settings', icon: '📋' },
     ],
   },

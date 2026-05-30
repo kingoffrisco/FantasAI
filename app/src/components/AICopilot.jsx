@@ -1,7 +1,352 @@
 import React from 'react';
-import { findPlayer, LEAGUE_TEAMS } from '../lib/data.js';
+import { findPlayer, LEAGUE_TEAMS, PLAYERS } from '../lib/data.js';
+import { api } from '../api.js';
+
+// Module-level cache — fetched once per page load from the worker-api Sleeper endpoint
+let _dynamicNames   = null; // string[] sorted longest-first, or null while loading
+let _dynamicNamesSet = new Set();
+
+async function loadDynamicPlayers() {
+  if (_dynamicNames !== null) return; // already loaded or loading
+  _dynamicNames = []; // mark loading
+  try {
+    const data = await api.allPlayers(2000);
+    const names = (data.players || []).map(p => p.name).filter(Boolean);
+    _dynamicNames    = names.sort((a, b) => b.length - a.length);
+    _dynamicNamesSet = new Set(_dynamicNames);
+  } catch {
+    // Fall back to static list on failure
+    _dynamicNames    = PLAYERS.map(p => p.name).sort((a, b) => b.length - a.length);
+    _dynamicNamesSet = new Set(_dynamicNames);
+  }
+}
+
+// Fallback static list (used until dynamic load completes)
+const STATIC_NAMES_SORTED = PLAYERS.map(p => p.name).sort((a, b) => b.length - a.length);
+const STATIC_NAMES_SET    = new Set(STATIC_NAMES_SORTED);
+
+function getPlayerNames()    { return _dynamicNames?.length ? _dynamicNames    : STATIC_NAMES_SORTED; }
+function getPlayerNamesSet() { return _dynamicNamesSet.size  ? _dynamicNamesSet : STATIC_NAMES_SET; }
+
+// Detect "First Last (POS, TEAM)" patterns in AI text to catch players not in static list
+const MENTION_RE = /\b([A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){1,2})\s*\([A-Z]{1,3},\s*[A-Z]{2,3}\)/g;
+
+function extractMentionedNames(text) {
+  const knownSet = getPlayerNamesSet();
+  const base     = getPlayerNames();
+  const extra    = [];
+  let m;
+  MENTION_RE.lastIndex = 0;
+  while ((m = MENTION_RE.exec(text)) !== null) {
+    const name = m[1];
+    if (!knownSet.has(name)) extra.push(name);
+  }
+  // Combine dynamic list + any extra names the AI formatted but aren't in the DB yet
+  return extra.length === 0
+    ? base
+    : [...new Set([...base, ...extra])].sort((a, b) => b.length - a.length);
+}
+
+function highlightSegments(text, rosterNames, allNames) {
+  const out = [];
+  let remaining = text;
+  while (remaining) {
+    // Find the earliest-occurring player name across all known names
+    let bestIdx = -1;
+    let bestName = null;
+    for (const name of allNames) {
+      const idx = remaining.indexOf(name);
+      if (idx === -1) continue;
+      // Prefer earliest position; on tie, longer name wins (allNames is longest-first)
+      if (bestIdx === -1 || idx < bestIdx) {
+        bestIdx = idx;
+        bestName = name;
+      }
+    }
+    if (bestName === null) {
+      out.push({ t: 'text', v: remaining });
+      remaining = '';
+    } else {
+      if (bestIdx > 0) out.push({ t: 'text', v: remaining.slice(0, bestIdx) });
+      const onRoster = rosterNames.has(bestName.toLowerCase());
+      out.push({ t: onRoster ? 'roster' : 'target', v: bestName });
+      remaining = remaining.slice(bestIdx + bestName.length);
+    }
+  }
+  return out;
+}
+
+function renderSegs(segs, bold, k, injuredNames) {
+  return segs.map((seg, j) => {
+    const key = `${k}-${j}`;
+    if (seg.t === 'roster') {
+      const color = injuredNames.has(seg.v.toLowerCase()) ? '#ff8c00' : '#FFD700';
+      return <span key={key} style={{ color, fontWeight: bold ? 800 : 600 }}>{seg.v}</span>;
+    }
+    if (seg.t === 'target') {
+      return <span key={key} style={{ color: '#4ea8ff', fontWeight: bold ? 800 : 600 }}>{seg.v}</span>;
+    }
+    return bold ? <span key={key}>{seg.v}</span> : <React.Fragment key={key}>{seg.v}</React.Fragment>;
+  });
+}
+
+function inlineMd(text, rosterNames, allNames, injuredNames) {
+  const boldParts = text.split(/(\*\*[^*]+\*\*)/);
+  const els = [];
+  let k = 0;
+  for (const part of boldParts) {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      const inner = part.slice(2, -2);
+      const segs  = highlightSegments(inner, rosterNames, allNames);
+      els.push(<strong key={k}>{renderSegs(segs, true, k, injuredNames)}</strong>);
+    } else {
+      const segs = highlightSegments(part, rosterNames, allNames);
+      els.push(...renderSegs(segs, false, k, injuredNames));
+    }
+    k++;
+  }
+  return els;
+}
+
+function renderMarkdown(text, rosterNames, injuredNames, onWaiverClick) {
+  if (!text) return null;
+  // Pre-scan entire message to detect "Name (POS, TEAM)" players not in static list
+  const allNames = extractMentionedNames(text);
+  const lines    = text.split('\n');
+  const out      = [];
+  let i          = 0;
+
+  while (i < lines.length) {
+    const raw  = lines[i];
+    const line = raw.trim();
+
+    if (!line) { i++; continue; }
+
+    if (/^\d+\.\s/.test(line)) {
+      const items = [];
+      while (i < lines.length) {
+        const cur = lines[i].trim();
+        if (/^\d+\.\s/.test(cur)) {
+          items.push(cur.replace(/^\d+\.\s*/, ''));
+          i++;
+        } else if (!cur) {
+          let j = i + 1;
+          while (j < lines.length && !lines[j].trim()) j++;
+          if (j < lines.length && /^\d+\.\s/.test(lines[j].trim())) {
+            i = j;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+      out.push(
+        <div key={`ol-${i}`} style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '6px 0' }}>
+          {items.map((item, j) => {
+            const mention = detectPlayerMention(item);
+            const isTarget = mention && !rosterNames.has(mention.name.toLowerCase());
+            return (
+              <div key={j}>
+                <div style={{ display: 'flex', gap: 8, lineHeight: 1.55 }}>
+                  <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 11, flexShrink: 0, minWidth: 16, textAlign: 'right' }}>{j + 1}.</span>
+                  <span>{inlineMd(item, rosterNames, allNames, injuredNames)}</span>
+                </div>
+                {isTarget && onWaiverClick && (
+                  <div style={{ marginLeft: 24, marginTop: 5 }}>
+                    <button
+                      style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '3px 10px', borderRadius: 5, background: 'rgba(78,168,255,.12)', border: '1px solid rgba(78,168,255,.4)', color: '#4ea8ff', cursor: 'pointer', letterSpacing: '.04em' }}
+                      onClick={() => onWaiverClick(mention)}
+                    >
+                      + Waiver Claim — {mention.name}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+      continue;
+    }
+
+    if (/^[*-]\s/.test(line)) {
+      const items = [];
+      while (i < lines.length) {
+        const cur = lines[i].trim();
+        if (/^[*-]\s/.test(cur)) {
+          items.push(cur.replace(/^[*-]\s*/, ''));
+          i++;
+        } else if (!cur) {
+          let j = i + 1;
+          while (j < lines.length && !lines[j].trim()) j++;
+          if (j < lines.length && /^[*-]\s/.test(lines[j].trim())) {
+            i = j;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+      out.push(
+        <div key={`ul-${i}`} style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '4px 0' }}>
+          {items.map((item, j) => (
+            <div key={j} style={{ display: 'flex', gap: 8, lineHeight: 1.5 }}>
+              <span style={{ color: 'var(--text-faint)', flexShrink: 0 }}>·</span>
+              <span>{inlineMd(item, rosterNames, allNames, injuredNames)}</span>
+            </div>
+          ))}
+        </div>
+      );
+      continue;
+    }
+
+    out.push(<p key={`p-${i}`} style={{ margin: '4px 0', lineHeight: 1.6 }}>{inlineMd(line, rosterNames, allNames, injuredNames)}</p>);
+    i++;
+  }
+
+  return <div style={{ fontSize: 12 }}>{out}</div>;
+}
 
 const API_BASE = 'https://api.fantasai.net';
+
+// Extract the first "Name (POS, TEAM)" mention from a single list-item string
+function detectPlayerMention(text) {
+  const re = /\b([A-Z][a-zA-Z'.-]+(?:\s+[A-Z][a-zA-Z'.-]+){1,2})\s*\(([A-Z]{1,3}),\s*([A-Z]{2,3})\)/;
+  const m  = re.exec(text);
+  if (!m) return null;
+  return { name: m[1], pos: m[2], team: m[3] };
+}
+
+// ── Waiver Claim Modal ────────────────────────────────────────────────────────
+function WaiverClaimModal({ claim, myRosterIds, onClose }) {
+  const [dropId,     setDropId]     = React.useState('');
+  const [notes,      setNotes]      = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+  const [result,     setResult]     = React.useState(null);
+
+  const rosterPlayers = [...(myRosterIds || [])].map(id => findPlayer(id)).filter(Boolean);
+  const staticPlayer  = PLAYERS.find(p => p.name.toLowerCase() === claim.name.toLowerCase());
+
+  async function submit() {
+    setSubmitting(true);
+    try {
+      // Read existing claims, append new one, write back to R2
+      const existingRes = await fetch(`${API_BASE}/api/v1/r2/fantasai/waivers/claims.json`);
+      const existing    = existingRes.ok ? await existingRes.json() : [];
+      const claims      = Array.isArray(existing) ? existing : [];
+
+      const dropPlayer = dropId ? findPlayer(Number(dropId)) : null;
+      claims.push({
+        id:             Date.now(),
+        addPlayer:      claim.name,
+        addPos:         claim.pos,
+        addTeam:        claim.team,
+        dropPlayerId:   dropPlayer?.id   || null,
+        dropPlayerName: dropPlayer?.name || null,
+        notes:          notes.trim() || null,
+        submittedAt:    new Date().toISOString(),
+        status:         'pending',
+      });
+
+      await fetch(`${API_BASE}/api/v1/r2/fantasai/waivers/claims.json`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(claims),
+      });
+      setResult({ ok: true });
+    } catch (err) {
+      setResult({ ok: false, msg: err.message });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.72)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, width: '100%', maxWidth: 420, padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--accent-2)', marginBottom: 4 }}>Waiver Wire Claim</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#4ea8ff' }}>{claim.name}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>
+              {claim.pos} · {claim.team}
+              {staticPlayer && <span style={{ marginLeft: 10 }}>Proj {staticPlayer.proj} · Avg {staticPlayer.avg}</span>}
+            </div>
+          </div>
+          <button className="btn sm ghost" onClick={onClose} style={{ fontSize: 14, padding: '2px 8px' }}>✕</button>
+        </div>
+
+        {result ? (
+          result.ok ? (
+            <div style={{ textAlign: 'center', padding: '18px 0' }}>
+              <div style={{ fontSize: 22, marginBottom: 8 }}>✓</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--good)' }}>Waiver claim submitted!</div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
+                {claim.name} → pending review
+                {dropId && ` · dropping ${findPlayer(Number(dropId))?.name}`}
+              </div>
+              <button className="btn sm ghost" style={{ marginTop: 14 }} onClick={onClose}>Close</button>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '12px 0' }}>
+              <div style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 10 }}>Failed: {result.msg}</div>
+              <button className="btn sm ghost" onClick={() => setResult(null)}>Try again</button>
+            </div>
+          )
+        ) : (
+          <>
+            {/* Drop player */}
+            <div>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 6 }}>Drop Player (optional)</div>
+              <select
+                value={dropId}
+                onChange={e => setDropId(e.target.value)}
+                style={{ width: '100%', background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', color: 'var(--text)', fontSize: 12 }}
+              >
+                <option value="">No drop — claim open roster spot</option>
+                {rosterPlayers.map(p => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.pos} · {p.team}) · avg {p.avg}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 6 }}>Notes (optional)</div>
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="e.g. streaming this week, handcuff, bye week fill..."
+                rows={2}
+                style={{ width: '100%', background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn sm ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+              <button
+                className="btn primary sm"
+                style={{ background: 'var(--accent-2)', borderColor: 'var(--accent-2)', color: '#000', fontWeight: 700 }}
+                onClick={submit}
+                disabled={submitting}
+              >
+                {submitting ? 'Submitting…' : '↗ Submit Waiver Claim'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 async function callChat(question, context, rosterPlayers) {
   const res = await fetch(`${API_BASE}/api/v1/chat`, {
@@ -48,9 +393,26 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
   const [messages, setMessages] = React.useState([
     { type: 'system', text: "I'm watching your roster, the waiver wire, and league news. Ask anything." },
   ]);
-  const [input, setInput]     = React.useState('');
-  const [loading, setLoading] = React.useState(false);
+  const [input,       setInput]       = React.useState('');
+  const [loading,     setLoading]     = React.useState(false);
+  const [waiverClaim, setWaiverClaim] = React.useState(null);
   const bodyRef = React.useRef(null);
+
+  // Yellow = on roster, Blue = target; Questionable roster players get Orange instead of Yellow
+  const rosterNames = React.useMemo(() =>
+    new Set([...(myRosterIds || [])].map(id => findPlayer(id)?.name?.toLowerCase()).filter(Boolean)),
+    [myRosterIds],
+  );
+  const injuredNames = React.useMemo(() =>
+    new Set([...(myRosterIds || [])].map(id => findPlayer(id)).filter(p => p?.status === 'Q' || p?.status === 'D').map(p => p.name.toLowerCase())),
+    [myRosterIds],
+  );
+
+  // Load full NFL player list from worker-api and pre-warm Databricks on panel open
+  React.useEffect(() => {
+    loadDynamicPlayers();
+    callChat('ping', '', []).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const contextNotes = {
     dashboard: [
@@ -133,6 +495,9 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
       </div>
 
       <div className="ai-body" ref={bodyRef}>
+        <div style={{ fontSize: 10, color: '#ff5a6e', fontWeight: 700, marginBottom: 8, lineHeight: 1.5 }}>
+          ⚠ Might timeout 1st time as services spin up — try again if it fails.
+        </div>
         <div className="mono faint" style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Watching this view</div>
         {notes.map((n, i) => (
           <div key={i} className="ai-msg note">
@@ -147,7 +512,10 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
             <div className="label" style={m.pending ? { color: 'var(--accent)', opacity: 0.6 } : {}}>
               {m.type === 'user' ? 'YOU' : 'FANTASAI'}
             </div>
-            <div style={m.pending ? { color: 'var(--text-faint)', fontStyle: 'italic' } : {}}>{m.text}</div>
+            {m.pending || m.type === 'user'
+              ? <div style={m.pending ? { color: 'var(--text-faint)', fontStyle: 'italic' } : {}}>{m.text}</div>
+              : renderMarkdown(m.text, rosterNames, injuredNames, setWaiverClaim)
+            }
           </div>
         ))}
 
@@ -174,6 +542,14 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
           {loading ? '…' : '↗'}
         </button>
       </div>
+
+      {waiverClaim && (
+        <WaiverClaimModal
+          claim={waiverClaim}
+          myRosterIds={myRosterIds}
+          onClose={() => setWaiverClaim(null)}
+        />
+      )}
     </div>
   );
 }

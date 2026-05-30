@@ -1,6 +1,137 @@
 import React from 'react';
 import { LEAGUE_TEAMS, findTeam } from '../lib/data.js';
 import { getMyTeamPrefs, saveMyTeamPrefs, clearMyTeamPrefs } from '../lib/leagueStore.js';
+import { TeamLogoBadge } from '../components/ui.jsx';
+
+// ── Scoring weight config ─────────────────────────────────────────────────────
+
+const POSITION_FEATURES = {
+  QB:  [
+    { key: 'proj',    label: 'Projected Points' },
+    { key: 'avg',     label: 'Season Avg Pts'   },
+    { key: 'passYds', label: 'Passing Yards'     },
+    { key: 'passTDs', label: 'Passing TDs'       },
+    { key: 'ints',    label: 'Interceptions'     },
+    { key: 'rushYds', label: 'Rushing Yards'     },
+    { key: 'last',    label: 'Last Week Pts'     },
+    { key: 'ecr',     label: 'ECR Rank'          },
+    { key: 'adp',     label: 'ADP'               },
+    { key: 'oppRank', label: 'Matchup Rank'      },
+    { key: 'owned',   label: 'Ownership %'       },
+    { key: 'tier',    label: 'Tier'              },
+  ],
+  RB:  [
+    { key: 'proj',    label: 'Projected Points'  },
+    { key: 'avg',     label: 'Season Avg Pts'    },
+    { key: 'rushYds', label: 'Rushing Yards'     },
+    { key: 'rushTDs', label: 'Rushing TDs'       },
+    { key: 'recYds',  label: 'Receiving Yards'   },
+    { key: 'recTDs',  label: 'Receiving TDs'     },
+    { key: 'targets', label: 'Targets'           },
+    { key: 'last',    label: 'Last Week Pts'     },
+    { key: 'ecr',     label: 'ECR Rank'          },
+    { key: 'adp',     label: 'ADP'               },
+    { key: 'oppRank', label: 'Matchup Rank'      },
+    { key: 'owned',   label: 'Ownership %'       },
+    { key: 'tier',    label: 'Tier'              },
+  ],
+  WR:  [
+    { key: 'proj',     label: 'Projected Points' },
+    { key: 'avg',      label: 'Season Avg Pts'   },
+    { key: 'recYds',   label: 'Receiving Yards'  },
+    { key: 'recTDs',   label: 'Receiving TDs'    },
+    { key: 'targets',  label: 'Targets'          },
+    { key: 'tgtShare', label: 'Target Share %'   },
+    { key: 'airYards', label: 'Air Yards'        },
+    { key: 'last',     label: 'Last Week Pts'    },
+    { key: 'ecr',      label: 'ECR Rank'         },
+    { key: 'adp',      label: 'ADP'              },
+    { key: 'oppRank',  label: 'Matchup Rank'     },
+    { key: 'owned',    label: 'Ownership %'      },
+    { key: 'tier',     label: 'Tier'             },
+  ],
+  TE:  [
+    { key: 'proj',     label: 'Projected Points' },
+    { key: 'avg',      label: 'Season Avg Pts'   },
+    { key: 'recYds',   label: 'Receiving Yards'  },
+    { key: 'recTDs',   label: 'Receiving TDs'    },
+    { key: 'targets',  label: 'Targets'          },
+    { key: 'tgtShare', label: 'Target Share %'   },
+    { key: 'last',     label: 'Last Week Pts'    },
+    { key: 'ecr',      label: 'ECR Rank'         },
+    { key: 'adp',      label: 'ADP'              },
+    { key: 'oppRank',  label: 'Matchup Rank'     },
+    { key: 'owned',    label: 'Ownership %'      },
+    { key: 'tier',     label: 'Tier'             },
+  ],
+  K:   [
+    { key: 'proj',    label: 'Projected Points' },
+    { key: 'avg',     label: 'Season Avg Pts'   },
+    { key: 'fgPct',   label: 'FG Percentage'    },
+    { key: 'fgAtt',   label: 'FG Attempts'      },
+    { key: 'longFG',  label: 'Long FG Made'     },
+    { key: 'xp',      label: 'Extra Points'     },
+    { key: 'ecr',     label: 'ECR Rank'         },
+    { key: 'adp',     label: 'ADP'              },
+    { key: 'oppRank', label: 'Matchup Rank'     },
+    { key: 'owned',   label: 'Ownership %'      },
+  ],
+  DST: [
+    { key: 'proj',     label: 'Projected Points'   },
+    { key: 'avg',      label: 'Season Avg Pts'     },
+    { key: 'ptsAllow', label: 'Points Allowed'     },
+    { key: 'sacks',    label: 'Sacks'              },
+    { key: 'ints',     label: 'Interceptions'      },
+    { key: 'fumbles',  label: 'Fumble Recoveries'  },
+    { key: 'dstTDs',   label: 'Defensive TDs'      },
+    { key: 'ecr',      label: 'ECR Rank'           },
+    { key: 'adp',      label: 'ADP'               },
+    { key: 'oppRank',  label: 'Matchup Rank'       },
+    { key: 'owned',    label: 'Ownership %'        },
+  ],
+};
+
+const DEFAULT_WEIGHT_DIST = {
+  QB:  [25, 20, 12, 10, 5,  8, 5,  8,  3,  2,  1,  1],
+  RB:  [25, 18, 12,  8,  8, 6,  5, 4,  7,  3,  2,  1,  1],
+  WR:  [25, 18, 12,  8,  8, 6,  5, 4,  7,  3,  2,  1,  1],
+  TE:  [25, 18, 14,  8,  8, 6,  4, 8,  3,  2,  3,  1],
+  K:   [30, 20, 15, 10,  8, 7,  5,  3,  1,  1],
+  DST: [25, 18, 12, 10,  8, 7,  5, 7,  3,  3,  2],
+};
+
+function buildDefaultWeights() {
+  const result = {};
+  for (const pos of ['QB', 'RB', 'WR', 'TE', 'K', 'DST']) {
+    const features = POSITION_FEATURES[pos];
+    const dist = DEFAULT_WEIGHT_DIST[pos];
+    result[pos] = features.map((f, i) => ({ ...f, weight: dist[i] ?? 0 }));
+  }
+  return result;
+}
+
+function loadScoringWeights() {
+  try {
+    const raw = localStorage.getItem('fantasai_scoring_weights');
+    if (!raw) return buildDefaultWeights();
+    const saved = JSON.parse(raw);
+    const defaults = buildDefaultWeights();
+    const result = {};
+    for (const pos of ['QB', 'RB', 'WR', 'TE', 'K', 'DST']) {
+      if (Array.isArray(saved[pos]) && saved[pos].length > 0) {
+        // Merge saved order/weights; add any new features not in saved list
+        const savedKeys = new Set(saved[pos].map(f => f.key));
+        const extras = (defaults[pos] || []).filter(f => !savedKeys.has(f.key));
+        result[pos] = [...saved[pos], ...extras];
+      } else {
+        result[pos] = defaults[pos];
+      }
+    }
+    return result;
+  } catch { return buildDefaultWeights(); }
+}
+
+const SCORE_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DST'];
 
 const LIGHT_SURFACE_VARS = {
   '--bg': '#b8bfd4', '--bg-2': '#aeb5ca', '--panel': '#c4cbde',
@@ -45,7 +176,7 @@ const THEME_VARS = {
   },
 };
 
-function LogoPreview({ logo, logoImg, color, size = 64 }) {
+function LogoPreview({ logo, logoImg, color, textColor = '#000000', size = 64 }) {
   const radius = size * 0.18;
   return (
     <div style={{
@@ -56,7 +187,7 @@ function LogoPreview({ logo, logoImg, color, size = 64 }) {
     }}>
       {logoImg
         ? <img src={logoImg} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        : <span style={{ fontSize: size * 0.28, fontWeight: 900, color: '#000', letterSpacing: '-0.04em' }}>
+        : <span style={{ fontSize: size * 0.28, fontWeight: 900, color: textColor, letterSpacing: '-0.04em' }}>
             {(logo || '??').slice(0, 2).toUpperCase()}
           </span>
       }
@@ -64,33 +195,64 @@ function LogoPreview({ logo, logoImg, color, size = 64 }) {
   );
 }
 
+const TABS = [
+  { id: 'team',       label: 'Team Name',   icon: '🏆' },
+  { id: 'sleeper',    label: 'Sleeper',      icon: '😴' },
+  { id: 'appearance', label: 'Appearance',  icon: '🎨' },
+  { id: 'security',   label: 'Security',    icon: '🔒' },
+];
+
 export default function AccountEditScreen({ user }) {
   const teamId = user?.teamId || 1;
-  const baseTeam = (getLiveTeamBase(teamId));
-
-  function getLiveTeamBase(id) {
-    return LEAGUE_TEAMS.find(t => t.id === id) || LEAGUE_TEAMS[0];
-  }
+  const baseTeam = LEAGUE_TEAMS.find(t => t.id === teamId) || LEAGUE_TEAMS[0];
 
   const savedPrefs = getMyTeamPrefs() || {};
 
+  const [activeTab, setActiveTab]   = React.useState('team');
+
+  // Team tab state
   const [teamName, setTeamName]   = React.useState(savedPrefs.name   ?? baseTeam.name);
   const [ownerName, setOwnerName] = React.useState(savedPrefs.owner  ?? baseTeam.owner);
   const [logo, setLogo]           = React.useState(savedPrefs.logo   ?? baseTeam.logo);
-  const [color, setColor]         = React.useState(savedPrefs.color  ?? baseTeam.color);
-  const [logoImg, setLogoImg]     = React.useState(savedPrefs.logoImg ?? null);
+  const [color, setColor]             = React.useState(savedPrefs.color        ?? baseTeam.color);
+  const [logoTextColor, setLogoTextColor] = React.useState(savedPrefs.logoTextColor ?? '#000000');
+  const [logoImg, setLogoImg]         = React.useState(savedPrefs.logoImg ?? null);
   const [saved, setSaved]         = React.useState(false);
   const [dragOver, setDragOver]   = React.useState(false);
-  const VALID_THEME_IDS = new Set(THEMES.map(t => t.id));
-  const storedTheme = localStorage.getItem('fantasai_theme') || 'sportsbook-dark';
-  const [activeTheme, setActiveTheme] = React.useState(VALID_THEME_IDS.has(storedTheme) ? storedTheme : 'sportsbook-dark');
-  const [lightMode, setLightMode] = React.useState(localStorage.getItem('fantasai_light_mode') === 'true');
   const [aiPrompt, setAiPrompt]   = React.useState('');
   const [aiImgUrl, setAiImgUrl]   = React.useState('');
   const [promptCopied, setPromptCopied] = React.useState(false);
   const fileRef = React.useRef(null);
 
-  // ── Change Password state ──
+  // Appearance tab state
+  const VALID_THEME_IDS = new Set(THEMES.map(t => t.id));
+  const storedTheme = localStorage.getItem('fantasai_theme') || 'sportsbook-dark';
+  const [activeTheme, setActiveTheme] = React.useState(VALID_THEME_IDS.has(storedTheme) ? storedTheme : 'sportsbook-dark');
+  const [lightMode, setLightMode] = React.useState(localStorage.getItem('fantasai_light_mode') === 'true');
+
+  // Sleeper tab state
+  const [sleeperUsername, setSleeperUsername] = React.useState(
+    () => { try { return localStorage.getItem('fantasai_sleeper_username') || ''; } catch { return ''; } }
+  );
+  const [sleeperLeagueId, setSleeperLeagueId] = React.useState(
+    () => { try { return localStorage.getItem('fantasai_sleeper_league_id') || ''; } catch { return ''; } }
+  );
+  const [sleeperAdpWeight, setSleeperAdpWeight] = React.useState(
+    () => { try { return Number(localStorage.getItem('fantasai_sleeper_adp_weight') ?? 70); } catch { return 70; } }
+  );
+  const [sleeperAutoSync, setSleeperAutoSync] = React.useState(
+    () => { try { return localStorage.getItem('fantasai_sleeper_auto_sync') === 'true'; } catch { return false; } }
+  );
+  const [sleeperSyncing, setSleeperSyncing] = React.useState(false);
+  const [sleeperSynced, setSleeperSynced]   = React.useState(false);
+  const [sleeperError, setSleeperError]     = React.useState(null);
+
+  // Scoring weights state
+  const [scoringPos, setScoringPos]         = React.useState('QB');
+  const [scoringWeights, setScoringWeights] = React.useState(() => loadScoringWeights());
+  const [weightsSaved, setWeightsSaved]     = React.useState(false);
+
+  // Security tab state
   const [currentPass, setCurrentPass]   = React.useState('');
   const [newPass, setNewPass]           = React.useState('');
   const [confirmPass, setConfirmPass]   = React.useState('');
@@ -98,45 +260,51 @@ export default function AccountEditScreen({ user }) {
   const [showNew, setShowNew]           = React.useState(false);
   const [showConfirm, setShowConfirm]   = React.useState(false);
   const [passError, setPassError]       = React.useState('');
-  const [passStatus, setPassStatus]     = React.useState(null); // null | 'saving' | 'saved' | 'error'
+  const [passStatus, setPassStatus]     = React.useState(null);
 
   const API_BASE = 'https://api.fantasai.net';
   const OWNERS_KEY = 'fantasai_owners_config';
   const DEFAULT_PASSWORD = 'fantasy2025';
 
-  async function handleChangePassword(e) {
-    e.preventDefault();
-    setPassError('');
-    setPassStatus(null);
+  React.useEffect(() => {
+    setAiPrompt(`Fantasy football team logo for "${teamName}", sports emblem, bold design, dark background, professional`);
+  }, [teamName]);
 
-    const overrides = (() => { try { return JSON.parse(localStorage.getItem(OWNERS_KEY) || '{}'); } catch { return {}; } })();
-    const myOverride = overrides[teamId] || {};
-    const expected = myOverride.password || DEFAULT_PASSWORD;
+  React.useEffect(() => {
+    const savedTheme = localStorage.getItem('fantasai_theme');
+    const savedLight = localStorage.getItem('fantasai_light_mode') === 'true';
+    if (savedTheme && THEME_VARS[savedTheme]) applyTheme(savedTheme, savedLight);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    if (currentPass !== expected) { setPassError('Current password is incorrect.'); return; }
-    if (newPass.length < 8)       { setPassError('New password must be at least 8 characters.'); return; }
-    if (newPass !== confirmPass)  { setPassError('New passwords do not match.'); return; }
+  function moveFeature(pos, idx, dir) {
+    setScoringWeights(prev => {
+      const list = [...prev[pos]];
+      const target = idx + dir;
+      if (target < 0 || target >= list.length) return prev;
+      [list[idx], list[target]] = [list[target], list[idx]];
+      return { ...prev, [pos]: list };
+    });
+  }
 
-    setPassStatus('saving');
-    const next = { ...overrides, [teamId]: { ...myOverride, password: newPass, passwordSet: true } };
-    localStorage.setItem(OWNERS_KEY, JSON.stringify(next));
+  function setFeatureWeight(pos, idx, val) {
+    setScoringWeights(prev => {
+      const list = prev[pos].map((f, i) => i === idx ? { ...f, weight: val } : f);
+      return { ...prev, [pos]: list };
+    });
+  }
 
+  function saveScoringWeights() {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/owners/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next),
-      });
-      if (!res.ok) throw new Error('Server error');
-      setPassStatus('saved');
-      setCurrentPass('');
-      setNewPass('');
-      setConfirmPass('');
-      setTimeout(() => setPassStatus(null), 3000);
-    } catch {
-      setPassStatus('error');
-      setPassError('Saved locally but failed to sync to server. Try again.');
-    }
+      localStorage.setItem('fantasai_scoring_weights', JSON.stringify(scoringWeights));
+      setWeightsSaved(true);
+      setTimeout(() => setWeightsSaved(false), 2500);
+    } catch {}
+  }
+
+  function resetScoringWeights() {
+    const defaults = buildDefaultWeights();
+    setScoringWeights(defaults);
   }
 
   function handleFile(file) {
@@ -149,8 +317,7 @@ export default function AccountEditScreen({ user }) {
   function handleDrop(e) {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    handleFile(file);
+    handleFile(e.dataTransfer.files[0]);
   }
 
   function handleSave() {
@@ -159,6 +326,7 @@ export default function AccountEditScreen({ user }) {
       owner: ownerName.trim() || baseTeam.owner,
       logo: logo.slice(0, 2).toUpperCase() || baseTeam.logo,
       color,
+      logoTextColor,
       logoImg: logoImg || null,
     };
     saveMyTeamPrefs(prefs);
@@ -172,14 +340,13 @@ export default function AccountEditScreen({ user }) {
     setOwnerName(baseTeam.owner);
     setLogo(baseTeam.logo);
     setColor(baseTeam.color);
+    setLogoTextColor('#000000');
     setLogoImg(null);
   }
 
   function applyTheme(themeId, isLight) {
     const vars = THEME_VARS[themeId] ?? THEME_VARS['sportsbook-dark'];
-    const merged = isLight ?? lightMode
-      ? { ...vars, ...LIGHT_SURFACE_VARS }
-      : vars;
+    const merged = isLight ?? lightMode ? { ...vars, ...LIGHT_SURFACE_VARS } : vars;
     Object.entries(merged).forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
     localStorage.setItem('fantasai_theme', themeId);
     setActiveTheme(themeId);
@@ -191,411 +358,448 @@ export default function AccountEditScreen({ user }) {
     applyTheme(activeTheme, next);
   }
 
-  React.useEffect(() => {
-    const savedTheme = localStorage.getItem('fantasai_theme');
-    const savedLight = localStorage.getItem('fantasai_light_mode') === 'true';
-    if (savedTheme && THEME_VARS[savedTheme]) applyTheme(savedTheme, savedLight);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  function saveSleeperSettings() {
+    try {
+      localStorage.setItem('fantasai_sleeper_username', sleeperUsername.trim());
+      localStorage.setItem('fantasai_sleeper_league_id', sleeperLeagueId.trim());
+      localStorage.setItem('fantasai_sleeper_adp_weight', String(sleeperAdpWeight));
+      localStorage.setItem('fantasai_sleeper_auto_sync', sleeperAutoSync ? 'true' : 'false');
+    } catch {}
+  }
 
-  React.useEffect(() => {
-    setAiPrompt(`Fantasy football team logo for "${teamName}", sports emblem, bold design, dark background, professional`);
-  }, [teamName]);
+  async function handleSleeperSync() {
+    if (!sleeperUsername.trim() && !sleeperLeagueId.trim()) {
+      setSleeperError('Enter a Sleeper username or league ID first.');
+      return;
+    }
+    setSleeperError(null);
+    setSleeperSyncing(true);
+    saveSleeperSettings();
+    try {
+      const params = new URLSearchParams();
+      if (sleeperUsername.trim()) params.set('username', sleeperUsername.trim());
+      if (sleeperLeagueId.trim()) params.set('leagueId', sleeperLeagueId.trim());
+      const res = await fetch(`${API_BASE}/api/v1/sleeper/sync?${params}`, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSleeperSynced(true);
+      setTimeout(() => setSleeperSynced(false), 3000);
+    } catch (e) {
+      setSleeperError(`Sync failed: ${e.message}. Settings saved locally.`);
+    } finally {
+      setSleeperSyncing(false);
+    }
+  }
+
+  async function handleChangePassword(e) {
+    e.preventDefault();
+    setPassError('');
+    setPassStatus(null);
+    const overrides = (() => { try { return JSON.parse(localStorage.getItem(OWNERS_KEY) || '{}'); } catch { return {}; } })();
+    const myOverride = overrides[teamId] || {};
+    const expected = myOverride.password || DEFAULT_PASSWORD;
+    if (currentPass !== expected) { setPassError('Current password is incorrect.'); return; }
+    if (newPass.length < 8)       { setPassError('New password must be at least 8 characters.'); return; }
+    if (newPass !== confirmPass)  { setPassError('New passwords do not match.'); return; }
+    setPassStatus('saving');
+    const next = { ...overrides, [teamId]: { ...myOverride, password: newPass, passwordSet: true } };
+    localStorage.setItem(OWNERS_KEY, JSON.stringify(next));
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/owners/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) throw new Error('Server error');
+      setPassStatus('saved');
+      setCurrentPass(''); setNewPass(''); setConfirmPass('');
+      setTimeout(() => setPassStatus(null), 3000);
+    } catch {
+      setPassStatus('error');
+      setPassError('Saved locally but failed to sync to server. Try again.');
+    }
+  }
 
   const labelStyle = { fontSize: 11, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 6, display: 'block' };
   const inputStyle = { width: '100%' };
 
   return (
     <div className="col" style={{ height: '100%' }}>
-
       <div className="page-head">
-        <div>
-          <h1>My Account &amp; Team</h1>
-          <div className="sub">Customize how your team appears in the league</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TeamLogoBadge team={findTeam(teamId)} size={40} />
+          <div>
+            <h1>My Account &amp; Team</h1>
+            <div className="sub">Customize how your team appears in the league</div>
+          </div>
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '0 24px 40px' }}>
-
-        {/* ── Live preview card ── */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 20, marginBottom: 32,
-          padding: 20, borderRadius: 12, background: 'var(--panel-2)',
-          border: '1px solid var(--border)',
-        }}>
-          <LogoPreview logo={logo} logoImg={logoImg} color={color} size={72} />
-          <div>
-            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 20 }}>
-              {teamName || '—'}
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>{ownerName || '—'}</div>
-            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{
-                display: 'inline-block', width: 16, height: 16, borderRadius: 4,
-                background: color, border: '1px solid rgba(255,255,255,.15)',
-              }} />
-              <span className="mono faint" style={{ fontSize: 11 }}>{color}</span>
-              <span style={{
-                fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700,
-                background: color, color: '#000', borderRadius: 3, padding: '1px 6px',
-              }}>{logo.slice(0, 2).toUpperCase()}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Site Color Theme ── */}
-        <div style={{ maxWidth: 640, marginBottom: 32 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <label style={{ ...labelStyle, marginBottom: 0 }}>Site Color Theme</label>
-            {/* Light / Dark toggle */}
-            <button
-              onClick={() => toggleLightMode(!lightMode)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 0,
-                padding: 0, border: '1px solid var(--border)', borderRadius: 20,
-                background: 'var(--panel-2)', cursor: 'pointer', overflow: 'hidden',
-                fontFamily: 'var(--font-body)', fontSize: 11,
-              }}
-            >
-              {['Dark', 'Light'].map(mode => {
-                const isActive = mode === 'Light' ? lightMode : !lightMode;
-                return (
-                  <span key={mode} style={{
-                    padding: '5px 14px', borderRadius: 20,
-                    background: isActive ? 'var(--accent)' : 'transparent',
-                    color: isActive ? 'var(--accent-ink)' : 'var(--text-faint)',
-                    fontWeight: isActive ? 700 : 400,
-                    transition: 'background .15s, color .15s',
-                  }}>
-                    {mode === 'Dark' ? '◗ Dark' : 'Light ◖'}
-                  </span>
-                );
-              })}
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {THEMES.map(t => (
-              <button
-                key={t.id}
-                onClick={() => applyTheme(t.id, lightMode)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
-                  border: `2px solid ${activeTheme === t.id ? t.accent : 'rgba(255,255,255,.12)'}`,
-                  background: t.bg, color: '#e0e4f0',
-                  fontFamily: 'var(--font-body)', fontSize: 12,
-                  fontWeight: activeTheme === t.id ? 700 : 400,
-                  transition: 'border-color .15s, box-shadow .15s',
-                  boxShadow: activeTheme === t.id ? `0 0 0 1px ${t.accent}55, 0 0 16px ${t.accent}28` : '0 2px 8px rgba(0,0,0,.4)',
-                }}
-              >
-                {/* Dual-color swatch */}
-                <div style={{ display: 'flex', flexShrink: 0, borderRadius: 4, overflow: 'hidden', border: '1px solid rgba(255,255,255,.12)' }}>
-                  <div style={{ width: 10, height: 16, background: t.accent }} />
-                  <div style={{ width: 10, height: 16, background: t.accent2 }} />
-                </div>
-                {t.label}
-                {activeTheme === t.id && <span style={{ fontSize: 11, color: t.accent, marginLeft: 2 }}>✓</span>}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 8 }}>
-            Changes apply instantly across the whole site and are remembered for your browser.
-          </div>
-        </div>
-
-        {/* ── Form fields ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, maxWidth: 640 }}>
-
-          <div>
-            <label style={labelStyle}>Team Name</label>
-            <input
-              className="input"
-              style={inputStyle}
-              value={teamName}
-              onChange={e => setTeamName(e.target.value)}
-              placeholder={baseTeam.name}
-              maxLength={40}
-            />
-          </div>
-
-          <div>
-            <label style={labelStyle}>Owner Name</label>
-            <input
-              className="input"
-              style={inputStyle}
-              value={ownerName}
-              onChange={e => setOwnerName(e.target.value)}
-              placeholder={baseTeam.owner}
-              maxLength={40}
-            />
-          </div>
-
-          <div>
-            <label style={labelStyle}>Logo Text (2 letters)</label>
-            <input
-              className="input"
-              style={inputStyle}
-              value={logo}
-              onChange={e => setLogo(e.target.value.slice(0, 2).toUpperCase())}
-              placeholder={baseTeam.logo}
-              maxLength={2}
-            />
-            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
-              Shown in standings, matchups, and draft tables
-            </div>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Team Color</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <input
-                type="color"
-                value={color}
-                onChange={e => setColor(e.target.value)}
-                style={{ width: 44, height: 36, borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer', padding: 2, background: 'var(--panel-2)' }}
-              />
-              <input
-                className="input"
-                value={color}
-                onChange={e => setColor(e.target.value)}
-                style={{ flex: 1, fontFamily: 'var(--font-mono)' }}
-                maxLength={7}
-                placeholder="#c6ff3a"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* ── Logo image upload ── */}
-        <div style={{ maxWidth: 640, marginTop: 28 }}>
-          <label style={labelStyle}>Logo Image (optional)</label>
-          <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 10 }}>
-            Upload a PNG or JPG to use instead of the text initials. Shown in your team card and profile.
-          </div>
-
-          <div
+      {/* Tab bar */}
+      <div style={{ display: 'flex', gap: 2, padding: '0 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        {TABS.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
             style={{
-              display: 'flex', alignItems: 'center', gap: 16,
-              padding: '20px 24px', borderRadius: 10,
-              border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
-              background: dragOver ? 'rgba(198,255,58,.04)' : 'var(--panel-2)',
-              transition: 'border-color .15s, background .15s', cursor: 'pointer',
+              padding: '10px 18px', background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: 13, fontWeight: activeTab === tab.id ? 700 : 400,
+              color: activeTab === tab.id ? 'var(--accent)' : 'var(--text-dim)',
+              borderBottom: activeTab === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
+              marginBottom: -1, display: 'flex', alignItems: 'center', gap: 6,
+              transition: 'color .15s',
             }}
-            onClick={() => fileRef.current?.click()}
-            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
           >
-            {logoImg ? (
-              <>
-                <LogoPreview logo={logo} logoImg={logoImg} color={color} size={52} />
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>Image uploaded</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>
-                    Click to replace · drag a new image to swap
-                  </div>
+            <span>{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto', padding: '24px 24px 40px' }}>
+
+        {/* ── TEAM NAME TAB ── */}
+        {activeTab === 'team' && (
+          <div style={{ maxWidth: 640 }}>
+            {/* Live preview */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 20, marginBottom: 28,
+              padding: 20, borderRadius: 12, background: 'var(--panel-2)', border: '1px solid var(--border)',
+            }}>
+              <LogoPreview logo={logo} logoImg={logoImg} color={color} textColor={logoTextColor} size={72} />
+              <div>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 20 }}>{teamName || '—'}</div>
+                <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>{ownerName || '—'}</div>
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ display: 'inline-block', width: 16, height: 16, borderRadius: 4, background: color, border: '1px solid rgba(255,255,255,.15)' }} />
+                  <span className="mono faint" style={{ fontSize: 11 }}>{color}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, background: color, color: logoTextColor, borderRadius: 3, padding: '1px 6px' }}>{logo.slice(0, 2).toUpperCase()}</span>
                 </div>
-                <button
-                  className="btn sm ghost"
-                  style={{ marginLeft: 'auto' }}
-                  onClick={e => { e.stopPropagation(); setLogoImg(null); }}
-                >
-                  Remove
+              </div>
+            </div>
+
+            {/* Form fields */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 28 }}>
+              <div>
+                <label style={labelStyle}>Team Name</label>
+                <input className="input" style={inputStyle} value={teamName} onChange={e => setTeamName(e.target.value)} placeholder={baseTeam.name} maxLength={40} />
+              </div>
+              <div>
+                <label style={labelStyle}>Owner Name</label>
+                <input className="input" style={inputStyle} value={ownerName} onChange={e => setOwnerName(e.target.value)} placeholder={baseTeam.owner} maxLength={40} />
+              </div>
+              <div>
+                <label style={labelStyle}>Logo Text (2 letters)</label>
+                <input className="input" style={inputStyle} value={logo} onChange={e => setLogo(e.target.value.slice(0, 2).toUpperCase())} placeholder={baseTeam.logo} maxLength={2} />
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>Shown in standings, matchups, and draft tables</div>
+              </div>
+              <div>
+                <label style={labelStyle}>Logo Background Color</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input type="color" value={color} onChange={e => setColor(e.target.value)} style={{ width: 44, height: 36, borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer', padding: 2, background: 'var(--panel-2)' }} />
+                  <input className="input" value={color} onChange={e => setColor(e.target.value)} style={{ flex: 1, fontFamily: 'var(--font-mono)' }} maxLength={7} placeholder="#c6ff3a" />
+                </div>
+              </div>
+              <div>
+                <label style={labelStyle}>Logo Text Color</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input type="color" value={logoTextColor} onChange={e => setLogoTextColor(e.target.value)} style={{ width: 44, height: 36, borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer', padding: 2, background: 'var(--panel-2)' }} />
+                  <input className="input" value={logoTextColor} onChange={e => setLogoTextColor(e.target.value)} style={{ flex: 1, fontFamily: 'var(--font-mono)' }} maxLength={7} placeholder="#000000" />
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>Color of the initials shown inside the logo badge</div>
+              </div>
+            </div>
+
+            {/* Logo image upload */}
+            <div style={{ marginBottom: 28 }}>
+              <label style={labelStyle}>Logo Image (optional)</label>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 10 }}>
+                Upload a PNG or JPG to use instead of the text initials.
+              </div>
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 16, padding: '20px 24px', borderRadius: 10,
+                  border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
+                  background: dragOver ? 'rgba(198,255,58,.04)' : 'var(--panel-2)',
+                  transition: 'border-color .15s, background .15s', cursor: 'pointer',
+                }}
+                onClick={() => fileRef.current?.click()}
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+              >
+                {logoImg ? (
+                  <>
+                    <LogoPreview logo={logo} logoImg={logoImg} color={color} size={52} />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>Image uploaded</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>Click to replace · drag a new image to swap</div>
+                    </div>
+                    <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={e => { e.stopPropagation(); setLogoImg(null); }}>Remove</button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ width: 52, height: 52, borderRadius: 10, background: 'var(--panel)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>🖼</div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>Drop image here or click to browse</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>PNG, JPG, SVG — max 2MB</div>
+                    </div>
+                  </>
+                )}
+              </div>
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+            </div>
+
+            {/* AI Logo Generator */}
+            <div style={{ marginBottom: 32 }}>
+              <label style={labelStyle}>AI Logo Generator</label>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 12, lineHeight: 1.6 }}>
+                Use ChatGPT, DALL·E, or Midjourney to generate a custom logo. Copy the prompt, generate, then paste the URL below or upload above.
+              </div>
+              <label style={{ ...labelStyle, marginBottom: 4 }}>Suggested Prompt</label>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <input className="input" style={{ flex: 1, fontSize: 11, fontFamily: 'var(--font-mono)' }} value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} />
+                <button className="btn ghost sm" style={{ flexShrink: 0, fontSize: 11 }} onClick={() => { navigator.clipboard?.writeText(aiPrompt); setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); }}>
+                  {promptCopied ? '✓ Copied' : 'Copy Prompt'}
                 </button>
-              </>
-            ) : (
-              <>
-                <div style={{
-                  width: 52, height: 52, borderRadius: 10, background: 'var(--panel)',
-                  border: '1px solid var(--border)', display: 'flex', alignItems: 'center',
-                  justifyContent: 'center', fontSize: 22, flexShrink: 0,
-                }}>🖼</div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>Drop image here or click to browse</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>PNG, JPG, SVG — max 2MB</div>
-                </div>
-              </>
-            )}
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            style={{ display: 'none' }}
-            onChange={e => handleFile(e.target.files[0])}
-          />
-        </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                <a href="https://chat.openai.com" target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', color: 'var(--text-dim)', textDecoration: 'none', background: 'var(--panel-2)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>🤖 Open ChatGPT ↗</a>
+                <a href="https://labs.openai.com" target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', color: 'var(--text-dim)', textDecoration: 'none', background: 'var(--panel-2)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>🎨 Open DALL·E ↗</a>
+                <a href="https://www.midjourney.com" target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', color: 'var(--text-dim)', textDecoration: 'none', background: 'var(--panel-2)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>✨ Open Midjourney ↗</a>
+              </div>
+              <label style={{ ...labelStyle, marginBottom: 4 }}>Import from URL</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="input" placeholder="Paste image URL from AI generator…" style={{ flex: 1, fontSize: 11 }} value={aiImgUrl} onChange={e => setAiImgUrl(e.target.value)} />
+                <button className="btn primary sm" style={{ flexShrink: 0, fontSize: 11 }} disabled={!aiImgUrl.startsWith('http')} onClick={() => { setLogoImg(aiImgUrl); setAiImgUrl(''); }}>Use Image</button>
+              </div>
+            </div>
 
-        {/* ── AI Logo Generator ── */}
-        <div style={{ maxWidth: 640, marginTop: 28 }}>
-          <label style={labelStyle}>AI Logo Generator</label>
-          <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 12, lineHeight: 1.6 }}>
-            Use ChatGPT, DALL·E, or Midjourney to generate a custom logo. Copy the suggested prompt, generate your image, then paste its URL below or upload the file above.
-          </div>
-
-          <label style={{ ...labelStyle, marginBottom: 4 }}>Suggested Prompt</label>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            <input
-              className="input"
-              style={{ flex: 1, fontSize: 11, fontFamily: 'var(--font-mono)' }}
-              value={aiPrompt}
-              onChange={e => setAiPrompt(e.target.value)}
-            />
-            <button
-              className="btn ghost sm"
-              style={{ flexShrink: 0, fontSize: 11 }}
-              onClick={() => { navigator.clipboard?.writeText(aiPrompt); setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); }}
-            >
-              {promptCopied ? '✓ Copied' : 'Copy Prompt'}
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-            <a href="https://chat.openai.com" target="_blank" rel="noreferrer"
-              style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', color: 'var(--text-dim)', textDecoration: 'none', background: 'var(--panel-2)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              🤖 Open ChatGPT ↗
-            </a>
-            <a href="https://labs.openai.com" target="_blank" rel="noreferrer"
-              style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', color: 'var(--text-dim)', textDecoration: 'none', background: 'var(--panel-2)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              🎨 Open DALL·E ↗
-            </a>
-            <a href="https://www.midjourney.com" target="_blank" rel="noreferrer"
-              style={{ fontSize: 11, padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', color: 'var(--text-dim)', textDecoration: 'none', background: 'var(--panel-2)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              ✨ Open Midjourney ↗
-            </a>
-          </div>
-
-          <label style={{ ...labelStyle, marginBottom: 4 }}>Import from URL</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              className="input"
-              placeholder="Paste image URL from AI generator…"
-              style={{ flex: 1, fontSize: 11 }}
-              value={aiImgUrl}
-              onChange={e => setAiImgUrl(e.target.value)}
-            />
-            <button
-              className="btn primary sm"
-              style={{ flexShrink: 0, fontSize: 11 }}
-              disabled={!aiImgUrl.startsWith('http')}
-              onClick={() => { setLogoImg(aiImgUrl); setAiImgUrl(''); }}
-            >
-              Use Image
-            </button>
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
-            Or download the image and upload it directly using the drop zone above.
-          </div>
-        </div>
-
-        {/* ── Actions ── */}
-        <div style={{ marginTop: 32, display: 'flex', gap: 12, maxWidth: 640 }}>
-          <button className="btn primary" onClick={handleSave} style={{ minWidth: 120 }}>
-            {saved ? '✓ Saved' : 'Save Changes'}
-          </button>
-          <button className="btn ghost" onClick={handleReset}>
-            Reset to Defaults
-          </button>
-        </div>
-
-        {saved && (
-          <div style={{
-            marginTop: 12, fontSize: 13, color: 'var(--accent)',
-            fontFamily: 'var(--font-mono)', letterSpacing: '.04em',
-          }}>
-            Changes saved — refresh any screen to see your updated logo and name.
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button className="btn primary" onClick={handleSave} style={{ minWidth: 120 }}>
+                {saved ? '✓ Saved' : 'Save Changes'}
+              </button>
+              <button className="btn ghost" onClick={handleReset}>Reset to Defaults</button>
+            </div>
+            {saved && <div style={{ marginTop: 12, fontSize: 13, color: 'var(--accent)', fontFamily: 'var(--font-mono)', letterSpacing: '.04em' }}>Changes saved — refresh any screen to see your updated logo and name.</div>}
           </div>
         )}
 
-        {/* ── Change Password ── */}
-        <div style={{ maxWidth: 640, marginTop: 40, paddingTop: 32, borderTop: '1px solid var(--border)' }}>
-          <label style={labelStyle}>Change Password</label>
-          <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 18, lineHeight: 1.6 }}>
-            Update your login password. Changes are saved to your browser and synced to the league server.
-          </div>
-          <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-            {/* Current password */}
+        {/* ── SLEEPER TAB ── */}
+        {activeTab === 'sleeper' && (
+          <div style={{ maxWidth: 600 }}>
+            {/* ── Player Ranking Weights ── */}
             <div>
-              <label style={labelStyle}>Current Password</label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  className="input"
-                  type={showCurrent ? 'text' : 'password'}
-                  value={currentPass}
-                  onChange={e => { setCurrentPass(e.target.value); setPassError(''); }}
-                  placeholder="Enter your current password"
-                  style={{ width: '100%', paddingRight: 40 }}
-                />
-                <button type="button" onClick={() => setShowCurrent(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 15, padding: 0, lineHeight: 1 }}>
-                  {showCurrent ? '🙈' : '👁'}
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text)' }}>Player Ranking Weights — Sleeper Slider</div>
+                <div style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 4, lineHeight: 1.6 }}>
+                  Rank features by priority and assign each a weight. Weights determine how players are scored and ranked on the Players page. Total should equal 100%.
+                </div>
+              </div>
+
+              {/* Position pill selector */}
+              <div style={{ display: 'flex', gap: 0, background: 'var(--panel)', borderRadius: 8, padding: 3, alignSelf: 'flex-start', marginBottom: 20, marginTop: 16, width: 'fit-content' }}>
+                {SCORE_POSITIONS.map(pos => (
+                  <button
+                    key={pos}
+                    onClick={() => setScoringPos(pos)}
+                    style={{
+                      padding: '5px 14px', borderRadius: 6, fontSize: 12, fontWeight: scoringPos === pos ? 700 : 500,
+                      cursor: 'pointer', border: 'none',
+                      background: scoringPos === pos ? 'var(--accent)' : 'transparent',
+                      color: scoringPos === pos ? 'var(--accent-ink)' : 'var(--text-dim)',
+                      transition: 'background .15s, color .15s',
+                    }}
+                  >{pos}</button>
+                ))}
+              </div>
+
+              {/* Total bar */}
+              {(() => {
+                const features = scoringWeights[scoringPos] || [];
+                const total = features.reduce((s, f) => s + (f.weight || 0), 0);
+                const over  = total > 100;
+                const exact = total === 100;
+                const barColor = over ? 'var(--danger)' : exact ? 'var(--good)' : 'var(--accent)';
+                return (
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Total Weight</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 14, color: barColor }}>
+                        {total}% {over ? '— over by ' + (total - 100) + '%' : exact ? '✓' : '— ' + (100 - total) + '% remaining'}
+                      </span>
+                    </div>
+                    <div style={{ height: 6, borderRadius: 3, background: 'var(--panel-2)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(total, 100)}%`, background: barColor, borderRadius: 3, transition: 'width .2s, background .2s' }} />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Feature rows */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(scoringWeights[scoringPos] || []).map((f, idx, arr) => (
+                  <div
+                    key={f.key}
+                    style={{
+                      display: 'grid', gridTemplateColumns: '22px 20px 20px 1fr 120px 42px',
+                      alignItems: 'center', gap: 8,
+                      padding: '8px 12px', borderRadius: 8,
+                      background: 'var(--panel-2)', border: '1px solid var(--border)',
+                    }}
+                  >
+                    {/* Rank number */}
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-faint)', textAlign: 'center' }}>
+                      {idx + 1}
+                    </span>
+
+                    {/* Up / Down */}
+                    <button
+                      onClick={() => moveFeature(scoringPos, idx, -1)}
+                      disabled={idx === 0}
+                      style={{ background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? 'var(--border-strong)' : 'var(--text-dim)', fontSize: 13, padding: 0, lineHeight: 1 }}
+                    >↑</button>
+                    <button
+                      onClick={() => moveFeature(scoringPos, idx, 1)}
+                      disabled={idx === arr.length - 1}
+                      style={{ background: 'none', border: 'none', cursor: idx === arr.length - 1 ? 'default' : 'pointer', color: idx === arr.length - 1 ? 'var(--border-strong)' : 'var(--text-dim)', fontSize: 13, padding: 0, lineHeight: 1 }}
+                    >↓</button>
+
+                    {/* Feature label */}
+                    <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.label}</span>
+
+                    {/* Weight slider */}
+                    <input
+                      type="range"
+                      min={0} max={100} step={1}
+                      value={f.weight || 0}
+                      onChange={e => setFeatureWeight(scoringPos, idx, Number(e.target.value))}
+                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: 'pointer' }}
+                    />
+
+                    {/* Weight % display */}
+                    <span style={{
+                      fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 13,
+                      color: f.weight > 0 ? 'var(--accent)' : 'var(--text-faint)',
+                      textAlign: 'right', whiteSpace: 'nowrap',
+                    }}>
+                      {f.weight || 0}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Save / Reset */}
+              <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+                <button className="btn primary" onClick={saveScoringWeights} style={{ minWidth: 140 }}>
+                  {weightsSaved ? '✓ Saved' : 'Save Weights'}
                 </button>
+                <button className="btn ghost" onClick={resetScoringWeights}>Reset to Defaults</button>
               </div>
-            </div>
-
-            {/* New password row */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div>
-                <label style={labelStyle}>New Password</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    className="input"
-                    type={showNew ? 'text' : 'password'}
-                    value={newPass}
-                    onChange={e => { setNewPass(e.target.value); setPassError(''); }}
-                    placeholder="Min. 8 characters"
-                    style={{ width: '100%', paddingRight: 40 }}
-                  />
-                  <button type="button" onClick={() => setShowNew(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 15, padding: 0, lineHeight: 1 }}>
-                    {showNew ? '🙈' : '👁'}
-                  </button>
+              {weightsSaved && (
+                <div style={{ marginTop: 10, fontSize: 12, color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                  Weights saved — Players page will use these rankings.
                 </div>
-              </div>
-              <div>
-                <label style={labelStyle}>Confirm New Password</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    className="input"
-                    type={showConfirm ? 'text' : 'password'}
-                    value={confirmPass}
-                    onChange={e => { setConfirmPass(e.target.value); setPassError(''); }}
-                    placeholder="Repeat new password"
-                    style={{ width: '100%', paddingRight: 40 }}
-                  />
-                  <button type="button" onClick={() => setShowConfirm(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 15, padding: 0, lineHeight: 1 }}>
-                    {showConfirm ? '🙈' : '👁'}
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
+          </div>
+        )}
 
-            {passError && (
-              <div style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>{passError}</div>
-            )}
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        {/* ── APPEARANCE TAB ── */}
+        {activeTab === 'appearance' && (
+          <div style={{ maxWidth: 640 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div>
+                <label style={{ ...labelStyle, marginBottom: 2 }}>Site Color Theme</label>
+                <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>Changes apply instantly and are remembered for your browser</div>
+              </div>
               <button
-                className="btn primary"
-                type="submit"
-                disabled={passStatus === 'saving' || !currentPass || !newPass || !confirmPass}
-                style={{ minWidth: 160 }}
+                onClick={() => toggleLightMode(!lightMode)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 0, padding: 0,
+                  border: '1px solid var(--border)', borderRadius: 20, background: 'var(--panel-2)',
+                  cursor: 'pointer', overflow: 'hidden', fontFamily: 'var(--font-body)', fontSize: 11,
+                }}
               >
-                {passStatus === 'saving' ? 'Saving…' : passStatus === 'saved' ? '✓ Password Updated' : 'Change Password'}
+                {['Dark', 'Light'].map(mode => {
+                  const isActive = mode === 'Light' ? lightMode : !lightMode;
+                  return (
+                    <span key={mode} style={{ padding: '5px 14px', borderRadius: 20, background: isActive ? 'var(--accent)' : 'transparent', color: isActive ? 'var(--accent-ink)' : 'var(--text-faint)', fontWeight: isActive ? 700 : 400, transition: 'background .15s, color .15s' }}>
+                      {mode === 'Dark' ? '◗ Dark' : 'Light ◖'}
+                    </span>
+                  );
+                })}
               </button>
-              {passStatus === 'saved' && (
-                <span style={{ fontSize: 12, color: 'var(--good)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-                  Synced to server
-                </span>
-              )}
-              {passStatus === 'error' && (
-                <span style={{ fontSize: 12, color: 'var(--warn)', fontFamily: 'var(--font-mono)' }}>
-                  Saved locally · server sync failed
-                </span>
-              )}
             </div>
-          </form>
-        </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 32 }}>
+              {THEMES.map(t => (
+                <button key={t.id} onClick={() => applyTheme(t.id, lightMode)} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 8,
+                  cursor: 'pointer', border: `2px solid ${activeTheme === t.id ? t.accent : 'rgba(255,255,255,.12)'}`,
+                  background: t.bg, color: '#e0e4f0', fontFamily: 'var(--font-body)', fontSize: 12,
+                  fontWeight: activeTheme === t.id ? 700 : 400, transition: 'border-color .15s, box-shadow .15s',
+                  boxShadow: activeTheme === t.id ? `0 0 0 1px ${t.accent}55, 0 0 16px ${t.accent}28` : '0 2px 8px rgba(0,0,0,.4)',
+                }}>
+                  <div style={{ display: 'flex', flexShrink: 0, borderRadius: 4, overflow: 'hidden', border: '1px solid rgba(255,255,255,.12)' }}>
+                    <div style={{ width: 10, height: 16, background: t.accent }} />
+                    <div style={{ width: 10, height: 16, background: t.accent2 }} />
+                  </div>
+                  {t.label}
+                  {activeTheme === t.id && <span style={{ fontSize: 11, color: t.accent, marginLeft: 2 }}>✓</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── SECURITY TAB ── */}
+        {activeTab === 'security' && (
+          <div style={{ maxWidth: 480 }}>
+            <label style={labelStyle}>Change Password</label>
+            <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 24, lineHeight: 1.6 }}>
+              Update your login password. Changes are saved to your browser and synced to the league server.
+            </div>
+            <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div>
+                <label style={labelStyle}>Current Password</label>
+                <div style={{ position: 'relative' }}>
+                  <input className="input" type={showCurrent ? 'text' : 'password'} value={currentPass} onChange={e => { setCurrentPass(e.target.value); setPassError(''); }} placeholder="Enter your current password" style={{ width: '100%', paddingRight: 40 }} />
+                  <button type="button" onClick={() => setShowCurrent(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 15, padding: 0, lineHeight: 1 }}>
+                    {showCurrent ? '🙈' : '👁'}
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div>
+                  <label style={labelStyle}>New Password</label>
+                  <div style={{ position: 'relative' }}>
+                    <input className="input" type={showNew ? 'text' : 'password'} value={newPass} onChange={e => { setNewPass(e.target.value); setPassError(''); }} placeholder="Min. 8 characters" style={{ width: '100%', paddingRight: 40 }} />
+                    <button type="button" onClick={() => setShowNew(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 15, padding: 0, lineHeight: 1 }}>
+                      {showNew ? '🙈' : '👁'}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label style={labelStyle}>Confirm New Password</label>
+                  <div style={{ position: 'relative' }}>
+                    <input className="input" type={showConfirm ? 'text' : 'password'} value={confirmPass} onChange={e => { setConfirmPass(e.target.value); setPassError(''); }} placeholder="Repeat new password" style={{ width: '100%', paddingRight: 40 }} />
+                    <button type="button" onClick={() => setShowConfirm(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 15, padding: 0, lineHeight: 1 }}>
+                      {showConfirm ? '🙈' : '👁'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {passError && <div style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>{passError}</div>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <button className="btn primary" type="submit" disabled={passStatus === 'saving' || !currentPass || !newPass || !confirmPass} style={{ minWidth: 160 }}>
+                  {passStatus === 'saving' ? 'Saving…' : passStatus === 'saved' ? '✓ Password Updated' : 'Change Password'}
+                </button>
+                {passStatus === 'saved' && <span style={{ fontSize: 12, color: 'var(--good)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>Synced to server</span>}
+                {passStatus === 'error' && <span style={{ fontSize: 12, color: 'var(--warn)', fontFamily: 'var(--font-mono)' }}>Saved locally · server sync failed</span>}
+              </div>
+            </form>
+          </div>
+        )}
 
       </div>
     </div>

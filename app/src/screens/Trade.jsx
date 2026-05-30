@@ -1,12 +1,12 @@
 import React from 'react';
 import { findPlayer, findTeam, LEAGUE_TEAMS, TEAM_ROSTERS } from '../lib/data.js';
-import { PosBadge, PlayerAvatar } from '../components/ui.jsx';
+import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 
 function getTeamAllPlayerIds(teamId) {
   return (TEAM_ROSTERS[teamId] || []).filter(r => r.playerId).map(r => r.playerId);
 }
 
-export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRosterIds = new Set(), user, onSendTradeOffer }) {
+export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRosterIds = new Set(), user, onSendTradeOffer, tradeOffers = [], onRespondTradeOffer, onDeleteTradeOffer }) {
   const myTeamObj = (user?.teamId ? findTeam(user.teamId) : null) ?? LEAGUE_TEAMS.find(t => t.me);
   const myTeamId  = myTeamObj?.id;
 
@@ -55,6 +55,12 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
   }
 
   const [offerSent, setOfferSent] = React.useState(false);
+  const [offerComments, setOfferComments] = React.useState({});
+
+  // Outgoing: offers this owner sent, still pending or resolved
+  const sentOffers = tradeOffers.filter(o => o.fromTeamId === myTeamId);
+  // Incoming: pending offers addressed to this owner awaiting approval
+  const incomingOffers = tradeOffers.filter(o => o.toTeamId === myTeamId && o.status === 'pending');
 
   function reset() {
     setOtherTeam(defaultOther);
@@ -65,16 +71,30 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
 
   function sendOffer() {
     if (!bothSided) return;
-    onSendTradeOffer?.({ fromTeamId: myTeamId, toTeamId: otherTeam, giveIds: myGive, getIds: myGet });
+    const offer = {
+      id: Date.now(),
+      sentAt: Date.now(),
+      fromTeamId: myTeamId,
+      toTeamId: otherTeam,
+      giveIds: [...myGive],
+      getIds: [...myGet],
+      grade,
+      diff: parseFloat(diff.toFixed(1)),
+      status: 'pending',
+    };
+    onSendTradeOffer?.(offer);
     setOfferSent(true);
   }
 
   return (
     <div className="col" style={{ height: '100%', overflow: 'auto' }}>
       <div className="page-head">
-        <div>
-          <h1>Trade Analyzer</h1>
-          <div className="sub">Build a multi-player offer · FantasAI grades the deal</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TeamLogoBadge team={myTeamObj} size={40} />
+          <div>
+            <h1>Trade Analyzer</h1>
+            <div className="sub">Build a multi-player offer · FantasAI grades the deal</div>
+          </div>
         </div>
         <div className="flex gap-8" style={{ alignItems: 'center' }}>
           {offerSent && (
@@ -176,6 +196,161 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Incoming offers awaiting my approval ── */}
+      {incomingOffers.length > 0 && (
+        <div style={{ padding: '0 24px 8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#FFD700', flexShrink: 0 }} />
+            <div style={{ fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.08em', color: '#FFD700' }}>
+              Pending — Awaiting Your Approval
+            </div>
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', background: '#FFD70022', color: '#FFD700', border: '1px solid #FFD70044', borderRadius: 4, padding: '1px 7px' }}>
+              {incomingOffers.length}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {incomingOffers.map(offer => {
+              const fromTeam = findTeam(offer.fromTeamId);
+              const sentDate = new Date(offer.sentAt);
+              const timeStr  = sentDate.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+              return (
+                <div key={offer.id} style={{ borderRadius: 10, border: '2px solid rgba(255,215,0,.4)', background: 'rgba(255,215,0,.04)', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid rgba(255,215,0,.2)', background: 'rgba(255,215,0,.06)' }}>
+                    {fromTeam?.color && <span style={{ width: 8, height: 8, borderRadius: '50%', background: fromTeam.color, flexShrink: 0 }} />}
+                    <span style={{ fontWeight: 700, fontSize: 13, flex: 1 }}>From: {fromTeam?.name ?? `Team ${offer.fromTeamId}`}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-faint)' }}>{timeStr}</span>
+                  </div>
+                  <TradeOfferPlayers
+                    giveLabel="They Give You"
+                    getLabel="You Give Them"
+                    giveIds={offer.getIds}
+                    getIds={offer.giveIds}
+                  />
+                  <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(255,215,0,.2)', background: 'rgba(255,215,0,.02)' }}>
+                    <textarea
+                      value={offerComments[offer.id] || ''}
+                      onChange={e => setOfferComments(prev => ({ ...prev, [offer.id]: e.target.value }))}
+                      placeholder="Add a comment to your response (optional)…"
+                      rows={2}
+                      style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', background: 'var(--panel)', border: '1px solid rgba(255,215,0,.25)', borderRadius: 6, color: 'var(--text)', fontSize: 12, padding: '7px 10px', fontFamily: 'inherit', outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, padding: '10px 14px', borderTop: '1px solid rgba(255,215,0,.2)', background: 'rgba(255,215,0,.04)' }}>
+                    <button
+                      className="btn primary"
+                      style={{ flex: 1, background: 'var(--good)', color: '#001a0a', fontWeight: 800 }}
+                      onClick={() => onRespondTradeOffer?.(offer.id, 'accepted', offerComments[offer.id] || '')}
+                    >
+                      ✓ Approve Trade — Swap Players Now
+                    </button>
+                    <button
+                      className="btn ghost"
+                      style={{ flex: 1, borderColor: 'var(--danger)', color: 'var(--danger)' }}
+                      onClick={() => onRespondTradeOffer?.(offer.id, 'declined', offerComments[offer.id] || '')}
+                    >
+                      ✕ Decline
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Sent offers history ── */}
+      {sentOffers.length > 0 && (
+        <div style={{ padding: '0 24px 32px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text)' }}>
+                Offers Sent
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>{sentOffers.length} offer{sentOffers.length !== 1 ? 's' : ''}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {sentOffers.map(offer => {
+              const toTeam = findTeam(offer.toTeamId);
+              const gradeColor = !offer.grade || offer.grade === '—' ? 'var(--text-faint)'
+                : offer.diff > 1 ? 'var(--good)' : offer.diff > -2 ? 'var(--warn)' : 'var(--danger)';
+              const sentDate = new Date(offer.sentAt);
+              const timeStr  = sentDate.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+              const statusColor = offer.status === 'accepted' ? 'var(--good)' : offer.status === 'declined' ? 'var(--danger)' : offer.status === 'cancelled' ? 'var(--text-faint)' : '#FFD700';
+              const statusLabel = offer.status === 'accepted' ? 'Trade Accepted' : offer.status === 'declined' ? '✕ Declined' : offer.status === 'cancelled' ? 'Trade Cancelled' : '⏳ Pending';
+              return (
+                <div key={offer.id} style={{ borderRadius: 10, border: '1px solid var(--border)', background: 'var(--panel-2)', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
+                    {toTeam?.color && <span style={{ width: 8, height: 8, borderRadius: '50%', background: toTeam.color, flexShrink: 0 }} />}
+                    <span style={{ fontWeight: 700, fontSize: 13, flex: 1 }}>To: {toTeam?.name ?? `Team ${offer.toTeamId}`}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: statusColor }}>{statusLabel}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-faint)', marginLeft: 6 }}>{timeStr}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 13, color: gradeColor, marginLeft: 6 }}>{offer.grade}</span>
+                    <button
+                      onClick={() => onDeleteTradeOffer?.(offer.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 14, padding: '0 0 0 6px', lineHeight: 1 }}
+                    >✕</button>
+                  </div>
+                  <TradeOfferPlayers giveLabel="You Give" getLabel="You Get" giveIds={offer.giveIds} getIds={offer.getIds} />
+                  <div style={{ padding: '7px 14px', borderTop: '1px solid var(--border)', background: 'var(--panel)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', flex: 1 }}>
+                      Net avg/wk:{' '}
+                      <span style={{ color: gradeColor, fontWeight: 700 }}>{offer.diff > 0 ? '+' : ''}{offer.diff} pts</span>
+                      {offer.diff > 0 ? ' · favorable' : offer.diff < -2 ? ' · unfavorable' : ' · roughly even'}
+                      {offer.status === 'pending' && <span style={{ marginLeft: 10, color: '#FFD700' }}>Waiting for {toTeam?.name ?? 'other owner'}…</span>}
+                    </span>
+                    {offer.status === 'pending' && (
+                      <button
+                        onClick={() => onRespondTradeOffer?.(offer.id, 'cancelled')}
+                        style={{ fontSize: 11, fontWeight: 700, cursor: 'pointer', background: 'none', border: '1px solid var(--danger)', borderRadius: 5, color: 'var(--danger)', padding: '3px 10px', flexShrink: 0 }}
+                      >
+                        Cancel Trade
+                      </button>
+                    )}
+                  </div>
+                  {offer.responseComment && (
+                    <div style={{ padding: '7px 14px', borderTop: '1px solid var(--border)', background: 'rgba(0,0,0,.1)' }}>
+                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                        {toTeam?.name ?? 'Their'} comment:{' '}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic' }}>{offer.responseComment}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TradeOfferPlayers({ giveLabel, getLabel, giveIds, getIds }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr' }}>
+      <div style={{ padding: '10px 14px' }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>{giveLabel}</div>
+        {giveIds.map(id => { const p = findPlayer(id); return p ? (
+          <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <PosBadge pos={p.pos} />
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.avg.toFixed(1)}</span>
+          </div>
+        ) : null; })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '10px 8px', color: 'var(--text-faint)', fontSize: 18 }}>⇄</div>
+      <div style={{ padding: '10px 14px', borderLeft: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 6 }}>{getLabel}</div>
+        {getIds.map(id => { const p = findPlayer(id); return p ? (
+          <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <PosBadge pos={p.pos} />
+            <span style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.avg.toFixed(1)}</span>
+          </div>
+        ) : null; })}
       </div>
     </div>
   );

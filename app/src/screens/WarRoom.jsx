@@ -1,7 +1,7 @@
 import React from 'react';
 import { PLAYERS, findPlayer } from '../lib/data.js';
 import { runMockDraft } from '../lib/draft.js';
-import { PosBadge, PlayerAvatar } from '../components/ui.jsx';
+import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 
 export default function WarRoomScreen({ onOpenPlayer }) {
   const [slot, setSlot] = React.useState(6);
@@ -36,9 +36,12 @@ export default function WarRoomScreen({ onOpenPlayer }) {
   return (
     <div className="col" style={{ height: '100%', overflow: 'hidden' }}>
       <div className="page-head">
-        <div>
-          <h1>War Room</h1>
-          <div className="sub">{nMocks} mock drafts simulated · league-specific ADP · your slot {slot}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TeamLogoBadge team={null} size={40} />
+          <div>
+            <h1>War Room</h1>
+            <div className="sub">{nMocks} mock drafts simulated · league-specific ADP · your slot {slot}</div>
+          </div>
         </div>
         <div className="flex gap-8">
           <button className="btn ghost" onClick={run} disabled={running}>{running ? `Running… ${progress}/${nMocks}` : '↻ Re-run'}</button>

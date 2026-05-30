@@ -1,6 +1,6 @@
 import React from 'react';
 import { INTEGRATIONS, RANKING_SOURCES, OWNER_PROFILES, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, findTeam, PLAYERS } from '../lib/data.js';
-import { PosBadge } from '../components/ui.jsx';
+import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 import { CBSConnectModal, WorkerConfig } from '../components/CBSConnectModal.jsx';
 
 export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, user, myRosterIds = new Set() }) {
@@ -41,9 +41,12 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
   return (
     <div className="col" style={{ height: '100%', overflow: 'auto' }}>
       <div className="page-head">
-        <div>
-          <h1>Sources &amp; Connections</h1>
-          <div className="sub">Plug FantasAI into your league + tune which expert feeds drive recommendations.</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TeamLogoBadge team={null} size={40} />
+          <div>
+            <h1>Sources &amp; Connections</h1>
+            <div className="sub">Plug FantasAI into your league + tune which expert feeds drive recommendations.</div>
+          </div>
         </div>
         <div className="flex gap-8">
           <button className="btn ghost">↻ Sync Now</button>
@@ -362,6 +365,40 @@ const API_PREVIEW = {
         col1: t.team?.displayName || t.displayName || `Team ${i + 1}`,
         col2: t.team?.abbreviation || t.abbreviation || '',
       }));
+    },
+  },
+  'cbs-news': {
+    probe: `${WORKER_API}/api/v1/cbs/players`,
+    label: 'CBS Player News (RotoWire)',
+    parse: data => {
+      const players = (data?.players || []).filter(p => p.news || p.newsTitle).slice(0, 8);
+      if (players.length === 0) return [{ key: 0, col1: data?.error || 'No news loaded', col2: 'CBS cookie may have expired' }];
+      return players.map((p, i) => ({
+        key: i,
+        col1: p.name || `Player ${i + 1}`,
+        col2: (p.newsTitle || p.news || '').slice(0, 40) + '…',
+      }));
+    },
+  },
+  'beat-writers': {
+    probe: `${WORKER_API}/api/v1/twitter/beat`,
+    label: 'Recent Beat Writer Tweets',
+    parse: data => {
+      const items = data?.items || [];
+      if (items.length === 0) {
+        return [{ key: 0, col1: data?.error || 'No tweets fetched', col2: 'Nitter may be unavailable' }];
+      }
+      // One row per reporter, showing their most recent tweet (already sorted newest-first)
+      const seen = new Set();
+      const rows = [];
+      for (const item of items) {
+        if (seen.has(item.handle)) continue;
+        seen.add(item.handle);
+        const preview = (item.text || '').replace(/\n/g, ' ').slice(0, 38);
+        rows.push({ key: rows.length, col1: `@${item.handle}`, col2: preview + (item.text?.length > 38 ? '…' : '') });
+        if (rows.length >= 8) break;
+      }
+      return rows;
     },
   },
 };

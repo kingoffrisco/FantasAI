@@ -1,6 +1,6 @@
 import React from 'react';
 import { CBS_RANKINGS, PLAYERS, findPlayer } from '../lib/data.js';
-import { PosBadge, PlayerCell } from './ui.jsx';
+import { PosBadge, PlayerCell, TeamLogoBadge } from './ui.jsx';
 
 export function CBSConnectModal({ onClose, onConnected, mode }) {
   const [step, setStep] = React.useState(mode === 'resync' ? 4 : 1);
@@ -396,9 +396,12 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
   return (
     <div className="col" style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div className="page-head" style={{ flexShrink: 0 }}>
-        <div>
-          <h1>Player Draft Rankings</h1>
-          <div className="sub">CBS expert rankings + your personal cheat sheet</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <TeamLogoBadge team={null} size={40} />
+          <div>
+            <h1>Player Draft Rankings</h1>
+            <div className="sub">CBS expert rankings + your personal cheat sheet</div>
+          </div>
         </div>
         <div className="flex gap-8">
           {[{ id: 'cbs', label: '▦ CBS Rankings' }, { id: 'personal', label: '★ Personal Rankings' }].map(t => (
@@ -517,7 +520,7 @@ export function WorkerConfig() {
       setHealthData(data);
       if (data.ok) {
         setStatus('ok');
-        setStatusMsg('Worker live' + (data.awsConfigured ? ' · S3 connected' : '') + (data.emailConfigured ? ' · email ready' : '') + '. Try fetching league data below.');
+        setStatusMsg('Worker live' + (data.r2Configured ? ' · R2 connected' : '') + (data.emailConfigured ? ' · email ready' : '') + '. Try fetching league data below.');
         save(url, key);
       } else {
         setStatus('err');

@@ -1,11 +1,11 @@
 import React from 'react';
-import { NEWS, PLAYERS, findPlayer, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, SOURCE_META, TEAM_ROSTERS } from '../lib/data.js';
+import { NEWS, PLAYERS, findPlayer, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, SOURCE_META, TEAM_ROSTERS, findTeam } from '../lib/data.js';
 
 // Players currently on any roster
 const ROSTERED_IDS = new Set(
   Object.values(TEAM_ROSTERS).flatMap(entries => entries.map(e => e.playerId).filter(Boolean))
 );
-import { PosBadge, PlayerAvatar } from '../components/ui.jsx';
+import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 
 const API_BASE = 'https://api.fantasai.net';
@@ -40,34 +40,64 @@ function extractTitle(text = '', maxLen = 110) {
   return sentence.length > maxLen ? sentence.slice(0, maxLen) + '…' : sentence;
 }
 
-function makeLiveItem(src, player, note, titleOverride) {
+function makeLiveItem(src, player, note, titleOverride, publishedAt) {
   return {
-    id:        `${src.id}-${player.id}-${Date.now()}`,
-    playerId:  player.id,
-    type:      guessType(note),
-    impact:    guessImpact(note),
-    mins:      0,
-    fetchedAt: Date.now(),
-    source:    src.name,
-    sourceId:  src.id,
-    color:     src.color,
-    title:     titleOverride || extractTitle(note),
-    body:      note,
+    id:          `${src.id}-${player.id}-${Date.now()}`,
+    playerId:    player.id,
+    type:        guessType(note),
+    impact:      guessImpact(note),
+    mins:        0,
+    fetchedAt:   Date.now(),
+    publishedAt: publishedAt ? new Date(publishedAt).getTime() || null : null,
+    source:      src.name,
+    sourceId:    src.id,
+    color:       src.color,
+    title:       titleOverride || extractTitle(note),
+    body:        note,
   };
+}
+
+function fmtNewsDate(ts) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `Today ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${time}`;
 }
 
 function srcColor(item) {
   return item.color || SOURCE_META[item.source]?.color || 'var(--text-faint)';
 }
 
+// Last names that belong to exactly one player in PLAYERS (min 5 chars to avoid short common words).
+// Used as a fallback when an ESPN article doesn't include a player's first name.
+const UNIQUE_LAST_NAMES = (() => {
+  const byLast = {};
+  for (const p of PLAYERS) {
+    const last = p.name.split(' ').slice(1).join(' ');
+    if (last.length < 5) continue;
+    if (!byLast[last]) byLast[last] = [];
+    byLast[last].push(p);
+  }
+  const result = {};
+  for (const [last, players] of Object.entries(byLast)) {
+    if (players.length === 1) result[last] = players[0];
+  }
+  return result;
+})();
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function NewsScreen({ onOpenPlayer, sourcesState }) {
+export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
   const [filter,   setFilter]   = React.useState('all');
   const [impact,   setImpact]   = React.useState('all');
   const [pos,      setPos]      = React.useState('ALL');
   const [search,   setSearch]   = React.useState('');
-  const [grouped,  setGrouped]  = React.useState(false);
   const [faFilter, setFaFilter] = React.useState('all'); // 'all' | 'fa' | 'sleeper'
 
   // liveItems: { [sourceId]: newsItem[] }
@@ -104,11 +134,10 @@ export default function NewsScreen({ onOpenPlayer, sourcesState }) {
     return result;
   }, [sourcesState, SLEEPER_SRC, CBS_NEWS_SRC]);
 
-  // Auto-fetch Sleeper (default) and CBS on page load
+  // Auto-fetch every activated source on page load
   // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useEffect(() => {
-    handleRefreshSource(SLEEPER_SRC);
-    handleRefreshSource(CBS_NEWS_SRC);
+    activatedSources.forEach(src => handleRefreshSource(src));
   }, []);
 
   // Targets for per-player APIs: top-100 by ECR
@@ -154,30 +183,61 @@ export default function NewsScreen({ onOpenPlayer, sourcesState }) {
             const body = cp.status && cp.status !== 'Active'
               ? `[${cp.status}] ${cp.news}`
               : cp.news;
-            newItems.push(makeLiveItem(src, match, body.slice(0, 800), cp.newsTitle || undefined));
+            newItems.push(makeLiveItem(src, match, body.slice(0, 800), cp.newsTitle || undefined, cp.newsDate || cp.updatedDate || null));
           }
         }
       }
 
       // ── ESPN NFL news feed ───────────────────────────────────────────────
       else if (src.id === 'espn-nfl') {
-        const res = await fetch(`${API_BASE}/api/v1/nfl/news?limit=100`, { signal: AbortSignal.timeout(10000) });
-        if (res.ok) {
-          const { articles = [] } = await res.json();
-          total = articles.length;
-          for (const article of articles) {
-            if (!article.headline) continue;
-            const text = `${article.headline} ${article.description || ''}`;
-            const match = PLAYERS.find(p => {
+        // Fetch 3 pages in parallel; fall back gracefully if pagination isn't supported
+        const pages = await Promise.allSettled([
+          fetch(`${API_BASE}/api/v1/nfl/news?limit=50`,           { signal: AbortSignal.timeout(10000) }),
+          fetch(`${API_BASE}/api/v1/nfl/news?limit=50&page=2`,    { signal: AbortSignal.timeout(10000) }),
+          fetch(`${API_BASE}/api/v1/nfl/news?limit=50&page=3`,    { signal: AbortSignal.timeout(10000) }),
+        ]);
+        const seenHeadlines = new Set();
+        const allArticles = [];
+        for (const p of pages) {
+          if (p.status !== 'fulfilled' || !p.value.ok) continue;
+          try {
+            const { articles = [] } = await p.value.json();
+            for (const a of articles) {
+              if (!a.headline || seenHeadlines.has(a.headline)) continue;
+              seenHeadlines.add(a.headline);
+              allArticles.push(a);
+            }
+          } catch {}
+        }
+        total = allArticles.length;
+        for (const article of allArticles) {
+          const text = `${article.headline} ${article.description || ''}`;
+          const tl = text.toLowerCase();
+          // 1. Full name: both first and last appear (case-insensitive)
+          let match = PLAYERS.find(p => {
+            const parts = p.name.split(' ');
+            const first = parts[0].toLowerCase();
+            const last  = parts.slice(1).join(' ').toLowerCase();
+            return last.length > 2 && tl.includes(first) && tl.includes(last);
+          });
+          // 2. Abbreviated name: "G. Kittle" or "G Kittle" style
+          if (!match) {
+            match = PLAYERS.find(p => {
               const parts = p.name.split(' ');
-              const first = parts[0];
-              const last  = parts.slice(1).join(' ');
-              return last.length > 2 && text.includes(first) && text.includes(last);
+              const initial = parts[0][0].toLowerCase();
+              const last    = parts.slice(1).join(' ').toLowerCase();
+              return last.length > 2 && (tl.includes(`${initial}. ${last}`) || tl.includes(`${initial} ${last}`));
             });
-            if (!match) continue;
-            const body = article.description || article.headline;
-            newItems.push({ ...makeLiveItem(src, match, body), title: article.headline });
           }
+          // 3. Unique last name fallback (≥5 chars, only one player in the pool has it)
+          if (!match) {
+            for (const [last, player] of Object.entries(UNIQUE_LAST_NAMES)) {
+              if (tl.includes(last.toLowerCase())) { match = player; break; }
+            }
+          }
+          if (!match) continue;
+          const body = article.description || article.headline;
+          newItems.push({ ...makeLiveItem(src, match, body, null, article.published || article.lastModified || null), title: article.headline });
         }
       }
 
@@ -236,7 +296,58 @@ export default function NewsScreen({ onOpenPlayer, sourcesState }) {
             if (!status || ['', 'Active', 'Full Participation', 'DNE'].includes(status)) continue;
             const injury = row.report_primary_injury || row.practice_primary_injury || '';
             const note   = injury ? `${status} · ${injury}` : status;
-            newItems.push(makeLiveItem(src, p, note));
+            // nflverse has no per-row timestamp; approximate from season+week
+            const season = parseInt(row.season) || null;
+            const week   = parseInt(row.week) || null;
+            let nflverseDate = null;
+            if (season && week) {
+              // NFL week 1 of season starts early Sep; approximate Mon of that week
+              const sep1 = new Date(season, 8, 1);
+              const dayOfWeek = sep1.getDay();
+              const daysToMonday = dayOfWeek === 0 ? 1 : dayOfWeek === 1 ? 0 : 8 - dayOfWeek;
+              const week1Monday = new Date(sep1);
+              week1Monday.setDate(sep1.getDate() + daysToMonday);
+              nflverseDate = week1Monday.getTime() + (week - 1) * 7 * 24 * 60 * 60 * 1000;
+            }
+            newItems.push(makeLiveItem(src, p, note, undefined, nflverseDate));
+          }
+        }
+      }
+
+      // ── Beat Writers (Twitter/X via Nitter RSS) ──────────────────────────
+      else if (src.id === 'beat-writers') {
+        const res = await fetch(`${API_BASE}/api/v1/twitter/beat`, { signal: AbortSignal.timeout(40000) });
+        if (res.ok) {
+          const { items: tweets = [], count = 0 } = await res.json();
+          total = count;
+          for (const tweet of tweets) {
+            const text = tweet.text || '';
+            if (!text) continue;
+            const tl = text.toLowerCase();
+            // Three-tier player matching (same as ESPN)
+            let match = PLAYERS.find(p => {
+              const parts = p.name.split(' ');
+              const first = parts[0].toLowerCase();
+              const last  = parts.slice(1).join(' ').toLowerCase();
+              return last.length > 2 && tl.includes(first) && tl.includes(last);
+            });
+            if (!match) {
+              match = PLAYERS.find(p => {
+                const parts = p.name.split(' ');
+                const initial = parts[0][0].toLowerCase();
+                const last    = parts.slice(1).join(' ').toLowerCase();
+                return last.length > 2 && (tl.includes(`${initial}. ${last}`) || tl.includes(`${initial} ${last}`));
+              });
+            }
+            if (!match) {
+              for (const [last, player] of Object.entries(UNIQUE_LAST_NAMES)) {
+                if (tl.includes(last.toLowerCase())) { match = player; break; }
+              }
+            }
+            if (!match) continue;
+            // Prefix reporter handle so it's visible in the cell text
+            const displayText = tweet.reporter ? `@${tweet.handle}: ${text}` : text;
+            newItems.push(makeLiveItem(src, match, displayText.slice(0, 600), undefined, tweet.publishedAt));
           }
         }
       }
@@ -303,8 +414,18 @@ export default function NewsScreen({ onOpenPlayer, sourcesState }) {
   let news = allNews;
   if (filter !== 'all') news = news.filter(n => n.sources.some(s => s.type === filter));
   if (impact !== 'all') news = news.filter(n => n.impact === impact);
-  if (pos === 'FLEX')   news = news.filter(n => ['RB', 'WR', 'TE'].includes(findPlayer(n.playerId)?.pos));
-  else if (pos !== 'ALL') news = news.filter(n => findPlayer(n.playerId)?.pos === pos);
+  if (pos === 'FLEX') {
+    news = news.filter(n => ['RB', 'WR', 'TE'].includes(findPlayer(n.playerId)?.pos));
+  } else if (pos === 'DST') {
+    // Show news for any player whose team has a DST unit in the pool
+    const dstTeams = new Set(PLAYERS.filter(p => p.pos === 'DST').map(p => p.team));
+    news = news.filter(n => {
+      const player = findPlayer(n.playerId);
+      return player && (player.pos === 'DST' || dstTeams.has(player.team));
+    });
+  } else if (pos !== 'ALL') {
+    news = news.filter(n => findPlayer(n.playerId)?.pos === pos);
+  }
   if (search.trim())    news = news.filter(n => findPlayer(n.playerId)?.name.toLowerCase().includes(search.trim().toLowerCase()));
 
   // Free agent / sleeper filters
@@ -327,9 +448,12 @@ export default function NewsScreen({ onOpenPlayer, sourcesState }) {
 
       {/* PAGE HEAD */}
       <div className="page-head" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1>News &amp; Updates</h1>
-          <div className="sub">Injury reports, transactions, analysis · multi-source</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {user && <TeamLogoBadge team={user.teamId ? findTeam(user.teamId) : null} size={40} />}
+          <div>
+            <h1>News &amp; Updates</h1>
+            <div className="sub">Injury reports, transactions, analysis · multi-source</div>
+          </div>
         </div>
 
         {/* Source refresh buttons — same pattern as Current Roster */}
@@ -393,10 +517,6 @@ export default function NewsScreen({ onOpenPlayer, sourcesState }) {
           ))}
         </div>
         <div className="grow" />
-        <div className="view-toggle hide-mobile">
-          <button className={`vt-btn${!grouped ? ' active' : ''}`} onClick={() => setGrouped(false)}>Timeline</button>
-          <button className={`vt-btn${grouped ? ' active' : ''}`} onClick={() => setGrouped(true)}>By Player</button>
-        </div>
       </div>
 
       {/* FILTERS — pos + search + FA/sleeper */}
@@ -466,101 +586,115 @@ export default function NewsScreen({ onOpenPlayer, sourcesState }) {
               </div>
             )}
           </div>
-        ) : grouped
-          ? <GroupedView news={news} onOpenPlayer={onOpenPlayer} />
-          : <TimelineView news={news} onOpenPlayer={onOpenPlayer} />
+        ) : <TableView news={news} activatedSources={activatedSources} onOpenPlayer={onOpenPlayer} />
         }
       </div>
     </div>
   );
 }
 
-/* ── Source badge — handles both static SOURCE_META names and live colored sources ── */
-function SrcBadge({ item }) {
-  const color = srcColor(item);
-  return (
-    <span style={{
-      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-      letterSpacing: '.05em', padding: '2px 6px', borderRadius: 3,
-      background: `${color}22`, color, border: `1px solid ${color}55`,
-      whiteSpace: 'nowrap',
-    }}>
-      {item.source}
-    </span>
+/* ── Table view — one row per player, one column per source ──────────────────── */
+function TableView({ news, activatedSources, onOpenPlayer }) {
+  // Only show columns for sources that have at least one update in the visible set
+  const colSources = activatedSources.filter(src =>
+    news.some(n => (n.sources || [n]).some(s => (s.sourceId ?? s.source) === (src.id ?? src.name)))
   );
-}
 
-/* ── Shared player card — used by both Timeline and Grouped views ─────────────── */
-function PlayerNewsCard({ n, onOpenPlayer, compact = false }) {
-  const player = findPlayer(n.playerId);
-  if (!player) return null;
-  const srcs = n.sources || [n];
+  // Deduplicate to one entry per player (news is already grouped by player)
+  const seenPlayers = new Set();
+  const playerRows = news.filter(n => {
+    if (seenPlayers.has(n.playerId)) return false;
+    seenPlayers.add(n.playerId);
+    return true;
+  });
 
   return (
-    <div
-      style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
-      onClick={() => onOpenPlayer(player.id)}
-    >
-      {/* Player header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: compact ? '10px 16px 6px' : '12px 20px 8px', background: 'var(--panel-1)' }}>
-        <PlayerAvatar player={player} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 700, fontSize: 14 }}>{player.name}</span>
-            <PosBadge pos={player.pos} />
-            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{player.team}</span>
-            <span style={{ fontSize: 10, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{fmtAge(n.mins, n.fetchedAt)}</span>
-            {srcs.length > 1 && (
-              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', background: 'rgba(78,168,255,.12)', border: '1px solid rgba(78,168,255,.3)', borderRadius: 4, padding: '1px 6px' }}>
-                {srcs.length} sources
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
-            {srcs.map((s, i) => <SrcBadge key={i} item={s} />)}
-          </div>
-        </div>
-        <div className={`news-impact impact-${n.impact}`}>{n.impact === 'good' ? 'BOOST' : n.impact?.toUpperCase()}</div>
-      </div>
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+      <colgroup>
+        {/* Player column — fixed width */}
+        <col style={{ width: 220 }} />
+        {/* Source columns — equal share of remaining space */}
+        {colSources.map(src => <col key={src.id} />)}
+      </colgroup>
 
-      {/* One section per source */}
-      {srcs.map((s, i) => (
-        <div key={i} style={{
-          padding: compact ? '8px 16px 8px 52px' : '10px 20px 10px 56px',
-          borderTop: '1px solid var(--border)',
-          background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,.015)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <SrcBadge item={s} />
-            {srcs.length > 1 && (
-              <div className={`news-impact impact-${s.impact}`} style={{ fontSize: 9, padding: '1px 6px' }}>
-                {s.impact === 'good' ? 'BOOST' : s.impact?.toUpperCase()}
-              </div>
-            )}
-          </div>
-          {s.title && <div className="title" style={{ marginBottom: s.body ? 3 : 0 }}>{s.title}</div>}
-          {s.body  && <div className="body">{s.body}</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
+      <thead>
+        <tr style={{ background: 'var(--panel-2)' }}>
+          <th style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--panel-2)', textAlign: 'left', padding: '8px 16px', borderBottom: '2px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', whiteSpace: 'nowrap' }}>
+            Player
+          </th>
+          {colSources.map(src => (
+            <th key={src.id} style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--panel-2)', textAlign: 'left', padding: '8px 12px', borderBottom: `2px solid ${src.color}`, borderLeft: '1px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: src.color, textTransform: 'uppercase', letterSpacing: '.08em', whiteSpace: 'nowrap' }}>
+              {src.name}
+            </th>
+          ))}
+        </tr>
+      </thead>
 
-/* ── Timeline view ───────────────────────────────────────────────────────────── */
-function TimelineView({ news, onOpenPlayer }) {
-  return (
-    <>
-      {news.map(n => <PlayerNewsCard key={n.id} n={n} onOpenPlayer={onOpenPlayer} />)}
-    </>
-  );
-}
+      <tbody>
+        {playerRows.map(n => {
+          const player = findPlayer(n.playerId);
+          if (!player) return null;
 
-/* ── Grouped view — same cards, just labelled differently in the toggle ──────── */
-function GroupedView({ news, onOpenPlayer }) {
-  return (
-    <>
-      {news.map(n => <PlayerNewsCard key={n.id} n={n} onOpenPlayer={onOpenPlayer} compact />)}
-    </>
+          // Build per-source lookup for this player
+          const srcMap = {};
+          for (const s of (n.sources || [n])) {
+            const key = s.sourceId ?? s.source;
+            if (key) srcMap[key] = s;
+          }
+
+          return (
+            <tr
+              key={n.playerId}
+              onClick={() => onOpenPlayer(player.id)}
+              style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
+              onMouseLeave={e => e.currentTarget.style.background = ''}
+            >
+              {/* Player cell */}
+              <td style={{ padding: '7px 16px', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <PlayerAvatar player={player} size="sm" />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{player.name}</div>
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginTop: 2 }}>
+                      <PosBadge pos={player.pos} />
+                      <div className={`news-impact impact-${n.impact}`} style={{ fontSize: 8, padding: '1px 5px' }}>
+                        {n.impact === 'good' ? 'BOOST' : n.impact?.toUpperCase()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </td>
+
+              {/* One cell per source column */}
+              {colSources.map(src => {
+                const item = srcMap[src.id] ?? srcMap[src.name];
+                const text = item ? (item.title || item.body || '') : '';
+                const dateStr = item ? fmtNewsDate(item.publishedAt || item.fetchedAt) : null;
+                return (
+                  <td key={src.id} style={{ padding: '7px 12px', borderLeft: '1px solid var(--border)', verticalAlign: 'middle', maxWidth: 0 }}>
+                    {text ? (
+                      <div>
+                        {dateStr && (
+                          <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginBottom: 2, whiteSpace: 'nowrap' }}>
+                            {dateStr}
+                          </div>
+                        )}
+                        <span style={{ fontSize: 11, color: src.color, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={text}>
+                          {text}
+                        </span>
+                      </div>
+                    ) : (
+                      <span style={{ color: 'var(--panel-3)', fontSize: 11 }}>—</span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 

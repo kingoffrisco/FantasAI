@@ -9,14 +9,18 @@ routes = [
   { pattern = "api.fantasai.net/*", zone_name = "fantasai.net" }
 ]
 
+[[r2_buckets]]
+binding     = "BUCKET"
+bucket_name = "fantasai-r2"
+
 [vars]
-SLEEPER_BASE    = "https://api.sleeper.app/v1"
-CBS_WORKER_URL  = "https://fantasai-cbs.fantasai.workers.dev"
-S3_BUCKET       = "aws-kingoffisco-s3-bucket"
-AWS_REGION      = "us-east-2"
+SLEEPER_BASE             = "https://api.sleeper.app/v1"
+CBS_WORKER_URL           = "https://fantasai-cbs.fantasai.workers.dev"
+# DATABRICKS_HOST / DATABRICKS_URL — already set as secrets above
+DATABRICKS_WAREHOUSE_ID  = "bf2143dada93343348cfcfc5a751da264c260bde2ad2d287f5d3b835e6179b56"
 
 # Secrets — add with: wrangler secret put <NAME> --name fantasai-api
 #   FANTASAI_KEY          optional shared key for protected GET routes
-#   AWS_ACCESS_KEY_ID     IAM key with s3:GetObject + s3:PutObject on the bucket
-#   AWS_SECRET_ACCESS_KEY paired secret
 #   RESEND_API_KEY        from resend.com — enables password reset emails
+#   AWS_ACCESS_KEY_ID     R2 API token key ID  (for Databricks → R2 via S3-compatible API)
+#   AWS_SECRET_ACCESS_KEY R2 API token secret  (for Databricks → R2 via S3-compatible API)

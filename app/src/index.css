@@ -182,8 +182,7 @@ body {
 .nav-item:hover { background: var(--hover); color: var(--text); }
 .nav-item.active { background: var(--panel-2); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
 .nav-item .icon { width: 16px; height: 16px; opacity: .8; }
-.nav-item .badge { margin-left: auto; background: var(--panel-3); color: var(--text-dim); font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border-radius: 4px; }
-.nav-item.active .badge { background: var(--accent); color: var(--accent-ink); }
+.nav-item .badge { margin-left: auto; background: var(--accent); color: var(--accent-ink); font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border-radius: 4px; }
 .nav-item.live .badge { background: var(--danger); color: white; }
 
 /* Team card in sidebar */
