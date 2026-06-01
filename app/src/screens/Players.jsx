@@ -1,13 +1,13 @@
 import React from 'react';
 import { MY_ROSTER, DRAFT_PICKS, TEAM_ROSTERS, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster } from '../lib/data.js';
-import { usePlayers, isLiveData } from '../lib/playerStore.js';
+import { usePlayers, isLiveData, findPlayer } from '../lib/playerStore.js';
+import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
+import { useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes } from '../hooks.js';
+import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats } from '../lib/sleeper.js';
 
 const FREE_DATA_SOURCES_LIST = FREE_DATA_SOURCES.map(s => ({ id: s.id, name: s.name, defaultEnabled: s.enabled }));
 const FEED_NAMES = Object.fromEntries(RANKING_SOURCES.map(s => [s.id, s.name.replace(' (ECR)', '').replace(' Fantasy', '').replace(' Sports Rankings', '').replace(' Rankings', '')]));
 
-import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
-import { useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes } from '../hooks.js';
-import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats } from '../lib/sleeper.js';
 
 const WORKER   = (import.meta.env?.VITE_WORKER_URL || '').replace(/\/$/, '');
 const API_BASE = 'https://api.fantasai.net';
