@@ -506,9 +506,9 @@ function ImportRankingsModal({ onClose, onImport }) {
 
   const tabStyle = (t) => ({
     padding: '7px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
-    borderBottom: `2px solid ${importTab === t ? 'var(--accent)' : 'transparent'}`,
     color: importTab === t ? 'var(--accent)' : 'var(--text-dim)',
-    background: 'none', border: 'none', borderBottom: `2px solid ${importTab === t ? 'var(--accent)' : 'transparent'}`,
+    background: 'none', border: 'none',
+    borderBottom: `2px solid ${importTab === t ? 'var(--accent)' : 'transparent'}`,
   });
 
   return (
