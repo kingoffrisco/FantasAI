@@ -1,14 +1,14 @@
 import React from 'react';
 import { NEWS, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, SOURCE_META, TEAM_ROSTERS, findTeam } from '../lib/data.js';
 import { getPlayers, findPlayer, findPlayerByName } from '../lib/playerStore.js';
+import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
+import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
+import { useR2PlayerNotes, useR2AiSummaries } from '../hooks.js';
 
 // Players currently on any roster
 const ROSTERED_IDS = new Set(
   Object.values(TEAM_ROSTERS).flatMap(entries => entries.map(e => e.playerId).filter(Boolean))
 );
-import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
-import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
-import { useR2PlayerNotes, useR2AiSummaries } from '../hooks.js';
 
 const FANTASAI_SRC = { id: 'fantasai-notes', name: 'FantasAI', color: '#c6ff3a', kind: 'ai' };
 
@@ -98,6 +98,7 @@ const UNIQUE_LAST_NAMES = (() => {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
+  const [mainTab,  setMainTab]  = React.useState('news'); // 'news' | 'addrop' | 'trades' | 'waivers' | 'notstarted'
   const [filter,   setFilter]   = React.useState('all');
   const [impact,   setImpact]   = React.useState('all');
   const [pos,      setPos]      = React.useState('ALL');
@@ -498,14 +499,18 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     });
   }, [liveItems]);
 
-  // Apply filters — filter on the merged card's worst impact/type
+  const addropCount   = allNews.filter(n => n.sources?.some(s => s.type === 'transaction')).length;
+  const sleeperCount2 = allNews.filter(n => !ROSTERED_IDS.has(n.playerId) && (n.impact === 'good' || n.sources?.some(s => s.type === 'analysis' || s.impact === 'good'))).length;
+
+  // Apply tab-level filter on top of existing filters
   let news = allNews;
-  if (filter !== 'all') news = news.filter(n => n.sources.some(s => s.type === filter));
-  if (impact !== 'all') news = news.filter(n => n.impact === impact);
+  if (mainTab === 'addrop')  news = allNews.filter(n => n.sources?.some(s => s.type === 'transaction'));
+  else if (mainTab === 'waivers') news = allNews.filter(n => !ROSTERED_IDS.has(n.playerId));
+
+  if (filter !== 'all') news = news.filter(n => n.sources?.some(s => s.type === filter));
   if (pos === 'FLEX') {
     news = news.filter(n => ['RB', 'WR', 'TE'].includes(findPlayer(n.playerId)?.pos));
   } else if (pos === 'DST') {
-    // Show news for any player whose team has a DST unit in the pool
     const dstTeams = new Set(getPlayers().filter(p => p.pos === 'DST').map(p => p.team));
     news = news.filter(n => {
       const player = findPlayer(n.playerId);
@@ -514,254 +519,254 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
   } else if (pos !== 'ALL') {
     news = news.filter(n => findPlayer(n.playerId)?.pos === pos);
   }
-  if (search.trim())    news = news.filter(n => findPlayer(n.playerId)?.name.toLowerCase().includes(search.trim().toLowerCase()));
+  if (search.trim()) news = news.filter(n => findPlayer(n.playerId)?.name.toLowerCase().includes(search.trim().toLowerCase()));
 
-  // Free agent / sleeper filters
-  if (faFilter === 'fa') {
-    news = news.filter(n => !ROSTERED_IDS.has(n.playerId));
-  } else if (faFilter === 'sleeper') {
-    // Free agent + positive news (good impact or analysis type with returning/boost signal)
-    news = news.filter(n => {
-      if (ROSTERED_IDS.has(n.playerId)) return false;
-      return n.impact === 'good' || n.sources.some(s => s.type === 'analysis' || s.impact === 'good');
-    });
-  }
+  if (faFilter === 'fa')      news = news.filter(n => !ROSTERED_IDS.has(n.playerId));
+  else if (faFilter === 'sleeper') news = news.filter(n => !ROSTERED_IDS.has(n.playerId) && (n.impact === 'good' || n.sources?.some(s => s.type === 'analysis' || s.impact === 'good')));
 
-  const uniqueSrcCount = new Set(news.flatMap(n => n.sources.map(s => s.sourceId || s.source))).size;
-  const faCount       = allNews.filter(n => !ROSTERED_IDS.has(n.playerId)).length;
-  const sleeperCount  = allNews.filter(n => !ROSTERED_IDS.has(n.playerId) && (n.impact === 'good' || n.sources.some(s => s.type === 'analysis' || s.impact === 'good'))).length;
+  const faCount        = allNews.filter(n => !ROSTERED_IDS.has(n.playerId)).length;
+  const uniqueSrcCount = new Set(news.flatMap(n => n.sources?.map(s => s.sourceId || s.source) || [])).size;
+
+  const TABS = [
+    { id: 'news',       label: 'Player News',  count: allNews.length },
+    { id: 'addrop',     label: 'Add/Drop',     count: addropCount },
+    { id: 'trades',     label: 'Trades',       count: 0 },
+    { id: 'waivers',    label: 'Waivers',      count: faCount },
+    { id: 'notstarted', label: 'Not Started',  count: null },
+  ];
 
   return (
     <div className="col" style={{ height: '100%' }}>
 
-      {/* PAGE HEAD */}
-      <div className="page-head" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      {/* ── Header ── */}
+      <div className="page-head" style={{ paddingBottom: 0, borderBottom: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
           {user && <TeamLogoBadge team={user.teamId ? findTeam(user.teamId) : null} size={40} />}
-          <div>
-            <h1>News &amp; Updates</h1>
-            <div className="sub">Injury reports, transactions, analysis · multi-source</div>
-          </div>
+          <div><h1>News &amp; Updates</h1></div>
         </div>
-
-        {/* Single "Refresh All" button */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, marginLeft: 'auto' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {/* FantasAI R2 chip */}
-            <span style={{
-              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
-              color: r2PlayerNotes ? '#c6ff3a' : 'var(--text-faint)',
-              background: r2PlayerNotes ? 'rgba(198,255,58,.1)' : 'transparent',
-              border: `1px solid ${r2PlayerNotes ? 'rgba(198,255,58,.35)' : 'var(--border)'}`,
-              borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap',
-              display: 'flex', alignItems: 'center', gap: 5,
-            }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: r2PlayerNotes ? '#c6ff3a' : 'var(--text-faint)', flexShrink: 0, display: 'inline-block' }} />
-              ◆ FantasAI{r2NotesFetchedAt ? ` · ${fmtAge(0, r2NotesFetchedAt)}` : r2PlayerNotes === null ? ' · no data' : ' · loading…'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {r2PlayerNotes && (
+            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent)', opacity: 0.8 }}>
+              ◆ AI
             </span>
-            <button
-              className="btn sm"
-              style={{ fontSize: 11, whiteSpace: 'nowrap' }}
-              disabled={fetchingSourceIds.size > 0}
-              onClick={() => activatedSources.filter(s => s.kind !== 'ai').forEach(src => handleRefreshSource(src))}
-            >
-              {fetchingSourceIds.size > 0 ? `⟳ Refreshing (${fetchingSourceIds.size})…` : '↻ Refresh All'}
-            </button>
-          </div>
-          {/* Error summary row */}
-          {Object.keys(sourceErrors).length > 0 && (
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              {Object.entries(sourceErrors).map(([srcId, err]) => {
-                const src = activatedSources.find(s => s.id === srcId);
-                return (
-                  <span key={srcId} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: '#ff6b6b' }}>
-                    {src?.name || srcId}: ⚠ {err}
-                  </span>
-                );
-              })}
-            </div>
           )}
+          <button
+            className="btn sm"
+            style={{ fontSize: 11 }}
+            disabled={fetchingSourceIds.size > 0}
+            onClick={() => activatedSources.filter(s => s.kind !== 'ai').forEach(src => handleRefreshSource(src))}
+          >
+            {fetchingSourceIds.size > 0 ? `⟳ ${fetchingSourceIds.size}…` : '↻ Refresh'}
+          </button>
         </div>
       </div>
 
-      {/* FILTERS — type + impact */}
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <div className="chips">
-          {[['all', 'All'], ['injury', 'Injury'], ['transaction', 'Trans'], ['analysis', 'Analysis'], ['matchup', 'Matchup']].map(([k, v]) => (
-            <div key={k} className={`chip ${filter === k ? 'accent active' : ''}`} onClick={() => setFilter(k)}>{v}</div>
-          ))}
-        </div>
-        <div className="chips">
-          {[['all', 'All Impact'], ['high', 'High'], ['med', 'Med'], ['low', 'Low'], ['good', 'Good']].map(([k, v]) => (
-            <div key={k} className={`chip ${impact === k ? 'active' : ''}`} onClick={() => setImpact(k)}>{v}</div>
-          ))}
-        </div>
-        <div className="grow" />
+      {/* ── Main tab row ── */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', paddingLeft: 20, gap: 0, overflowX: 'auto', flexShrink: 0 }}>
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setMainTab(t.id)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: '10px 18px',
+              fontSize: 13, fontWeight: mainTab === t.id ? 700 : 500,
+              color: mainTab === t.id ? 'var(--text)' : 'var(--text-faint)',
+              borderBottom: `2px solid ${mainTab === t.id ? 'var(--accent)' : 'transparent'}`,
+              marginBottom: -1, whiteSpace: 'nowrap',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {t.label}
+            {t.count != null && t.count > 0 && (
+              <span style={{
+                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                background: mainTab === t.id ? 'var(--accent)' : 'var(--panel-3)',
+                color: mainTab === t.id ? '#0a1300' : 'var(--text-faint)',
+                borderRadius: 10, padding: '1px 6px',
+              }}>
+                {t.count}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* FILTERS — pos + search + FA/sleeper */}
-      <div className="toolbar" style={{ borderTop: 'none', paddingTop: 0, gap: 8 }}>
-        <div className="chips">
-          {['ALL', 'QB', 'RB', 'WR', 'TE', 'FLEX', 'K', 'DST'].map(p => (
-            <div key={p} className={`chip ${pos === p ? 'accent active' : ''}`} onClick={() => setPos(p)}>{p}</div>
-          ))}
+      {/* ── Filters row ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 20px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', flexShrink: 0 }}>
+        {/* Position pills */}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-faint)', marginRight: 2 }}>Position</span>
+          {['All', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => {
+            const val = p === 'All' ? 'ALL' : p;
+            return (
+              <button key={p} onClick={() => setPos(val)} style={{
+                background: pos === val ? 'var(--accent)' : 'var(--panel-3)',
+                color: pos === val ? '#0a1300' : 'var(--text-dim)',
+                border: 'none', borderRadius: 4, padding: '3px 9px', fontSize: 11,
+                fontWeight: pos === val ? 700 : 500, cursor: 'pointer',
+              }}>{p}</button>
+            );
+          })}
         </div>
-        <div style={{ width: 1, height: 20, background: 'var(--border)', flexShrink: 0 }} />
-        <button
-          className={`btn sm${faFilter === 'fa' ? '' : ' ghost'}`}
-          style={{
-            fontSize: 11, fontFamily: 'var(--font-mono)',
-            background: faFilter === 'fa' ? 'rgba(78,168,255,.18)' : undefined,
-            borderColor: faFilter === 'fa' ? '#4ea8ff' : undefined,
-            color: faFilter === 'fa' ? '#4ea8ff' : 'var(--text-faint)',
-          }}
-          onClick={() => setFaFilter(f => f === 'fa' ? 'all' : 'fa')}
-        >
-          Free Agent{faCount > 0 ? ` · ${faCount}` : ''}
-        </button>
-        <button
-          className={`btn sm${faFilter === 'sleeper' ? '' : ' ghost'}`}
-          style={{
-            fontSize: 11, fontFamily: 'var(--font-mono)',
-            background: faFilter === 'sleeper' ? 'rgba(198,255,58,.12)' : undefined,
-            borderColor: faFilter === 'sleeper' ? 'var(--accent)' : undefined,
-            color: faFilter === 'sleeper' ? 'var(--accent)' : 'var(--text-faint)',
-          }}
-          onClick={() => setFaFilter(f => f === 'sleeper' ? 'all' : 'sleeper')}
-        >
-          ⚡ Possible Sleeper{sleeperCount > 0 ? ` · ${sleeperCount}` : ''}
-        </button>
+
+        <div style={{ width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }} />
+
+        {/* FA / Sleeper toggles */}
+        <button onClick={() => setFaFilter(f => f === 'fa' ? 'all' : 'fa')} style={{
+          background: faFilter === 'fa' ? 'rgba(78,168,255,.18)' : 'var(--panel-3)',
+          color: faFilter === 'fa' ? '#4ea8ff' : 'var(--text-faint)',
+          border: `1px solid ${faFilter === 'fa' ? '#4ea8ff44' : 'transparent'}`,
+          borderRadius: 4, padding: '3px 10px', fontSize: 11, cursor: 'pointer',
+        }}>Free Agent{faCount > 0 ? ` (${faCount})` : ''}</button>
+
+        <button onClick={() => setFaFilter(f => f === 'sleeper' ? 'all' : 'sleeper')} style={{
+          background: faFilter === 'sleeper' ? 'rgba(198,255,58,.12)' : 'var(--panel-3)',
+          color: faFilter === 'sleeper' ? 'var(--accent)' : 'var(--text-faint)',
+          border: `1px solid ${faFilter === 'sleeper' ? 'rgba(198,255,58,.3)' : 'transparent'}`,
+          borderRadius: 4, padding: '3px 10px', fontSize: 11, cursor: 'pointer',
+        }}>⚡ Sleeper{sleeperCount2 > 0 ? ` (${sleeperCount2})` : ''}</button>
+
+        <div style={{ flex: 1 }} />
+
+        {/* Search */}
         <input
           className="input search"
-          placeholder="Search player…"
+          placeholder="Search players…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ width: 200 }}
+          style={{ width: 200, fontSize: 12 }}
         />
+
         {(pos !== 'ALL' || search || faFilter !== 'all') && (
-          <button className="btn sm ghost" onClick={() => { setPos('ALL'); setSearch(''); setFaFilter('all'); }}>✕ Clear</button>
+          <button className="btn sm ghost" onClick={() => { setPos('ALL'); setSearch(''); setFaFilter('all'); }} style={{ fontSize: 11 }}>✕</button>
         )}
-        <div className="grow" />
-        <span className="faint mono" style={{ fontSize: 11 }}>
-          {news.length} item{news.length !== 1 ? 's' : ''} · {uniqueSrcCount} source{uniqueSrcCount !== 1 ? 's' : ''}
+        <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+          {news.length} story{news.length !== 1 ? 's' : ''}
         </span>
       </div>
 
+      {/* ── Feed ── */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {news.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60%', gap: 12, color: 'var(--text-faint)' }}>
-            <div style={{ fontSize: 32 }}>📰</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-dim)' }}>No news loaded yet</div>
-            <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 320, lineHeight: 1.6 }}>
-              Click <strong style={{ color: 'var(--accent)' }}>↻ Refresh All</strong> above to pull the latest news from all active sources.
-            </div>
+        {mainTab === 'trades' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 8, color: 'var(--text-faint)' }}>
+            <div style={{ fontSize: 28 }}>🔄</div>
+            <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Trade news coming soon</div>
           </div>
-        ) : <FeedView news={news} onOpenPlayer={onOpenPlayer} />
-        }
+        ) : mainTab === 'notstarted' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 8, color: 'var(--text-faint)' }}>
+            <div style={{ fontSize: 28 }}>🏈</div>
+            <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Lineup decisions on Lineup Decisions page</div>
+          </div>
+        ) : news.length === 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
+            <div style={{ fontSize: 28 }}>📰</div>
+            <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>No stories yet — click ↻ Refresh above</div>
+          </div>
+        ) : (
+          <FeedView news={news} onOpenPlayer={onOpenPlayer} rosteredIds={ROSTERED_IDS} />
+        )}
       </div>
     </div>
   );
 }
 
-/* ── Single-column feed — one card per player ────────────────────────────────── */
-function FeedView({ news, onOpenPlayer }) {
+/* ── Feed — full RotoWire-style article cards ───────────────────────────────── */
+function FeedView({ news, onOpenPlayer, rosteredIds }) {
   const IMPACT_COLOR = { high: 'var(--danger)', med: 'var(--warn)', good: 'var(--good)', low: 'var(--text-faint)' };
-
   return (
-    <div style={{ maxWidth: 780, margin: '0 auto', padding: '0 16px 32px' }}>
+    <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
       {news.map(n => {
         const player = findPlayer(n.playerId);
         if (!player) return null;
-        const impactColor = IMPACT_COLOR[n.impact] || 'var(--text-faint)';
 
-        // Pick the best source item: prefer FantasAI, then by impact rank
-        const sources = n.sources || [n];
-        const best = sources.find(s => s.sourceId === 'fantasai-notes') || sources[0];
-        const title = best?.title || n.title || '';
-        const body  = best?.body  || n.body  || '';
-        const dateStr = fmtNewsDate(best?.publishedAt || best?.fetchedAt);
+        const sources  = n.sources || [n];
+        const best     = sources.find(s => s.sourceId === 'fantasai-notes') || sources.find(s => s.sourceId === 'fantasai-ai') || sources[0];
+        const title    = best?.title || n.title || '';
+        const body     = best?.body  || n.body  || '';
+        const srcLabel = best?.source || best?.sourceId || '';
+        const dateStr  = fmtNewsDate(best?.publishedAt || best?.fetchedAt);
+        const isFA     = !rosteredIds?.has(n.playerId);
+        const impColor = IMPACT_COLOR[n.impact] || 'var(--text-faint)';
 
         return (
-          <div
+          <article
             key={n.playerId}
             onClick={() => onOpenPlayer(player.id)}
             style={{
-              display: 'flex', gap: 14, padding: '13px 0',
+              padding: '20px 24px',
               borderBottom: '1px solid var(--border)',
-              borderLeft: `3px solid ${impactColor}`,
-              paddingLeft: 14, cursor: 'pointer',
+              cursor: 'pointer',
+              transition: 'background .12s',
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,.03)'}
             onMouseLeave={e => e.currentTarget.style.background = ''}
           >
-            {/* Avatar */}
-            <PlayerAvatar player={player} size="sm" style={{ flexShrink: 0, marginTop: 2 }} />
-
-            {/* Body */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {/* Player name row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
-                <span style={{ fontWeight: 700, fontSize: 13 }}>{player.name}</span>
-                <PosBadge pos={player.pos} />
-                <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{player.team}</span>
-                <div className={`news-impact impact-${n.impact}`} style={{ fontSize: 8, padding: '1px 5px' }}>
-                  {n.impact === 'good' ? 'BOOST' : n.impact?.toUpperCase()}
-                </div>
-              </div>
-
-              {/* Headline */}
-              {title && (
-                <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.4, marginBottom: body && body !== title ? 4 : 0 }}>
-                  {title}
-                </div>
-              )}
-
-              {/* Body (if different from title) */}
-              {body && body !== title && (
-                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                  {body.length > 220 ? body.slice(0, 220) + '…' : body}
-                </div>
-              )}
-
-              {/* Ripple effect — other players impacted by same AI summary */}
-              {best?.ripple?.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 5, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>Ripple:</span>
-                  {best.ripple.map((r, i) => (
-                    <span key={i} style={{
-                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
-                      color: r.direction === 'positive' ? 'var(--good)' : r.direction === 'negative' ? 'var(--danger)' : 'var(--text-faint)',
-                      background: r.direction === 'positive' ? 'rgba(52,211,153,.12)' : r.direction === 'negative' ? 'rgba(255,90,110,.12)' : 'var(--panel-3)',
-                      border: `1px solid ${r.direction === 'positive' ? 'rgba(52,211,153,.3)' : r.direction === 'negative' ? 'rgba(255,90,110,.3)' : 'var(--border)'}`,
-                      borderRadius: 3, padding: '1px 5px',
+            {/* Player identity row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <PlayerAvatar player={player} size="sm" style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 800, fontSize: 14, letterSpacing: '.01em' }}>{player.name}</span>
+                  <PosBadge pos={player.pos} />
+                  <span style={{ fontSize: 12, color: 'var(--text-faint)', fontWeight: 600 }}>• {player.team}</span>
+                  {n.impact !== 'low' && (
+                    <span style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800,
+                      color: impColor, background: `${impColor}18`,
+                      border: `1px solid ${impColor}40`,
+                      borderRadius: 3, padding: '1px 6px', textTransform: 'uppercase', letterSpacing: '.06em',
                     }}>
-                      {r.direction === 'positive' ? '▲' : r.direction === 'negative' ? '▼' : '◆'} {r.name}
+                      {n.impact === 'good' ? 'BOOST' : n.impact}
                     </span>
-                  ))}
+                  )}
                 </div>
-              )}
-
-              {/* Source attribution row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                {sources.map((s, i) => (
-                  <span key={i} style={{
-                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                    color: s.color || srcColor(s),
-                    background: `${s.color || 'var(--text-faint)'}18`,
-                    border: `1px solid ${s.color || 'var(--text-faint)'}44`,
-                    borderRadius: 3, padding: '1px 5px',
-                  }}>
-                    {s.source || s.sourceId || '?'}
-                  </span>
-                ))}
-                {dateStr && (
-                  <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>
-                    {dateStr}
-                  </span>
-                )}
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>
+                  {isFA ? 'Free Agent' : 'Rostered'}
+                </div>
               </div>
             </div>
-          </div>
+
+            {/* Headline */}
+            {title && (
+              <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.45, marginBottom: 6, color: 'var(--text)' }}>
+                {title}
+              </div>
+            )}
+
+            {/* Source + date attribution */}
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: body && body !== title ? 10 : 0, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              {srcLabel && (
+                <>
+                  <span style={{ color: 'var(--text-dim)' }}>by</span>
+                  <span style={{ color: srcColor(best), fontWeight: 600 }}>{srcLabel}</span>
+                  <span>·</span>
+                </>
+              )}
+              {dateStr && <span>{dateStr}</span>}
+            </div>
+
+            {/* Full article body */}
+            {body && body !== title && (
+              <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.65, marginBottom: 8 }}>
+                {body}
+              </div>
+            )}
+
+            {/* Ripple row */}
+            {best?.ripple?.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>Also affects:</span>
+                {best.ripple.map((r, i) => (
+                  <span key={i} style={{
+                    fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                    color: r.direction === 'positive' ? 'var(--good)' : r.direction === 'negative' ? 'var(--danger)' : 'var(--text-faint)',
+                  }}>
+                    {r.direction === 'positive' ? '▲' : r.direction === 'negative' ? '▼' : '◆'} {r.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </article>
         );
       })}
     </div>

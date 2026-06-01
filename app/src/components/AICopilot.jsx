@@ -375,7 +375,7 @@ function buildRosterContext(user, myRosterIds) {
   const rosterLines = posOrder
     .filter(pos => byPos[pos])
     .flatMap(pos => byPos[pos].map(p =>
-      `  ${pos}: ${p.name} (${p.team})${p.status !== 'OK' ? ` [${p.status}]` : ''} | Proj: ${p.proj} | Avg: ${p.avg} | Last: ${p.last}`
+      `  ${p.pos}: ${p.name} (${p.team})${p.status !== 'OK' ? ` [${p.status}]` : ''} | Proj: ${p.proj} | Avg: ${p.avg} | Last: ${p.last} | ECR: ${p.ecr ?? 'N/A'}`
     ))
     .join('\n');
 
@@ -388,6 +388,55 @@ CURRENT ROSTER (${players.length} players):
 ${rosterLines || '  (No roster data available)'}
 
 Use this roster data to answer questions specifically about this team. When asked about players on the roster, only refer to the players listed above.`;
+}
+
+function detectNonRosterPlayersInQuery(query, myRosterIds) {
+  const rosterSet = new Set(
+    [...(myRosterIds || [])].map(id => findPlayer(id)?.name?.toLowerCase()).filter(Boolean)
+  );
+  const queryLower = query.toLowerCase();
+  const found = [];
+  const seen  = new Set();
+
+  for (const name of getPlayerNames()) {
+    const nameLower = name.toLowerCase();
+    if (rosterSet.has(nameLower) || seen.has(nameLower)) continue;
+    if (queryLower.includes(nameLower)) {
+      const player = findPlayerByName(name);
+      if (player) { found.push(player); seen.add(nameLower); }
+    }
+  }
+  return found;
+}
+
+function buildNonRosterContext(nonRosterPlayers, myRosterIds) {
+  const rosterPlayers = [...(myRosterIds || [])].map(id => findPlayer(id)).filter(Boolean);
+
+  const playerLines = nonRosterPlayers.map(p =>
+    `  ${p.pos}: ${p.name} (${p.team})${p.status && p.status !== 'OK' ? ` [${p.status}]` : ''} | Proj: ${p.proj ?? 'N/A'} | Avg: ${p.avg ?? 'N/A'} | Last: ${p.last ?? 'N/A'} | ECR: ${p.ecr ?? 'N/A'}`
+  ).join('\n');
+
+  // Roster players at the same positions as the targets
+  const targetPositions = new Set(nonRosterPlayers.map(p => p.pos));
+  const comparablePlayers = rosterPlayers.filter(p => targetPositions.has(p.pos));
+  const compareLines = comparablePlayers.map(p =>
+    `  ${p.pos}: ${p.name} (${p.team})${p.status && p.status !== 'OK' ? ` [${p.status}]` : ''} | Proj: ${p.proj ?? 'N/A'} | Avg: ${p.avg ?? 'N/A'} | Last: ${p.last ?? 'N/A'} | ECR: ${p.ecr ?? 'N/A'}`
+  ).join('\n') || '  (none at these positions)';
+
+  return `
+
+NON-ROSTER PLAYER INQUIRY:
+The user is asking about the following player(s) NOT currently on their roster:
+${playerLines}
+
+Their roster players at those same position(s) for direct comparison:
+${compareLines}
+
+For each non-roster player above, please:
+1. Summarize their current value and situation (injuries, role, opportunity)
+2. Compare them directly to the equivalent player(s) on the user's roster
+3. Give a clear recommendation: is this player worth pursuing via waiver or trade?
+4. If yes, suggest which roster player they would replace or compete with`;
 }
 
 export default function AICopilot({ active, aiMode, user, myRosterIds }) {
@@ -462,7 +511,11 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
     setMessages(prev => [...prev, { type: 'user', text: q }, thinking]);
     setLoading(true);
     try {
-      const context       = buildRosterContext(user, myRosterIds);
+      const nonRosterPlayers = detectNonRosterPlayersInQuery(q, myRosterIds);
+      let context = buildRosterContext(user, myRosterIds);
+      if (nonRosterPlayers.length > 0) {
+        context += buildNonRosterContext(nonRosterPlayers, myRosterIds);
+      }
       const rosterPlayers = [...(myRosterIds || [])].map(id => findPlayer(id)).filter(Boolean)
         .map(p => ({ name: p.name, pos: p.pos, team: p.team, id: p.id }));
       const answer = await callChat(q, context, rosterPlayers);

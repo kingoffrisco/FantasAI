@@ -164,7 +164,7 @@ export const PLAYERS = [
   { id: 172, name: "Cade Otton",         pos: "TE", team: "TB",  num: 88, age: 25, status: "OK", bye: 11, adp: 104.6, ecr: 100, tier: 3, proj: 7.2,  last: 8.4,  avg: 7.0,  owned: 64.6, trend: [6,8,8,8,6,8],   news: "Consistent role in Tampa offense",        opp: "NO",  oppRank: 14 },
 ];
 
-export const findPlayer = (id) => PLAYERS.find(p => p.id === id);
+const findPlayer = (id) => PLAYERS.find(p => p.id === id);
 
 // Advanced stats overlay: [depth-chart pos, targetShare %, routes/game]
 // Applied after declaration so player objects stay concise above.
