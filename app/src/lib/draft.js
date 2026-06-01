@@ -1,4 +1,5 @@
-import { PLAYERS, findPlayer, findOwner, TEAMS_ORDER } from './data.js';
+import { findOwner, TEAMS_ORDER } from './data.js';
+import { getPlayers, findPlayer } from './playerStore.js';
 
 export function predictPicks(teamId, pickNum, draftedIdSet, n = 3) {
   const owner = findOwner(teamId);
@@ -6,7 +7,7 @@ export function predictPicks(teamId, pickNum, draftedIdSet, n = 3) {
   const round = Math.min(16, Math.max(1, Math.ceil(pickNum / 12)));
   const dist = owner.posByRound[round - 1] || {};
 
-  let cands = PLAYERS.filter(p =>
+  let cands = getPlayers().filter(p =>
     !draftedIdSet.has(p.id) &&
     p.ecr <= pickNum + 40
   );
@@ -47,7 +48,7 @@ export function runMockDraft(yourSlot, opts = {}) {
       const pred = owner.metrics.predictability / 100;
       let chosen;
       if (preds.length === 0) {
-        const avail = PLAYERS.filter(p => !drafted.has(p.id)).sort((a, b) => a.ecr - b.ecr)[0];
+        const avail = getPlayers().filter(p => !drafted.has(p.id)).sort((a, b) => a.ecr - b.ecr)[0];
         chosen = avail;
       } else if (Math.random() < pred) {
         chosen = preds[0].player;

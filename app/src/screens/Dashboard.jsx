@@ -1,5 +1,6 @@
 import React from 'react';
-import { TEAM_ROSTERS, PLAYERS, findPlayer, findTeam, NEWS, LEAGUE_TEAMS, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { TEAM_ROSTERS, findTeam, NEWS, LEAGUE_TEAMS, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { findPlayer } from '../lib/playerStore.js';
 import { PlayerCell, StatusDot, Sparkline, PosBadge, SourceBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
 import { useApi, useR2CriticalAlerts, useR2BreakoutCandidates } from '../hooks.js';

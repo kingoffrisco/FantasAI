@@ -1,10 +1,11 @@
 import React from 'react';
-import { PLAYERS, findPlayer } from '../lib/data.js';
+import { usePlayers, findPlayer } from '../lib/playerStore.js';
 import { PosBadge, PlayerAvatar, Sparkline, Delta, TeamLogoBadge } from '../components/ui.jsx';
 
 const API_BASE = 'https://api.fantasai.net';
 
 export default function CompareScreen() {
+  const players = usePlayers();
   const [leftId, setLeftId] = React.useState(50);
   const [rightId, setRightId] = React.useState(54);
   const [aiLoading, setAiLoading] = React.useState(false);
@@ -64,7 +65,7 @@ export default function CompareScreen() {
           <div key={idx} className="muted-card" style={{ padding: 0 }}>
             <div style={{ padding: 18, borderBottom: '1px solid var(--border)' }}>
               <select className="input" value={id} onChange={e => setId(parseInt(e.target.value))} style={{ width: '100%', marginBottom: 12 }}>
-                {PLAYERS.map(pl => (
+                {players.map(pl => (
                   <option key={pl.id} value={pl.id}>{pl.name} ({pl.pos} · {pl.team})</option>
                 ))}
               </select>

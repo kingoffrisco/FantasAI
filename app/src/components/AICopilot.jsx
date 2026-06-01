@@ -1,5 +1,6 @@
 import React from 'react';
-import { findPlayer, LEAGUE_TEAMS, PLAYERS } from '../lib/data.js';
+import { LEAGUE_TEAMS } from '../lib/data.js';
+import { findPlayer, findPlayerByName, getPlayers } from '../lib/playerStore.js';
 import { api } from '../api.js';
 
 // Module-level cache — fetched once per page load from the worker-api Sleeper endpoint
@@ -16,13 +17,13 @@ async function loadDynamicPlayers() {
     _dynamicNamesSet = new Set(_dynamicNames);
   } catch {
     // Fall back to static list on failure
-    _dynamicNames    = PLAYERS.map(p => p.name).sort((a, b) => b.length - a.length);
+    _dynamicNames    = getPlayers().map(p => p.name).sort((a, b) => b.length - a.length);
     _dynamicNamesSet = new Set(_dynamicNames);
   }
 }
 
 // Fallback static list (used until dynamic load completes)
-const STATIC_NAMES_SORTED = PLAYERS.map(p => p.name).sort((a, b) => b.length - a.length);
+const STATIC_NAMES_SORTED = getPlayers().map(p => p.name).sort((a, b) => b.length - a.length);
 const STATIC_NAMES_SET    = new Set(STATIC_NAMES_SORTED);
 
 function getPlayerNames()    { return _dynamicNames?.length ? _dynamicNames    : STATIC_NAMES_SORTED; }
@@ -227,7 +228,7 @@ function WaiverClaimModal({ claim, myRosterIds, onClose }) {
   const [result,     setResult]     = React.useState(null);
 
   const rosterPlayers = [...(myRosterIds || [])].map(id => findPlayer(id)).filter(Boolean);
-  const staticPlayer  = PLAYERS.find(p => p.name.toLowerCase() === claim.name.toLowerCase());
+  const staticPlayer  = findPlayerByName(claim.name);
 
   async function submit() {
     setSubmitting(true);

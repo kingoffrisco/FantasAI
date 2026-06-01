@@ -1,5 +1,6 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, findPlayer, buildRosterFrame, assignRoster, findTeam } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam } from '../lib/data.js';
+import { findPlayer } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 
 const NUM_WEEKS = 14;

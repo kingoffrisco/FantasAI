@@ -1,5 +1,6 @@
 import React from 'react';
-import { OWNER_PROFILES, findOwner, LEAGUE_TEAMS, findTeam, findPlayer, PLAYERS, TEAMS_ORDER, CBS_DRAFT_HISTORY, TEAM_ROSTERS, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { OWNER_PROFILES, findOwner, LEAGUE_TEAMS, findTeam, TEAMS_ORDER, CBS_DRAFT_HISTORY, TEAM_ROSTERS, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { findPlayer, findPlayerByName, getPlayers } from '../lib/playerStore.js';
 import { runMockDraft } from '../lib/draft.js';
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
@@ -52,20 +53,18 @@ function buildTeamOverlay(cbsRaw) {
 
 // ─── Draft history parsing ───────────────────────────────────────────────────
 
-// Try to match a CBS player name to a local PLAYERS entry
+// Try to match a CBS player name to a player store entry
 function matchPlayerByName(fullName, pos) {
   if (!fullName) return null;
-  const nl = fullName.toLowerCase().trim();
-  // Exact full name
-  let p = PLAYERS.find(pl => pl.name.toLowerCase() === nl);
+  const p = findPlayerByName(fullName);
   if (p) return p;
-  // Last name + position
+  // Last name + position fallback
+  const nl   = fullName.toLowerCase().trim();
   const last = nl.split(' ').slice(-1)[0];
-  p = PLAYERS.find(pl => {
+  return getPlayers().find(pl => {
     const pLast = pl.name.toLowerCase().split(' ').slice(-1)[0];
     return pLast === last && (!pos || pl.pos === pos.toUpperCase().replace(/\//g, ''));
-  });
-  return p || null;
+  }) || null;
 }
 
 // Flatten a CBS draft response into an array of pick objects

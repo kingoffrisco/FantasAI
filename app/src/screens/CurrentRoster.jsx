@@ -1,5 +1,6 @@
 import React from 'react';
-import { TEAM_ROSTERS, PLAYERS, findPlayer, findTeam, NEWS, SLOT_ELIGIBILITY, ROSTER_CONFIG, LEAGUE_TEAMS, buildRosterFrame, assignRoster, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES } from '../lib/data.js';
+import { TEAM_ROSTERS, findTeam, NEWS, SLOT_ELIGIBILITY, ROSTER_CONFIG, LEAGUE_TEAMS, buildRosterFrame, assignRoster, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES } from '../lib/data.js';
+import { usePlayers, findPlayer, findPlayerByName } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 import { useR2Drops, useR2Injuries, useR2PlayerNotes, useR2EnrichedNews, useR2WeatherForecast } from '../hooks.js';
@@ -194,7 +195,7 @@ function DropCandidatesPanel({ myRosterIds, onOpenPlayer }) {
   if (loading || !data) return null;
 
   const candidates = (Array.isArray(data) ? data : []).filter(r => {
-    const match = PLAYERS.find(p => p.name?.toLowerCase() === r.player_name?.toLowerCase());
+    const match = findPlayerByName(r.player_name);
     return match && myRosterIds.has(match.id);
   });
 
@@ -221,7 +222,7 @@ function DropCandidatesPanel({ myRosterIds, onOpenPlayer }) {
       {!collapsed && (
         <div style={{ borderTop: '1px solid rgba(255,90,110,.15)', padding: '8px 14px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
           {candidates.map((r, i) => {
-            const player = PLAYERS.find(p => p.name?.toLowerCase() === r.player_name?.toLowerCase());
+            const player = findPlayerByName(r.player_name);
             const uColor = urgencyColor(r.urgency);
             return (
               <div
@@ -255,6 +256,7 @@ function DropCandidatesPanel({ myRosterIds, onOpenPlayer }) {
 }
 
 export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPlayer, onDropPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange, tradeOffers = [], onRespondTradeOffer, rosterSyncBadge, rosterLoading }) {
+  const allPlayers = usePlayers();
   const [dropConfirm, setDropConfirm] = React.useState(null);
   const [addFilter, setAddFilter] = React.useState('ALL');
   const [addSearch, setAddSearch] = React.useState('');
@@ -712,7 +714,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
 
   // Available players for Add tab
   const rosterIds = new Set(fullRoster.map(r => r.playerId).filter(Boolean));
-  const available = PLAYERS.filter(p => {
+  const available = allPlayers.filter(p => {
     if (rosterIds.has(p.id)) return false;
     if (addFilter === 'FLEX' && !['RB', 'WR', 'TE'].includes(p.pos)) return false;
     if (addFilter !== 'ALL' && addFilter !== 'FLEX' && p.pos !== addFilter) return false;
@@ -722,7 +724,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
 
   // Build news feed for this roster
   const rosterPlayerIds = new Set(fullRoster.map(r => r.playerId).filter(Boolean));
-  const rosterPlayers   = PLAYERS.filter(p => rosterPlayerIds.has(p.id));
+  const rosterPlayers   = allPlayers.filter(p => rosterPlayerIds.has(p.id));
 
   // Name → roster player lookup for R2 matching
   const rosterByName = React.useMemo(() => {

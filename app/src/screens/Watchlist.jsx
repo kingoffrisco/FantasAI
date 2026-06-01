@@ -1,5 +1,6 @@
 import React from 'react';
-import { WATCHLIST, findPlayer } from '../lib/data.js';
+import { WATCHLIST } from '../lib/data.js';
+import { findPlayer } from '../lib/playerStore.js';
 import { PlayerCell, Sparkline, TeamLogoBadge } from '../components/ui.jsx';
 
 export default function WatchlistScreen({ onOpenPlayer }) {

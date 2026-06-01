@@ -1,5 +1,6 @@
 import React from 'react';
-import { PLAYERS, findPlayer, LEAGUE_TEAMS, DRAFT_PICKS, TEAMS_ORDER, QUEUE as INIT_QUEUE, CHAT_MESSAGES } from '../lib/data.js';
+import { LEAGUE_TEAMS, DRAFT_PICKS, TEAMS_ORDER, QUEUE as INIT_QUEUE, CHAT_MESSAGES } from '../lib/data.js';
+import { getPlayers, findPlayer } from '../lib/playerStore.js';
 import { predictPicks } from '../lib/draft.js';
 import { PosBadge, PlayerAvatar, PlayerCell, TeamLogoBadge } from '../components/ui.jsx';
 
@@ -473,7 +474,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
         pickId = preds[0]?.player?.id ?? null;
       } else {
         const queueId = queue.find(id => !draftedSet.has(id));
-        pickId = queueId ?? PLAYERS.filter(p => !draftedSet.has(p.id)).sort((a, b) => a.ecr - b.ecr)[0]?.id ?? null;
+        pickId = queueId ?? getPlayers().filter(p => !draftedSet.has(p.id)).sort((a, b) => a.ecr - b.ecr)[0]?.id ?? null;
       }
       if (pickId) {
         const pickNum = livePickNum;
@@ -500,12 +501,13 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
 
   const currentPrediction = predictPicks(onClockTeamId, currentPickNum, draftedIds, 3);
 
-  // Normalize API player IDs to local PLAYERS IDs (matched by name+pos) so findPlayer
+  // Normalize API player IDs to store IDs (matched by name+pos) so findPlayer
   // works in the pick log, teams grid, and drafted-set filtering throughout the draft.
   const playerPool = React.useMemo(() => {
-    if (!apiPlayers) return PLAYERS;
+    const store = getPlayers();
+    if (!apiPlayers) return store;
     return apiPlayers.map(ap => {
-      const local = PLAYERS.find(lp => lp.name === ap.name && lp.pos === ap.pos);
+      const local = store.find(lp => lp.name === ap.name && lp.pos === ap.pos);
       return local ? { ...ap, id: local.id } : ap;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps

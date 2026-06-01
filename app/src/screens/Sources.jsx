@@ -1,5 +1,6 @@
 import React from 'react';
-import { INTEGRATIONS, RANKING_SOURCES, OWNER_PROFILES, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, findTeam, PLAYERS } from '../lib/data.js';
+import { INTEGRATIONS, RANKING_SOURCES, OWNER_PROFILES, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, findTeam } from '../lib/data.js';
+import { getPlayers, findPlayer } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 import { CBSConnectModal, WorkerConfig } from '../components/CBSConnectModal.jsx';
 
@@ -260,7 +261,7 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
 
 function CustomCheatSheet() {
   const [ranks, setRanks] = React.useState(
-    PLAYERS.slice().sort((a, b) => a.ecr - b.ecr).slice(0, 30).map(p => p.id)
+    () => getPlayers().slice().sort((a, b) => a.ecr - b.ecr).slice(0, 30).map(p => p.id)
   );
   const [enabled, setEnabled] = React.useState(false);
 
@@ -300,7 +301,7 @@ function CustomCheatSheet() {
         </div>
         <div className="cheat-list">
           {ranks.map((id, idx) => {
-            const p = PLAYERS.find(pl => pl.id === id);
+            const p = findPlayer(id);
             if (!p) return null;
             return (
               <div key={id} className="cheat-row">
@@ -754,10 +755,7 @@ function LimitedApiSources({ user, myRosterIds = new Set() }) {
       setRefreshing(r => ({ ...r, [src.id]: false }));
       return;
     }
-    const names = [...myRosterIds].map(id => {
-      const p = PLAYERS.find(pl => pl.id === id);
-      return p?.name || null;
-    }).filter(Boolean);
+    const names = [...myRosterIds].map(id => findPlayer(id)?.name || null).filter(Boolean);
 
     try {
       const rows = await refreshFn(names, src);

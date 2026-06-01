@@ -1,5 +1,6 @@
 import React from 'react';
-import { NEWS, PLAYERS, findPlayer, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, SOURCE_META, TEAM_ROSTERS, findTeam } from '../lib/data.js';
+import { NEWS, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, SOURCE_META, TEAM_ROSTERS, findTeam } from '../lib/data.js';
+import { getPlayers, findPlayer, findPlayerByName } from '../lib/playerStore.js';
 
 // Players currently on any roster
 const ROSTERED_IDS = new Set(
@@ -77,11 +78,11 @@ function srcColor(item) {
   return item.color || SOURCE_META[item.source]?.color || 'var(--text-faint)';
 }
 
-// Last names that belong to exactly one player in PLAYERS (min 5 chars to avoid short common words).
+// Last names that belong to exactly one player (min 5 chars to avoid short common words).
 // Used as a fallback when an ESPN article doesn't include a player's first name.
 const UNIQUE_LAST_NAMES = (() => {
   const byLast = {};
-  for (const p of PLAYERS) {
+  for (const p of getPlayers()) {
     const last = p.name.split(' ').slice(1).join(' ');
     if (last.length < 5) continue;
     if (!byLast[last]) byLast[last] = [];
@@ -228,14 +229,14 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
 
   // Targets for per-player APIs: top-100 by ECR
   const newsTargets = React.useMemo(
-    () => PLAYERS.slice().sort((a, b) => (a.ecr || 999) - (b.ecr || 999)).slice(0, 100),
+    () => getPlayers().slice().sort((a, b) => (a.ecr || 999) - (b.ecr || 999)).slice(0, 100),
     [],
   );
 
-  // Match a name string to a PLAYERS entry
+  // Match a name string to a player store entry
   function matchPlayer(name = '') {
     const n = name.toLowerCase();
-    return PLAYERS.find(p => {
+    return getPlayers().find(p => {
       const pn = p.name.toLowerCase();
       if (n === pn) return true;
       const nParts = n.split(' ');
@@ -300,7 +301,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
           const text = `${article.headline} ${article.description || ''}`;
           const tl = text.toLowerCase();
           // 1. Full name: both first and last appear (case-insensitive)
-          let match = PLAYERS.find(p => {
+          let match = getPlayers().find(p => {
             const parts = p.name.split(' ');
             const first = parts[0].toLowerCase();
             const last  = parts.slice(1).join(' ').toLowerCase();
@@ -308,7 +309,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
           });
           // 2. Abbreviated name: "G. Kittle" or "G Kittle" style
           if (!match) {
-            match = PLAYERS.find(p => {
+            match = getPlayers().find(p => {
               const parts = p.name.split(' ');
               const initial = parts[0][0].toLowerCase();
               const last    = parts.slice(1).join(' ').toLowerCase();
@@ -374,8 +375,9 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
             const key = (parseInt(row.season) || 0) * 100 + (parseInt(row.week) || 0);
             if (!latest[name] || latest[name]._key < key) latest[name] = { ...row, _key: key };
           }
-          total = PLAYERS.length;
-          for (const p of PLAYERS) {
+          const _pl = getPlayers();
+          total = _pl.length;
+          for (const p of _pl) {
             const row = latest[p.name] ?? latest[Object.keys(latest).find(n => n.toLowerCase() === p.name.toLowerCase())];
             if (!row) continue;
             const status = row.report_status || row.practice_status || '';
@@ -411,14 +413,14 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
             if (!text) continue;
             const tl = text.toLowerCase();
             // Three-tier player matching (same as ESPN)
-            let match = PLAYERS.find(p => {
+            let match = getPlayers().find(p => {
               const parts = p.name.split(' ');
               const first = parts[0].toLowerCase();
               const last  = parts.slice(1).join(' ').toLowerCase();
               return last.length > 2 && tl.includes(first) && tl.includes(last);
             });
             if (!match) {
-              match = PLAYERS.find(p => {
+              match = getPlayers().find(p => {
                 const parts = p.name.split(' ');
                 const initial = parts[0][0].toLowerCase();
                 const last    = parts.slice(1).join(' ').toLowerCase();
@@ -504,7 +506,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     news = news.filter(n => ['RB', 'WR', 'TE'].includes(findPlayer(n.playerId)?.pos));
   } else if (pos === 'DST') {
     // Show news for any player whose team has a DST unit in the pool
-    const dstTeams = new Set(PLAYERS.filter(p => p.pos === 'DST').map(p => p.team));
+    const dstTeams = new Set(getPlayers().filter(p => p.pos === 'DST').map(p => p.team));
     news = news.filter(n => {
       const player = findPlayer(n.playerId);
       return player && (player.pos === 'DST' || dstTeams.has(player.team));

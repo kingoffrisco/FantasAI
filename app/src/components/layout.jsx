@@ -1,5 +1,6 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, findPlayer, findTeam, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { findPlayer } from '../lib/playerStore.js';
 
 function getDraftStatus() {
   try {

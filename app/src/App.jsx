@@ -1,5 +1,6 @@
 import React from 'react';
-import { findPlayer, findTeam, MY_ROSTER, TEAM_ROSTERS, PLAYERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster } from './lib/data.js';
+import { findTeam, MY_ROSTER, TEAM_ROSTERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster } from './lib/data.js';
+import { findPlayer, getPlayers, setPlayers, normalizePlayerList } from './lib/playerStore.js';
 import { api } from './api.js';
 import { applyLeagueData, clearLeagueData } from './lib/leagueStore.js';
 import { Sidebar, TopBar, MobileNav } from './components/layout.jsx';
@@ -95,7 +96,7 @@ async function syncRosterToS3(teamId, playerIds) {
 
 function validateRosterAdd(playerId, currentIds) {
   const settings  = loadLeagueSettings();
-  const player    = PLAYERS.find(p => p.id === playerId);
+  const player    = findPlayer(playerId);
   if (!player) return null;
 
   const totalMax  = settings?.roster?.totalPlayers?.max ?? 14;
@@ -120,7 +121,7 @@ function validateRosterAdd(playerId, currentIds) {
     const limitStr = posEntry.rosterTotal;
     const limitNum = limitStr === 'No Limit' ? Infinity : parseInt(limitStr, 10);
     if (!isNaN(limitNum) && isFinite(limitNum)) {
-      const currentOfPos = [...currentIds].filter(id => PLAYERS.find(p => p.id === id)?.pos === player.pos).length;
+      const currentOfPos = [...currentIds].filter(id => findPlayer(id)?.pos === player.pos).length;
       if (currentOfPos >= limitNum) {
         return {
           title: 'Invalid Roster Request',
@@ -270,6 +271,28 @@ export default function App() {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally runs only once on mount
+
+  // Load live player list from Databricks → Sleeper fallback.
+  // Runs once on mount; the store already holds the static seed so the UI
+  // renders immediately and updates reactively when live data arrives.
+  React.useEffect(() => {
+    api.dbPlayers()
+      .then(data => {
+        const rows = data?.players || [];
+        if (rows.length > 0) {
+          setPlayers(normalizePlayerList(rows));
+          return;
+        }
+        throw new Error('empty');
+      })
+      .catch(() =>
+        api.allPlayers(2000).then(raw => {
+          const arr = raw?.players || (Array.isArray(raw) ? raw : []);
+          const normalized = normalizePlayerList(arr.filter(p => p.team && p.status !== 'Inactive'));
+          if (normalized.length > 0) setPlayers(normalized);
+        }).catch(() => {/* keep static seed */})
+      );
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handlePasswordChanged() {
     setNeedsPasswordChange(false);
@@ -493,7 +516,7 @@ export default function App() {
       filename = `fantasai-players.csv`;
       rows = [
         ['Name','Pos','Team','Proj','Last','Avg','Owned%','ADP','ECR','Status'],
-        ...PLAYERS.map(p => [p.name, p.pos, p.team, p.proj, p.last, p.avg, p.owned, p.adp, p.ecr, p.status]),
+        ...getPlayers().map(p => [p.name, p.pos, p.team, p.proj, p.last, p.avg, p.owned, p.adp, p.ecr, p.status]),
       ];
     } else if (active === 'roster') {
       filename = `fantasai-roster.csv`;

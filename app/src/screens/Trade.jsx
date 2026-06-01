@@ -1,5 +1,6 @@
 import React from 'react';
-import { findPlayer, findTeam, LEAGUE_TEAMS, TEAM_ROSTERS } from '../lib/data.js';
+import { findTeam, LEAGUE_TEAMS, TEAM_ROSTERS } from '../lib/data.js';
+import { findPlayer } from '../lib/playerStore.js';
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 
 function getTeamAllPlayerIds(teamId) {

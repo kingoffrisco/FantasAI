@@ -1,5 +1,6 @@
 import React from 'react';
-import { findPlayer, buildRosterFrame, assignRoster, PLAYERS } from '../lib/data.js';
+import { buildRosterFrame, assignRoster } from '../lib/data.js';
+import { findPlayer, findPlayerByName } from '../lib/playerStore.js';
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { useR2Lineup, useR2Injuries } from '../hooks.js';
 
@@ -46,7 +47,7 @@ function DatabricksAIPanel({ myRosterIds }) {
   // Filter recommendations to players on this user's roster
   const recs = Array.isArray(lineupData)
     ? lineupData.filter(r => {
-        const match = PLAYERS.find(p => p.name?.toLowerCase() === r.player_name?.toLowerCase());
+        const match = findPlayerByName(r.player_name);
         return match && myRosterIds.has(match.id);
       })
     : [];
@@ -55,7 +56,7 @@ function DatabricksAIPanel({ myRosterIds }) {
   const benchers = recs.filter(r => r.recommendation === 'Bench');
   const injuryAlerts = Array.isArray(injuryData)
     ? injuryData.filter(r => {
-        const match = PLAYERS.find(p => p.name?.toLowerCase() === r.player_name?.toLowerCase());
+        const match = findPlayerByName(r.player_name);
         const injSt = r.injury_status;
         return match && myRosterIds.has(match.id) && (injSt === 'Out' || injSt === 'IR');
       })

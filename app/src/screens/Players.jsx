@@ -1,13 +1,13 @@
 import React from 'react';
-import { PLAYERS, findPlayer, MY_ROSTER, DRAFT_PICKS, TEAM_ROSTERS, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { MY_ROSTER, DRAFT_PICKS, TEAM_ROSTERS, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { usePlayers, isLiveData } from '../lib/playerStore.js';
 
 const FREE_DATA_SOURCES_LIST = FREE_DATA_SOURCES.map(s => ({ id: s.id, name: s.name, defaultEnabled: s.enabled }));
 const FEED_NAMES = Object.fromEntries(RANKING_SOURCES.map(s => [s.id, s.name.replace(' (ECR)', '').replace(' Fantasy', '').replace(' Sports Rankings', '').replace(' Rankings', '')]));
 
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes } from '../hooks.js';
+import { useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats } from '../lib/sleeper.js';
-import { api } from '../api.js';
 
 const WORKER   = (import.meta.env?.VITE_WORKER_URL || '').replace(/\/$/, '');
 const API_BASE = 'https://api.fantasai.net';
@@ -124,11 +124,8 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     return s;
   }, [r2Breakouts]);
 
-  // Databricks bronze_player_news_raw is the primary player source.
-  // Falls back to Sleeper API if Databricks is unavailable, then static PLAYERS as last resort.
-  const [apiPlayerList, setApiPlayerList] = React.useState([]);
-  const [playersLoading, setPlayersLoading] = React.useState(true);
-  const [playersSource, setPlayersSource] = React.useState('');
+  // Global player store — seeds from static data, replaced with live Databricks/Sleeper on startup
+  const apiPlayerList = usePlayers();
 
   // R2 injury overlay — real status + depth chart from Databricks silver_player_news
   const { data: r2InjuryData } = useR2Injuries();
@@ -155,107 +152,6 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     }
     return byName;
   }, [r2Notes]);
-
-  React.useEffect(() => {
-    const staticByName = new Map(PLAYERS.map(p => [p.name.toLowerCase().trim(), p]));
-
-    function injStatusCode(injStatus) {
-      if (!injStatus || injStatus === 'Na') return 'OK';
-      if (injStatus === 'Questionable')    return 'Q';
-      if (injStatus === 'Doubtful')        return 'D';
-      if (injStatus === 'Out')             return 'Out';
-      if (injStatus === 'Injured_Reserve' || injStatus === 'IR') return 'IR';
-      return injStatus;
-    }
-
-    function normalizeRows(arr) {
-      const seen = new Set();
-      const result = [];
-      for (const p of arr) {
-        const rawPos  = p.position;
-        const rawTeam = p.team;
-        if (!rawTeam || rawTeam === 'FA') continue;
-        const pos = rawPos === 'DEF' ? 'DST' : (rawPos || '');
-        if (!['QB', 'RB', 'WR', 'TE', 'K', 'DST'].includes(pos)) continue;
-        let name;
-        if (pos === 'DST') {
-          name = `${rawTeam.toUpperCase()} D/ST`;
-        } else {
-          name = (p.full_name || p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim()).trim();
-          if (!name) continue;
-        }
-        const key = name.toLowerCase().trim();
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        const st = staticByName.get(key);
-        // Use the static numeric ID when there is a match — roster system uses these IDs.
-        // Otherwise keep the Sleeper string ID so the player is still identifiable.
-        const id = st ? st.id : (p.player_id || p.id || key);
-
-        const searchRank = Number(p.search_rank || p.ecr) || null;
-        const ecr   = searchRank || st?.ecr || 999;
-        const adp   = st?.adp || searchRank || 999;
-        const owned = st?.owned ?? (searchRank ? Math.max(0, parseFloat((100 - searchRank * 0.28).toFixed(1))) : 0);
-
-        result.push({
-          id,
-          sleeperId: p.player_id || p.id || null, // preserve for R2 injury lookup
-          name,
-          pos,
-          team:    rawTeam,
-          num:     Number(p.number) || st?.num || 0,
-          age:     Number(p.age)    || st?.age || 0,
-          bye:     st?.bye     ?? 0,
-          opp:     st?.opp     ?? '',
-          oppRank: st?.oppRank ?? 0,
-          proj:    st?.proj    ?? 0,
-          last:    st?.last    ?? 0,
-          avg:     st?.avg     ?? 0,
-          trend:   st?.trend   ?? [0,0,0,0,0,0],
-          owned,
-          adp,
-          ecr,
-          tier:    st?.tier ?? 0,
-          news:    st?.news ?? '',
-          status:  injStatusCode(p.injury_status),
-        });
-      }
-      return result;
-    }
-
-    // Try Databricks first
-    api.dbPlayers()
-      .then(data => {
-        const rows = data?.players || [];
-        if (rows.length > 0) {
-          setApiPlayerList(normalizeRows(rows));
-          setPlayersSource('Databricks');
-          return;
-        }
-        throw new Error('empty');
-      })
-      .catch(() =>
-        // Fall back to Sleeper
-        api.allPlayers(2000).then(raw => {
-          // Worker returns { players: [...], fetchedAt, source }
-          const arr = raw?.players || (Array.isArray(raw) ? raw : []);
-          const result = normalizeRows(arr.filter(p => p.team && p.status !== 'Inactive'));
-          if (result.length > 0) {
-            setApiPlayerList(result);
-            setPlayersSource('Sleeper');
-          } else {
-            setApiPlayerList(PLAYERS);
-            setPlayersSource('static');
-          }
-        })
-      )
-      .catch(() => {
-        setApiPlayerList(PLAYERS);
-        setPlayersSource('static');
-      })
-      .finally(() => setPlayersLoading(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Merge R2 injury overlay into the player list when it arrives.
   // R2 has more current injury_status + depth_chart_order than Databricks bronze table.
@@ -553,12 +449,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           <div>
             <h1>Players</h1>
             <div className="sub">
-              {playersLoading
-                ? 'Loading player pool from Databricks…'
-                : `${players.length} of ${allPlayersList.length} players · ${
-                    playersSource === 'Databricks' ? 'Live from Databricks'
-                  : playersSource === 'Sleeper'    ? 'Sleeper API (Databricks unavailable)'
-                  : 'Static fallback'}`}
+              {`${players.length} of ${allPlayersList.length} players · ${isLiveData() ? 'Live data' : 'Static seed'}`}
             </div>
           </div>
         </div>
@@ -671,12 +562,10 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           </div>
         )}
         <div className="grow"></div>
-        {playersSource && (
-          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
-            {playersSource === 'Databricks' ? '◆ Databricks' : playersSource === 'Sleeper' ? '⚡ Sleeper' : '○ Static'} · {allPlayersList.length} players
-            {r2InjuryData ? ' · R2 injuries' : ''}
-          </span>
-        )}
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
+          {isLiveData() ? '◆ Live' : '○ Static'} · {allPlayersList.length} players
+          {r2InjuryData ? ' · R2 injuries' : ''}
+        </span>
         <span className="faint mono" style={{ fontSize: 11 }}>HALF PPR</span>
       </div>
 
@@ -701,7 +590,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
             </tr>
           </thead>
           <tbody>
-            {playersLoading && players.length === 0 && Array.from({ length: 20 }).map((_, i) => (
+            {!isLiveData() && players.length === 0 && Array.from({ length: 20 }).map((_, i) => (
               <tr key={`skel-${i}`}>
                 {Array.from({ length: 13 }).map((__, c) => (
                   <td key={c}><div style={{ height: 12, borderRadius: 4, background: 'rgba(255,255,255,.06)', width: c === 1 ? 140 : c === 0 ? 24 : 48, animation: 'pulse 1.4s ease-in-out infinite' }} /></td>

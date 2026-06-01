@@ -1,5 +1,6 @@
 import React from 'react';
-import { PLAYERS, TEAM_ROSTERS, TEAMS_ORDER, findTeam, findPlayer, GAME_WEATHER } from '../lib/data.js';
+import { TEAM_ROSTERS, TEAMS_ORDER, findTeam, GAME_WEATHER } from '../lib/data.js';
+import { usePlayers, findPlayerByName } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { useR2Waivers } from '../hooks.js';
 
@@ -89,7 +90,7 @@ function WaiverAIPanel({ myRosterIds, onOpenPlayer }) {
       {!collapsed && (
         <div style={{ borderTop: '1px solid rgba(78,168,255,.15)', padding: '8px 14px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
           {[...priority, ...standard].map((r, i) => {
-            const player = PLAYERS.find(p => p.name?.toLowerCase() === r.player_name?.toLowerCase());
+            const player = findPlayerByName(r.player_name);
             const pColor = priorityColor(r.priority);
             return (
               <div
@@ -126,6 +127,7 @@ function WaiverAIPanel({ myRosterIds, onOpenPlayer }) {
 }
 
 export default function WaiversScreen({ user, myRosterIds = new Set(), onAddPlayer, onDropPlayer, onOpenPlayer, sourcesState }) {
+  const players = usePlayers();
   const [posFilter, setPosFilter] = React.useState('ALL');
   const [search, setSearch]       = React.useState('');
   const [sortBy, setSortBy]       = React.useState('proj');
@@ -255,7 +257,7 @@ export default function WaiversScreen({ user, myRosterIds = new Set(), onAddPlay
   }
 
   const available = React.useMemo(() => {
-    return PLAYERS.filter(p => {
+    return players.filter(p => {
       if (allRosteredIds.has(p.id)) return false;
       if (queuedAddIds.has(p.id)) return false;
       if (posFilter === 'FLEX' && !FLEX_POS.has(p.pos)) return false;
@@ -269,9 +271,9 @@ export default function WaiversScreen({ user, myRosterIds = new Set(), onAddPlay
       if (sortBy === 'adp')   return a.adp - b.adp;
       return 0;
     });
-  }, [allRosteredIds, queuedAddIds, posFilter, search, sortBy]);
+  }, [players, allRosteredIds, queuedAddIds, posFilter, search, sortBy]);
 
-  const myRosterList = PLAYERS.filter(p => myRosterIds.has(p.id));
+  const myRosterList = players.filter(p => myRosterIds.has(p.id));
 
   // How many total claims exist per player (to show contention)
   const claimCountByPlayer = React.useMemo(() => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { PLAYERS, findPlayer } from '../lib/data.js';
+import { getPlayers, findPlayer } from '../lib/playerStore.js';
 import { runMockDraft } from '../lib/draft.js';
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 
@@ -254,7 +254,7 @@ function BuildFrequency({ builds }) {
 
 function analyzeMocks(mocks, yourSlot) {
   const playerStats = {};
-  PLAYERS.forEach(p => { playerStats[p.id] = { picks: [], drafted: 0 }; });
+  getPlayers().forEach(p => { playerStats[p.id] = { picks: [], drafted: 0 }; });
 
   mocks.forEach(m => {
     m.picks.forEach(pk => {

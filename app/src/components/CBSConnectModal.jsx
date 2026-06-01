@@ -1,5 +1,6 @@
 import React from 'react';
-import { CBS_RANKINGS, PLAYERS, findPlayer } from '../lib/data.js';
+import { CBS_RANKINGS } from '../lib/data.js';
+import { getPlayers, findPlayer } from '../lib/playerStore.js';
 import { PosBadge, PlayerCell, TeamLogoBadge } from './ui.jsx';
 
 export function CBSConnectModal({ onClose, onConnected, mode }) {
@@ -430,7 +431,7 @@ function parseDraftRankingHtml(html) {
 
 function matchDraftPlayer(name) {
   const n = name.toLowerCase().trim();
-  return PLAYERS.find(p => {
+  return getPlayers().find(p => {
     const pn = p.name.toLowerCase();
     if (n === pn) return true;
     const np = n.split(' '); const pp = pn.split(' ');
@@ -711,7 +712,7 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
   };
 
   const rankedSet = new Set(personalRanks);
-  let pool = PLAYERS.filter(p => !rankedSet.has(p.id)).sort((a, b) => a.ecr - b.ecr);
+  let pool = getPlayers().filter(p => !rankedSet.has(p.id)).sort((a, b) => a.ecr - b.ecr);
   if (prPos !== 'ALL') pool = pool.filter(p => p.pos === prPos);
   if (prSearch) pool = pool.filter(p => p.name.toLowerCase().includes(prSearch.toLowerCase()));
 
