@@ -354,6 +354,327 @@ export function CBSRankingsScreen({ onOpenPlayer }) {
   );
 }
 
+// ── Helpers shared by the import modal ───────────────────────────────────────
+
+const API_BASE_CDR = 'https://api.fantasai.net';
+
+function parseDraftRankingText(text, filename = '') {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (ext === 'json') {
+    try {
+      const raw = JSON.parse(text);
+      const arr = Array.isArray(raw) ? raw : (raw.players || raw.rankings || Object.values(raw));
+      if (!Array.isArray(arr) || !arr.length) throw new Error('No array in JSON');
+      if (typeof arr[0] === 'string') return arr.map((n, i) => ({ name: n.trim(), rank: i + 1 })).filter(p => p.name);
+      return arr.map((d, i) => ({
+        name: (d.name || d.player_name || d.player || d.full_name || '').trim(),
+        rank: Number(d.rank || d.ecr || d.adp || i + 1),
+        pos:  d.pos || d.position || '',
+      })).filter(p => p.name);
+    } catch (e) { throw new Error(`JSON parse error: ${e.message}`); }
+  }
+  const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) throw new Error('File is empty');
+  const firstCols = lines[0].split(',').map(c => c.replace(/"/g, '').trim().toLowerCase());
+  const hasHeader = firstCols.some(c => ['name','player','rank','pos','position','ecr','adp'].includes(c));
+  if (hasHeader) {
+    const ni = firstCols.findIndex(c => ['name','player','player_name','full_name'].includes(c));
+    const ri = firstCols.findIndex(c => ['rank','ecr','adp','rk'].includes(c));
+    const pi = firstCols.findIndex(c => ['pos','position'].includes(c));
+    if (ni < 0) throw new Error('No name column found (expected "name" or "player" header)');
+    return lines.slice(1).map((l, i) => {
+      const c = l.split(',').map(v => v.replace(/"/g, '').trim());
+      return { name: c[ni] || '', rank: ri >= 0 ? (parseInt(c[ri]) || i + 1) : i + 1, pos: pi >= 0 ? c[pi] : '' };
+    }).filter(p => p.name);
+  }
+  // Plain numbered list: "1. Josh Allen" or "1, Josh Allen"
+  return lines.map((l, i) => {
+    const m = l.match(/^(\d+)[.):\s]+(.+?)(?:\s*[([].*)?$/);
+    if (m) return { rank: parseInt(m[1]), name: m[2].trim() };
+    const parts = l.split(',').map(p => p.replace(/"/g, '').trim());
+    if (parts.length >= 2 && !isNaN(parts[0])) return { rank: parseInt(parts[0]), name: parts[1] };
+    return { rank: i + 1, name: l.replace(/^\d+[.):\s]+/, '').trim() };
+  }).filter(p => p.name && p.name.length > 1);
+}
+
+function parseDraftRankingHtml(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  // FantasyPros embedded JSON
+  for (const script of doc.querySelectorAll('script')) {
+    const txt = script.textContent || '';
+    const m = txt.match(/var\s+(?:ecrData|rankingData|playersData)\s*=\s*(\{[\s\S]*?\});\s*(?:var\s|\n|$)/);
+    if (m) {
+      try {
+        const d = JSON.parse(m[1]);
+        const arr = d.players || d.rankings;
+        if (Array.isArray(arr) && arr.length >= 5)
+          return arr.map((p, i) => ({ rank: p.rank_ecr || p.rank || i + 1, name: (p.player_name || p.name || '').trim(), pos: p.pos || '' })).filter(p => p.name);
+      } catch {}
+    }
+  }
+  // Generic table rows with name-like cells
+  const rows = [...doc.querySelectorAll('table tr, [class*="row"], [class*="player-row"]')];
+  const results = [];
+  for (const row of rows) {
+    const cells = [...row.querySelectorAll('td, [class*="cell"]')].map(c => c.textContent.trim());
+    const nameCell = cells.find(c => c.length > 4 && /[A-Z][a-z]+ [A-Z]/.test(c));
+    if (!nameCell) continue;
+    const rankCell = cells.find(c => /^\d+$/.test(c));
+    results.push({ rank: rankCell ? parseInt(rankCell) : results.length + 1, name: nameCell.split('\n')[0].trim() });
+  }
+  if (results.length >= 5) return results;
+  // Plain text fallback
+  const text = doc.body?.innerText || doc.body?.textContent || '';
+  try { return parseDraftRankingText(text, '.txt'); } catch { return []; }
+}
+
+function matchDraftPlayer(name) {
+  const n = name.toLowerCase().trim();
+  return PLAYERS.find(p => {
+    const pn = p.name.toLowerCase();
+    if (n === pn) return true;
+    const np = n.split(' '); const pp = pn.split(' ');
+    return np.at(-1) === pp.at(-1) && np[0]?.[0] === pp[0]?.[0];
+  });
+}
+
+// ── Import Rankings Modal ─────────────────────────────────────────────────────
+
+function ImportRankingsModal({ onClose, onImport }) {
+  const [importTab, setImportTab] = React.useState('file'); // 'file' | 'url' | 'paste'
+  const [file, setFile] = React.useState(null);
+  const [pasteText, setPasteText] = React.useState('');
+  const [scrapeUrl, setScrapeUrl] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [preview, setPreview] = React.useState(null); // [{rank,name,matched,player}]
+  const fileRef = React.useRef(null);
+
+  function buildPreview(entries) {
+    const matched = [];
+    const unmatched = [];
+    for (const e of entries) {
+      const player = matchDraftPlayer(e.name);
+      if (player) matched.push({ ...e, player });
+      else unmatched.push(e);
+    }
+    matched.sort((a, b) => a.rank - b.rank);
+    return { matched, unmatched };
+  }
+
+  async function handleFile(f) {
+    setError(''); setPreview(null);
+    const text = await f.text();
+    try {
+      const entries = parseDraftRankingText(text, f.name);
+      setPreview(buildPreview(entries));
+    } catch (e) { setError(e.message); }
+  }
+
+  async function handleScrape() {
+    if (!scrapeUrl.trim()) return;
+    setLoading(true); setError(''); setPreview(null);
+    try {
+      const proxyUrl = `${API_BASE_CDR}/api/v1/proxy?url=${encodeURIComponent(scrapeUrl.trim())}`;
+      const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error(`Proxy returned ${res.status} — check the URL`);
+      const html = await res.text();
+      const entries = parseDraftRankingHtml(html);
+      if (!entries.length) throw new Error('Could not find a rankings list on that page');
+      setPreview(buildPreview(entries));
+    } catch (e) {
+      setError(e.message.includes('timeout') ? 'Request timed out — try a different URL' : e.message);
+    } finally { setLoading(false); }
+  }
+
+  async function handlePaste() {
+    setError(''); setPreview(null);
+    const text = pasteText.trim();
+    if (!text) return;
+    try {
+      const entries = parseDraftRankingText(text, '.txt');
+      setPreview(buildPreview(entries));
+    } catch (e) { setError(e.message); }
+  }
+
+  function handleImport() {
+    if (!preview?.matched?.length) return;
+    onImport(preview.matched.map(e => e.player.id));
+    onClose();
+  }
+
+  const tabStyle = (t) => ({
+    padding: '7px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+    borderBottom: `2px solid ${importTab === t ? 'var(--accent)' : 'transparent'}`,
+    color: importTab === t ? 'var(--accent)' : 'var(--text-dim)',
+    background: 'none', border: 'none', borderBottom: `2px solid ${importTab === t ? 'var(--accent)' : 'transparent'}`,
+  });
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.65)', backdropFilter: 'blur(4px)' }}
+      onClick={onClose}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, width: '90%', maxWidth: 640, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 64px rgba(0,0,0,.6)' }}
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ padding: '18px 24px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15 }}>Import Draft Rankings</div>
+            <div style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 2 }}>Load a cheat sheet from a file, URL, or pasted text</div>
+          </div>
+          <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--text-faint)', lineHeight: 1 }} onClick={onClose}>✕</button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', paddingLeft: 12, marginTop: 12, flexShrink: 0 }}>
+          <button style={tabStyle('file')} onClick={() => setImportTab('file')}>CSV / File</button>
+          <button style={tabStyle('url')}  onClick={() => setImportTab('url')}>Scrape URL</button>
+          <button style={tabStyle('paste')} onClick={() => setImportTab('paste')}>Paste Text</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '16px 24px', flex: 1, overflow: 'auto' }}>
+
+          {importTab === 'file' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+                Accepts <strong style={{ color: 'var(--text-dim)' }}>CSV, JSON, or plain text</strong> with ranked player names.
+                Headers like <code style={{ fontSize: 10, background: 'var(--panel-3)', padding: '1px 4px', borderRadius: 3 }}>name,rank,pos</code> are auto-detected.
+                A numbered list (<code style={{ fontSize: 10, background: 'var(--panel-3)', padding: '1px 4px', borderRadius: 3 }}>1. Josh Allen</code>) also works.
+              </div>
+              <div
+                style={{ border: `2px dashed ${file ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 10, padding: '28px 24px', textAlign: 'center', cursor: 'pointer', transition: 'border-color .15s', background: file ? 'rgba(198,255,58,.04)' : 'transparent' }}
+                onClick={() => fileRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { setFile(f); handleFile(f); } }}
+              >
+                <input ref={fileRef} type="file" accept=".csv,.txt,.json" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files[0]; if (f) { setFile(f); handleFile(f); } }} />
+                {file ? (
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)' }}>📄 {file.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>{(file.size / 1024).toFixed(1)} KB · click to change</div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: 28, marginBottom: 6 }}>📂</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-dim)' }}>Drop file here or click to browse</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>.csv · .json · .txt</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {importTab === 'url' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+                Paste a URL from <strong style={{ color: 'var(--text-dim)' }}>FantasyPros, CBS, ESPN</strong>, or any rankings page.
+                The page is fetched server-side to avoid CORS issues and the player list is extracted automatically.
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="input"
+                  style={{ flex: 1, fontSize: 12, fontFamily: 'var(--font-mono)' }}
+                  placeholder="https://www.fantasypros.com/nfl/rankings/..."
+                  value={scrapeUrl}
+                  onChange={e => { setScrapeUrl(e.target.value); setPreview(null); setError(''); }}
+                  onKeyDown={e => { if (e.key === 'Enter') handleScrape(); }}
+                />
+                <button className="btn primary sm" onClick={handleScrape} disabled={loading || !scrapeUrl.trim()} style={{ whiteSpace: 'nowrap' }}>
+                  {loading ? 'Fetching…' : '⚡ Fetch'}
+                </button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.5 }}>
+                Works best with FantasyPros ECR pages. Some sites block scrapers — try the CSV export option if a URL fails.
+              </div>
+            </div>
+          )}
+
+          {importTab === 'paste' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+                Paste a numbered list, CSV rows, or player names (one per line). Rank order = list order if no rank numbers.
+              </div>
+              <textarea
+                className="input"
+                style={{ width: '100%', minHeight: 140, fontSize: 12, fontFamily: 'var(--font-mono)', resize: 'vertical', boxSizing: 'border-box' }}
+                placeholder={'1. Josh Allen QB BUF\n2. Ja\'Marr Chase WR CIN\n3. Saquon Barkley RB PHI\n…'}
+                value={pasteText}
+                onChange={e => { setPasteText(e.target.value); setPreview(null); setError(''); }}
+              />
+              <button className="btn primary sm" onClick={handlePaste} disabled={!pasteText.trim()} style={{ alignSelf: 'flex-start' }}>
+                Parse Rankings
+              </button>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(255,90,110,.1)', border: '1px solid rgba(255,90,110,.3)', borderRadius: 8, fontSize: 12, color: 'var(--danger)' }}>
+              ✗ {error}
+            </div>
+          )}
+
+          {/* Preview */}
+          {preview && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <div style={{ fontWeight: 800, fontSize: 13 }}>Preview</div>
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--good)', background: 'rgba(52,211,153,.12)', border: '1px solid rgba(52,211,153,.3)', borderRadius: 4, padding: '1px 7px' }}>
+                  {preview.matched.length} matched
+                </span>
+                {preview.unmatched.length > 0 && (
+                  <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', background: 'var(--panel-3)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 7px' }}>
+                    {preview.unmatched.length} unrecognized
+                  </span>
+                )}
+              </div>
+              <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', maxHeight: 240, overflowY: 'auto' }}>
+                {preview.matched.slice(0, 30).map((e, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', fontWeight: 700, width: 28, textAlign: 'right', flexShrink: 0 }}>{i + 1}</span>
+                    <span className={`pos-badge pos-${e.player.pos.toLowerCase()}`} style={{ flexShrink: 0 }}>{e.player.pos}</span>
+                    <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.player.name}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{e.player.team}</span>
+                  </div>
+                ))}
+                {preview.matched.length > 30 && (
+                  <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text-faint)', textAlign: 'center' }}>
+                    + {preview.matched.length - 30} more players
+                  </div>
+                )}
+              </div>
+              {preview.unmatched.length > 0 && (
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ fontSize: 11, color: 'var(--text-faint)', cursor: 'pointer', userSelect: 'none' }}>
+                    {preview.unmatched.length} names not matched (click to see)
+                  </summary>
+                  <div style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', lineHeight: 2, paddingTop: 4, paddingLeft: 12 }}>
+                    {preview.unmatched.map(e => e.name).join(', ')}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexShrink: 0 }}>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button
+            className="btn primary"
+            disabled={!preview?.matched?.length}
+            onClick={handleImport}
+          >
+            Import {preview?.matched?.length ? `${preview.matched.length} Players` : 'Rankings'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
   const [tab, setTab] = React.useState('cbs');
   const [personalRanks, setPersonalRanks] = React.useState(() => {
@@ -361,6 +682,7 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
   });
   const [prPos, setPrPos] = React.useState('ALL');
   const [prSearch, setPrSearch] = React.useState('');
+  const [showImport, setShowImport] = React.useState(false);
 
   const saveRanks = (ranks) => {
     setPersonalRanks(ranks);
@@ -395,6 +717,17 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
 
   return (
     <div className="col" style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      {showImport && (
+        <ImportRankingsModal
+          onClose={() => setShowImport(false)}
+          onImport={(ids) => {
+            // Merge: imported list first, then any previously ranked players not in the import
+            const importedSet = new Set(ids);
+            const existing = personalRanks.filter(id => !importedSet.has(id));
+            saveRanks([...ids, ...existing]);
+          }}
+        />
+      )}
       <div className="page-head" style={{ flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <TeamLogoBadge team={null} size={40} />
@@ -446,16 +779,19 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
 
           {/* Right: personal ranked list */}
           <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
               <div style={{ fontWeight: 800, fontSize: 13, flex: 1 }}>My Rankings · {personalRanks.length} players</div>
+              <button className="btn primary sm" style={{ fontSize: 11 }} onClick={() => setShowImport(true)}>⬆ Import</button>
               {personalRanks.length > 0 && (
                 <button className="btn ghost sm" style={{ fontSize: 11 }} onClick={() => saveRanks([])}>Clear All</button>
               )}
             </div>
             <div style={{ flex: 1, overflow: 'auto' }}>
               {personalRanks.length === 0 && (
-                <div style={{ padding: 24, color: 'var(--text-faint)', fontSize: 12, textAlign: 'center', lineHeight: 1.8 }}>
-                  No players ranked yet.<br />Add players from the pool on the left.
+                <div style={{ padding: 32, color: 'var(--text-faint)', fontSize: 12, textAlign: 'center', lineHeight: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                  <div style={{ fontSize: 28 }}>📋</div>
+                  <div>No players ranked yet.<br />Add players one-by-one from the pool, or import a cheat sheet.</div>
+                  <button className="btn primary sm" onClick={() => setShowImport(true)}>⬆ Import Rankings</button>
                 </div>
               )}
               {personalRanks.map((id, i) => {

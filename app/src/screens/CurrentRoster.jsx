@@ -2,7 +2,7 @@ import React from 'react';
 import { TEAM_ROSTERS, PLAYERS, findPlayer, findTeam, NEWS, SLOT_ELIGIBILITY, ROSTER_CONFIG, LEAGUE_TEAMS, buildRosterFrame, assignRoster, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES } from '../lib/data.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
-import { useR2Drops, useR2Injuries } from '../hooks.js';
+import { useR2Drops, useR2Injuries, useR2PlayerNotes, useR2EnrichedNews, useR2WeatherForecast } from '../hooks.js';
 
 const H2H_WEEKS   = 14;
 const H2H_SEASON_START = new Date('2026-09-09');
@@ -182,13 +182,9 @@ const API_BASE = 'https://api.fantasai.net';
 
 function fmtTs(ts) {
   if (!ts) return null;
-  const d   = new Date(typeof ts === 'number' ? ts : ts);
+  const d = new Date(typeof ts === 'number' ? ts : ts);
   if (isNaN(d)) return null;
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  return sameDay
-    ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-    : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 function DropCandidatesPanel({ myRosterIds, onOpenPlayer }) {
@@ -258,7 +254,7 @@ function DropCandidatesPanel({ myRosterIds, onOpenPlayer }) {
   );
 }
 
-export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, onDropPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange, tradeOffers = [], onRespondTradeOffer }) {
+export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPlayer, onDropPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange, tradeOffers = [], onRespondTradeOffer, rosterSyncBadge, rosterLoading }) {
   const [dropConfirm, setDropConfirm] = React.useState(null);
   const [addFilter, setAddFilter] = React.useState('ALL');
   const [addSearch, setAddSearch] = React.useState('');
@@ -298,6 +294,58 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
   const [swapError, setSwapError] = React.useState(null);
   // R2 injury report written by Databricks — used to populate Updated News/Live column on load
   const { data: r2InjuryData, fetchedAt: r2InjuryFetchedAt } = useR2Injuries();
+  const { data: r2PlayerNotes }  = useR2PlayerNotes();
+  const { data: r2EnrichedNews } = useR2EnrichedNews();
+  const { data: r2WeatherData }  = useR2WeatherForecast();
+
+  // Live weather state — updated by the Refresh Weather button (overrides cached R2 data)
+  const [liveWeatherTeams, setLiveWeatherTeams]     = React.useState(null);
+  const [weatherRefreshing, setWeatherRefreshing]   = React.useState(false);
+  const [weatherRefreshedAt, setWeatherRefreshedAt] = React.useState(null);
+  const [weatherRateMsg, setWeatherRateMsg]         = React.useState(null);
+
+  const weatherTeams = liveWeatherTeams || r2WeatherData?.teams || {};
+
+  async function handleWeatherRefresh() {
+    if (weatherRefreshing) return;
+    setWeatherRefreshing(true);
+    setWeatherRateMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/weather/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 7 }),
+        signal: AbortSignal.timeout(120000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.teams) {
+          setLiveWeatherTeams(data.teams);
+          setWeatherRefreshedAt(data.fetched_at || new Date().toISOString());
+        }
+        if (data.message) setWeatherRateMsg(data.message);
+      }
+    } catch {}
+    setWeatherRefreshing(false);
+  }
+
+  // Returns the best game-time forecast hour for a given team's forecast array.
+  // Prefers the upcoming Sunday afternoon (1300h slot); falls back to first day.
+  function getGameWeather(teamAbbr) {
+    const entry = weatherTeams[teamAbbr?.toUpperCase()];
+    if (!entry) return null;
+    if (entry.is_dome) return { dome: true };
+    if (!entry.forecast?.length) return { dome: false, noData: true };
+    const now = new Date();
+    const daysUntilSunday = (7 - now.getDay()) % 7 || 7;
+    const sundayStr = new Date(now.getTime() + daysUntilSunday * 86400000)
+      .toISOString().split('T')[0];
+    const day = entry.forecast.find(d => d.date === sundayStr) || entry.forecast[0];
+    const hour = day.hourly?.find(h => h.time === '1300') ||
+                 day.hourly?.find(h => h.time === '1500') ||
+                 day.hourly?.[day.hourly.length > 4 ? Math.floor(day.hourly.length / 2) : 0];
+    return { dome: false, date: day.date, maxTempF: day.max_temp_f, minTempF: day.min_temp_f, hour };
+  }
   const r2InjuryByName = React.useMemo(() => {
     const m = {};
     const list = Array.isArray(r2InjuryData) ? r2InjuryData : [];
@@ -676,34 +724,94 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
   const rosterPlayerIds = new Set(fullRoster.map(r => r.playerId).filter(Boolean));
   const rosterPlayers   = PLAYERS.filter(p => rosterPlayerIds.has(p.id));
 
-  const newsHasId = new Set(NEWS.filter(n => rosterPlayerIds.has(n.playerId)).map(n => n.playerId));
+  // Name → roster player lookup for R2 matching
+  const rosterByName = React.useMemo(() => {
+    const m = {};
+    for (const p of rosterPlayers) {
+      m[p.name.toLowerCase().trim()] = p;
+      const last = p.name.split(' ').slice(-1)[0].toLowerCase();
+      if (last.length > 3) m[last] = m[last] || p; // last-name fallback, no clobber
+    }
+    return m;
+  }, [rosterPlayers]);
 
-  // Synthetic items from player.news text for players with non-OK status or no news entry
-  const syntheticNews = rosterPlayers
-    .filter(p => p.news && !newsHasId.has(p.id))
-    .map((p, i) => ({
-      id: `syn-${p.id}`,
-      playerId: p.id,
-      mins: 360 + i * 30,
-      impact: p.status !== 'OK' ? 'med' : 'low',
-      source: 'Beat Writer',
-      title: `${p.name}: ${p.news}`,
-      body: p.status !== 'OK'
-        ? `${p.name} listed as ${p.status}. Monitor practice reports through the week.`
-        : `No significant updates. ${p.news}.`,
-      synthetic: true,
-    }));
+  function matchRosterPlayer(name = '') {
+    const key = name.toLowerCase().trim();
+    return rosterByName[key] || rosterByName[key.split(' ').slice(-1)[0]] || null;
+  }
 
-  const allRosterNews = [
+  // Build news feed from R2 tables (replaces static Beat Writer)
+  const r2RosterNews = React.useMemo(() => {
+    const items = [];
+    const coveredByEnriched = new Set();
+
+    // 1. enriched_news — real articles tagged to players
+    const enrichedArr = Array.isArray(r2EnrichedNews) ? r2EnrichedNews : [];
+    for (const article of enrichedArr) {
+      const names = Array.isArray(article.mentioned_players) ? article.mentioned_players : [];
+      const matchedPlayers = names.map(n => matchRosterPlayer(n)).filter(p => p && rosterPlayerIds.has(p.id));
+      if (!matchedPlayers.length && article.primary_player_id) {
+        const p = matchRosterPlayer(article.primary_player_id);
+        if (p && rosterPlayerIds.has(p.id)) matchedPlayers.push(p);
+      }
+      for (const p of matchedPlayers) {
+        coveredByEnriched.add(p.id);
+        const publishedAt = article.published_at ? new Date(article.published_at) : null;
+        const minsAgo = publishedAt ? Math.max(0, Math.floor((Date.now() - publishedAt.getTime()) / 60000)) : 9999;
+        let sourceLabel = 'FantasAI News';
+        try { sourceLabel = new URL(article.source_url).hostname.replace(/^www\./, ''); } catch {}
+        items.push({
+          id:        `r2-enriched-${p.id}-${article.published_at || Math.random()}`,
+          playerId:  p.id,
+          impact:    'med',
+          title:     article.headline || `${p.name} Update`,
+          body:      article.full_text ? article.full_text.slice(0, 350) : '',
+          mins:      minsAgo,
+          source:    sourceLabel,
+          publishedAt: publishedAt?.toISOString() || null,
+        });
+      }
+    }
+
+    // 2. player_notes — per-player intelligence (skip players already covered above)
+    const notesArr = Array.isArray(r2PlayerNotes) ? r2PlayerNotes : [];
+    for (const pn of notesArr) {
+      if (!pn.notes?.length) continue;
+      const p = matchRosterPlayer(pn.player_name || '');
+      if (!p || !rosterPlayerIds.has(p.id) || coveredByEnriched.has(p.id)) continue;
+      const note   = pn.notes[0];
+      const impact = pn.has_critical_news || note.priority === 'critical' ? 'high'
+                   : pn.has_injury_concern || note.priority === 'high'    ? 'med'
+                   : note.impact_direction === 'positive'                  ? 'good'
+                   : 'low';
+      const publishedAt = note.published_at ? new Date(note.published_at) : null;
+      const minsAgo = publishedAt ? Math.max(0, Math.floor((Date.now() - publishedAt.getTime()) / 60000))
+                    : pn.last_updated ? Math.max(0, Math.floor((Date.now() - new Date(pn.last_updated).getTime()) / 60000))
+                    : 9999;
+      items.push({
+        id:        `r2-note-${p.id}`,
+        playerId:  p.id,
+        impact,
+        title:     note.note_text ? note.note_text.slice(0, 140) : `${p.name} Update`,
+        body:      pn.notes.slice(0, 3).map(n => n.note_text).filter(Boolean).join(' · '),
+        mins:      minsAgo,
+        source:    'FantasAI',
+        publishedAt: publishedAt?.toISOString() || pn.last_updated || null,
+      });
+    }
+
+    return items;
+  }, [r2EnrichedNews, r2PlayerNotes, rosterPlayerIds, rosterByName]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const allRosterNews = React.useMemo(() => [
     ...NEWS.filter(n => rosterPlayerIds.has(n.playerId)),
-    ...syntheticNews,
+    ...r2RosterNews,
   ].sort((a, b) => {
-    // Injury/high-impact first, then by recency
     const aUrgent = a.impact === 'high' || deriveStatus(a.playerId) !== 'OK';
     const bUrgent = b.impact === 'high' || deriveStatus(b.playerId) !== 'OK';
     if (aUrgent !== bUrgent) return aUrgent ? -1 : 1;
     return a.mins - b.mins;
-  });
+  }), [r2RosterNews, rosterPlayerIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const injuryCount = rosterPlayers.filter(p => deriveStatus(p.id) !== 'OK').length;
 
@@ -750,7 +858,21 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <TeamLogoBadge team={team} size={48} />
           <div>
-            <h1 style={{ marginBottom: 2 }}>Current Roster</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
+              <h1 style={{ margin: 0 }}>Current Roster</h1>
+              {rosterSyncBadge && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 20,
+                  border: `1px solid ${rosterSyncBadge === 'saving' ? '#555' : rosterSyncBadge === 'saved' ? '#c6ff3a' : '#ff5a6e'}`,
+                  color: rosterSyncBadge === 'saving' ? '#aaa' : rosterSyncBadge === 'saved' ? '#c6ff3a' : '#ff5a6e',
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', display: 'inline-block',
+                    background: rosterSyncBadge === 'saving' ? '#888' : rosterSyncBadge === 'saved' ? '#c6ff3a' : '#ff5a6e' }} />
+                  {rosterSyncBadge === 'saving' ? 'Saving…' : rosterSyncBadge === 'saved' ? 'Saved' : 'Save Failed'}
+                </span>
+              )}
+            </div>
             <div className="sub" style={{ marginBottom: 8 }}>
               {team?.name || 'My Team'} · {fullRoster.length} players
             </div>
@@ -806,6 +928,22 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                   })}
                 </div>
               )}
+              <button
+                className="btn sm"
+                style={{ fontSize: 11, whiteSpace: 'nowrap', background: 'rgba(78,168,255,.08)', borderColor: 'rgba(78,168,255,.35)', color: '#4ea8ff', fontWeight: 700, padding: '6px 14px' }}
+                disabled={weatherRefreshing}
+                onClick={handleWeatherRefresh}
+              >
+                {weatherRefreshing ? '⟳ Fetching weather…' : '⛅ Refresh Weather'}
+              </button>
+              {weatherRateMsg && (
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textAlign: 'right' }}>{weatherRateMsg}</div>
+              )}
+              {weatherRefreshedAt && !weatherRateMsg && (
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#4ea8ff', opacity: 0.75, textAlign: 'right' }}>
+                  Weather updated {fmtTs(weatherRefreshedAt)}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -834,7 +972,13 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
       </div>
 
       {/* Roster tab */}
-      {tab === 'roster' && (
+      {tab === 'roster' && rosterLoading && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, padding: 60, color: 'var(--text-dim)', fontSize: 14 }}>
+          <div style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+          Loading roster from R2…
+        </div>
+      )}
+      {tab === 'roster' && !rosterLoading && (
         <div style={{ flex: 1, overflow: 'auto' }}>
           <DropCandidatesPanel myRosterIds={myRosterIds} onOpenPlayer={onOpenPlayer} />
           {/* Incoming trade offers */}
@@ -1215,6 +1359,14 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                 <th>Opp</th>
                 <th className="num">Bye</th>
                 <th>Status</th>
+                <th style={{ whiteSpace: 'nowrap' }}>
+                  Weather
+                  {weatherRefreshedAt && (
+                    <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: '#4ea8ff', fontWeight: 400, marginTop: 2 }}>
+                      {fmtTs(weatherRefreshedAt)}
+                    </div>
+                  )}
+                </th>
                 <th style={{ maxWidth: 160 }}>
                   News
                   {r2InjuryFetchedAt && (
@@ -1269,7 +1421,18 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                           {entry.slot}
                         </span>
                       </td>
-                      <td colSpan={9} className="dim" style={{ fontSize: 12 }}>Empty slot · drop here</td>
+                      <td colSpan={10} style={{ fontSize: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span className="dim">{isBench ? 'Empty bench slot · drop here' : 'Empty slot · drop here'}</span>
+                          <button
+                            className="btn sm primary"
+                            onClick={e => { e.stopPropagation(); onNav?.('players'); }}
+                            style={{ fontSize: 11, padding: '3px 10px' }}
+                          >
+                            + Add Player
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 }
@@ -1371,6 +1534,45 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                         <span className="status-pill"><StatusDot status={effectiveStatus} /> {effectiveStatus}</span>
                       )}
                     </td>
+                    <td style={{ whiteSpace: 'nowrap', minWidth: 80 }}>
+                      {(() => {
+                        const wx = getGameWeather(p.team);
+                        if (!wx) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
+                        if (wx.dome) return (
+                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#666', background: 'rgba(255,255,255,.06)', border: '1px solid #333', borderRadius: 3, padding: '1px 5px' }}>
+                            DOME
+                          </span>
+                        );
+                        if (wx.noData) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
+                        const h = wx.hour;
+                        if (!h) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
+                        const windMph  = h.wind_mph || 0;
+                        const tempF    = h.temp_f   || wx.maxTempF || 0;
+                        const precipIn = h.precip_in || 0;
+                        const cond     = (h.condition || '').toLowerCase();
+                        const isSnow   = cond.includes('snow') || cond.includes('blizzard') || cond.includes('sleet');
+                        const isRain   = precipIn > 0.05 || cond.includes('rain') || cond.includes('drizzle') || cond.includes('shower');
+                        // Wind thresholds per fantasy impact:
+                        // <10 minimal · 10-15 slight · 15-20 noticeable · 20+ significant · 25+ major
+                        const windColor = windMph >= 20 ? 'var(--danger)'
+                                        : windMph >= 15 ? '#ff8c00'
+                                        : windMph >= 10 ? '#ffd700'
+                                        : 'var(--text)';
+                        const tempColor = tempF <= 20 ? '#4ea8ff' : tempF <= 32 ? '#7ecff5' : tempF >= 95 ? 'var(--danger)' : 'var(--text-dim)';
+                        return (
+                          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>
+                            <span style={{ fontWeight: 700, color: tempColor }}>{tempF}°F</span>
+                            {' · '}
+                            <span style={{ color: windColor }}>{windMph}mph</span>
+                            {h.wind_dir && <span style={{ color: 'var(--text-faint)', fontSize: 9 }}> {h.wind_dir}</span>}
+                            {isSnow && <div style={{ color: '#7ecff5', fontSize: 9 }}>❄ Snow</div>}
+                            {!isSnow && isRain && <div style={{ color: '#ffd700', fontSize: 9 }}>🌧 Rain</div>}
+                            {windMph >= 25 && <div style={{ color: 'var(--danger)', fontSize: 9, fontWeight: 700 }}>⚠ Major wind</div>}
+                            {windMph >= 20 && windMph < 25 && <div style={{ color: 'var(--danger)', fontSize: 9 }}>⚠ Sig. wind</div>}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td style={{ maxWidth: 160 }}>
                       {(() => {
                         // Primary news: static beat-writer text, then CBS API as fallback
@@ -1394,14 +1596,15 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                         // Secondary sources only (skip CBS since it shows in News column)
                         const liveNotes = (liveData[p.id] || []).filter(e => e.note && e.sourceId !== 'cbs-news');
                         const r2 = r2InjuryByName[p.name.toLowerCase()];
-                        const hasR2 = r2 && r2.status && r2.status !== 'Active' && r2.status !== 'OK';
+                        const r2InjSt = r2?.injury_status;
+                        const hasR2 = r2 && r2InjSt && r2InjSt !== 'Active';
                         if (!liveNotes.length && !hasR2) return null;
                         return (
                           <div style={{ fontSize: 11, lineHeight: 1.5, whiteSpace: 'normal', display: 'flex', flexDirection: 'column', gap: 4 }}>
                             {hasR2 && (
                               <div>
-                                <span style={{ color: r2.status === 'Out' ? 'var(--danger)' : r2.status === 'Questionable' ? '#ff8c00' : r2.status === 'Doubtful' ? '#ffb547' : 'var(--accent-2)' }}>
-                                  {r2.status}{r2.notes ? ` · ${r2.notes}` : ''}
+                                <span style={{ color: r2InjSt === 'Out' ? 'var(--danger)' : r2InjSt === 'Questionable' ? '#ff8c00' : r2InjSt === 'Doubtful' ? '#ffb547' : 'var(--accent-2)' }}>
+                                  {r2InjSt}{r2.injury_notes ? ` · ${r2.injury_notes}` : ''}{r2.depth_chart_order ? ` (DC: ${r2.depth_chart_order})` : ''}
                                 </span>
                                 <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', color: 'var(--accent-2)', opacity: 0.75 }}>DATABRICKS</span>
                                 {r2InjuryFetchedAt && (
@@ -1576,8 +1779,8 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
           {allRosterNews.length === 0 ? (
             <div style={{ padding: '60px 24px', textAlign: 'center' }}>
               <div style={{ fontSize: 32, marginBottom: 12 }}>📰</div>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>All quiet</div>
-              <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>No news for your roster players right now.</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>No live news yet</div>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>Waiting for FantasAI pipeline to publish player news to R2.</div>
             </div>
           ) : (
             <>
@@ -1637,9 +1840,6 @@ export default function CurrentRosterScreen({ user, myRosterIds, onAddPlayer, on
                         </span>
                         <span className="dot" style={{ color: 'var(--text-faint)' }}></span>
                         <span className="mono faint" style={{ fontSize: 10 }}>{n.source}</span>
-                        {n.synthetic && (
-                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', marginLeft: 4 }}>· from player status</span>
-                        )}
                       </div>
                     </div>
                   );

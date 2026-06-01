@@ -908,6 +908,73 @@ function LimitedApiSources({ user, myRosterIds = new Set() }) {
           );
         })}
       </div>
+
+      {/* Source Update Schedule */}
+      <div style={{ padding: '0 24px 32px', maxWidth: 1200, margin: '0 auto', width: '100%' }}>
+        <div className="section-head" style={{ marginTop: 32 }}>
+          <div>
+            <div className="section-title">Source Update Schedule</div>
+            <div className="section-sub">All background jobs that keep FantasAI data current — 7 jobs total</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#4caf82', display: 'inline-block', flexShrink: 0, boxShadow: '0 0 6px #4caf82' }} />
+            <span style={{ fontSize: 11, color: '#4caf82', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>All Systems Active</span>
+          </div>
+        </div>
+        <div className="card" style={{ overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px 1fr 80px', padding: '7px 18px', borderBottom: '1px solid var(--border)', fontSize: 9, fontWeight: 800, color: 'var(--text-faint)', letterSpacing: '.1em', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+            <span>Job</span><span>Schedule</span><span>Purpose</span><span style={{ textAlign: 'right' }}>Status</span>
+          </div>
+          <div style={{ padding: '5px 18px', background: 'rgba(78,168,255,.05)', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 9, fontWeight: 800, color: '#4ea8ff', letterSpacing: '.12em', fontFamily: 'var(--font-mono)' }}>DAILY JOBS</span>
+          </div>
+          {[
+            { job: 'Daily NFL News & Injury Updates',  schedule: 'Daily 6:00 AM ET', purpose: 'Sleeper, RSS, injuries' },
+            { job: 'API-Sports.io Daily Stats',        schedule: 'Daily 2:00 AM CT', purpose: 'NFL stats, scores' },
+            { job: 'Daily Player Analytics Pipeline', schedule: 'Daily 4:00 AM CT', purpose: 'Performance metrics' },
+          ].map((row, i, arr) => (
+            <div key={row.job} style={{ display: 'grid', gridTemplateColumns: '1fr 160px 1fr 80px', padding: '9px 18px', borderBottom: i < arr.length - 1 ? '1px solid rgba(255,255,255,.04)' : '1px solid var(--border)', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', paddingRight: 12 }}>{row.job}</span>
+              <span style={{ fontSize: 11, color: '#4ea8ff', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{row.schedule}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)', paddingRight: 12 }}>{row.purpose}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4caf82', flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: '#4caf82', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>Active</span>
+              </div>
+            </div>
+          ))}
+          <div style={{ padding: '5px 18px', background: 'rgba(198,255,58,.04)', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--accent)', letterSpacing: '.12em', fontFamily: 'var(--font-mono)' }}>WEEKLY JOBS · TUESDAYS</span>
+          </div>
+          {[
+            { job: 'ESPN Public API Weekly Sync',  schedule: 'Tuesdays 3:00 AM CT', purpose: 'ESPN stats, schedules' },
+            { job: 'Sleeper API Weekly Update',    schedule: 'Tuesdays 3:00 AM CT', purpose: 'League rosters, matchups' },
+            { job: 'nflverse Weekly Stats Update', schedule: 'Tuesdays 3:00 AM CT', purpose: 'Play-by-play, advanced stats' },
+            { job: 'Weekly ML Model Training',     schedule: 'Tuesdays 5:00 AM CT', purpose: 'Feature eng → training → UC' },
+          ].map((row, i, arr) => (
+            <div key={row.job} style={{ display: 'grid', gridTemplateColumns: '1fr 160px 1fr 80px', padding: '9px 18px', borderBottom: i < arr.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', paddingRight: 12 }}>{row.job}</span>
+              <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{row.schedule}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)', paddingRight: 12 }}>{row.purpose}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4caf82', flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: '#4caf82', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>Active</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 24, marginTop: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+            <span style={{ color: '#4ea8ff', fontWeight: 700 }}>3</span> daily · <span style={{ color: 'var(--accent)', fontWeight: 700 }}>4</span> weekly
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+            Next weekly run: <span style={{ color: 'var(--text-dim)' }}>Tuesday 3:00 AM CT</span>
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+            Next daily run: <span style={{ color: 'var(--text-dim)' }}>Tomorrow 2:00 AM CT</span>
+          </span>
+        </div>
+      </div>
     </React.Fragment>
   );
 }

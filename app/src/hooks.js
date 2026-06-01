@@ -41,9 +41,15 @@ export function useR2Analysis(fetcher) {
   return { data, loading: data === undefined, fetchedAt }
 }
 
-export const useR2Lineup   = () => useR2Analysis(api.r2.lineup)
-export const useR2Injuries = () => useR2Analysis(api.r2.injuries)
-export const useR2Trends   = () => useR2Analysis(api.r2.trends)
-export const useR2Trade    = () => useR2Analysis(api.r2.trade)
-export const useR2Waivers  = () => useR2Analysis(api.r2.waivers)
-export const useR2Drops    = () => useR2Analysis(api.r2.drops)
+export const useR2Lineup        = () => useR2Analysis(api.r2.lineup)
+export const useR2Injuries      = () => useR2Analysis(api.r2.injuries)
+export const useR2Trends        = () => useR2Analysis(api.r2.trends)
+export const useR2Trade         = () => useR2Analysis(api.r2.trade)
+export const useR2Waivers       = () => useR2Analysis(api.r2.waivers)
+export const useR2Drops         = () => useR2Analysis(api.r2.drops)
+export const useR2PlayerNotes    = () => useR2Analysis(api.r2.playerNotes)
+export const useR2CriticalAlerts = () => useR2Analysis(api.r2.criticalAlerts)
+export const useR2EnrichedNews       = () => useR2Analysis(api.r2.enrichedNews)
+export const useR2AiSummaries        = () => useR2Analysis(api.r2.aiSummaries)
+export const useR2BreakoutCandidates = () => useR2Analysis(api.r2.breakoutCandidates)
+export const useR2WeatherForecast    = () => useR2Analysis(api.r2.weatherForecast)

@@ -13,6 +13,7 @@ function getCurrentNFLWeek() {
 }
 
 const CURRENT_WEEK = getCurrentNFLWeek();
+const CURRENT_SEASON = 2026;
 
 function buildSchedule(ids, weeks) {
   const n = ids.length;
@@ -35,6 +36,31 @@ function computeScore(roster, teamId, week) {
     return sum + (p ? (p.avg || 0) : 0);
   }, 0);
   return Math.max(0, Math.round((base + weekSeed(teamId, week)) * 10) / 10);
+}
+
+function loadLockedScores(season, week) {
+  try {
+    const key = `fantasai_week_scores_${season}_${week}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function getActualPtsFromLocked(locked, roster) {
+  if (!locked?.players) return null;
+  const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
+  let total = 0;
+  let matched = 0;
+  for (const entry of starters) {
+    const p = findPlayer(entry.playerId);
+    if (!p) continue;
+    const lockedPlayer = locked.players.find(lp =>
+      lp.name?.toLowerCase().trim() === p.name?.toLowerCase().trim()
+    );
+    if (lockedPlayer) { total += lockedPlayer.pts || 0; matched++; }
+  }
+  return matched > 0 ? Math.round(total * 10) / 10 : null;
 }
 
 function isRosterValid(roster) {
@@ -155,6 +181,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
                 homeId={homeId}
                 awayId={awayId}
                 week={week}
+                season={CURRENT_SEASON}
                 isLive={week === CURRENT_WEEK}
                 isFinal={week < CURRENT_WEEK}
                 expanded={expanded === idx}
@@ -178,33 +205,40 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   );
 }
 
-function MatchupCard({ homeId, awayId, week, isLive, isFinal, expanded, onToggle, onOpenPlayer, myTeamId, myLiveRoster, homeRecord, awayRecord }) {
+function MatchupCard({ homeId, awayId, week, season, isLive, isFinal, expanded, onToggle, onOpenPlayer, myTeamId, myLiveRoster, homeRecord, awayRecord }) {
   const home = findTeam(homeId);
   const away = findTeam(awayId);
 
-  // Use live roster for the user's team; fall back to TEAM_ROSTERS for others
   const homeRoster = homeId === myTeamId && myLiveRoster ? myLiveRoster : (TEAM_ROSTERS[homeId] || []);
   const awayRoster = awayId === myTeamId && myLiveRoster ? myLiveRoster : (TEAM_ROSTERS[awayId] || []);
 
-  const homePts      = computeScore(homeRoster, homeId, week);
-  const awayPts      = computeScore(awayRoster, awayId, week);
+  const homeProj  = computeScore(homeRoster, homeId, week);
+  const awayProj  = computeScore(awayRoster, awayId, week);
+
+  const locked = React.useMemo(() => loadLockedScores(season, week), [season, week]);
+  const homeActual = locked ? getActualPtsFromLocked(locked, homeRoster) : null;
+  const awayActual = locked ? getActualPtsFromLocked(locked, awayRoster) : null;
+
+  const homePts = homeActual ?? homeProj;
+  const awayPts = awayActual ?? awayProj;
   const homeWin      = homePts > awayPts;
   const awayWin      = awayPts > homePts;
   const homeRosterOk = isRosterValid(homeRoster);
   const awayRosterOk = isRosterValid(awayRoster);
-  const label        = isFinal ? 'Final' : isLive ? 'Live' : 'Upcoming';
+  const hasActual    = homeActual !== null || awayActual !== null;
+  const label        = isFinal ? (hasActual ? 'Final (Actual)' : 'Final') : isLive ? 'Live' : 'Upcoming';
   const labelColor   = isLive ? 'var(--accent)' : isFinal ? 'var(--text-dim)' : 'var(--text-faint)';
   const isMyMatchup  = homeId === myTeamId || awayId === myTeamId;
 
   return (
     <div className="card" style={{ overflow: 'hidden', borderLeft: isMyMatchup ? '3px solid #4caf82' : undefined, background: isMyMatchup ? 'rgba(76,175,130,.06)' : undefined }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, cursor: 'pointer' }} onClick={onToggle}>
-        <TeamScore team={home} pts={homePts} win={homeWin} side="home" showPts={isLive || isFinal} isMe={homeId === myTeamId} rosterOk={homeRosterOk} record={homeRecord} />
+        <TeamScore team={home} pts={homePts} projPts={homeActual !== null ? homeProj : null} win={homeWin} side="home" showPts={isLive || isFinal} isMe={homeId === myTeamId} rosterOk={homeRosterOk} record={homeRecord} hasActual={homeActual !== null} />
         <div style={{ flexShrink: 0, textAlign: 'center', padding: '0 14px', minWidth: 80 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: labelColor, letterSpacing: '.08em', marginBottom: 4 }}>{label}</div>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-faint)' }}>vs</div>
         </div>
-        <TeamScore team={away} pts={awayPts} win={awayWin} side="away" showPts={isLive || isFinal} isMe={awayId === myTeamId} rosterOk={awayRosterOk} record={awayRecord} />
+        <TeamScore team={away} pts={awayPts} projPts={awayActual !== null ? awayProj : null} win={awayWin} side="away" showPts={isLive || isFinal} isMe={awayId === myTeamId} rosterOk={awayRosterOk} record={awayRecord} hasActual={awayActual !== null} />
         <div style={{ marginLeft: 'auto', paddingRight: 14, color: 'var(--text-faint)', fontSize: 12 }}>
           {expanded ? '▲' : '▼'}
         </div>
@@ -212,15 +246,15 @@ function MatchupCard({ homeId, awayId, week, isLive, isFinal, expanded, onToggle
 
       {expanded && (
         <div style={{ borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
-          <RosterBreakdown roster={homeRoster} teamId={homeId} week={week} onOpenPlayer={onOpenPlayer} isProjected={!isLive && !isFinal} />
-          <RosterBreakdown roster={awayRoster} teamId={awayId} week={week} onOpenPlayer={onOpenPlayer} side="away" isProjected={!isLive && !isFinal} />
+          <RosterBreakdown roster={homeRoster} teamId={homeId} week={week} onOpenPlayer={onOpenPlayer} isProjected={!isLive && !isFinal} locked={locked} />
+          <RosterBreakdown roster={awayRoster} teamId={awayId} week={week} onOpenPlayer={onOpenPlayer} side="away" isProjected={!isLive && !isFinal} locked={locked} />
         </div>
       )}
     </div>
   );
 }
 
-function TeamScore({ team, pts, win, side, showPts, isMe, rosterOk, record }) {
+function TeamScore({ team, pts, projPts, win, side, showPts, isMe, rosterOk, record, hasActual }) {
   if (!team) return null;
   const isRight = side === 'away';
   const logoSize = team.logoImg ? 64 : 56;
@@ -252,9 +286,21 @@ function TeamScore({ team, pts, win, side, showPts, isMe, rosterOk, record }) {
         </div>
       </div>
       {showPts && (
-        <div style={{ flexShrink: 0, fontFamily: 'var(--font-display)', fontStretch: '75%', color: rosterOk ? (win ? 'var(--accent)' : 'var(--text)') : 'var(--danger)', textAlign: isRight ? 'left' : 'right' }}>
-          <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>{rosterOk ? pts.toFixed(1) : '—'}</div>
-          {win && rosterOk && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', letterSpacing: '.06em', marginTop: 2 }}>WIN</div>}
+        <div style={{ flexShrink: 0, textAlign: isRight ? 'left' : 'right' }}>
+          {/* Actual score (large) */}
+          <div style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', color: rosterOk ? (win ? 'var(--accent)' : 'var(--text)') : 'var(--danger)' }}>
+            <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>{rosterOk ? pts.toFixed(1) : '—'}</div>
+            {win && rosterOk && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', letterSpacing: '.06em', marginTop: 2 }}>WIN</div>}
+          </div>
+          {/* Projected score (small, shown when actual differs) */}
+          {hasActual && projPts != null && rosterOk && (
+            <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginTop: 3 }}>
+              {projPts.toFixed(1)} proj
+            </div>
+          )}
+          {!hasActual && (
+            <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>proj</div>
+          )}
         </div>
       )}
     </div>
@@ -376,52 +422,120 @@ function NflGameRow({ game }) {
   );
 }
 
-function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected }) {
+function formatStatLine(p, lockedStats) {
+  if (!p) return null;
+  const s = lockedStats || {};
+  const parts = [];
+  if (s.passYds || p.pos === 'QB') {
+    if (s.passYds) parts.push(`${s.passYds}y`);
+    if (s.passTds) parts.push(`${s.passTds}td`);
+    if (s.passInt) parts.push(`${s.passInt}int`);
+    if (s.rushYds) parts.push(`${s.rushYds} rush`);
+  } else if (p.pos === 'RB') {
+    if (s.rushYds) parts.push(`${s.rushYds}y`);
+    if (s.rushTds) parts.push(`${s.rushTds}td`);
+    if (s.rec != null) parts.push(`${s.rec}rec`);
+    if (s.recYds) parts.push(`+${s.recYds}y`);
+  } else if (['WR', 'TE'].includes(p.pos)) {
+    if (s.rec != null) parts.push(`${s.rec}rec`);
+    if (s.recYds) parts.push(`${s.recYds}y`);
+    if (s.recTds) parts.push(`${s.recTds}td`);
+    if (s.targets) parts.push(`${s.targets}tgt`);
+  } else if (p.pos === 'K' || p.pos === 'PK') {
+    if (s.fgMade) parts.push(`${s.fgMade}fg`);
+    if (s.xpMade) parts.push(`${s.xpMade}xp`);
+  } else if (['DST', 'D/ST', 'DEF'].includes(p.pos)) {
+    if (s.sacks) parts.push(`${s.sacks}sk`);
+    if (s.ints) parts.push(`${s.ints}int`);
+    if (s.ptsAllowed != null) parts.push(`${s.ptsAllowed}pa`);
+  }
+  if (parts.length === 0 && p.last) parts.push(`${p.last.toFixed(1)} last wk`);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected, locked }) {
   const starters = roster.filter(r => r.slot !== 'BENCH');
   const bench    = roster.filter(r => r.slot === 'BENCH');
-  const total    = computeScore(roster, teamId, week);
   const isRight  = side === 'away';
-  const ptColor  = isProjected ? 'var(--text-dim)' : 'var(--accent)';
 
-  function playerPts(p) {
+  function projPts(p) {
     if (!p) return 0;
     const v = p.avg + Math.sin(p.id * 3.7 + week * 2.3) * 4;
     return Math.max(0, Math.round(v * 10) / 10);
   }
 
+  function getLockedEntry(p) {
+    if (!p || !locked?.players) return null;
+    return locked.players.find(x => x.name?.toLowerCase().trim() === p.name?.toLowerCase().trim()) || null;
+  }
+
+  const totalProj = starters.reduce((s, e) => s + projPts(e.playerId ? findPlayer(e.playerId) : null), 0);
+  const lockedEntries = starters.map(e => getLockedEntry(e.playerId ? findPlayer(e.playerId) : null));
+  const hasActual = locked && lockedEntries.some(v => v !== null);
+  const totalActual = hasActual ? lockedEntries.reduce((s, v) => s + (v?.pts ?? 0), 0) : null;
+  const total = totalActual ?? totalProj;
+  const ptColor = isProjected && !hasActual ? 'var(--text-dim)' : 'var(--accent)';
+
   return (
     <div style={{ borderRight: isRight ? 'none' : '1px solid var(--border)', padding: '10px 0' }}>
-      <div style={{ padding: '4px 16px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* Header */}
+      <div style={{ padding: '4px 16px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', letterSpacing: '.1em' }}>STARTERS</span>
-          {isProjected && (
-            <span style={{ fontSize: 8, fontWeight: 800, color: 'var(--text-faint)', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 5px', fontFamily: 'var(--font-mono)', letterSpacing: '.06em' }}>PROJ</span>
-          )}
+          <span style={{ fontSize: 8, fontWeight: 800, color: hasActual ? '#4ea8ff' : 'var(--text-faint)', background: 'var(--panel)', border: `1px solid ${hasActual ? 'rgba(78,168,255,.4)' : 'var(--border)'}`, borderRadius: 3, padding: '1px 5px', fontFamily: 'var(--font-mono)', letterSpacing: '.06em' }}>
+            {hasActual ? 'ACTUAL' : 'PROJ'}
+          </span>
         </div>
-        <span style={{ fontSize: 13, fontWeight: 800, color: ptColor }}>{total.toFixed(1)} pts</span>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+          {hasActual && <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{totalProj.toFixed(1)} proj</span>}
+          <span style={{ fontSize: 13, fontWeight: 800, color: ptColor }}>{total.toFixed(1)} pts</span>
+        </div>
       </div>
+
+      {/* Column labels */}
+      <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 44px 48px', padding: '2px 16px 4px', borderBottom: '1px solid rgba(255,255,255,.06)', fontSize: 8, fontWeight: 700, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+        <span />
+        <span />
+        <span style={{ textAlign: 'right' }}>PROJ</span>
+        <span style={{ textAlign: 'right', color: hasActual ? '#4ea8ff' : 'var(--text-faint)' }}>ACT</span>
+      </div>
+
       {starters.map((entry, i) => {
         const p = entry.playerId ? findPlayer(entry.playerId) : null;
-        const pts = playerPts(p);
-        const ptsColor = isProjected ? 'var(--text-dim)' : pts >= 15 ? 'var(--accent)' : pts >= 8 ? 'var(--text)' : 'var(--text-dim)';
+        const proj = projPts(p);
+        const lockedEntry = p ? getLockedEntry(p) : null;
+        const actual = lockedEntry ? lockedEntry.pts : null;
+        const statLine = formatStatLine(p, lockedEntry?.stats || null);
+        const dispScore = actual ?? proj;
+        const actColor = actual != null ? (dispScore >= 20 ? 'var(--accent)' : dispScore >= 10 ? '#4ea8ff' : 'var(--text)') : 'var(--text-faint)';
         return (
-          <div
-            key={i}
-            style={{ padding: '5px 16px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, cursor: p && onOpenPlayer ? 'pointer' : 'default' }}
+          <div key={i}
+            style={{ padding: '5px 16px', display: 'grid', gridTemplateColumns: '32px 1fr 44px 48px', alignItems: 'center', gap: 6, fontSize: 11, cursor: p && onOpenPlayer ? 'pointer' : 'default' }}
             onClick={p && onOpenPlayer ? () => onOpenPlayer(p.id) : undefined}
           >
-            <span style={{ fontSize: 9, color: 'var(--text-faint)', width: 32, fontFamily: 'var(--font-mono)' }}>{entry.slot}</span>
+            <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{entry.slot}</span>
             {p ? (
               <>
-                <PosBadge pos={p.pos} />
-                <span style={{ flex: 1 }}>{p.name}</span>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: ptsColor }}>{pts.toFixed(1)}</span>
-                  {isProjected && <span style={{ fontSize: 8, color: 'var(--text-faint)', marginLeft: 2 }}>proj</span>}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <PosBadge pos={p.pos} />
+                    <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                  </div>
+                  {statLine && (
+                    <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginTop: 2, paddingLeft: 22, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{statLine}</div>
+                  )}
                 </div>
+                <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)' }}>{proj.toFixed(1)}</span>
+                <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: actColor }}>
+                  {actual != null ? actual.toFixed(1) : '—'}
+                </span>
               </>
             ) : (
-              <span style={{ color: 'var(--text-faint)', flex: 1 }}>Empty slot</span>
+              <>
+                <span style={{ color: 'var(--text-faint)', fontSize: 10, fontStyle: 'italic' }}>Empty slot</span>
+                <span />
+                <span />
+              </>
             )}
           </div>
         );
@@ -431,7 +545,7 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
       )}
       {bench.map((entry, i) => {
         const p = entry.playerId ? findPlayer(entry.playerId) : null;
-        const pts = playerPts(p);
+        const pts = projPts(p);
         return (
           <div key={i} style={{ padding: '4px 16px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, opacity: 0.55 }}>
             <span style={{ fontSize: 9, color: 'var(--text-faint)', width: 32, fontFamily: 'var(--font-mono)' }}>BN</span>
@@ -439,7 +553,7 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
               <>
                 <PosBadge pos={p.pos} />
                 <span style={{ flex: 1 }}>{p.name}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)' }}>{pts.toFixed(1)}{isProjected && <span style={{ fontSize: 8 }}> proj</span>}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)' }}>{pts.toFixed(1)} proj</span>
               </>
             ) : (
               <span style={{ color: 'var(--text-faint)' }}>—</span>

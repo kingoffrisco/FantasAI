@@ -22,7 +22,7 @@ jobs:
 
     env:
       API_BASE: https://api.fantasai.net
-      S3_BUCKET: aws-kingoffisco-s3-bucket
+      S3_BUCKET: aws-kingoffrisco-s3-bucket
       S3_PREFIX: fantasai
       AWS_DEFAULT_REGION: us-east-2
 

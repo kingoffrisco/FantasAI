@@ -163,8 +163,9 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     { id: 'h2h',       label: 'Head to Head',    icon: '⚔' },
     { id: 'players',   label: 'Players',          icon: '👥', badge: 'All' },
     { id: 'news',      label: 'News & Updates',   icon: '📰', badge: '9', live: true },
-    { id: 'waivers',   label: 'Waivers',           icon: '📑' },
-    { id: 'lineup',    label: 'Lineup Decisions',  icon: '⚡', badge: lineupAlertCount > 0 ? String(lineupAlertCount) : undefined, alert: lineupAlertCount > 0 },
+    { id: 'waivers',       label: 'Waivers',           icon: '📑' },
+    { id: 'transactions',  label: 'Transactions',      icon: '📒' },
+    { id: 'lineup',        label: 'Lineup Decisions',  icon: '⚡', badge: lineupAlertCount > 0 ? String(lineupAlertCount) : undefined, alert: lineupAlertCount > 0 },
     { group: 'Tools' },
     { id: 'account',   label: 'My Account / Team', icon: '⊙' },
     { id: 'compare',   label: 'Compare',           icon: '⚖' },
@@ -179,7 +180,8 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     { id: 'settings', label: 'Rules & Settings',  icon: '📋' },
     ...(isAdmin ? [
       { group: 'Admin' },
-      { id: 'admin-owners', label: 'Owners', icon: '👤' },
+      { id: 'admin-owners',  label: 'Owners',       icon: '👤' },
+      { id: 'admin-scoring', label: 'Scoring Test',  icon: '🧮' },
     ] : []),
   ];
 
@@ -312,7 +314,7 @@ export const MobileNav = ({ active, onNav, user, lineupAlertCount = 0 }) => {
           : it
       ),
     }));
-    return [...sections, ...(isAdmin ? [{ group: 'Admin', items: [{ id: 'admin-owners', label: 'Owners', icon: '👤' }] }] : [])];
+    return [...sections, ...(isAdmin ? [{ group: 'Admin', items: [{ id: 'admin-owners', label: 'Owners', icon: '👤' }, { id: 'admin-scoring', label: 'Scoring Test', icon: '🧮' }] }] : [])];
   }, [isAdmin, lineupAlertCount]);
 
   const tabs = [

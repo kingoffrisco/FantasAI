@@ -87,11 +87,53 @@ const BEAT_FALLBACK_RSS = [
   { url: 'https://www.nfl.com/rss/rsslanding?searchString=news', handle: 'NFLcom', reporter: 'NFL.com News', category: 'national' },
 ];
 
+// ── NFL team stadium map ──────────────────────────────────────────────────────
+// Used by weather refresh to fetch forecasts for outdoor venues only.
+// Dome teams get a "DOME" indicator — weather has no fantasy impact.
+const NFL_TEAMS = {
+  ARI: { city: 'Glendale, AZ',        dome: true  },
+  ATL: { city: 'Atlanta, GA',          dome: true  },
+  BAL: { city: 'Baltimore, MD',        dome: false },
+  BUF: { city: 'Orchard Park, NY',     dome: false },
+  CAR: { city: 'Charlotte, NC',        dome: false },
+  CHI: { city: 'Chicago, IL',          dome: false },
+  CIN: { city: 'Cincinnati, OH',       dome: false },
+  CLE: { city: 'Cleveland, OH',        dome: false },
+  DAL: { city: 'Arlington, TX',        dome: true  },
+  DEN: { city: 'Denver, CO',           dome: false },
+  DET: { city: 'Detroit, MI',          dome: true  },
+  GB:  { city: 'Green Bay, WI',        dome: false },
+  HOU: { city: 'Houston, TX',          dome: true  },
+  IND: { city: 'Indianapolis, IN',     dome: true  },
+  JAX: { city: 'Jacksonville, FL',     dome: false },
+  KC:  { city: 'Kansas City, MO',      dome: false },
+  LAC: { city: 'Inglewood, CA',        dome: false },
+  LAR: { city: 'Inglewood, CA',        dome: true  },
+  LV:  { city: 'Las Vegas, NV',        dome: true  },
+  MIA: { city: 'Miami Gardens, FL',    dome: false },
+  MIN: { city: 'Minneapolis, MN',      dome: true  },
+  NE:  { city: 'Foxborough, MA',       dome: false },
+  NO:  { city: 'New Orleans, LA',      dome: true  },
+  NYG: { city: 'East Rutherford, NJ',  dome: false },
+  NYJ: { city: 'East Rutherford, NJ',  dome: false },
+  PHI: { city: 'Philadelphia, PA',     dome: false },
+  PIT: { city: 'Pittsburgh, PA',       dome: false },
+  SEA: { city: 'Seattle, WA',          dome: false },
+  SF:  { city: 'Santa Clara, CA',      dome: false },
+  TB:  { city: 'Tampa, FL',            dome: false },
+  TEN: { city: 'Nashville, TN',        dome: false },
+  WAS: { city: 'Landover, MD',         dome: false },
+};
+
 const S3_KEY              = 'fantasai/owners-config.json';
 const S3_LEAGUE_KEY       = 'fantasai/league-config.json';
 const S3_ROSTERS_KEY      = 'fantasai/rosters.json';
 const S3_SCHEDULE_KEY     = 'fantasai/schedule.json';
 const S3_SETTINGS_KEY     = 'fantasai/league-settings.json';
+const S3_WEATHER_KEY      = 'fantasai/analysis/weather_forecast.json';
+
+// Weather refresh cooldown: 30 minutes (prevents burning WWO quota on rapid clicks)
+const WEATHER_COOLDOWN_MS = 30 * 60 * 1000;
 
 const PROTECTED_GET = {
   '/api/v1/injuries':    handleInjuries,
@@ -129,6 +171,9 @@ export default {
         if (url.pathname === '/api/v1/rosters/reset')         return handleRosterReset(request, env);
         if (url.pathname === '/api/v1/schedule')              return handleScheduleSave(request, env);
         if (url.pathname === '/api/v1/league-settings')       return handleLeagueSettingsSave(request, env);
+        if (url.pathname === '/api/v1/weather/refresh')       return handleWeatherRefresh(request, env);
+        if (url.pathname === '/api/v1/transactions')          return handleTransactionsPost(request, env);
+        if (url.pathname === '/api/v1/scrape')                return handleScrape(request);
         return json({ error: 'Not found' }, 404);
       }
 
@@ -146,13 +191,17 @@ export default {
       if (url.pathname === '/api/v1/league-settings')     return handleLeagueSettingsLoad(url, env);
       if (url.pathname === '/api/v1/proxy')               return handleProxy(url);
       if (url.pathname === '/api/v1/nfl/scoreboard')      return handleNflScoreboard(url);
+      if (url.pathname === '/api/v1/nfl/player-stats')   return handleNflPlayerStats(url);
       if (url.pathname === '/api/v1/nfl/schedule')        return handleNflSchedule(url);
       if (url.pathname === '/api/v1/nfl/news')            return handleNflNews(url);
       if (url.pathname === '/api/v1/players')             return handlePlayers(url);
       if (url.pathname === '/api/v1/cbs/players')         return await handleCbsPlayers(env);
+      if (url.pathname === '/api/v1/weather')            return await handleWeatherGet(env);
+      if (url.pathname === '/api/v1/transactions')      return await handleTransactionsGet(env);
       if (url.pathname === '/api/v1/cbs/rankings')        return await handleCbsRankings(url, env);
       if (url.pathname === '/api/v1/twitter/beat')        return await handleBeatWriterNews();
       if (url.pathname.startsWith('/api/v1/player/'))   return await handlePlayerProfile(url, env);
+      if (url.pathname === '/api/v1/db/players')          return await handleDbPlayers(env);
       if (url.pathname === '/api/v1/news/latest')        return await handleDbNews(env);
       if (url.pathname === '/api/v1/news/critical')      return await handleDbCritical(env);
       if (url.pathname === '/api/v1/leaderboard/live')   return await handleDbLeaderboard(env);
@@ -711,6 +760,151 @@ async function handleNflNews(url) {
   return json({ source: 'espn', fetchedAt: new Date().toISOString(), count: articles.length, articles }, 200);
 }
 
+// ── NFL Player Stats (ESPN box scores) ──────────────────────────────────────
+async function handleNflPlayerStats(url) {
+  const { week, season, type } = resolveWeekParams(url);
+  const seasonType = espnSeasonType(type);
+
+  // Step 1: get the scoreboard to find game IDs
+  const board = await espnFetch(`/scoreboard?seasontype=${seasonType}&week=${week}&season=${season}`);
+  const events = (board.events || []).filter(e => {
+    const d = new Date(e.date);
+    return d >= new Date(`${season}-07-01`) && d < new Date(`${season + 1}-03-01`);
+  });
+
+  if (events.length === 0) {
+    return json({ source: 'espn', week, season, gameCount: 0, players: [], fetchedAt: new Date().toISOString() }, 200);
+  }
+
+  // Step 2: fetch box scores for each game in parallel (cap at 16 games)
+  const gameIds = events.slice(0, 16).map(e => e.id);
+  const summaries = await Promise.allSettled(
+    gameIds.map(id => espnFetch(`/summary?event=${id}`))
+  );
+
+  // Step 3: parse player stats from each game
+  const playerMap = {};
+
+  for (let i = 0; i < summaries.length; i++) {
+    const result = summaries[i];
+    if (result.status !== 'fulfilled') continue;
+    const data = result.value;
+    const boxscore = data.boxscore || {};
+
+    // Determine team scores for DST pts-allowed calculation
+    const teamScores = {};
+    for (const comp of (events[i]?.competitions?.[0]?.competitors || [])) {
+      const abbr = comp.team?.abbreviation || '';
+      teamScores[abbr] = parseInt(comp.score || '0', 10);
+    }
+
+    // Parse individual player stats
+    for (const teamData of (boxscore.players || [])) {
+      const teamAbbr = teamData.team?.abbreviation || '';
+      const opponentAbbr = Object.keys(teamScores).find(k => k !== teamAbbr) || '';
+      const ptsAllowed = teamScores[opponentAbbr] ?? null;
+
+      for (const statGroup of (teamData.statistics || [])) {
+        const { name, keys = [], athletes = [] } = statGroup;
+        for (const athleteEntry of athletes) {
+          const athlete = athleteEntry.athlete || {};
+          const statsArr = athleteEntry.stats || [];
+          const pid = athlete.id;
+          if (!pid) continue;
+
+          if (!playerMap[pid]) {
+            playerMap[pid] = {
+              id: pid,
+              name: athlete.displayName || '',
+              pos: athlete.position?.abbreviation || '',
+              team: teamAbbr,
+              stats: {},
+            };
+          }
+          const p = playerMap[pid];
+
+          function sv(key) {
+            const idx = keys.indexOf(key);
+            if (idx < 0) return 0;
+            const v = statsArr[idx];
+            return v && v !== '--' ? parseFloat(v) || 0 : 0;
+          }
+          function splitSlash(key) {
+            const idx = keys.indexOf(key);
+            const v = idx >= 0 ? (statsArr[idx] || '') : '';
+            const parts = v.split('/');
+            return { a: parseFloat(parts[0]) || 0, b: parseFloat(parts[1]) || 0 };
+          }
+          function splitDash(key) {
+            const idx = keys.indexOf(key);
+            const v = idx >= 0 ? (statsArr[idx] || '') : '';
+            const parts = v.split('-');
+            return parseFloat(parts[0]) || 0;
+          }
+
+          if (name === 'passing') {
+            const ca = splitSlash('completionsAttempts');
+            p.stats.passComp = (p.stats.passComp || 0) + ca.a;
+            p.stats.passAtt  = (p.stats.passAtt  || 0) + ca.b;
+            p.stats.passYds  = (p.stats.passYds  || 0) + sv('passingYards');
+            p.stats.passTds  = (p.stats.passTds  || 0) + sv('passingTouchdowns');
+            p.stats.passInt  = (p.stats.passInt  || 0) + sv('interceptions');
+          } else if (name === 'rushing') {
+            p.stats.rushAtt = (p.stats.rushAtt || 0) + sv('rushingAttempts');
+            p.stats.rushYds = (p.stats.rushYds || 0) + sv('rushingYards');
+            p.stats.rushTds = (p.stats.rushTds || 0) + sv('rushingTouchdowns');
+          } else if (name === 'receiving') {
+            p.stats.rec     = (p.stats.rec     || 0) + sv('receptions');
+            p.stats.recYds  = (p.stats.recYds  || 0) + sv('receivingYards');
+            p.stats.recTds  = (p.stats.recTds  || 0) + sv('receivingTouchdowns');
+            p.stats.targets = (p.stats.targets || 0) + sv('receivingTargets');
+          } else if (name === 'kicking') {
+            const fg = splitSlash('fieldGoalsMadeFieldGoalsAttempted');
+            const xp = splitSlash('extraPointsMadeExtraPointsAttempted');
+            p.stats.fgMade  = (p.stats.fgMade  || 0) + fg.a;
+            p.stats.fgAtt   = (p.stats.fgAtt   || 0) + fg.b;
+            p.stats.xpMade  = (p.stats.xpMade  || 0) + xp.a;
+            if (!p.pos || p.pos === '') p.pos = 'K';
+          } else if (name === 'defensive') {
+            p.stats.sacks   = (p.stats.sacks   || 0) + sv('sacks');
+            p.stats.ints    = (p.stats.ints    || 0) + sv('interceptions');
+            p.stats.fumRec  = (p.stats.fumRec  || 0) + sv('fumbleRecoveries');
+            p.stats.tds     = (p.stats.tds     || 0) + sv('defensiveTouchdowns');
+            p.stats.safeties= (p.stats.safeties|| 0) + sv('safeties');
+          }
+
+          // Tag DST players with ptsAllowed for their team's defense
+          if (ptsAllowed !== null) p.stats.ptsAllowed = ptsAllowed;
+        }
+      }
+    }
+  }
+
+  // Normalize ESPN position abbreviations to fantasy slot names
+  const POS_NORM = { HB: 'RB', FB: 'RB', WB: 'RB', FL: 'WR', SE: 'WR', SWR: 'WR', 'D/ST': 'DST', DEF: 'DST', PK: 'K' };
+  for (const p of Object.values(playerMap)) {
+    const t = (p.pos || '').trim();
+    p.pos = POS_NORM[t] || t;
+  }
+
+  // Filter to players with at least some recorded stats.
+  // Kickers are included if they appeared in the kicking stat group (fgAtt > 0) even if they missed all FGs.
+  const players = Object.values(playerMap).filter(p => {
+    const s = p.stats;
+    return (s.passYds || s.rushYds || s.recYds || s.rec || s.fgMade || s.fgAtt || s.sacks || s.ints || s.tds) > 0
+      || (s.xpMade || 0) > 0;
+  });
+
+  return json({
+    source: 'espn',
+    fetchedAt: new Date().toISOString(),
+    week,
+    season,
+    gameCount: gameIds.length,
+    players,
+  }, 200);
+}
+
 // ── Proxy (CORS bypass for whitelisted third-party APIs) ─────────────────────
 
 const PROXY_WHITELIST = [
@@ -902,6 +1096,185 @@ async function handleR2Proxy(request, env, url) {
   if (method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
 
   return json({ error: 'Method not allowed' }, 405);
+}
+
+// ── Weather (WorldWeatherOnline) ──────────────────────────────────────────────
+
+async function handleWeatherGet(env) {
+  if (!env.BUCKET) return json({ teams: {}, fetched_at: null, cached: false }, 200);
+  try {
+    const obj = await env.BUCKET.get(S3_WEATHER_KEY);
+    if (!obj) return json({ teams: {}, fetched_at: null, cached: false }, 200);
+    const data = JSON.parse(await obj.text());
+    return json({ ...data, cached: true }, 200);
+  } catch (err) {
+    return json({ teams: {}, fetched_at: null, cached: false, error: err.message }, 200);
+  }
+}
+
+async function handleWeatherRefresh(request, env) {
+  if (!env.BUCKET) return json({ error: 'R2 binding not configured' }, 503);
+  if (!env.WWO_API_KEY) {
+    return json({ error: 'WWO_API_KEY not configured — run: wrangler secret put WWO_API_KEY' }, 503);
+  }
+
+  // Enforce 30-minute cooldown to protect WWO daily quota (500 calls/day free tier)
+  try {
+    const existing = await env.BUCKET.get(S3_WEATHER_KEY);
+    if (existing) {
+      const prev = JSON.parse(await existing.text());
+      const age  = Date.now() - new Date(prev.fetched_at || 0).getTime();
+      if (age < WEATHER_COOLDOWN_MS) {
+        const nextRefreshSec = Math.ceil((WEATHER_COOLDOWN_MS - age) / 1000);
+        return json({
+          ok: false, cached: true, teams: prev.teams || {},
+          fetched_at: prev.fetched_at,
+          message: `Rate limited — refresh available in ${nextRefreshSec}s`,
+          next_refresh_sec: nextRefreshSec,
+        }, 200);
+      }
+    }
+  } catch {}
+
+  const body = await request.json().catch(() => ({}));
+  const numDays = Math.min(parseInt(body.days || '7'), 7);
+
+  const results = {};
+  const errors  = [];
+
+  // Dome teams — no weather data needed
+  for (const [team, info] of Object.entries(NFL_TEAMS)) {
+    if (info.dome) results[team] = { team, city: info.city, is_dome: true, forecast: null };
+  }
+
+  // Fetch outdoor teams in batches of 5 (WWO allows ~5 concurrent)
+  const outdoor    = Object.entries(NFL_TEAMS).filter(([, v]) => !v.dome);
+  const BATCH_SIZE = 5;
+
+  for (let i = 0; i < outdoor.length; i += BATCH_SIZE) {
+    const batch = outdoor.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(async ([team, info]) => {
+      try {
+        const wwoUrl = `https://api.worldweatheronline.com/premium/v1/weather.ashx` +
+          `?key=${env.WWO_API_KEY}&q=${encodeURIComponent(info.city)}` +
+          `&format=json&num_of_days=${numDays}&hourly=1&tp=1&lang=en`;
+        const res = await fetch(wwoUrl, { signal: AbortSignal.timeout(12000) });
+        if (!res.ok) throw new Error(`WWO HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.data?.error) throw new Error(data.data.error[0]?.msg || 'WWO error');
+        results[team] = { team, city: info.city, is_dome: false, forecast: shapeWWOForecast(data) };
+      } catch (err) {
+        errors.push(`${team}: ${err.message}`);
+        results[team] = { team, city: info.city, is_dome: false, forecast: null, error: err.message };
+      }
+    }));
+    if (i + BATCH_SIZE < outdoor.length) await sleep(1100); // ~1 req/sec headroom
+  }
+
+  const payload = {
+    fetched_at:    new Date().toISOString(),
+    num_days:      numDays,
+    team_count:    Object.keys(results).length,
+    outdoor_count: outdoor.length,
+    teams:         results,
+  };
+
+  await env.BUCKET.put(S3_WEATHER_KEY, JSON.stringify(payload), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+
+  return json({
+    ok:          true,
+    fetched_at:  payload.fetched_at,
+    team_count:  payload.team_count,
+    error_count: errors.length,
+    errors,
+    teams:       results,
+  }, 200);
+}
+
+function shapeWWOForecast(raw) {
+  return (raw.data?.weather || []).map(day => ({
+    date:       day.date,
+    max_temp_f: parseInt(day.maxtempF  || 0),
+    min_temp_f: parseInt(day.mintempF  || 0),
+    hourly: (day.hourly || []).map(h => ({
+      time:            h.time,
+      temp_f:          parseInt(h.tempF          || 0),
+      feels_like_f:    parseInt(h.FeelsLikeF     || 0),
+      wind_mph:        parseInt(h.windspeedMiles  || 0),
+      wind_dir:        h.winddir16Point           || '',
+      precip_in:       Math.round((parseFloat(h.precipMM || 0) / 25.4) * 100) / 100,
+      humidity_pct:    parseInt(h.humidity       || 0),
+      cloud_cover_pct: parseInt(h.cloudcover     || 0),
+      condition:       h.weatherDesc?.[0]?.value || '',
+    })),
+  }));
+}
+
+// ── League Transactions (R2-backed, no auth required for reads or writes) ────
+const TX_R2_KEY = 'fantasai/league/transactions.json';
+const TX_MAX    = 300;
+
+async function handleTransactionsGet(env) {
+  if (!env.BUCKET) return json([], 200);
+  const obj = await env.BUCKET.get(TX_R2_KEY);
+  if (!obj) return json([], 200);
+  try {
+    const data = await obj.json();
+    return json(Array.isArray(data) ? data : [], 200);
+  } catch {
+    return json([], 200);
+  }
+}
+
+async function handleTransactionsPost(request, env) {
+  if (!env.BUCKET) return json({ error: 'R2 not configured' }, 503);
+  let tx;
+  try { tx = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  if (!tx || !tx.type || !tx.timestamp) return json({ error: 'Missing type or timestamp' }, 400);
+
+  const obj = await env.BUCKET.get(TX_R2_KEY);
+  let existing = [];
+  if (obj) { try { existing = await obj.json(); } catch {} }
+  if (!Array.isArray(existing)) existing = [];
+
+  const updated = [tx, ...existing].slice(0, TX_MAX);
+  await env.BUCKET.put(TX_R2_KEY, JSON.stringify(updated), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+  return json({ ok: true, count: updated.length }, 200);
+}
+
+// ── Web Scrape Proxy ─────────────────────────────────────────────────────────
+// POST /api/v1/scrape — fetch any public URL server-side (bypasses CORS)
+// Returns { html, url } or { error }. Caps response at 600 KB.
+
+async function handleScrape(request) {
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  const target = (body.url || '').trim();
+  if (!target) return json({ error: 'url required' }, 400);
+  let parsed;
+  try { parsed = new URL(target); } catch { return json({ error: 'Invalid URL' }, 400); }
+  if (!['http:', 'https:'].includes(parsed.protocol)) return json({ error: 'Only http/https URLs allowed' }, 400);
+
+  try {
+    const res = await fetch(target, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) return json({ error: `Site returned HTTP ${res.status}` }, 502);
+    const text = await res.text();
+    return json({ html: text.slice(0, 600000), url: target, status: res.status }, 200);
+  } catch (err) {
+    return json({ error: `Fetch failed: ${err.message}` }, 502);
+  }
 }
 
 // ── Cloudflare R2 (native binding) ───────────────────────────────────────────
@@ -1191,6 +1564,22 @@ async function handlePlayerProfile(url, env) {
     `SELECT * FROM main.fantasai_news.api_player_profile WHERE player_name = '${name}' LIMIT 1`, env
   );
   return json({ status: 'success', data: rows[0] || null, metadata: { timestamp: new Date().toISOString() } }, 200);
+}
+
+async function handleDbPlayers(env) {
+  const rows = await queryDatabricks(`
+    SELECT
+      player_id, full_name, first_name, last_name,
+      position, team, injury_status, search_rank,
+      number, age, status
+    FROM main.fantasai.bronze_player_news_raw
+    WHERE position IN ('QB','RB','WR','TE','K','DEF')
+      AND team IS NOT NULL
+      AND (status IS NULL OR status != 'Inactive')
+    ORDER BY CAST(search_rank AS INT) ASC NULLS LAST
+    LIMIT 2000
+  `, env);
+  return json({ source: 'databricks', fetchedAt: new Date().toISOString(), count: rows.length, players: rows }, 200);
 }
 
 async function handleDbNews(env) {

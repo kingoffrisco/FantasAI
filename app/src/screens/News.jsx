@@ -7,6 +7,9 @@ const ROSTERED_IDS = new Set(
 );
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
+import { useR2PlayerNotes, useR2AiSummaries } from '../hooks.js';
+
+const FANTASAI_SRC = { id: 'fantasai-notes', name: 'FantasAI', color: '#c6ff3a', kind: 'ai' };
 
 const API_BASE = 'https://api.fantasai.net';
 
@@ -100,6 +103,9 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
   const [search,   setSearch]   = React.useState('');
   const [faFilter, setFaFilter] = React.useState('all'); // 'all' | 'fa' | 'sleeper'
 
+  const { data: r2PlayerNotes, fetchedAt: r2NotesFetchedAt } = useR2PlayerNotes();
+  const { data: r2AiSummaries } = useR2AiSummaries();
+
   // liveItems: { [sourceId]: newsItem[] }
   const [liveItems,         setLiveItems]         = React.useState({});
   const [fetchingSourceIds, setFetchingSourceIds] = React.useState(new Set());
@@ -117,9 +123,89 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     [],
   );
 
+  // Convert R2 player_notes → liveItems when data arrives
+  React.useEffect(() => {
+    if (!r2PlayerNotes) return;
+    const arr = Array.isArray(r2PlayerNotes) ? r2PlayerNotes : [];
+    const items = [];
+    for (const pn of arr) {
+      if (!pn.notes?.length) continue;
+      const note   = pn.notes[0];
+      const player = matchPlayer(pn.player_name || '');
+      if (!player) continue;
+      const impact = pn.has_critical_news || note.priority === 'critical' ? 'high'
+                   : note.priority === 'high'                              ? 'med'
+                   : note.impact_direction === 'positive'                  ? 'good'
+                   : 'low';
+      items.push({
+        id:          `fantasai-${player.id}`,
+        playerId:    player.id,
+        type:        pn.has_injury_concern ? 'injury' : 'analysis',
+        impact,
+        mins:        0,
+        fetchedAt:   pn.last_updated ? new Date(pn.last_updated).getTime() : Date.now(),
+        publishedAt: note.published_at ? new Date(note.published_at).getTime() : null,
+        source:      'FantasAI',
+        sourceId:    'fantasai-notes',
+        color:       '#c6ff3a',
+        title:       note.note_text ? note.note_text.slice(0, 120) : '',
+        body:        pn.notes.slice(0, 3).map(n => n.note_text).filter(Boolean).join(' · '),
+        impactScore: pn.overall_impact_score,
+      });
+    }
+    setLiveItems(prev => ({ ...prev, 'fantasai-notes': items }));
+  }, [r2PlayerNotes]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Convert R2 ai_summaries → liveItems when data arrives
+  React.useEffect(() => {
+    if (!r2AiSummaries) return;
+    const arr = Array.isArray(r2AiSummaries) ? r2AiSummaries : [];
+    const now = Date.now();
+    const items = [];
+    for (const s of arr) {
+      // Skip expired or low-relevance summaries
+      if (s.expires_at && new Date(s.expires_at).getTime() < now) continue;
+      if ((s.fantasy_relevance_score ?? 1) < 0.5) continue;
+      const impacted = Array.isArray(s.impacted_players) ? s.impacted_players : [];
+      // Primary player = highest magnitude
+      const primary = impacted.slice().sort((a, b) => (b.impact_magnitude ?? 0) - (a.impact_magnitude ?? 0))[0];
+      if (!primary) continue;
+      const player = matchPlayer(primary.player_name || '');
+      if (!player) continue;
+      const impact = s.priority_level === 'critical' ? 'high'
+                   : s.priority_level === 'high'     ? 'med'
+                   : primary.impact_direction === 'positive' ? 'good'
+                   : 'low';
+      const title = s.fantasy_insight ? s.fantasy_insight.slice(0, 120) : extractTitle(s.summary_text);
+      const body  = s.summary_text || '';
+      // Other players affected (ripple)
+      const ripple = impacted
+        .filter(p => p.player_name !== primary.player_name)
+        .slice(0, 4)
+        .map(p => ({ name: p.player_name, direction: p.impact_direction }));
+      items.push({
+        id:          `ai-sum-${s.summary_id || player.id}-${s.generated_at}`,
+        playerId:    player.id,
+        type:        s.impact_category === 'injury' ? 'injury' : 'analysis',
+        impact,
+        mins:        0,
+        fetchedAt:   s.generated_at ? new Date(s.generated_at).getTime() : Date.now(),
+        publishedAt: s.generated_at ? new Date(s.generated_at).getTime() : null,
+        source:      'FantasAI AI',
+        sourceId:    'fantasai-ai',
+        color:       '#c6ff3a',
+        title,
+        body,
+        ripple,
+        confidence:  s.llm_confidence ?? null,
+      });
+    }
+    setLiveItems(prev => ({ ...prev, 'fantasai-ai': items }));
+  }, [r2AiSummaries]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const activatedSources = React.useMemo(() => {
-    // Sleeper first (default), CBS second, then user-toggled sources
-    const result = [SLEEPER_SRC, CBS_NEWS_SRC];
+    // FantasAI first (R2/Databricks), then Sleeper, CBS, then user-toggled sources
+    const result = [FANTASAI_SRC, SLEEPER_SRC, CBS_NEWS_SRC];
     for (const src of FREE_DATA_SOURCES) {
       if (src.id === 'sleeper-api' || src.id === 'cbs-news') continue;
       if (sourcesState?.freeApis?.[src.id]) result.push({ ...src, kind: 'free' });
@@ -456,46 +542,38 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
           </div>
         </div>
 
-        {/* Source refresh buttons — same pattern as Current Roster */}
+        {/* Single "Refresh All" button */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, marginLeft: 'auto' }}>
-          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>
-            Data Source Refresh
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* FantasAI R2 chip */}
+            <span style={{
+              fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+              color: r2PlayerNotes ? '#c6ff3a' : 'var(--text-faint)',
+              background: r2PlayerNotes ? 'rgba(198,255,58,.1)' : 'transparent',
+              border: `1px solid ${r2PlayerNotes ? 'rgba(198,255,58,.35)' : 'var(--border)'}`,
+              borderRadius: 4, padding: '3px 8px', whiteSpace: 'nowrap',
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: r2PlayerNotes ? '#c6ff3a' : 'var(--text-faint)', flexShrink: 0, display: 'inline-block' }} />
+              ◆ FantasAI{r2NotesFetchedAt ? ` · ${fmtAge(0, r2NotesFetchedAt)}` : r2PlayerNotes === null ? ' · no data' : ' · loading…'}
+            </span>
+            <button
+              className="btn sm"
+              style={{ fontSize: 11, whiteSpace: 'nowrap' }}
+              disabled={fetchingSourceIds.size > 0}
+              onClick={() => activatedSources.filter(s => s.kind !== 'ai').forEach(src => handleRefreshSource(src))}
+            >
+              {fetchingSourceIds.size > 0 ? `⟳ Refreshing (${fetchingSourceIds.size})…` : '↻ Refresh All'}
+            </button>
           </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {activatedSources.map(src => {
-              const isFetching = fetchingSourceIds.has(src.id);
-              const ts  = lastFetched[src.id];
-              const ago = ts ? Math.round((Date.now() - ts) / 60000) : null;
-              return (
-                <button
-                  key={src.id}
-                  className="btn sm ghost"
-                  style={{ fontSize: 10, borderColor: src.color, color: isFetching ? 'var(--text-faint)' : src.color, whiteSpace: 'nowrap' }}
-                  disabled={isFetching}
-                  onClick={() => handleRefreshSource(src)}
-                >
-                  {isFetching ? `⟳ ${src.name}…` : `↻ ${src.name}${ago != null ? ` · ${ago}m ago` : ''}`}
-                </button>
-              );
-            })}
-          </div>
-          {activatedSources.some(s => refreshResults[s.id] || sourceErrors[s.id]) && (
+          {/* Error summary row */}
+          {Object.keys(sourceErrors).length > 0 && (
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              {activatedSources.filter(s => refreshResults[s.id] || sourceErrors[s.id]).map(src => {
-                const err = sourceErrors[src.id];
-                if (err) {
-                  return (
-                    <span key={src.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                      <span style={{ color: '#ff6b6b', fontWeight: 700 }}>{src.name}</span>
-                      <span style={{ color: '#ff6b6b', opacity: 0.85 }}>⚠ {err}</span>
-                    </span>
-                  );
-                }
-                const { updated, total } = refreshResults[src.id];
+              {Object.entries(sourceErrors).map(([srcId, err]) => {
+                const src = activatedSources.find(s => s.id === srcId);
                 return (
-                  <span key={src.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                    <span style={{ color: updated > 0 ? src.color : 'var(--text-faint)', fontWeight: 700 }}>{src.name}</span>
-                    <span style={{ color: updated > 0 ? src.color : 'var(--text-faint)', opacity: 0.85 }}>{updated}/{total}</span>
+                  <span key={srcId} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: '#ff6b6b' }}>
+                    {src?.name || srcId}: ⚠ {err}
                   </span>
                 );
               })}
@@ -573,128 +651,118 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
             <div style={{ fontSize: 32 }}>📰</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-dim)' }}>No news loaded yet</div>
             <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 320, lineHeight: 1.6 }}>
-              Click <span style={{ color: '#0d4ea2', fontWeight: 700 }}>↻ CBS League News</span> above to pull live articles from your CBS league, or refresh any other source.
+              Click <strong style={{ color: 'var(--accent)' }}>↻ Refresh All</strong> above to pull the latest news from all active sources.
             </div>
-            {sourceErrors['cbs-news'] && (
-              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#ff6b6b', background: 'rgba(255,107,107,.08)', border: '1px solid rgba(255,107,107,.2)', borderRadius: 6, padding: '8px 16px', maxWidth: 360, textAlign: 'center' }}>
-                CBS: {sourceErrors['cbs-news']}
-                {sourceErrors['cbs-news'].includes('502') && (
-                  <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-faint)' }}>
-                    CBS worker is deployed but the session cookie may have expired — run <code>wrangler secret put CBS_COOKIE</code> in <code>worker/</code> and redeploy.
-                  </div>
-                )}
-              </div>
-            )}
           </div>
-        ) : <TableView news={news} activatedSources={activatedSources} onOpenPlayer={onOpenPlayer} />
+        ) : <FeedView news={news} onOpenPlayer={onOpenPlayer} />
         }
       </div>
     </div>
   );
 }
 
-/* ── Table view — one row per player, one column per source ──────────────────── */
-function TableView({ news, activatedSources, onOpenPlayer }) {
-  // Only show columns for sources that have at least one update in the visible set
-  const colSources = activatedSources.filter(src =>
-    news.some(n => (n.sources || [n]).some(s => (s.sourceId ?? s.source) === (src.id ?? src.name)))
-  );
-
-  // Deduplicate to one entry per player (news is already grouped by player)
-  const seenPlayers = new Set();
-  const playerRows = news.filter(n => {
-    if (seenPlayers.has(n.playerId)) return false;
-    seenPlayers.add(n.playerId);
-    return true;
-  });
+/* ── Single-column feed — one card per player ────────────────────────────────── */
+function FeedView({ news, onOpenPlayer }) {
+  const IMPACT_COLOR = { high: 'var(--danger)', med: 'var(--warn)', good: 'var(--good)', low: 'var(--text-faint)' };
 
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
-      <colgroup>
-        {/* Player column — fixed width */}
-        <col style={{ width: 220 }} />
-        {/* Source columns — equal share of remaining space */}
-        {colSources.map(src => <col key={src.id} />)}
-      </colgroup>
+    <div style={{ maxWidth: 780, margin: '0 auto', padding: '0 16px 32px' }}>
+      {news.map(n => {
+        const player = findPlayer(n.playerId);
+        if (!player) return null;
+        const impactColor = IMPACT_COLOR[n.impact] || 'var(--text-faint)';
 
-      <thead>
-        <tr style={{ background: 'var(--panel-2)' }}>
-          <th style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--panel-2)', textAlign: 'left', padding: '8px 16px', borderBottom: '2px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', whiteSpace: 'nowrap' }}>
-            Player
-          </th>
-          {colSources.map(src => (
-            <th key={src.id} style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--panel-2)', textAlign: 'left', padding: '8px 12px', borderBottom: `2px solid ${src.color}`, borderLeft: '1px solid var(--border)', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: src.color, textTransform: 'uppercase', letterSpacing: '.08em', whiteSpace: 'nowrap' }}>
-              {src.name}
-            </th>
-          ))}
-        </tr>
-      </thead>
+        // Pick the best source item: prefer FantasAI, then by impact rank
+        const sources = n.sources || [n];
+        const best = sources.find(s => s.sourceId === 'fantasai-notes') || sources[0];
+        const title = best?.title || n.title || '';
+        const body  = best?.body  || n.body  || '';
+        const dateStr = fmtNewsDate(best?.publishedAt || best?.fetchedAt);
 
-      <tbody>
-        {playerRows.map(n => {
-          const player = findPlayer(n.playerId);
-          if (!player) return null;
+        return (
+          <div
+            key={n.playerId}
+            onClick={() => onOpenPlayer(player.id)}
+            style={{
+              display: 'flex', gap: 14, padding: '13px 0',
+              borderBottom: '1px solid var(--border)',
+              borderLeft: `3px solid ${impactColor}`,
+              paddingLeft: 14, cursor: 'pointer',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
+            onMouseLeave={e => e.currentTarget.style.background = ''}
+          >
+            {/* Avatar */}
+            <PlayerAvatar player={player} size="sm" style={{ flexShrink: 0, marginTop: 2 }} />
 
-          // Build per-source lookup for this player
-          const srcMap = {};
-          for (const s of (n.sources || [n])) {
-            const key = s.sourceId ?? s.source;
-            if (key) srcMap[key] = s;
-          }
-
-          return (
-            <tr
-              key={n.playerId}
-              onClick={() => onOpenPlayer(player.id)}
-              style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
-              onMouseLeave={e => e.currentTarget.style.background = ''}
-            >
-              {/* Player cell */}
-              <td style={{ padding: '7px 16px', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <PlayerAvatar player={player} size="sm" />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{player.name}</div>
-                    <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginTop: 2 }}>
-                      <PosBadge pos={player.pos} />
-                      <div className={`news-impact impact-${n.impact}`} style={{ fontSize: 8, padding: '1px 5px' }}>
-                        {n.impact === 'good' ? 'BOOST' : n.impact?.toUpperCase()}
-                      </div>
-                    </div>
-                  </div>
+            {/* Body */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {/* Player name row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: 13 }}>{player.name}</span>
+                <PosBadge pos={player.pos} />
+                <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{player.team}</span>
+                <div className={`news-impact impact-${n.impact}`} style={{ fontSize: 8, padding: '1px 5px' }}>
+                  {n.impact === 'good' ? 'BOOST' : n.impact?.toUpperCase()}
                 </div>
-              </td>
+              </div>
 
-              {/* One cell per source column */}
-              {colSources.map(src => {
-                const item = srcMap[src.id] ?? srcMap[src.name];
-                const text = item ? (item.title || item.body || '') : '';
-                const dateStr = item ? fmtNewsDate(item.publishedAt || item.fetchedAt) : null;
-                return (
-                  <td key={src.id} style={{ padding: '7px 12px', borderLeft: '1px solid var(--border)', verticalAlign: 'middle', maxWidth: 0 }}>
-                    {text ? (
-                      <div>
-                        {dateStr && (
-                          <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginBottom: 2, whiteSpace: 'nowrap' }}>
-                            {dateStr}
-                          </div>
-                        )}
-                        <span style={{ fontSize: 11, color: src.color, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={text}>
-                          {text}
-                        </span>
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--panel-3)', fontSize: 11 }}>—</span>
-                    )}
-                  </td>
-                );
-              })}
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+              {/* Headline */}
+              {title && (
+                <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.4, marginBottom: body && body !== title ? 4 : 0 }}>
+                  {title}
+                </div>
+              )}
+
+              {/* Body (if different from title) */}
+              {body && body !== title && (
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+                  {body.length > 220 ? body.slice(0, 220) + '…' : body}
+                </div>
+              )}
+
+              {/* Ripple effect — other players impacted by same AI summary */}
+              {best?.ripple?.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 5, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>Ripple:</span>
+                  {best.ripple.map((r, i) => (
+                    <span key={i} style={{
+                      fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
+                      color: r.direction === 'positive' ? 'var(--good)' : r.direction === 'negative' ? 'var(--danger)' : 'var(--text-faint)',
+                      background: r.direction === 'positive' ? 'rgba(52,211,153,.12)' : r.direction === 'negative' ? 'rgba(255,90,110,.12)' : 'var(--panel-3)',
+                      border: `1px solid ${r.direction === 'positive' ? 'rgba(52,211,153,.3)' : r.direction === 'negative' ? 'rgba(255,90,110,.3)' : 'var(--border)'}`,
+                      borderRadius: 3, padding: '1px 5px',
+                    }}>
+                      {r.direction === 'positive' ? '▲' : r.direction === 'negative' ? '▼' : '◆'} {r.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Source attribution row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                {sources.map((s, i) => (
+                  <span key={i} style={{
+                    fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    color: s.color || srcColor(s),
+                    background: `${s.color || 'var(--text-faint)'}18`,
+                    border: `1px solid ${s.color || 'var(--text-faint)'}44`,
+                    borderRadius: 3, padding: '1px 5px',
+                  }}>
+                    {s.source || s.sourceId || '?'}
+                  </span>
+                ))}
+                {dateStr && (
+                  <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>
+                    {dateStr}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

@@ -1,0 +1,18 @@
+{
+  "leagueId": "tau",
+  "teams": [
+    { "id": 1,  "name": "Armed Rodgery",           "color": "#c6ff3a", "logo": "AR", "record": "7-3", "pf": 1284.6, "pa": 1100.2 },
+    { "id": 2,  "name": "Bourbon is a Vegetable",  "color": "#ff5a6e", "logo": "BV", "record": "6-4", "pf": 1198.4, "pa": 1145.8 },
+    { "id": 3,  "name": "Howdy Hut",               "color": "#4ea8ff", "logo": "HH", "record": "5-5", "pf": 1102.2, "pa": 1189.6 },
+    { "id": 4,  "name": "Start Pulling Out",        "color": "#36d39a", "logo": "SP", "record": "4-6", "pf": 1088.0, "pa": 1210.4 },
+    { "id": 5,  "name": "The Epstein Islanders",   "color": "#ffa83a", "logo": "EI", "record": "8-2", "pf": 1320.8, "pa": 1044.6 },
+    { "id": 6,  "name": "Penn State Shower Power", "color": "#b48cff", "logo": "PS", "record": "3-7", "pf": 1044.6, "pa": 1288.2 },
+    { "id": 7,  "name": "Vick's Hushpuppies",      "color": "#ffd84a", "logo": "VH", "record": "7-3", "pf": 1266.4, "pa": 1122.0 },
+    { "id": 8,  "name": "Gecko Barflies",           "color": "#59c8ff", "logo": "GB", "record": "6-4", "pf": 1188.6, "pa": 1154.2 },
+    { "id": 9,  "name": "Swingin' Flamingos",       "color": "#ff7a3a", "logo": "SF", "record": "5-5", "pf": 1144.2, "pa": 1166.8 },
+    { "id": 10, "name": "Gringo Pendejo",           "color": "#36d39a", "logo": "GP", "record": "4-6", "pf": 1066.8, "pa": 1232.4 },
+    { "id": 11, "name": "Fat, Drunk & Stupid",      "color": "#c6ff3a", "logo": "FD", "record": "9-1", "pf": 1388.2, "pa": 988.4  },
+    { "id": 12, "name": "DJ 8 Trak",                "color": "#ff5a6e", "logo": "DJ", "record": "2-8", "pf": 988.4,  "pa": 1344.6 }
+  ],
+  "savedAt": "2026-05-24T00:00:00.000Z"
+}

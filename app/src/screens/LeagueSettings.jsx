@@ -2,6 +2,7 @@ import React from 'react';
 import { LEAGUE_TEAMS } from '../lib/data.js';
 import { TeamLogoBadge } from '../components/ui.jsx';
 import { getLiveTeams, getLiveSettings, getLeagueId } from '../lib/leagueStore.js';
+import { api } from '../api.js';
 
 const STORAGE_KEY = 'fantasai_league_settings';
 const MEDIA_KEY   = 'fantasai_commish_media';
@@ -393,6 +394,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     setData(next);
     setEditField(null);
     flash();
+    logChange('general', `Updated ${key.replace(/([A-Z])/g, ' $1').toLowerCase()} → "${String(fieldDraft).slice(0, 80)}"`);
   }
 
   function saveRule(key, text) {
@@ -405,12 +407,14 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
 
   function saveScore(type, index, value) {
     const arr = type === 'offensive' ? 'offensiveScoring' : 'defensiveScoring';
+    const rule = data[arr][index];
     const updated = data[arr].map((s, i) => i === index ? { ...s, value } : s);
     const next = { ...data, [arr]: updated };
     persist(next);
     setData(next);
     setEditingScore(null);
     flash();
+    logChange('scoring', `Updated ${type} scoring rule "${rule?.name || rule?.code}" → ${value}`);
   }
 
   function saveRosterLimit(key, draft) {
@@ -419,9 +423,11 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     setData(next);
     setEditingRoster(null);
     flash();
+    logChange('roster', `Updated roster limit "${key}" → min ${draft.min}, max ${draft.max}`);
   }
 
   function saveRosterPosition(index, draft) {
+    const pos = data.positions[index];
     const positions = data.positions.map((p, i) =>
       i === index ? { ...p, activeMin: Number(draft.activeMin), activeMax: Number(draft.activeMax), rosterTotal: draft.rosterTotal } : p
     );
@@ -430,6 +436,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     setData(next);
     setEditingRoster(null);
     flash();
+    logChange('roster', `Updated ${pos?.label || pos?.key || 'position'} roster limit → active ${draft.activeMin}–${draft.activeMax}, total ${draft.rosterTotal}`);
   }
 
   // ── S3 sync ────────────────────────────────────────────────────────────────
@@ -534,6 +541,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     setData(next);
     flash();
     saveScheduleToS3(schedule);
+    logChange('schedule', `Commissioner auto-generated a 14-week schedule with 2 divisions (${div1Ids.length} + ${div2Ids.length} teams)`, true);
   }
 
   function saveDivName(div) {
@@ -570,6 +578,9 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     setData(next);
     setEditingMatchupIdx(null);
     flash();
+    const tA = LEAGUE_TEAMS.find(t => String(t.id) === String(a));
+    const tB = LEAGUE_TEAMS.find(t => String(t.id) === String(b));
+    logChange('matchup', `Manually set Week ${week} matchup: ${tA?.name || a} vs ${tB?.name || b}`, true);
   }
 
   function addMatchup(week) {
@@ -591,12 +602,29 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
 
   function flash() { setSaved(true); setTimeout(() => setSaved(false), 2000); }
 
+  function logChange(category, description, highlight = false) {
+    if (!canEdit) return;
+    const who = user?.isAdmin ? 'Admin' : 'Commissioner';
+    api.transactions.log({
+      id: `${Date.now()}-settings-${Math.random().toString(36).slice(2, 6)}`,
+      type: 'league_settings',
+      timestamp: new Date().toISOString(),
+      teamId: user?.teamId || 0,
+      teamName: user?.teamName || who,
+      category,
+      description,
+      highlight,
+      changedBy: who,
+    });
+  }
+
   function saveWaiverRules() {
     const next = { ...data, waiverRules: { ...data.waiverRules, ...waiverDraft } };
     persist(next);
     setData(next);
     setEditingWaiver(false);
     flash();
+    logChange('waivers', `Updated waiver rules — runs on ${(waiverDraft.days || []).join(', ') || 'unset'}, reset: ${waiverDraft.resetPolicy || 'unchanged'}`);
   }
 
   function saveWaiverAdditionalRules(text) {
@@ -613,6 +641,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     setData(next);
     setEditingPlayoffSettings(false);
     flash();
+    logChange('playoffs', `Updated playoff settings — starts Week ${playoffSettingsDraft.startWeek || data.playoffRules?.startWeek}, ${playoffSettingsDraft.numTeams || data.playoffRules?.numTeams} teams qualify`);
   }
 
   function savePlayoffAdditionalRules(text) {
@@ -773,6 +802,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                   <button className="btn primary sm" onClick={() => {
                     const next = { ...data, draft: { ...data.draft, ...draftSettingsDraft } };
                     persist(next); setData(next); setEditingDraft(false); flash();
+                    logChange('draft', `Draft settings updated — format: ${draftSettingsDraft.format}${draftSettingsDraft.date ? `, date: ${new Date(draftSettingsDraft.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` : ''}`);
                   }}>Save Draft Settings</button>
                   <button className="btn ghost sm" onClick={() => setEditingDraft(false)}>Cancel</button>
                 </div>
@@ -832,6 +862,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                   <button className="btn primary sm" onClick={() => {
                     const next = { ...data, fees: feesDraft };
                     persist(next); setData(next); setEditingFees(false); flash();
+                    logChange('fees', `League fees updated — ${feesDraft.method || 'no method'} ${feesDraft.handle || ''} ${feesDraft.amount || ''}`.trim());
                   }}>Save</button>
                   <button className="btn ghost sm" onClick={() => setEditingFees(false)}>Cancel</button>
                 </div>

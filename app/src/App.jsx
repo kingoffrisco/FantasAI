@@ -1,5 +1,6 @@
 import React from 'react';
 import { findPlayer, findTeam, MY_ROSTER, TEAM_ROSTERS, PLAYERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster } from './lib/data.js';
+import { api } from './api.js';
 import { applyLeagueData, clearLeagueData } from './lib/leagueStore.js';
 import { Sidebar, TopBar, MobileNav } from './components/layout.jsx';
 import AICopilot from './components/AICopilot.jsx';
@@ -18,12 +19,14 @@ import OwnerIntelScreen from './screens/OwnerIntel.jsx';
 import { PlayerDraftRankingsScreen } from './components/CBSConnectModal.jsx';
 import SourcesScreen from './screens/Sources.jsx';
 import AdminOwners from './screens/AdminOwners.jsx';
+import ScoringTestScreen from './screens/ScoringTest.jsx';
 import LeagueSettings from './screens/LeagueSettings.jsx';
 import CurrentRosterScreen from './screens/CurrentRoster.jsx';
 import WaiversScreen from './screens/Waivers.jsx';
 import HeadToHeadScreen from './screens/HeadToHead.jsx';
 import AccountEditScreen from './screens/AccountEdit.jsx';
 import LineupDecisions from './screens/LineupDecisions.jsx';
+import TransactionsScreen from './screens/Transactions.jsx';
 
 function loadLeagueSettings() {
   try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
@@ -81,12 +84,13 @@ async function loadLeagueData(leagueId) {
 
 async function syncRosterToS3(teamId, playerIds) {
   try {
-    await fetch(`${API_BASE}/api/v1/rosters/save`, {
+    const res = await fetch(`${API_BASE}/api/v1/rosters/save`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ teamId: String(teamId), playerIds: [...playerIds] }),
     });
-  } catch {} // non-blocking, silently fails
+    return res.ok;
+  } catch { return false; }
 }
 
 function validateRosterAdd(playerId, currentIds) {
@@ -150,7 +154,8 @@ const CRUMBS = {
   roster:    ['League', 'Current Roster'],
   lineup:    ['League', 'Lineup Decisions'],
   waivers:   ['League', 'Waivers'],
-  h2h:       ['League', 'Head to Head'],
+  h2h:          ['League', 'Head to Head'],
+  transactions: ['League', 'Transactions'],
   compare:   ['Tools', 'Compare'],
   watchlist: ['Tools', 'Watchlist'],
   trade:     ['Tools', 'Trade Analyzer'],
@@ -158,8 +163,9 @@ const CRUMBS = {
   owners:    ['Draft', 'Owner Intel · Draft DNA'],
   cbs:       ['Draft', 'Player Draft Rankings'],
   sources:       ['Setup', 'Sources & Connections'],
-  'admin-owners': ['Admin', 'Owner Management'],
-  settings:       ['Setup', 'Rules & League Settings'],
+  'admin-owners':   ['Admin', 'Owner Management'],
+  'admin-scoring':  ['Admin', 'Scoring System Test'],
+  settings:         ['Setup', 'Rules & League Settings'],
 };
 
 export default function App() {
@@ -184,13 +190,8 @@ export default function App() {
   const [user, setUser] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_user') || 'null'); } catch { return null; }
   });
-  const [myRosterIds, setMyRosterIds] = React.useState(() => {
-    try {
-      const u = JSON.parse(localStorage.getItem('fantasai_user') || 'null');
-      const roster = (u ? TEAM_ROSTERS[u.teamId] : null) || MY_ROSTER;
-      return new Set(roster.filter(r => r.slot !== 'BENCH').map(r => r.playerId).filter(Boolean));
-    } catch { return new Set(MY_ROSTER.filter(r => r.slot !== 'BENCH').map(r => r.playerId)); }
-  });
+  const [myRosterIds, setMyRosterIds] = React.useState(() => new Set());
+  const [rosterLoading, setRosterLoading] = React.useState(true);
 
   // Stable ref so callbacks don't need user in their dep array
   const userRef = React.useRef(user);
@@ -225,22 +226,32 @@ export default function App() {
     localStorage.setItem('fantasai_user', JSON.stringify(u));
     setUser(u);
     userRef.current = u;
-    // Load league data for the selected league (seed → S3)
     loadLeagueData(u.leagueId || 'tau');
-    // Seed from static data immediately, then overwrite from S3
-    const staticRoster = TEAM_ROSTERS[u.teamId] || MY_ROSTER;
-    const staticIds = new Set(staticRoster.filter(r => r.slot !== 'BENCH').map(r => r.playerId).filter(Boolean));
-    setMyRosterIds(staticIds);
+    setMyRosterIds(new Set());
     setRosterSlotOverrides({});
     localStorage.removeItem('fantasai_slot_overrides');
     if (u.needsPasswordChange) setNeedsPasswordChange(true);
-    // Fetch the live roster from S3 (non-blocking — will override static once resolved)
     if (u.teamId) {
+      setRosterLoading(true);
       fetchS3Roster(u.teamId).then(s3Ids => {
-        if (s3Ids !== null) setMyRosterIds(new Set(s3Ids));
+        setMyRosterIds(new Set(s3Ids ?? []));
+        setRosterLoading(false);
       });
+    } else {
+      setRosterLoading(false);
     }
   }
+
+  // Keep browser tab title in sync with the logged-in league name
+  React.useEffect(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+      const leagueName = s?.leagueName?.trim() || null;
+      document.title = leagueName ? `FantasAI — ${leagueName}` : 'FantasAI';
+    } catch {
+      document.title = 'FantasAI';
+    }
+  }, [user]);
 
   // On cold load (already logged in): restore league data from cache, then fetch fresh
   React.useEffect(() => {
@@ -251,9 +262,11 @@ export default function App() {
     } catch {}
     loadLeagueData(leagueId);
 
-    if (!user?.teamId) return;
+    if (!user?.teamId) { setRosterLoading(false); return; }
+    setRosterLoading(true);
     fetchS3Roster(user.teamId).then(s3Ids => {
-      if (s3Ids !== null) setMyRosterIds(new Set(s3Ids));
+      setMyRosterIds(new Set(s3Ids ?? []));
+      setRosterLoading(false);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally runs only once on mount
@@ -266,7 +279,8 @@ export default function App() {
     localStorage.removeItem('fantasai_user');
     localStorage.removeItem('fantasai_slot_overrides');
     setUser(null);
-    setMyRosterIds(new Set(MY_ROSTER.filter(r => r.slot !== 'BENCH').map(r => r.playerId)));
+    setMyRosterIds(new Set());
+    setRosterLoading(false);
     setRosterSlotOverrides({});
     clearLeagueData();
   }
@@ -293,6 +307,16 @@ export default function App() {
   }
 
   const [rosterError, setRosterError] = React.useState(null);
+  const [rosterSyncBadge, setRosterSyncBadge] = React.useState(null); // null | 'saving' | 'saved' | 'error'
+  const syncTimerRef = React.useRef(null);
+  function doSync(teamId, ids) {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    setRosterSyncBadge('saving');
+    syncRosterToS3(teamId, ids).then(ok => {
+      setRosterSyncBadge(ok ? 'saved' : 'error');
+      syncTimerRef.current = setTimeout(() => setRosterSyncBadge(null), 3000);
+    });
+  }
 
   const [tradeInit, setTradeInit] = React.useState({ key: 0, otherTeamId: null, getIds: [] });
   const handleTradePlayer = React.useCallback((playerId, ownerTeamId) => {
@@ -301,13 +325,25 @@ export default function App() {
   }, []);
 
   const handleAddPlayer = React.useCallback(id => {
+    let nextIds = null;
     setMyRosterIds(prev => {
       const err = validateRosterAdd(id, prev);
       if (err) { setRosterError(err); return prev; }
-      const next = new Set([...prev, id]);
-      if (userRef.current?.teamId) syncRosterToS3(userRef.current.teamId, next);
-      return next;
+      nextIds = new Set([...prev, id]);
+      return nextIds;
     });
+    if (nextIds && userRef.current?.teamId) {
+      doSync(userRef.current.teamId, nextIds);
+      const p = findPlayer(id);
+      if (p) api.transactions.log({
+        id: `${Date.now()}-add-${id}`,
+        type: 'add',
+        timestamp: new Date().toISOString(),
+        teamId:   userRef.current.teamId,
+        teamName: userRef.current.teamName || userRef.current.teamId,
+        players:  [{ id, name: p.name, pos: p.pos, nflTeam: p.team, action: 'add' }],
+      });
+    }
   }, []);
   const [waiverQueue, setWaiverQueue] = React.useState(() => {
     try {
@@ -329,6 +365,20 @@ export default function App() {
       localStorage.setItem('fantasai_trade_offers', JSON.stringify(next));
       return next;
     });
+    // Log as pending trade — will be superseded by the accept log if accepted
+    const myTeam = findTeam(fromTeamId);
+    const theirTeam = findTeam(toTeamId);
+    api.transactions.log({
+      id: `${Date.now()}-trade-offer-${fromTeamId}`,
+      type: 'trade_offer',
+      timestamp: new Date().toISOString(),
+      teamId:      fromTeamId,
+      teamName:    myTeam?.name || fromTeamId,
+      otherTeamId: toTeamId,
+      otherTeamName: theirTeam?.name || toTeamId,
+      gave: giveIds.map(id => { const p = findPlayer(id); return p ? { id, name: p.name, pos: p.pos, nflTeam: p.team } : { id }; }),
+      got:  getIds.map(id  => { const p = findPlayer(id); return p ? { id, name: p.name, pos: p.pos, nflTeam: p.team } : { id }; }),
+    });
   }
 
   function handleDeleteTradeOffer(offerId) {
@@ -342,14 +392,27 @@ export default function App() {
   function handleRespondTradeOffer(offerId, response, comment = '') {
     const offer = tradeOffers.find(o => o.id === offerId);
     if (offer && response === 'accepted') {
+      let nextIds = null;
       setMyRosterIds(prev => {
         const next = new Set(prev);
-        // Give away the receiver's players the sender wanted
         offer.getIds.forEach(id => next.delete(id));
-        // Receive the sender's players
         offer.giveIds.forEach(id => next.add(id));
-        if (userRef.current?.teamId) syncRosterToS3(userRef.current.teamId, next);
+        nextIds = next;
         return next;
+      });
+      if (nextIds && userRef.current?.teamId) doSync(userRef.current.teamId, nextIds);
+      const myTeam    = findTeam(offer.toTeamId);
+      const theirTeam = findTeam(offer.fromTeamId);
+      api.transactions.log({
+        id: `${Date.now()}-trade-${offerId}`,
+        type: 'trade',
+        timestamp: new Date().toISOString(),
+        teamId:       offer.toTeamId,
+        teamName:     myTeam?.name    || offer.toTeamId,
+        otherTeamId:  offer.fromTeamId,
+        otherTeamName: theirTeam?.name || offer.fromTeamId,
+        gave: offer.getIds.map(id  => { const p = findPlayer(id); return p ? { id, name: p.name, pos: p.pos, nflTeam: p.team } : { id }; }),
+        got:  offer.giveIds.map(id => { const p = findPlayer(id); return p ? { id, name: p.name, pos: p.pos, nflTeam: p.team } : { id }; }),
       });
     }
     setTradeOffers(prev => {
@@ -362,12 +425,25 @@ export default function App() {
   }
 
   const handleDropPlayer = React.useCallback(id => {
+    let nextIds = null;
     setMyRosterIds(prev => {
       const n = new Set(prev);
       n.delete(id);
-      if (userRef.current?.teamId) syncRosterToS3(userRef.current.teamId, n);
+      nextIds = n;
       return n;
     });
+    if (nextIds && userRef.current?.teamId) {
+      doSync(userRef.current.teamId, nextIds);
+      const p = findPlayer(id);
+      if (p) api.transactions.log({
+        id: `${Date.now()}-drop-${id}`,
+        type: 'drop',
+        timestamp: new Date().toISOString(),
+        teamId:   userRef.current.teamId,
+        teamName: userRef.current.teamName || userRef.current.teamId,
+        players:  [{ id, name: p.name, pos: p.pos, nflTeam: p.team, action: 'drop' }],
+      });
+    }
     // Place player on waivers: minimum 1 day, then the next Wed/Thu/Fri/Sat at 11:59 PM
     const drop = new Date();
     const earliest = new Date(drop.getTime() + 24 * 60 * 60 * 1000);
@@ -499,7 +575,7 @@ export default function App() {
           {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} tradeOffers={tradeOffers} />}
           {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} />}
           {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} user={user} />}
-          {active === 'roster'    && <CurrentRosterScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} />}
+          {active === 'roster'    && <CurrentRosterScreen onNav={setActive} user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} rosterSyncBadge={rosterSyncBadge} rosterLoading={rosterLoading} />}
           {active === 'lineup'    && <LineupDecisions myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} onOpenPlayer={setOpenPlayer} />}
           {active === 'waivers'   && <WaiversScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} />}
           {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
@@ -507,16 +583,20 @@ export default function App() {
           {active === 'watchlist' && <WatchlistScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} onSendTradeOffer={handleSendTradeOffer} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} onDeleteTradeOffer={handleDeleteTradeOffer} />}
           {active === 'draft'     && <DraftRoom aiMode={aiMode} user={user} onNav={setActive} onDraftPick={id => {
+            let nextIds = null;
             setMyRosterIds(prev => {
               const next = new Set([...prev, id]);
-              if (userRef.current?.teamId) syncRosterToS3(userRef.current.teamId, next);
+              nextIds = next;
               return next;
             });
+            if (nextIds && userRef.current?.teamId) doSync(userRef.current.teamId, nextIds);
           }} />}
           {active === 'owners'    && <OwnerIntelScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'cbs'       && <PlayerDraftRankingsScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} user={user} myRosterIds={myRosterIds} />}
           {active === 'admin-owners'  && <AdminOwners />}
+          {active === 'admin-scoring'  && <ScoringTestScreen user={user} />}
+          {active === 'transactions'  && <TransactionsScreen />}
           {active === 'account'       && <AccountEditScreen user={user} />}
           {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} />}
         </div>
@@ -544,6 +624,20 @@ export default function App() {
               <button className="btn primary sm" onClick={() => setRosterError(null)}>OK</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {rosterSyncBadge && (
+        <div style={{ position: 'fixed', bottom: 80, right: 20, zIndex: 9998, display: 'flex', alignItems: 'center', gap: 8,
+          background: 'var(--card)',
+          border: `1px solid ${rosterSyncBadge === 'saving' ? '#555' : rosterSyncBadge === 'saved' ? '#c6ff3a' : '#ff5a6e'}`,
+          borderRadius: 10, padding: '8px 14px', fontSize: 13, boxShadow: '0 8px 24px rgba(0,0,0,.4)',
+          transition: 'border-color 0.2s' }}>
+          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+            background: rosterSyncBadge === 'saving' ? '#888' : rosterSyncBadge === 'saved' ? '#c6ff3a' : '#ff5a6e' }} />
+          {rosterSyncBadge === 'saving' && 'Saving roster…'}
+          {rosterSyncBadge === 'saved'  && 'Roster saved'}
+          {rosterSyncBadge === 'error'  && 'Roster save failed'}
         </div>
       )}
 

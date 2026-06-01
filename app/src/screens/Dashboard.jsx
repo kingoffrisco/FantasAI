@@ -2,7 +2,7 @@ import React from 'react';
 import { TEAM_ROSTERS, PLAYERS, findPlayer, findTeam, NEWS, LEAGUE_TEAMS, buildRosterFrame, assignRoster } from '../lib/data.js';
 import { PlayerCell, StatusDot, Sparkline, PosBadge, SourceBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
-import { useApi } from '../hooks.js';
+import { useApi, useR2CriticalAlerts, useR2BreakoutCandidates } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 const SLOT_ELIGIBLE = {
   QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
@@ -72,10 +72,7 @@ function LineupSummaryCard({ myRosterIds, slotOverrides, onOpenPlayer }) {
   const totalGain = swaps.reduce((s, c) => s + c.gain, 0);
 
   return (
-    <div className="card">
-      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10 }}>
-        Lineup Decisions
-      </div>
+    <>
       {swaps.length === 0 ? (
         <div style={{ fontSize: 13, color: 'var(--good)', fontWeight: 600 }}>Lineup looks optimal — no changes needed.</div>
       ) : (
@@ -96,7 +93,7 @@ function LineupSummaryCard({ myRosterIds, slotOverrides, onOpenPlayer }) {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }
 
@@ -246,8 +243,12 @@ function DraftCountdown({ canEdit }) {
   const [draftDate, setDraftDate] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null')?.draftDate ?? null; } catch { return null; }
   });
+  const [draftAddress, setDraftAddress] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null')?.draftAddress ?? ''; } catch { return ''; }
+  });
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft]     = React.useState('');
+  const [draftAddrDraft, setDraftAddrDraft] = React.useState('');
   const [timeLeft, setTimeLeft] = React.useState(null);
 
   React.useEffect(() => {
@@ -271,19 +272,31 @@ function DraftCountdown({ canEdit }) {
   function save() {
     try {
       const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || '{}');
-      localStorage.setItem('fantasai_league_settings', JSON.stringify({ ...saved, draftDate: draft }));
+      localStorage.setItem('fantasai_league_settings', JSON.stringify({ ...saved, draftDate: draft, draftAddress: draftAddrDraft }));
     } catch {}
     setDraftDate(draft);
+    setDraftAddress(draftAddrDraft);
     setEditing(false);
   }
 
   if (editing) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input type="datetime-local" className="input" style={{ fontSize: 12, padding: '4px 8px' }}
-          value={draft} onChange={e => setDraft(e.target.value)} />
-        <button className="btn sm primary" onClick={save}>Save</button>
-        <button className="btn sm ghost" onClick={() => setEditing(false)}>✕</button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 340 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="datetime-local" className="input" style={{ fontSize: 12, padding: '4px 8px', flex: 1 }}
+            value={draft} onChange={e => setDraft(e.target.value)} />
+        </div>
+        <input
+          className="input"
+          placeholder="Draft location / address (optional)…"
+          value={draftAddrDraft}
+          onChange={e => setDraftAddrDraft(e.target.value)}
+          style={{ fontSize: 12, padding: '4px 8px' }}
+        />
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn sm primary" onClick={save}>Save</button>
+          <button className="btn sm ghost" onClick={() => setEditing(false)}>✕</button>
+        </div>
       </div>
     );
   }
@@ -292,7 +305,7 @@ function DraftCountdown({ canEdit }) {
     if (!canEdit) return null;
     return (
       <button className="btn ghost" style={{ fontSize: 11 }}
-        onClick={() => { setDraft(''); setEditing(true); }}>
+        onClick={() => { setDraft(''); setDraftAddrDraft(''); setEditing(true); }}>
         + Set Draft Date
       </button>
     );
@@ -345,7 +358,7 @@ function DraftCountdown({ canEdit }) {
       </div>
       {canEdit && (
         <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 14, padding: 0, lineHeight: 1 }}
-          onClick={() => { setDraft(draftDate || ''); setEditing(true); }} title="Edit draft date">✏</button>
+          onClick={() => { setDraft(draftDate || ''); setDraftAddrDraft(draftAddress || ''); setEditing(true); }} title="Edit draft date">✏</button>
       )}
     </div>
   );
@@ -353,6 +366,8 @@ function DraftCountdown({ canEdit }) {
 
 export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new Set(), sourcesState, slotOverrides = {}, watchlistIds = new Set(), tradeOffers = [] }) {
   const { data: cbsTeams } = useApi(() => api.teams(), []);
+  const { data: r2Alerts, fetchedAt: r2AlertsFetchedAt } = useR2CriticalAlerts();
+  const { data: r2Breakouts } = useR2BreakoutCandidates();
   const standings = React.useMemo(() => buildStandings(cbsTeams), [cbsTeams]);
   const currentWeek = React.useMemo(getCurrentWeek, []);
   const nextWeek    = React.useMemo(getNextWeek, []);
@@ -608,8 +623,14 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const [editingChampions, setEditingChampions]     = React.useState(false);
   const [champDraft, setChampDraft]                 = React.useState([]);
   const [champTooltip, setChampTooltip]             = React.useState(null);
-  const [championsOpen, setChampionsOpen]           = React.useState(false);
+  const [championsOpen, setChampionsOpen]           = React.useState(true);
   const canEditChampions = user?.isAdmin || user?.isCommissioner;
+  const champPhotoRef = React.useRef(null);
+  const [champPhotoIdx, setChampPhotoIdx] = React.useState(null);
+  const [champComments, setChampComments] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_champ_comments') || '[]'); } catch { return []; }
+  });
+  const [champCommentText, setChampCommentText] = React.useState('');
 
   function startEditChampions() {
     setChampDraft(champions.map(c => ({ ...c })));
@@ -623,6 +644,47 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   function updateDraft(i, patch) {
     setChampDraft(prev => prev.map((c, idx) => idx === i ? { ...c, ...patch } : c));
   }
+  function addChampComment() {
+    const text = champCommentText.trim();
+    if (!text) return;
+    const comment = {
+      id: Date.now().toString(),
+      teamId: user?.teamId ?? null,
+      teamName: team?.name || user?.teamName || 'League Member',
+      text,
+      timestamp: new Date().toISOString(),
+    };
+    const updated = [comment, ...champComments];
+    setChampComments(updated);
+    localStorage.setItem('fantasai_champ_comments', JSON.stringify(updated));
+    setChampCommentText('');
+  }
+
+  function deleteChampComment(id) {
+    const updated = champComments.filter(c => c.id !== id);
+    setChampComments(updated);
+    localStorage.setItem('fantasai_champ_comments', JSON.stringify(updated));
+  }
+
+  function handleChampPhoto(e, i) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => updateDraft(i, { photo: ev.target.result });
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  // ── League Transactions (from R2) ────────────────────────────────────────────
+  const [transactions, setTransactions] = React.useState([]);
+  const [txLoading, setTxLoading]       = React.useState(false);
+
+  React.useEffect(() => {
+    setTxLoading(true);
+    api.transactions.get()
+      .then(data => { setTransactions(Array.isArray(data) ? data : []); })
+      .finally(() => setTxLoading(false));
+  }, []);
 
   // ── H2H win probability (shared between scoreboard card + stats grid) ──────
   const h2hWinData = React.useMemo(() => {
@@ -1024,8 +1086,133 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           )}
         </div>
 
-        {/* Lineup Decisions — bullet summary */}
-        <LineupSummaryCard myRosterIds={myRosterIds} slotOverrides={slotOverrides} onOpenPlayer={onOpenPlayer} />
+        {/* Combined Lineup Decisions + Lineup News card */}
+        <div className="card">
+          <div className="card-head">
+            <div className="card-title">{ownerName}'s Lineup</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {newsLoading && <span className="mono faint" style={{ fontSize: 9 }}>fetching…</span>}
+              {sleeperOn && !newsLoading && liveNewsItems.length > 0 && (
+                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', background: 'rgba(78,168,255,.1)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 3, padding: '1px 5px' }}>
+                  SLEEPER · LIVE
+                </span>
+              )}
+              {r2Alerts && (
+                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#c6ff3a', background: 'rgba(198,255,58,.1)', border: '1px solid rgba(198,255,58,.25)', borderRadius: 3, padding: '1px 5px' }}>
+                  ◆ FANTASAI
+                </span>
+              )}
+              {!sleeperOn && <span className="mono faint" style={{ fontSize: 9 }}>mock data</span>}
+            </div>
+          </div>
+
+          {/* ── Decisions section ── */}
+          <div style={{ padding: '10px 14px 14px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10 }}>
+              Lineup Decisions
+            </div>
+            <LineupSummaryCard myRosterIds={myRosterIds} slotOverrides={slotOverrides} onOpenPlayer={onOpenPlayer} />
+          </div>
+
+          {/* ── FantasAI Critical Alerts ── */}
+          {(() => {
+            const alerts = Array.isArray(r2Alerts) ? r2Alerts : [];
+            const starterNames = new Set(starters.map(r => findPlayer(r.playerId)?.name?.toLowerCase()).filter(Boolean));
+            const relevant = alerts.filter(a => {
+              const players = Array.isArray(a.impacted_players) ? a.impacted_players : [];
+              return players.some(p => starterNames.has((p.player_name || '').toLowerCase())) || a.priority_level === 'critical';
+            }).slice(0, 3);
+            if (!relevant.length) return null;
+            return (
+              <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 2 }}>
+                <div style={{ padding: '6px 14px 4px', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#c6ff3a', letterSpacing: '.1em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#c6ff3a', display: 'inline-block', flexShrink: 0 }} />
+                  FantasAI Alerts
+                  {r2AlertsFetchedAt && (
+                    <span style={{ color: 'var(--text-faint)', fontWeight: 400, marginLeft: 4 }}>
+                      · {Math.round((Date.now() - r2AlertsFetchedAt) / 60000)}m ago
+                    </span>
+                  )}
+                </div>
+                {relevant.map((alert, i) => {
+                  const impactColor = alert.priority_level === 'critical' ? 'var(--danger)'
+                                    : alert.priority_level === 'high'     ? 'var(--warn)'
+                                    : 'var(--accent-2)';
+                  const players = Array.isArray(alert.impacted_players) ? alert.impacted_players : [];
+                  return (
+                    <div key={i} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', borderLeft: `2px solid ${impactColor}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, lineHeight: 1.4, flex: 1 }}>{alert.summary_text}</div>
+                        {alert.priority_level && (
+                          <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, color: impactColor, background: `${impactColor}22`, border: `1px solid ${impactColor}55`, borderRadius: 3, padding: '1px 5px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                            {alert.priority_level.toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                      {alert.fantasy_insight && (
+                        <div style={{ fontSize: 11, color: '#c6ff3a', lineHeight: 1.4, marginBottom: 3 }}>{alert.fantasy_insight}</div>
+                      )}
+                      {players.length > 0 && (
+                        <div style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+                          {players.slice(0, 3).map(p => p.player_name).join(' · ')}
+                          {alert.fantasy_relevance_score != null && (
+                            <span style={{ marginLeft: 6, color: 'var(--accent)', fontWeight: 700 }}>
+                              {Math.round(alert.fantasy_relevance_score)}% relevant
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* ── News items ── */}
+          <div>
+            {rosterNews.length === 0 && !newsLoading && !r2Alerts && (
+              <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)' }}>No news for your starters — all clear.</div>
+            )}
+            {newsLoading && rosterNews.length === 0 && (
+              <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="ai-orb" style={{ width: 12, height: 12 }} />
+                Checking Sleeper for roster news…
+              </div>
+            )}
+            {rosterNews.map(n => {
+              const p = findPlayer(n.playerId);
+              if (!p) return null;
+              const impactColor = n.impact === 'high' ? 'var(--danger)' : n.impact === 'good' ? 'var(--good)' : n.impact === 'med' ? 'var(--warn)' : 'var(--text-faint)';
+              return (
+                <div
+                  key={n.id}
+                  style={{
+                    padding: '10px 14px',
+                    borderBottom: '1px solid var(--border)',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    borderLeft: n.live ? `2px solid ${impactColor}` : undefined,
+                  }}
+                  onClick={() => onOpenPlayer(p.id)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                    <span className="mono dim" style={{ fontSize: 11 }}>{p.name} · {p.pos} · {p.team}</span>
+                    <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                      {n.live && (
+                        <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)' }}>LIVE</span>
+                      )}
+                      <span className={`news-impact impact-${n.impact}`} style={{ fontSize: 9 }}>{n.impact}</span>
+                    </div>
+                  </div>
+                  <div style={{ fontWeight: 600, marginBottom: n.body ? 3 : 0 }}>{n.title}</div>
+                  {n.body && <div className="dim" style={{ fontSize: 11, lineHeight: 1.4 }}>{n.body}</div>}
+                  <div style={{ marginTop: 4 }}><SourceBadge source={n.source} /></div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         </div>{/* end middle column */}
 
@@ -1039,6 +1226,8 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           borderRadius: 10,
           overflow: 'hidden',
           alignSelf: 'start',
+          width: '100%',
+          boxSizing: 'border-box',
         }}>
           {/* Header / toggle bar */}
           <div
@@ -1068,6 +1257,9 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                 const latest = [...champions].reverse().find(c => c.champion);
                 return latest ? (
                   <>
+                    {latest.photo && (
+                      <img src={latest.photo} alt={latest.champion} style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', border: '1px solid rgba(255,215,0,.4)', flexShrink: 0 }} />
+                    )}
                     <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'rgba(255,215,0,.5)' }}>{latest.year}</span>
                     <span style={{ fontSize: 12, fontWeight: 800, color: '#FFD700' }}>{latest.champion}{latest.asterisk ? '*' : ''}</span>
                   </>
@@ -1081,37 +1273,65 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
           {/* Expanded */}
           {championsOpen && (
+            <>
             <div style={{ borderTop: '1px solid rgba(255,215,0,.12)', padding: '10px 14px' }}>
               {editingChampions ? (
                 <div>
+                  <input ref={champPhotoRef} type="file" accept="image/*" style={{ display: 'none' }}
+                    onChange={e => { handleChampPhoto(e, champPhotoIdx); setChampPhotoIdx(null); }}
+                  />
                   {champDraft.map((c, i) => (
-                    <div key={c.year} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#FFD700', minWidth: 38 }}>{c.year}</span>
-                      <input
-                        className="input"
-                        value={c.champion}
-                        onChange={e => updateDraft(i, { champion: e.target.value })}
-                        placeholder="Team name…"
-                        style={{ fontSize: 11, padding: '3px 7px', background: 'rgba(255,215,0,.05)', borderColor: 'rgba(255,215,0,.2)' }}
-                      />
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 11, color: 'rgba(255,215,0,.6)', whiteSpace: 'nowrap' }}
-                        title={c.asterisk ? c.note || 'Add a note below' : 'Mark as contested/asterisk'}>
+                    <div key={c.year} style={{ marginBottom: 8 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 6, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#FFD700', minWidth: 38 }}>{c.year}</span>
                         <input
-                          type="checkbox"
-                          checked={c.asterisk}
-                          onChange={e => updateDraft(i, { asterisk: e.target.checked, note: e.target.checked ? (champDraft[i]?.note || '') : '' })}
-                          style={{ accentColor: '#FFD700', cursor: 'pointer' }}
+                          className="input"
+                          value={c.champion}
+                          onChange={e => updateDraft(i, { champion: e.target.value })}
+                          placeholder="Team name…"
+                          style={{ fontSize: 11, padding: '3px 7px', background: 'rgba(255,215,0,.05)', borderColor: 'rgba(255,215,0,.2)' }}
                         />
-                        *
-                      </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 11, color: 'rgba(255,215,0,.6)', whiteSpace: 'nowrap' }}
+                          title={c.asterisk ? c.note || 'Add a note below' : 'Mark as contested/asterisk'}>
+                          <input
+                            type="checkbox"
+                            checked={c.asterisk}
+                            onChange={e => updateDraft(i, { asterisk: e.target.checked, note: e.target.checked ? (champDraft[i]?.note || '') : '' })}
+                            style={{ accentColor: '#FFD700', cursor: 'pointer' }}
+                          />
+                          *
+                        </label>
+                      </div>
                       {c.asterisk && (
                         <input
                           className="input"
                           value={c.note}
                           onChange={e => updateDraft(i, { note: e.target.value })}
                           placeholder="Reason for asterisk…"
-                          style={{ gridColumn: '2 / 4', fontSize: 10, padding: '2px 7px', background: 'rgba(255,215,0,.04)', borderColor: 'rgba(255,215,0,.15)', marginTop: -2 }}
+                          style={{ marginTop: 4, fontSize: 10, padding: '2px 7px', background: 'rgba(255,215,0,.04)', borderColor: 'rgba(255,215,0,.15)', width: '100%', boxSizing: 'border-box' }}
                         />
+                      )}
+                      {/* Photo upload — only shown for rows that have a champion name */}
+                      {c.champion && (
+                        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {c.photo && (
+                            <img src={c.photo} alt={c.champion} style={{ width: 36, height: 36, borderRadius: 4, objectFit: 'cover', border: '1px solid rgba(255,215,0,.3)' }} />
+                          )}
+                          <button
+                            className="btn ghost sm"
+                            onClick={() => { setChampPhotoIdx(i); champPhotoRef.current?.click(); }}
+                            style={{ fontSize: 10, padding: '2px 8px', borderColor: 'rgba(255,215,0,.3)', color: 'rgba(255,215,0,.7)' }}
+                          >
+                            {c.photo ? '📷 Replace Photo' : '📷 Add Photo'}
+                          </button>
+                          {c.photo && (
+                            <button
+                              className="btn ghost sm"
+                              onClick={() => updateDraft(i, { photo: null })}
+                              style={{ fontSize: 10, padding: '2px 8px', borderColor: 'rgba(255,100,100,.3)', color: 'rgba(255,100,100,.7)' }}
+                            >Remove</button>
+                          )}
+                        </div>
                       )}
                     </div>
                   ))}
@@ -1121,106 +1341,293 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                   </div>
                 </div>
               ) : (
-                <div>
-                  {champions.map((c, i) => {
-                    const hasNote = c.asterisk && c.note;
-                    return (
-                      <div
-                        key={c.year}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: i < champions.length - 1 ? '1px solid rgba(255,215,0,.07)' : 'none', position: 'relative' }}
-                        onMouseEnter={() => hasNote && setChampTooltip(c.year)}
-                        onMouseLeave={() => setChampTooltip(null)}
-                      >
-                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'rgba(255,215,0,.5)', fontWeight: 700, minWidth: 36 }}>{c.year}</span>
-                        {c.champion ? (
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#FFD700', flex: 1 }}>
-                            {c.champion}
-                            {c.asterisk && <span style={{ fontSize: 10, color: 'rgba(255,215,0,.55)', marginLeft: 1, cursor: hasNote ? 'help' : 'default' }}>*</span>}
-                          </span>
-                        ) : (
-                          <span style={{ flex: 1, fontSize: 11, color: 'rgba(255,255,255,.15)', fontFamily: 'var(--font-mono)' }}>—</span>
-                        )}
-                        {champTooltip === c.year && hasNote && (
-                          <div style={{
-                            position: 'absolute', bottom: '110%', left: 0, zIndex: 50,
-                            background: 'var(--card)', border: '1px solid rgba(255,215,0,.35)',
-                            borderRadius: 6, padding: '5px 10px', whiteSpace: 'nowrap',
-                            fontSize: 11, color: 'var(--text-dim)', boxShadow: '0 4px 16px rgba(0,0,0,.5)',
-                            pointerEvents: 'none',
-                          }}>
-                            <span style={{ color: '#FFD700', fontWeight: 700, marginRight: 4 }}>*</span>{c.note}
-                          </div>
-                        )}
+                (() => {
+                  const featuredChamp = [...champions].reverse().find(c => c.champion && c.photo);
+                  return (
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
+                      {/* Year list */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {champions.map((c, i) => {
+                          const hasNote = c.asterisk && c.note;
+                          return (
+                            <div
+                              key={c.year}
+                              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: i < champions.length - 1 ? '1px solid rgba(255,215,0,.07)' : 'none', position: 'relative' }}
+                              onMouseEnter={() => hasNote && setChampTooltip(c.year)}
+                              onMouseLeave={() => setChampTooltip(null)}
+                            >
+                              {c.photo && (!featuredChamp || c.year !== featuredChamp.year) && (
+                                <img src={c.photo} alt={c.champion} style={{ width: 26, height: 26, borderRadius: 4, objectFit: 'cover', border: '1px solid rgba(255,215,0,.35)', flexShrink: 0 }} />
+                              )}
+                              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'rgba(255,215,0,.5)', fontWeight: 700, minWidth: 36 }}>{c.year}</span>
+                              {c.champion ? (
+                                <span style={{ fontSize: 12, fontWeight: 700, color: '#FFD700', flex: 1 }}>
+                                  {c.champion}
+                                  {c.asterisk && <span style={{ fontSize: 10, color: 'rgba(255,215,0,.55)', marginLeft: 1, cursor: hasNote ? 'help' : 'default' }}>*</span>}
+                                </span>
+                              ) : (
+                                <span style={{ flex: 1, fontSize: 11, color: 'rgba(255,255,255,.15)', fontFamily: 'var(--font-mono)' }}>—</span>
+                              )}
+                              {champTooltip === c.year && hasNote && (
+                                <div style={{
+                                  position: 'absolute', bottom: '110%', left: 0, zIndex: 50,
+                                  background: 'var(--card)', border: '1px solid rgba(255,215,0,.35)',
+                                  borderRadius: 6, padding: '5px 10px', whiteSpace: 'nowrap',
+                                  fontSize: 11, color: 'var(--text-dim)', boxShadow: '0 4px 16px rgba(0,0,0,.5)',
+                                  pointerEvents: 'none',
+                                }}>
+                                  <span style={{ color: '#FFD700', fontWeight: 700, marginRight: 4 }}>*</span>{c.note}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </div>
+                      {/* Featured champion photo — full height, right side */}
+                      {featuredChamp && (
+                        <div style={{ width: 130, flexShrink: 0, borderRadius: 8, overflow: 'hidden', border: '2px solid rgba(255,215,0,.45)', position: 'relative' }}>
+                          <img
+                            src={featuredChamp.photo}
+                            alt={featuredChamp.champion}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                          />
+                          <div style={{
+                            position: 'absolute', bottom: 0, left: 0, right: 0,
+                            background: 'linear-gradient(transparent, rgba(0,0,0,.88))',
+                            padding: '22px 8px 8px',
+                            textAlign: 'center',
+                          }}>
+                            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,215,0,.7)', fontWeight: 700, letterSpacing: '.08em', marginBottom: 2 }}>
+                              {featuredChamp.year} CHAMPION
+                            </div>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: '#FFD700', lineHeight: 1.2 }}>
+                              {featuredChamp.champion}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
               )}
             </div>
+
+            {/* ── Champions Comments ── */}
+            {!editingChampions && (
+              <div style={{ borderTop: '1px solid rgba(255,215,0,.12)', padding: '10px 14px 14px' }}>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'rgba(255,215,0,.55)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 9 }}>
+                  💬 Comments
+                </div>
+
+                {/* Input row */}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                  <textarea
+                    className="input"
+                    value={champCommentText}
+                    onChange={e => setChampCommentText(e.target.value)}
+                    placeholder="Leave a comment…"
+                    rows={2}
+                    style={{ flex: 1, resize: 'none', fontSize: 11, background: 'rgba(255,215,0,.04)', borderColor: 'rgba(255,215,0,.15)', lineHeight: 1.5 }}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) addChampComment(); }}
+                  />
+                  <button
+                    onClick={addChampComment}
+                    disabled={!champCommentText.trim()}
+                    style={{ alignSelf: 'flex-end', padding: '5px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid rgba(255,215,0,.35)', borderRadius: 6, background: 'rgba(255,215,0,.1)', color: '#FFD700', opacity: champCommentText.trim() ? 1 : 0.4 }}
+                  >Post</button>
+                </div>
+
+                {/* Comments list */}
+                {champComments.length === 0 ? (
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,.18)', fontFamily: 'var(--font-mono)' }}>No comments yet — be the first!</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {champComments.map(c => {
+                      const diff = Date.now() - new Date(c.timestamp).getTime();
+                      const ago = diff < 3600000 ? `${Math.round(diff / 60000)}m ago`
+                                : diff < 86400000 ? `${Math.round(diff / 3600000)}h ago`
+                                : `${Math.round(diff / 86400000)}d ago`;
+                      const canDel = canEditChampions || c.teamId === user?.teamId;
+                      return (
+                        <div key={c.id} style={{ padding: '8px 10px', background: 'rgba(255,215,0,.04)', border: '1px solid rgba(255,215,0,.1)', borderRadius: 7 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,215,0,.8)', fontFamily: 'var(--font-mono)' }}>{c.teamName}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 9, color: 'rgba(255,255,255,.25)', fontFamily: 'var(--font-mono)' }}>{ago}</span>
+                              {canDel && (
+                                <button style={{ background: 'none', border: 'none', color: 'rgba(255,100,100,.45)', cursor: 'pointer', fontSize: 11, padding: 0, lineHeight: 1 }} onClick={() => deleteChampComment(c.id)}>✕</button>
+                              )}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.55 }}>{c.text}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+            </>
           )}
         </div>
 
-          <div className="card">
-            <div className="card-head">
-              <div className="card-title">
-                {ownerName}'s Lineup News
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {newsLoading && <span className="mono faint" style={{ fontSize: 9 }}>fetching…</span>}
-                {sleeperOn && !newsLoading && liveNewsItems.length > 0 && (
-                  <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', background: 'rgba(78,168,255,.1)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 3, padding: '1px 5px' }}>
-                    SLEEPER · LIVE
-                  </span>
-                )}
-                {!sleeperOn && <span className="mono faint" style={{ fontSize: 9 }}>mock data</span>}
-              </div>
+        {/* ── Transactions ── */}
+        <div className="card" style={{ alignSelf: 'start', width: '100%', boxSizing: 'border-box' }}>
+          <div className="card-head">
+            <div className="card-title">Transactions</div>
+            {txLoading && <span className="mono faint" style={{ fontSize: 9 }}>fetching…</span>}
+          </div>
+
+          {txLoading ? (
+            <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="ai-orb" style={{ width: 12, height: 12 }} />
+              Loading transactions…
             </div>
+          ) : transactions.length === 0 ? (
+            <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--text-faint)' }}>
+              No transactions yet — adds, drops, and trades will appear here.
+            </div>
+          ) : (
             <div>
-              {rosterNews.length === 0 && !newsLoading && (
-                <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)' }}>No news for your starters — all clear.</div>
-              )}
-              {newsLoading && rosterNews.length === 0 && (
-                <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div className="ai-orb" style={{ width: 12, height: 12 }} />
-                  Checking Sleeper for roster news…
-                </div>
-              )}
-              {rosterNews.map(n => {
-                const p = findPlayer(n.playerId);
-                if (!p) return null;
-                const impactColor = n.impact === 'high' ? 'var(--danger)' : n.impact === 'good' ? 'var(--good)' : n.impact === 'med' ? 'var(--warn)' : 'var(--text-faint)';
-                return (
-                  <div
-                    key={n.id}
-                    style={{
-                      padding: '10px 14px',
-                      borderBottom: '1px solid var(--border)',
-                      fontSize: 12,
-                      cursor: 'pointer',
-                      borderLeft: n.live ? `2px solid ${impactColor}` : undefined,
-                    }}
-                    onClick={() => onOpenPlayer(p.id)}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                      <span className="mono dim" style={{ fontSize: 11 }}>{p.name} · {p.pos} · {p.team}</span>
-                      <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                        {n.live && (
-                          <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)' }}>LIVE</span>
-                        )}
-                        <span className={`news-impact impact-${n.impact}`} style={{ fontSize: 9 }}>{n.impact}</span>
+              {transactions.map((tx, idx) => {
+                const isTrade  = tx.type === 'trade' || tx.type === 'trade_offer';
+                const typeLabel = isTrade ? (tx.type === 'trade_offer' ? 'Offer' : 'Trade')
+                               : tx.type === 'drop' ? 'Drop' : 'Add';
+                const typeColor = isTrade            ? '#c6ff3a'
+                               : tx.type === 'drop' ? 'var(--danger)'
+                               : 'var(--good)';
+                const ago = tx.timestamp ? (() => {
+                  const diff = Date.now() - new Date(tx.timestamp).getTime();
+                  if (diff < 3600000)  return `${Math.round(diff / 60000)}m ago`;
+                  if (diff < 86400000) return `${Math.round(diff / 3600000)}h ago`;
+                  return `${Math.round(diff / 86400000)}d ago`;
+                })() : '';
+
+                const PlayerLine = ({ p, action }) => (
+                  <div style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 5, marginBottom: 1 }}>
+                    <span style={{ color: action === 'add' ? 'var(--good)' : 'var(--danger)', fontWeight: 700, fontSize: 10, minWidth: 10 }}>
+                      {action === 'add' ? '+' : '−'}
+                    </span>
+                    <span style={{ fontWeight: 600, color: action === 'add' ? 'var(--text)' : 'var(--text-dim)' }}>{p.name || '—'}</span>
+                    {p.pos && <span style={{ fontSize: 9, color: 'var(--accent-2)', fontFamily: 'var(--font-mono)' }}>{p.pos}</span>}
+                    {p.nflTeam && <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.nflTeam}</span>}
+                  </div>
+                );
+
+                if (isTrade) {
+                  return (
+                    <div key={tx.id || idx} style={{ padding: '9px 14px', borderBottom: '1px solid var(--border)', borderLeft: `2px solid ${typeColor}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, background: `${typeColor}18`, border: `1px solid ${typeColor}44`, borderRadius: 3, padding: '1px 5px' }}>
+                          {typeLabel.toUpperCase()}
+                        </span>
+                        <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{ago}</span>
                       </div>
+                      {/* Side A */}
+                      <div style={{ marginBottom: 5 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 2 }}>{tx.teamName || tx.teamId}</div>
+                        {(tx.got  || []).map((p, i) => <PlayerLine key={i} p={p} action="add" />)}
+                        {(tx.gave || []).map((p, i) => <PlayerLine key={i} p={p} action="drop" />)}
+                      </div>
+                      {/* Side B */}
+                      {tx.otherTeamName && (
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 2 }}>{tx.otherTeamName}</div>
+                          {(tx.gave || []).map((p, i) => <PlayerLine key={i} p={p} action="add" />)}
+                          {(tx.got  || []).map((p, i) => <PlayerLine key={i} p={p} action="drop" />)}
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontWeight: 600, marginBottom: n.body ? 3 : 0 }}>{n.title}</div>
-                    {n.body && <div className="dim" style={{ fontSize: 11, lineHeight: 1.4 }}>{n.body}</div>}
-                    <div style={{ marginTop: 4 }}><SourceBadge source={n.source} /></div>
+                  );
+                }
+
+                // Add or Drop
+                const players = tx.players || [];
+                return (
+                  <div key={tx.id || idx} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', borderLeft: `2px solid ${typeColor}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, background: `${typeColor}18`, border: `1px solid ${typeColor}44`, borderRadius: 3, padding: '1px 5px' }}>
+                        {typeLabel.toUpperCase()}
+                      </span>
+                      <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{ago}</span>
+                    </div>
+                    {tx.teamName && (
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 3 }}>{tx.teamName}</div>
+                    )}
+                    {players.map((p, i) => <PlayerLine key={i} p={p} action={p.action || tx.type} />)}
                   </div>
                 );
               })}
             </div>
-          </div>
+          )}
+        </div>
+
         </div>
       </div>
-      <div style={{ padding: '0 24px 24px', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, alignItems: 'start' }}>
+      {/* ── Breakout Candidates (full-width, above standings) ── */}
+      {Array.isArray(r2Breakouts) && r2Breakouts.length > 0 && (
+        <div style={{ padding: '0 24px 16px' }}>
+          <div className="card" style={{ borderLeft: '3px solid #c6ff3a' }}>
+            <div className="card-head">
+              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14 }}>↑</span> Breakout Candidates
+                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#c6ff3a', background: 'rgba(198,255,58,.12)', border: '1px solid rgba(198,255,58,.35)', borderRadius: 3, padding: '1px 6px' }}>
+                  FANTASAI ML · AUC 0.728
+                </span>
+              </div>
+              <span className="mono faint" style={{ fontSize: 10 }}>Snap share + opportunity model · top {Math.min(r2Breakouts.length, 10)}</span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Player</th>
+                    <th>Pos</th>
+                    <th>Team</th>
+                    <th className="num">Snap Δ</th>
+                    <th className="num">Opp Score</th>
+                    <th className="num">Avg Snap%</th>
+                    <th className="num">Wk</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r2Breakouts.slice(0, 10).map((b, i) => {
+                    const snapDelta = typeof b.snap_share_delta === 'number' ? b.snap_share_delta : 0;
+                    const oppScore  = typeof b.opportunity_score === 'number' ? b.opportunity_score : 0;
+                    const avgSnap   = typeof b.avg_snap_share === 'number' ? b.avg_snap_share
+                                    : typeof b.avg_snap_share_prev_2wk === 'number' ? b.avg_snap_share_prev_2wk : null;
+                    return (
+                      <tr key={i}>
+                        <td className="rank" style={{ color: 'var(--text-faint)' }}>{i + 1}</td>
+                        <td style={{ fontWeight: 600 }}>{b.player_name || '—'}</td>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--accent-2)' }}>{b.position || '—'}</span></td>
+                        <td className="mono faint" style={{ fontSize: 11 }}>{b.team || '—'}</td>
+                        <td className="num">
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: snapDelta > 0.15 ? '#c6ff3a' : snapDelta > 0.08 ? 'var(--warn)' : 'var(--text-dim)' }}>
+                            +{(snapDelta * 100).toFixed(0)}%
+                          </span>
+                        </td>
+                        <td className="num">
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: oppScore > 7 ? '#c6ff3a' : oppScore > 4 ? 'var(--warn)' : 'var(--text-dim)' }}>
+                            {oppScore.toFixed(1)}
+                          </span>
+                        </td>
+                        <td className="num mono faint" style={{ fontSize: 11 }}>
+                          {avgSnap != null ? `${(avgSnap * 100).toFixed(0)}%` : '—'}
+                        </td>
+                        <td className="num mono faint" style={{ fontSize: 11 }}>{b.week ?? '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ padding: '0 24px 24px', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 16, alignItems: 'start' }}>
         <div className="card">
           <div className="card-head">
             <div className="card-title">League Standings · {weekLabel}</div>
@@ -1253,7 +1660,9 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
             </tbody>
           </table>
         </div>
-        <WeeklyCalendar weekLabel={weekLabel} waiverPosition={waiverPosition} totalTeams={totalTeams} />
+        <div style={{ gridColumn: 'span 2' }}>
+          <WeeklyCalendar weekLabel={weekLabel} waiverPosition={waiverPosition} totalTeams={totalTeams} user={user} />
+        </div>
       </div>
     </div>
   );
@@ -1299,7 +1708,7 @@ function formatSpread(odds, away, home) {
   return odds.details;
 }
 
-function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams }) {
+function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
   const events = React.useMemo(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
@@ -1348,22 +1757,112 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams }) {
   // Today's day of week for highlighting
   const todayDay = new Date().toLocaleDateString('en-US', { weekday: 'long' });
 
+  // ── Happy Hour ───────────────────────────────────────────────────────────────
+  const [happyHours, setHappyHours] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_happy_hours') || '[]'); } catch { return []; }
+  });
+  const [showHHModal, setShowHHModal] = React.useState(false);
+  const [hhDraft, setHhDraft]         = React.useState(null);
+
+  // Draft location (set by admin/commissioner in DraftCountdown)
+  const draftSettings = React.useMemo(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+      return { date: s?.draftDate ?? null, address: s?.draftAddress ?? '' };
+    } catch { return { date: null, address: '' }; }
+  }, []);
+
+  function getWeekDay(dateStr) {
+    try { return new Date(dateStr.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }); } catch { return null; }
+  }
+
+  function fmt12(t) {
+    try { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; }
+    catch { return t; }
+  }
+
+  function openHHModal() {
+    setHhDraft({ id: Date.now().toString(), title: 'Happy Hour', date: new Date().toISOString().slice(0, 10), time: '17:00', address: '', teamIds: LEAGUE_TEAMS.map(t => t.id) });
+    setShowHHModal(true);
+  }
+
+  function saveHH() {
+    if (!hhDraft) return;
+    const updated = [...happyHours.filter(h => h.id !== hhDraft.id), hhDraft]
+      .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    setHappyHours(updated);
+    localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
+    setShowHHModal(false);
+    setHhDraft(null);
+  }
+
+  function deleteHH(id) {
+    const updated = happyHours.filter(h => h.id !== id);
+    setHappyHours(updated);
+    localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
+  }
+
+  function rsvpHH(id, teamId, response) {
+    const updated = happyHours.map(h => {
+      if (h.id !== id) return h;
+      const rsvps = { ...(h.rsvps || {}) };
+      if (response === null) delete rsvps[String(teamId)];
+      else rsvps[String(teamId)] = response;
+      return { ...h, rsvps };
+    });
+    setHappyHours(updated);
+    localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
+  }
+
+  const [draftRsvp, setDraftRsvp] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_draft_rsvp') || '{}'); } catch { return {}; }
+  });
+
+  function rsvpDraft(teamId, response) {
+    const updated = { ...draftRsvp };
+    if (response === null) delete updated[String(teamId)];
+    else updated[String(teamId)] = response;
+    setDraftRsvp(updated);
+    localStorage.setItem('fantasai_draft_rsvp', JSON.stringify(updated));
+  }
+
+  const myTeamId = user?.teamId ? String(user.teamId) : null;
+
   const grouped = React.useMemo(() => {
     const g = {};
     for (const evt of events) {
       if (!g[evt.day]) g[evt.day] = [];
       g[evt.day].push(evt);
     }
+    for (const hh of happyHours) {
+      const day = getWeekDay(hh.date);
+      if (!day) continue;
+      if (!g[day]) g[day] = [];
+      g[day].push({ ...hh, _isHH: true });
+    }
+    if (draftSettings.date) {
+      const day = getWeekDay(draftSettings.date);
+      if (day) {
+        if (!g[day]) g[day] = [];
+        const draftTime = draftSettings.date.includes('T') ? draftSettings.date.split('T')[1].slice(0, 5) : '';
+        g[day].push({ id: '__draft__', _isDraft: true, date: draftSettings.date, time: draftTime, address: draftSettings.address });
+      }
+    }
     return g;
-  }, [events]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events, happyHours, draftSettings.date, draftSettings.address]);
 
   const activeDays = DAY_ORDER.filter(d => grouped[d]?.length > 0);
 
   return (
+    <>
     <div className="card" style={{ position: 'sticky', top: 0 }}>
       <div className="card-head">
         <div className="card-title">Weekly Events</div>
-        <span className="mono faint" style={{ fontSize: 10 }}>{weekLabel}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button className="btn primary sm" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.02em' }} onClick={openHHModal}>🍺 Create Happy Hour</button>
+          <span className="mono faint" style={{ fontSize: 10 }}>{weekLabel}</span>
+        </div>
       </div>
       <div>
         {activeDays.map(day => {
@@ -1383,6 +1882,181 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams }) {
               </div>
 
               {dayEvts.map(evt => {
+                // ── Happy Hour event ──
+                if (evt._isHH) {
+                  const dateLabel = (() => { try { return new Date(evt.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return evt.date; } })();
+                  const allTeams = (evt.teamIds || []).length === LEAGUE_TEAMS.length;
+                  return (
+                    <div key={evt.id} style={{ margin: '4px 10px 6px', borderRadius: 7, border: '1px solid rgba(255,180,0,.28)', background: 'rgba(255,180,0,.05)', overflow: 'hidden', display: 'flex', alignItems: 'stretch' }}>
+                      {/* Left: event details */}
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px 6px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
+                          <span style={{ fontSize: 15 }}>🍺</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{evt.title || 'Happy Hour'}</div>
+                            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,180,0,.8)', marginTop: 1 }}>
+                              {dateLabel}{evt.time ? ` · ${fmt12(evt.time)}` : ''}
+                            </div>
+                          </div>
+                          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 12, padding: '2px 4px', lineHeight: 1 }} onClick={() => deleteHH(evt.id)} title="Remove">✕</button>
+                        </div>
+                        <div style={{ padding: '5px 10px 4px' }}>
+                          {allTeams ? (
+                            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,180,0,.7)' }}>All {LEAGUE_TEAMS.length} teams invited</span>
+                          ) : (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                              {(evt.teamIds || []).map(tid => {
+                                const t = LEAGUE_TEAMS.find(x => x.id === tid);
+                                return t ? <span key={tid} style={{ fontSize: 9, background: 'rgba(255,180,0,.12)', border: '1px solid rgba(255,180,0,.3)', borderRadius: 3, padding: '1px 6px', color: 'rgba(255,215,0,.9)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{t.logo}</span> : null;
+                              })}
+                            </div>
+                          )}
+                        </div>
+                        {evt.address && (
+                          <div style={{ padding: '0 10px 4px', fontSize: 10, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <span>📍</span>
+                            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(evt.address)}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-2)', textDecoration: 'none', fontWeight: 600 }}>{evt.address}</a>
+                          </div>
+                        )}
+                        {/* RSVP section */}
+                        {(() => {
+                          const invitedIds = evt.teamIds || [];
+                          const myIsInvited = myTeamId && invitedIds.map(String).includes(myTeamId);
+                          const myRsvp = evt.rsvps?.[myTeamId];
+                          const going = [], notGoing = [];
+                          for (const tid of invitedIds) {
+                            const r = evt.rsvps?.[String(tid)];
+                            const t = LEAGUE_TEAMS.find(x => String(x.id) === String(tid));
+                            if (!t) continue;
+                            if (r === 'yes') going.push(t);
+                            else if (r === 'no') notGoing.push(t);
+                          }
+                          return (
+                            <div style={{ padding: '4px 10px 8px', borderTop: '1px solid rgba(255,180,0,.12)', marginTop: 2 }}>
+                              {myIsInvited && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+                                  <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>RSVP:</span>
+                                  <button onClick={() => rsvpHH(evt.id, myTeamId, myRsvp === 'yes' ? null : 'yes')}
+                                    style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, border: `1px solid ${myRsvp === 'yes' ? 'rgba(76,175,130,.6)' : 'rgba(255,255,255,.15)'}`, cursor: 'pointer', background: myRsvp === 'yes' ? 'rgba(76,175,130,.25)' : 'transparent', color: myRsvp === 'yes' ? '#4caf82' : 'var(--text-dim)', fontWeight: myRsvp === 'yes' ? 700 : 400 }}>
+                                    ✓ Going
+                                  </button>
+                                  <button onClick={() => rsvpHH(evt.id, myTeamId, myRsvp === 'no' ? null : 'no')}
+                                    style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, border: `1px solid ${myRsvp === 'no' ? 'rgba(224,94,94,.5)' : 'rgba(255,255,255,.15)'}`, cursor: 'pointer', background: myRsvp === 'no' ? 'rgba(224,94,94,.2)' : 'transparent', color: myRsvp === 'no' ? '#e05e5e' : 'var(--text-dim)', fontWeight: myRsvp === 'no' ? 700 : 400 }}>
+                                    ✗ Not Going
+                                  </button>
+                                </div>
+                              )}
+                              {(going.length > 0 || notGoing.length > 0) && (
+                                <div style={{ display: 'flex', gap: 14 }}>
+                                  {going.length > 0 && (
+                                    <div>
+                                      <div style={{ fontSize: 8, color: '#4caf82', fontWeight: 700, letterSpacing: '.08em', marginBottom: 3 }}>GOING ({going.length})</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                                        {going.map(t => <span key={t.id} title={t.name} style={{ fontSize: 11 }}>{t.logo}</span>)}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {notGoing.length > 0 && (
+                                    <div>
+                                      <div style={{ fontSize: 8, color: '#e05e5e', fontWeight: 700, letterSpacing: '.08em', marginBottom: 3 }}>NOT GOING ({notGoing.length})</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, opacity: 0.6 }}>
+                                        {notGoing.map(t => <span key={t.id} title={t.name} style={{ fontSize: 11 }}>{t.logo}</span>)}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                      {/* Right: map — full height of card */}
+                      {evt.address && (
+                        <iframe
+                          title={`Map: ${evt.address}`}
+                          src={`https://maps.google.com/maps?q=${encodeURIComponent(evt.address)}&output=embed`}
+                          style={{ width: 240, flexShrink: 0, border: 'none', borderLeft: '1px solid rgba(255,180,0,.15)', display: 'block', minHeight: 220, alignSelf: 'stretch' }}
+                        />
+                      )}
+                    </div>
+                  );
+                }
+
+                // ── Draft event ──
+                if (evt._isDraft) {
+                  const dateLabel = (() => { try { return new Date(evt.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }); } catch { return evt.date; } })();
+                  const timeLabel = (() => { try { return new Date(evt.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }); } catch { return ''; } })();
+                  const myDraftRsvp = draftRsvp[String(myTeamId)];
+                  const draftGoing = [], draftNotGoing = [];
+                  for (const t of LEAGUE_TEAMS) {
+                    const r = draftRsvp[String(t.id)];
+                    if (r === 'yes') draftGoing.push(t);
+                    else if (r === 'no') draftNotGoing.push(t);
+                  }
+                  return (
+                    <div key="__draft__" style={{ margin: '4px 10px 6px', borderRadius: 7, border: '1px solid rgba(198,255,58,.3)', background: 'rgba(198,255,58,.05)', overflow: 'hidden', display: 'flex', alignItems: 'stretch' }}>
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px 6px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
+                          <span style={{ fontSize: 15 }}>🏈</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#c6ff3a' }}>Fantasy Draft</div>
+                            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(198,255,58,.7)', marginTop: 1 }}>
+                              {dateLabel}{timeLabel ? ` · ${timeLabel}` : ''}
+                            </div>
+                          </div>
+                        </div>
+                        {evt.address && (
+                          <div style={{ padding: '6px 10px 4px', fontSize: 10, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <span>📍</span>
+                            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(evt.address)}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-2)', textDecoration: 'none', fontWeight: 600 }}>{evt.address}</a>
+                          </div>
+                        )}
+                        {/* Draft RSVP section */}
+                        <div style={{ padding: '4px 10px 8px', borderTop: '1px solid rgba(198,255,58,.12)', marginTop: 2 }}>
+                          {myTeamId && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+                              <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>RSVP:</span>
+                              <button onClick={() => rsvpDraft(myTeamId, myDraftRsvp === 'yes' ? null : 'yes')}
+                                style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, border: `1px solid ${myDraftRsvp === 'yes' ? 'rgba(76,175,130,.6)' : 'rgba(255,255,255,.15)'}`, cursor: 'pointer', background: myDraftRsvp === 'yes' ? 'rgba(76,175,130,.25)' : 'transparent', color: myDraftRsvp === 'yes' ? '#4caf82' : 'var(--text-dim)', fontWeight: myDraftRsvp === 'yes' ? 700 : 400 }}>
+                                ✓ Going
+                              </button>
+                              <button onClick={() => rsvpDraft(myTeamId, myDraftRsvp === 'no' ? null : 'no')}
+                                style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, border: `1px solid ${myDraftRsvp === 'no' ? 'rgba(224,94,94,.5)' : 'rgba(255,255,255,.15)'}`, cursor: 'pointer', background: myDraftRsvp === 'no' ? 'rgba(224,94,94,.2)' : 'transparent', color: myDraftRsvp === 'no' ? '#e05e5e' : 'var(--text-dim)', fontWeight: myDraftRsvp === 'no' ? 700 : 400 }}>
+                                ✗ Not Going
+                              </button>
+                            </div>
+                          )}
+                          {(draftGoing.length > 0 || draftNotGoing.length > 0) && (
+                            <div style={{ display: 'flex', gap: 14 }}>
+                              {draftGoing.length > 0 && (
+                                <div>
+                                  <div style={{ fontSize: 8, color: '#4caf82', fontWeight: 700, letterSpacing: '.08em', marginBottom: 3 }}>GOING ({draftGoing.length})</div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                                    {draftGoing.map(t => <span key={t.id} title={t.name} style={{ fontSize: 11 }}>{t.logo}</span>)}
+                                  </div>
+                                </div>
+                              )}
+                              {draftNotGoing.length > 0 && (
+                                <div>
+                                  <div style={{ fontSize: 8, color: '#e05e5e', fontWeight: 700, letterSpacing: '.08em', marginBottom: 3 }}>NOT GOING ({draftNotGoing.length})</div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, opacity: 0.6 }}>
+                                    {draftNotGoing.map(t => <span key={t.id} title={t.name} style={{ fontSize: 11 }}>{t.logo}</span>)}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {/* Right: map — full height of card */}
+                      {evt.address && (
+                        <iframe title="Draft location map" src={`https://maps.google.com/maps?q=${encodeURIComponent(evt.address)}&output=embed`}
+                          style={{ width: 240, flexShrink: 0, border: 'none', borderLeft: '1px solid rgba(198,255,58,.15)', display: 'block', minHeight: 220, alignSelf: 'stretch' }} />
+                      )}
+                    </div>
+                  );
+                }
+
                 const game     = slotGame[evt.id];
                 const isWaiver = evt.type === 'waiver';
                 const typeColor = TYPE_COLOR[evt.type] ?? TYPE_COLOR.other;
@@ -1489,5 +2163,73 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams }) {
         )}
       </div>
     </div>
+
+    {/* ── Happy Hour Modal ─────────────────────────────────────────────────── */}
+    {showHHModal && hhDraft && (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.72)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+        onClick={e => { if (e.target === e.currentTarget) { setShowHHModal(false); setHhDraft(null); } }}>
+        <div style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 14, padding: 24, width: 420, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>🍺 Schedule Happy Hour</div>
+            <button style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 18, cursor: 'pointer', lineHeight: 1 }} onClick={() => { setShowHHModal(false); setHhDraft(null); }}>✕</button>
+          </div>
+
+          {/* Event name */}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: 'var(--text-faint)', display: 'block', marginBottom: 4 }}>Event Name</label>
+            <input className="input" value={hhDraft.title} onChange={e => setHhDraft(d => ({ ...d, title: e.target.value }))} placeholder="Happy Hour" style={{ width: '100%', boxSizing: 'border-box' }} />
+          </div>
+
+          {/* Date + Time */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-faint)', display: 'block', marginBottom: 4 }}>Date</label>
+              <input type="date" className="input" value={hhDraft.date} onChange={e => setHhDraft(d => ({ ...d, date: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-faint)', display: 'block', marginBottom: 4 }}>Time</label>
+              <input type="time" className="input" value={hhDraft.time} onChange={e => setHhDraft(d => ({ ...d, time: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box' }} />
+            </div>
+          </div>
+
+          {/* Address */}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 11, color: 'var(--text-faint)', display: 'block', marginBottom: 4 }}>Address <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>(optional — shows map)</span></label>
+            <input className="input" value={hhDraft.address} onChange={e => setHhDraft(d => ({ ...d, address: e.target.value }))} placeholder="123 Main St, City, State" style={{ width: '100%', boxSizing: 'border-box' }} />
+          </div>
+
+          {/* Teams */}
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <label style={{ fontSize: 11, color: 'var(--text-faint)' }}>Invite Teams</label>
+              <button className="btn ghost sm" style={{ fontSize: 10 }}
+                onClick={() => setHhDraft(d => ({ ...d, teamIds: d.teamIds.length === LEAGUE_TEAMS.length ? [] : LEAGUE_TEAMS.map(t => t.id) }))}>
+                {hhDraft.teamIds.length === LEAGUE_TEAMS.length ? 'Deselect All' : 'Select All'}
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, maxHeight: 210, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 7, padding: 8 }}>
+              {LEAGUE_TEAMS.map(t => {
+                const checked = hhDraft.teamIds.includes(t.id);
+                return (
+                  <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '4px 6px', borderRadius: 5, background: checked ? 'rgba(198,255,58,.08)' : 'transparent', border: `1px solid ${checked ? 'rgba(198,255,58,.25)' : 'transparent'}`, transition: 'background .12s' }}>
+                    <input type="checkbox" checked={checked}
+                      onChange={() => setHhDraft(d => ({ ...d, teamIds: checked ? d.teamIds.filter(id => id !== t.id) : [...d.teamIds, t.id] }))}
+                      style={{ accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 800, color: t.color || 'var(--accent)', minWidth: 22 }}>{t.logo}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="btn ghost sm" onClick={() => { setShowHHModal(false); setHhDraft(null); }}>Cancel</button>
+            <button className="btn primary sm" onClick={saveHH} disabled={!hhDraft.date}>Save Event</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

@@ -5,7 +5,7 @@ const FREE_DATA_SOURCES_LIST = FREE_DATA_SOURCES.map(s => ({ id: s.id, name: s.n
 const FEED_NAMES = Object.fromEntries(RANKING_SOURCES.map(s => [s.id, s.name.replace(' (ECR)', '').replace(' Fantasy', '').replace(' Sports Rankings', '').replace(' Rankings', '')]));
 
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
-import { useApi } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats } from '../lib/sleeper.js';
 import { api } from '../api.js';
 
@@ -88,57 +88,205 @@ const PLAYER_OWNER_MAP = (() => {
 export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new Set(), onAddPlayer, onTradePlayer, user, watchlistIds = new Set(), onToggleWatch, waiverQueue = {} }) {
   const [pos, setPos] = React.useState('ALL');
   const [search, setSearch] = React.useState('');
-  const [sort, setSort] = React.useState('proj');
+  const [sort, setSort] = React.useState('rank');
   const [avail, setAvail] = React.useState('all');
   const [useSleeperSort, setUseSleeperSort] = React.useState(false);
+  const [breakoutOnly, setBreakoutOnly] = React.useState(false);
+
+  // ── Custom Rankings (import + scrape) ────────────────────────────────────────
+  const [customRankings, setCustomRankings] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_custom_rankings') || '[]'); } catch { return []; }
+  });
+  const [activeRankingId, setActiveRankingId] = React.useState(null);
+
+  const [showImportModal, setShowImportModal] = React.useState(false);
+  const [importName, setImportName]           = React.useState('');
+  const [importFileName, setImportFileName]   = React.useState('');
+  const [importFileText, setImportFileText]   = React.useState('');
+  const [importError, setImportError]         = React.useState('');
+  const importFileRef                         = React.useRef(null);
+
+  const [showScrapeModal, setShowScrapeModal] = React.useState(false);
+  const [scrapeName, setScrapeName]           = React.useState('');
+  const [scrapeUrl, setScrapeUrl]             = React.useState('');
+  const [scrapeLoading, setScrapeLoading]     = React.useState(false);
+  const [scrapeError, setScrapeError]         = React.useState('');
 
   const sleeperWeights = React.useMemo(() => loadScoringWeights(), []);
 
-  const [dynamicExtras, setDynamicExtras] = React.useState([]);
+  const { data: r2Breakouts } = useR2BreakoutCandidates();
+  const breakoutSet = React.useMemo(() => {
+    const s = new Map(); // player_name (lower) → { snap_share_delta, opportunity_score }
+    const arr = Array.isArray(r2Breakouts) ? r2Breakouts : [];
+    for (const b of arr) {
+      if (b.player_name) s.set(b.player_name.toLowerCase().trim(), b);
+    }
+    return s;
+  }, [r2Breakouts]);
+
+  // Databricks bronze_player_news_raw is the primary player source.
+  // Falls back to Sleeper API if Databricks is unavailable, then static PLAYERS as last resort.
+  const [apiPlayerList, setApiPlayerList] = React.useState([]);
+  const [playersLoading, setPlayersLoading] = React.useState(true);
+  const [playersSource, setPlayersSource] = React.useState('');
+
+  // R2 injury overlay — real status + depth chart from Databricks silver_player_news
+  const { data: r2InjuryData } = useR2Injuries();
+  const { data: r2Notes } = useR2PlayerNotes();
+
+  // Index R2 injury data by name and by Sleeper player_id for fast lookup
+  const r2InjuryIndex = React.useMemo(() => {
+    const byName = {};
+    const byId   = {};
+    const arr = Array.isArray(r2InjuryData) ? r2InjuryData : [];
+    for (const r of arr) {
+      if (r.player_name) byName[r.player_name.toLowerCase().trim()] = r;
+      if (r.player_id)   byId[String(r.player_id)] = r;
+    }
+    return { byName, byId };
+  }, [r2InjuryData]);
+
+  // Index player_notes by name for news overlay
+  const r2NotesIndex = React.useMemo(() => {
+    const byName = {};
+    const arr = Array.isArray(r2Notes) ? r2Notes : [];
+    for (const n of arr) {
+      if (n.player_name) byName[n.player_name.toLowerCase().trim()] = n;
+    }
+    return byName;
+  }, [r2Notes]);
+
   React.useEffect(() => {
-    api.allPlayers(2000).then(raw => {
-      const arr = Array.isArray(raw) ? raw : Object.values(raw || {});
-      const staticNames = new Set(PLAYERS.map(p => p.name.toLowerCase().trim()));
-      const staticDstTeams = new Set(
-        PLAYERS.filter(p => p.pos === 'DST').map(p => p.team.toUpperCase())
-      );
-      const extras = [];
+    const staticByName = new Map(PLAYERS.map(p => [p.name.toLowerCase().trim(), p]));
+
+    function injStatusCode(injStatus) {
+      if (!injStatus || injStatus === 'Na') return 'OK';
+      if (injStatus === 'Questionable')    return 'Q';
+      if (injStatus === 'Doubtful')        return 'D';
+      if (injStatus === 'Out')             return 'Out';
+      if (injStatus === 'Injured_Reserve' || injStatus === 'IR') return 'IR';
+      return injStatus;
+    }
+
+    function normalizeRows(arr) {
+      const seen = new Set();
+      const result = [];
       for (const p of arr) {
-        if (!p.team || p.status === 'Inactive') continue;
-        let name;
-        if (p.position === 'DEF') {
-          const t = p.team.toUpperCase();
-          if (staticDstTeams.has(t)) continue;
-          name = `${t} DST`;
-        } else {
-          name = (p.full_name || `${p.first_name || ''} ${p.last_name || ''}`).trim();
-          if (!name || staticNames.has(name.toLowerCase())) continue;
-        }
-        const pos = p.position === 'DEF' ? 'DST' : (p.position || '');
+        const rawPos  = p.position;
+        const rawTeam = p.team;
+        if (!rawTeam || rawTeam === 'FA') continue;
+        const pos = rawPos === 'DEF' ? 'DST' : (rawPos || '');
         if (!['QB', 'RB', 'WR', 'TE', 'K', 'DST'].includes(pos)) continue;
-        extras.push({
-          id: p.player_id || p.id || name,
+        let name;
+        if (pos === 'DST') {
+          name = `${rawTeam.toUpperCase()} D/ST`;
+        } else {
+          name = (p.full_name || p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim()).trim();
+          if (!name) continue;
+        }
+        const key = name.toLowerCase().trim();
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const st = staticByName.get(key);
+        // Use the static numeric ID when there is a match — roster system uses these IDs.
+        // Otherwise keep the Sleeper string ID so the player is still identifiable.
+        const id = st ? st.id : (p.player_id || p.id || key);
+
+        const searchRank = Number(p.search_rank || p.ecr) || null;
+        const ecr   = searchRank || st?.ecr || 999;
+        const adp   = st?.adp || searchRank || 999;
+        const owned = st?.owned ?? (searchRank ? Math.max(0, parseFloat((100 - searchRank * 0.28).toFixed(1))) : 0);
+
+        result.push({
+          id,
+          sleeperId: p.player_id || p.id || null, // preserve for R2 injury lookup
           name,
           pos,
-          team: p.team,
-          opp: '', oppRank: 0,
-          status: p.injury_status === 'Questionable' ? 'Q'
-                : p.injury_status === 'Doubtful'      ? 'D'
-                : p.injury_status === 'Out'            ? 'Out'
-                : p.injury_status === 'Injured_Reserve' ? 'IR'
-                : 'OK',
-          proj: 0, last: 0, avg: 0,
-          trend: [0, 0, 0, 0, 0, 0],
-          owned: 0, adp: 999, ecr: 999, tier: 0,
-          num: p.number || 0, age: p.age || 0,
-          news: '',
+          team:    rawTeam,
+          num:     Number(p.number) || st?.num || 0,
+          age:     Number(p.age)    || st?.age || 0,
+          bye:     st?.bye     ?? 0,
+          opp:     st?.opp     ?? '',
+          oppRank: st?.oppRank ?? 0,
+          proj:    st?.proj    ?? 0,
+          last:    st?.last    ?? 0,
+          avg:     st?.avg     ?? 0,
+          trend:   st?.trend   ?? [0,0,0,0,0,0],
+          owned,
+          adp,
+          ecr,
+          tier:    st?.tier ?? 0,
+          news:    st?.news ?? '',
+          status:  injStatusCode(p.injury_status),
         });
       }
-      setDynamicExtras(extras);
-    }).catch(() => {});
-  }, []);
+      return result;
+    }
 
-  const allPlayersList = React.useMemo(() => [...PLAYERS, ...dynamicExtras], [dynamicExtras]);
+    // Try Databricks first
+    api.dbPlayers()
+      .then(data => {
+        const rows = data?.players || [];
+        if (rows.length > 0) {
+          setApiPlayerList(normalizeRows(rows));
+          setPlayersSource('Databricks');
+          return;
+        }
+        throw new Error('empty');
+      })
+      .catch(() =>
+        // Fall back to Sleeper
+        api.allPlayers(2000).then(raw => {
+          // Worker returns { players: [...], fetchedAt, source }
+          const arr = raw?.players || (Array.isArray(raw) ? raw : []);
+          const result = normalizeRows(arr.filter(p => p.team && p.status !== 'Inactive'));
+          if (result.length > 0) {
+            setApiPlayerList(result);
+            setPlayersSource('Sleeper');
+          } else {
+            setApiPlayerList(PLAYERS);
+            setPlayersSource('static');
+          }
+        })
+      )
+      .catch(() => {
+        setApiPlayerList(PLAYERS);
+        setPlayersSource('static');
+      })
+      .finally(() => setPlayersLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Merge R2 injury overlay into the player list when it arrives.
+  // R2 has more current injury_status + depth_chart_order than Databricks bronze table.
+  const allPlayersList = React.useMemo(() => {
+    if (!r2InjuryData && !r2Notes) return apiPlayerList;
+    return apiPlayerList.map(p => {
+      const r2 = r2InjuryIndex.byName[p.name.toLowerCase().trim()]
+               || (p.sleeperId ? r2InjuryIndex.byId[String(p.sleeperId)] : null);
+      const note = r2NotesIndex[p.name.toLowerCase().trim()];
+      const injSt = r2?.injury_status;
+      const updates = {};
+      if (injSt) {
+        updates.status = injSt === 'Questionable' ? 'Q'
+                       : injSt === 'Doubtful'     ? 'D'
+                       : injSt === 'Out'           ? 'Out'
+                       : injSt === 'IR' || injSt === 'Injured_Reserve' ? 'IR'
+                       : p.status;
+        if (r2.injury_notes) updates.injuryNotes = r2.injury_notes;
+      }
+      if (r2?.depth_chart_order != null) updates.depthChartOrder = r2.depth_chart_order;
+      if (r2?.depth_chart_position)      updates.depthChartPos   = r2.depth_chart_position;
+      if (note?.notes?.length) {
+        const topNote = note.notes[0];
+        updates.news = topNote.note_text ? topNote.note_text.slice(0, 100) : p.news;
+        updates.hasCriticalNews   = note.has_critical_news   || false;
+        updates.hasInjuryConcern  = note.has_injury_concern  || false;
+        updates.overallImpact     = note.overall_impact_score ?? null;
+      }
+      return Object.keys(updates).length ? { ...p, ...updates } : p;
+    });
+  }, [apiPlayerList, r2InjuryData, r2Notes, r2InjuryIndex, r2NotesIndex]);
 
   const sleeperScores  = React.useMemo(
     () => useSleeperSort ? computeSleeperScores(allPlayersList, sleeperWeights) : {},
@@ -207,11 +355,27 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     if (avail === 'free' && (draftedIds.has(p.id) || activeWaivers.has(p.id) || PLAYER_OWNER_MAP[p.id] != null || myRosterIds.has(p.id))) return false;
     if (avail === 'waivers' && !activeWaivers.has(p.id)) return false;
     if (avail === 'rostered' && !draftedIds.has(p.id) && !myRosterIds.has(p.id) && PLAYER_OWNER_MAP[p.id] == null) return false;
+    if (breakoutOnly && !breakoutSet.has(p.name.toLowerCase().trim())) return false;
     return true;
   });
 
+  const activeRanking = customRankings.find(r => r.id === activeRankingId) ?? null;
+  const customRankMap = React.useMemo(() => {
+    if (!activeRanking) return null;
+    const m = new Map();
+    for (const p of activeRanking.players) m.set(p.name.toLowerCase().trim(), p.rank);
+    return m;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRankingId, customRankings]);
+
   if (useSleeperSort) {
     players.sort((a, b) => (sleeperScores[b.id] ?? 0) - (sleeperScores[a.id] ?? 0));
+  } else if (sort === 'custom' && customRankMap) {
+    players.sort((a, b) => {
+      const ra = customRankMap.get(a.name.toLowerCase().trim()) ?? Infinity;
+      const rb = customRankMap.get(b.name.toLowerCase().trim()) ?? Infinity;
+      return ra - rb;
+    });
   } else {
     players.sort((a, b) => {
       if (sort === 'proj') return b.proj - a.proj;
@@ -224,6 +388,162 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     });
   }
 
+  // ── Custom ranking helpers ───────────────────────────────────────────────────
+  function saveCustomRanking(ranking) {
+    const updated = [...customRankings.filter(r => r.id !== ranking.id), ranking];
+    setCustomRankings(updated);
+    localStorage.setItem('fantasai_custom_rankings', JSON.stringify(updated));
+    setActiveRankingId(ranking.id);
+    setSort('custom');
+  }
+
+  function deleteCustomRanking(id) {
+    const updated = customRankings.filter(r => r.id !== id);
+    setCustomRankings(updated);
+    localStorage.setItem('fantasai_custom_rankings', JSON.stringify(updated));
+    if (activeRankingId === id) { setActiveRankingId(null); setSort('proj'); }
+  }
+
+  function parseRankingText(text, filename) {
+    const ext = (filename || '').split('.').pop().toLowerCase();
+    if (ext === 'json') {
+      const raw = JSON.parse(text);
+      const arr = Array.isArray(raw) ? raw : (raw.players || raw.rankings || Object.values(raw));
+      if (!Array.isArray(arr) || !arr.length) throw new Error('No array found in JSON');
+      if (typeof arr[0] === 'string')
+        return arr.map((n, i) => ({ name: n.trim(), rank: i + 1 })).filter(p => p.name);
+      return arr.map((d, i) => ({
+        name: (d.name || d.player_name || d.player || d.full_name || '').trim(),
+        rank: Number(d.rank || d.ecr || d.adp || i + 1),
+        pos:  d.pos || d.position || '',
+        team: d.team || d.team_abbr || '',
+      })).filter(p => p.name);
+    }
+    const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) throw new Error('File is empty');
+    const firstCols = lines[0].split(',').map(c => c.replace(/"/g, '').trim().toLowerCase());
+    const hasHeader = firstCols.some(c => ['name','player','rank','pos','position','ecr','adp'].includes(c));
+    if (hasHeader) {
+      const ni = firstCols.findIndex(c => ['name','player','player_name'].includes(c));
+      const ri = firstCols.findIndex(c => ['rank','ecr','adp','rk'].includes(c));
+      const pi = firstCols.findIndex(c => ['pos','position'].includes(c));
+      if (ni < 0) throw new Error('No player name column found (expected "name" or "player" header)');
+      return lines.slice(1).map((l, i) => {
+        const c = l.split(',').map(v => v.replace(/"/g, '').trim());
+        return { name: c[ni] || '', rank: ri >= 0 ? (parseInt(c[ri]) || i+1) : i+1, pos: pi >= 0 ? c[pi] : '' };
+      }).filter(p => p.name);
+    }
+    return lines.map((l, i) => {
+      const m = l.match(/^(\d+)[.):\s]+(.+?)(?:\s*[([].*)?$/);
+      if (m) return { rank: parseInt(m[1]), name: m[2].trim() };
+      const parts = l.split(',').map(p => p.replace(/"/g,'').trim());
+      if (parts.length >= 2 && !isNaN(parts[0])) return { rank: parseInt(parts[0]), name: parts[1] };
+      return { rank: i+1, name: l.replace(/^\d+[.):\s]+/, '').trim() };
+    }).filter(p => p.name && p.name.length > 1);
+  }
+
+  function parseScrapedHtml(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    // Strategy 1: FantasyPros / embedded JSON in scripts
+    for (const script of doc.querySelectorAll('script')) {
+      const txt = script.textContent || '';
+      const fpM = txt.match(/var\s+(?:ecrData|rankingData|playersData)\s*=\s*(\{[\s\S]*?\});\s*(?:var\s|\n|$)/);
+      if (fpM) {
+        try {
+          const d = JSON.parse(fpM[1]);
+          const arr = d.players || d.rankings;
+          if (Array.isArray(arr) && arr.length >= 5)
+            return arr.map((p,i) => ({ rank: p.rank_ecr||p.rank||i+1, name: (p.player_name||p.name||'').trim(), pos: p.pos||'', team: p.team_abbr||'' })).filter(p=>p.name);
+        } catch {}
+      }
+      // Generic JSON array with player-like keys
+      const arrM = txt.match(/(?:=|:)\s*(\[\s*\{[^[\]]{10,3000}\}\s*\])/);
+      if (arrM) {
+        try {
+          const arr = JSON.parse(arrM[1]);
+          if (Array.isArray(arr) && arr.length >= 10) {
+            const first = arr[0];
+            if (first.player_name || first.name || first.full_name)
+              return arr.map((p,i) => ({ rank: p.rank||p.ecr||i+1, name:(p.player_name||p.name||p.full_name||'').trim(), pos:p.pos||p.position||'', team:p.team||'' })).filter(p=>p.name);
+          }
+        } catch {}
+      }
+    }
+    // Strategy 2: HTML tables
+    for (const table of doc.querySelectorAll('table')) {
+      const hdrs = [...table.querySelectorAll('th')].map(th => th.textContent.trim().toLowerCase());
+      const ni = hdrs.findIndex(h => h.includes('player') || h === 'name');
+      const ri = hdrs.findIndex(h => ['rank','#','rk','ecr','adp'].includes(h));
+      const pi = hdrs.findIndex(h => ['pos','position'].includes(h));
+      if (ni < 0 && ri < 0) continue;
+      const rows = [...table.querySelectorAll('tbody tr')];
+      if (rows.length < 5) continue;
+      const items = rows.map((row,i) => {
+        const cells = [...row.querySelectorAll('td')];
+        const col = ni >= 0 ? ni : 1;
+        if (cells.length <= col) return null;
+        const rawName = cells[col].textContent.replace(/\s+/g,' ').trim();
+        const name = rawName.split(/\s+(QB|RB|WR|TE|K|DST|DEF|D\/ST)\s*[-–]/)[0].trim();
+        return { rank: ri >= 0 ? (parseInt(cells[ri]?.textContent)||i+1) : i+1, name, pos: pi >= 0 ? cells[pi]?.textContent.trim() : '' };
+      }).filter(p => p && p.name && p.name.length > 2 && !/^\d+$/.test(p.name));
+      if (items.length >= 10) return items;
+    }
+    // Strategy 3: ordered lists
+    for (const ol of doc.querySelectorAll('ol')) {
+      const items = [...ol.querySelectorAll('li')].map((li,i) => ({
+        rank: i+1, name: li.textContent.replace(/\s+/g,' ').split('(')[0].split(' - ')[0].trim(),
+      })).filter(p => p.name.length > 2);
+      if (items.length >= 15) return items;
+    }
+    // Strategy 4: text pattern "1. Name" or "1) Name"
+    const bodyText = doc.body?.textContent || '';
+    const matches = [...bodyText.matchAll(/(?:^|\n)\s*(\d{1,3})[.):\s]+([A-Z][a-z]+(?:[\s'-][A-Z][a-z'.]+)+)/gm)];
+    if (matches.length >= 10) return matches.map(m => ({ rank: parseInt(m[1]), name: m[2].trim() }));
+    return [];
+  }
+
+  function handleImportFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFileName(file.name);
+    setImportError('');
+    const reader = new FileReader();
+    reader.onload = ev => setImportFileText(ev.target.result || '');
+    reader.readAsText(file);
+    e.target.value = '';
+  }
+
+  function handleImportSave() {
+    if (!importName.trim()) { setImportError('Please enter a name for this ranking.'); return; }
+    if (!importFileText)    { setImportError('Please choose a file.'); return; }
+    try {
+      const players = parseRankingText(importFileText, importFileName);
+      if (!players.length) { setImportError('No players found — check the file format.'); return; }
+      saveCustomRanking({ id: Date.now().toString(), name: importName.trim(), players, source: 'import', createdAt: new Date().toISOString() });
+      setShowImportModal(false); setImportName(''); setImportFileName(''); setImportFileText(''); setImportError('');
+    } catch (err) { setImportError(`Parse error: ${err.message}`); }
+  }
+
+  async function handleScrape() {
+    if (!scrapeName.trim()) { setScrapeError('Please enter a name for this ranking.'); return; }
+    if (!scrapeUrl.trim())  { setScrapeError('Please enter a URL to scrape.'); return; }
+    setScrapeLoading(true); setScrapeError('');
+    try {
+      const res = await fetch('https://api.fantasai.net/api/v1/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: scrapeUrl.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      const players = parseScrapedHtml(data.html || '');
+      if (!players.length) throw new Error('No player rankings detected on this page. Try a direct rankings URL (e.g. FantasyPros overall rankings page).');
+      saveCustomRanking({ id: Date.now().toString(), name: scrapeName.trim(), players, source: 'scrape', url: scrapeUrl.trim(), createdAt: new Date().toISOString() });
+      setShowScrapeModal(false); setScrapeName(''); setScrapeUrl(''); setScrapeError('');
+    } catch (err) { setScrapeError(err.message); }
+    finally { setScrapeLoading(false); }
+  }
+
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
     <div className="col" style={{ flex: 1, minWidth: 0, overflow: 'hidden', height: '100%' }}>
@@ -232,10 +552,19 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           {user && <TeamLogoBadge team={user.teamId ? findTeam(user.teamId) : null} size={40} />}
           <div>
             <h1>Players</h1>
-            <div className="sub">{players.length} of {allPlayersList.length} matching · Updated 2 min ago</div>
+            <div className="sub">
+              {playersLoading
+                ? 'Loading player pool from Databricks…'
+                : `${players.length} of ${allPlayersList.length} players · ${
+                    playersSource === 'Databricks' ? 'Live from Databricks'
+                  : playersSource === 'Sleeper'    ? 'Sleeper API (Databricks unavailable)'
+                  : 'Static fallback'}`}
+            </div>
           </div>
         </div>
         <div className="flex gap-8">
+          <button className="btn ghost" onClick={() => { setShowScrapeModal(true); setScrapeError(''); setScrapeUrl(''); setScrapeName(''); }}>🌐 Scrape Rankings</button>
+          <button className="btn ghost" onClick={() => { setShowImportModal(true); setImportError(''); setImportName(''); setImportFileName(''); setImportFileText(''); }}>↑ Import Rankings</button>
           <button className="btn ghost"><span>⇣</span> Export</button>
         </div>
       </div>
@@ -260,6 +589,26 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           ))}
         </div>
         <button
+          onClick={() => setBreakoutOnly(b => !b)}
+          disabled={breakoutSet.size === 0}
+          style={{
+            padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700,
+            cursor: breakoutSet.size === 0 ? 'default' : 'pointer',
+            border: `1px solid ${breakoutOnly ? 'rgba(198,255,58,.6)' : 'var(--border)'}`,
+            background: breakoutOnly ? 'rgba(198,255,58,.12)' : 'transparent',
+            color: breakoutOnly ? '#c6ff3a' : breakoutSet.size === 0 ? 'var(--text-faint)' : 'var(--text-dim)',
+            display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+            transition: 'all .15s',
+            opacity: breakoutSet.size === 0 ? 0.5 : 1,
+          }}
+          title={breakoutSet.size === 0 ? 'No breakout data yet — run the Databricks export job' : `${breakoutSet.size} breakout candidate${breakoutSet.size !== 1 ? 's' : ''} identified by FantasAI ML`}
+        >
+          <span style={{ fontSize: 13 }}>↑</span>
+          Breakout
+          {breakoutOnly && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>ON</span>}
+          {breakoutSet.size > 0 && !breakoutOnly && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: '#c6ff3a', opacity: 0.8 }}>{breakoutSet.size}</span>}
+        </button>
+        <button
           onClick={() => setUseSleeperSort(s => !s)}
           style={{
             padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700,
@@ -276,16 +625,59 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           {useSleeperSort && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>ON</span>}
           {!sleeperWeights && <span style={{ fontSize: 10, color: 'var(--warn)', fontFamily: 'var(--font-mono)' }}>!</span>}
         </button>
-        <select className="input" value={sort} onChange={e => { setSort(e.target.value); setUseSleeperSort(false); }} disabled={useSleeperSort} style={{ opacity: useSleeperSort ? 0.4 : 1 }}>
+        <select
+          className="input"
+          value={sort === 'custom' && activeRankingId ? `custom:${activeRankingId}` : sort}
+          onChange={e => {
+            const v = e.target.value;
+            setUseSleeperSort(false);
+            if (v.startsWith('custom:')) { setActiveRankingId(v.slice(7)); setSort('custom'); }
+            else { setSort(v); setActiveRankingId(null); }
+          }}
+          disabled={useSleeperSort}
+          style={{ opacity: useSleeperSort ? 0.4 : 1 }}
+        >
           <option value="proj">Sort: Projection</option>
           <option value="last">Sort: Last Week</option>
           <option value="avg">Sort: Season Avg</option>
           <option value="owned">Sort: % Owned</option>
           <option value="adp">Sort: ADP</option>
           <option value="rank">Sort: Expert Rank</option>
+          {customRankings.length > 0 && <option disabled>── My Rankings ──</option>}
+          {customRankings.map(r => <option key={r.id} value={`custom:${r.id}`}>📋 {r.name}</option>)}
         </select>
+        {/* Active custom ranking indicator */}
+        {activeRanking && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 10px', background: 'rgba(198,255,58,.1)', border: '1px solid rgba(198,255,58,.3)', borderRadius: 6, flexShrink: 0 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>📋 {activeRanking.name}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{activeRanking.players.length} players</span>
+            <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-faint)', fontSize:13, padding:0, lineHeight:1 }}
+              onClick={() => { setActiveRankingId(null); setSort('proj'); }}>✕</button>
+          </div>
+        )}
+        {/* Custom rankings chips (if any saved) */}
+        {customRankings.length > 0 && (
+          <div style={{ display:'flex', gap:4, flexWrap:'nowrap', alignItems:'center' }}>
+            {customRankings.map(r => (
+              <div key={r.id} style={{ display:'flex', alignItems:'center', gap:0, borderRadius:6, border:`1px solid ${activeRankingId===r.id ? 'rgba(198,255,58,.5)' : 'var(--border)'}`, overflow:'hidden', flexShrink:0 }}>
+                <button
+                  style={{ padding:'3px 9px', fontSize:11, fontWeight:600, background: activeRankingId===r.id ? 'rgba(198,255,58,.12)' : 'transparent', border:'none', cursor:'pointer', color: activeRankingId===r.id ? 'var(--accent)' : 'var(--text-dim)', whiteSpace:'nowrap' }}
+                  onClick={() => { setActiveRankingId(r.id); setSort('custom'); setUseSleeperSort(false); }}
+                >📋 {r.name}</button>
+                <button style={{ padding:'3px 7px', fontSize:11, background:'transparent', border:'none', borderLeft:`1px solid ${activeRankingId===r.id ? 'rgba(198,255,58,.3)' : 'var(--border)'}`, cursor:'pointer', color:'var(--text-faint)', lineHeight:1 }}
+                  onClick={() => deleteCustomRanking(r.id)}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="grow"></div>
-        <span className="faint mono" style={{ fontSize: 11 }}>Scoring: HALF PPR</span>
+        {playersSource && (
+          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
+            {playersSource === 'Databricks' ? '◆ Databricks' : playersSource === 'Sleeper' ? '⚡ Sleeper' : '○ Static'} · {allPlayersList.length} players
+            {r2InjuryData ? ' · R2 injuries' : ''}
+          </span>
+        )}
+        <span className="faint mono" style={{ fontSize: 11 }}>HALF PPR</span>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
@@ -309,6 +701,13 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
             </tr>
           </thead>
           <tbody>
+            {playersLoading && players.length === 0 && Array.from({ length: 20 }).map((_, i) => (
+              <tr key={`skel-${i}`}>
+                {Array.from({ length: 13 }).map((__, c) => (
+                  <td key={c}><div style={{ height: 12, borderRadius: 4, background: 'rgba(255,255,255,.06)', width: c === 1 ? 140 : c === 0 ? 24 : 48, animation: 'pulse 1.4s ease-in-out infinite' }} /></td>
+                ))}
+              </tr>
+            ))}
             {players.map((p, i) => {
               const isOnMyRoster  = myRosterIds.has(p.id);
               const waiverEntry   = waiverQueue[p.id];
@@ -316,10 +715,15 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               const isAvail       = !draftedIds.has(p.id) && !isOnMyRoster && !isOnWaivers;
               const aiPick = aiMode !== 'subtle' ? null :
                 (p.id === 65 ? 'fade — hammy' : p.id === 62 ? 'BUY' : p.id === 80 ? 'TE1 lock' : null);
-              const pKey = p.name.toLowerCase();
-              const depthLabel  = depthData[pKey];
+              const pKey = p.name.toLowerCase().trim();
+              // R2 overlay takes priority for depth; fall back to Sleeper getPlayerMap data
+              const depthLabel = p.depthChartPos
+                ? `${p.depthChartPos}${p.depthChartOrder != null ? p.depthChartOrder : ''}`
+                : depthData[pKey];
               const snapCount   = snapsData[pKey];
-              const injuryEntry = injuryData[pKey];
+              // Injury notes: prefer R2 overlay, fall back to Sleeper getPlayerMap
+              const injNotes    = p.injuryNotes || (injuryData[pKey] ? [injuryData[pKey].bodyPart, injuryData[pKey].notes].filter(Boolean).join(' · ') : null);
+              const breakoutData = breakoutSet.get(pKey);
               return (
                 <tr key={p.id} className={selected === p.id ? 'selected' : ''} onClick={() => setSelected(p.id)}
                   style={isOnWaivers ? { background: 'rgba(255,149,0,.04)' } : undefined}>
@@ -373,13 +777,24 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                     ) : p.status !== 'OK' ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                         <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>
-                        {injuryEntry && (injuryEntry.bodyPart || injuryEntry.notes) && (
+                        {injNotes && (
                           <span style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.4, maxWidth: 160 }}>
-                            {[injuryEntry.bodyPart, injuryEntry.notes].filter(Boolean).join(' · ')}
+                            {injNotes}
                           </span>
                         )}
                       </div>
                     ) : null}
+                    {breakoutData && (
+                      <div title={`Snap Δ +${((breakoutData.snap_share_delta || 0) * 100).toFixed(0)}% · Opp Score ${(breakoutData.opportunity_score || 0).toFixed(1)}`}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 3,
+                          fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-mono)',
+                          color: '#c6ff3a', background: 'rgba(198,255,58,.12)',
+                          border: '1px solid rgba(198,255,58,.4)',
+                          borderRadius: 4, padding: '2px 6px', letterSpacing: '.04em',
+                        }}>↑ BREAKOUT</span>
+                      </div>
+                    )}
                     {aiPick && <div><AIHint>{aiPick}</AIHint></div>}
                   </td>
                   <td>
@@ -440,6 +855,85 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       </div>
     </div>
     {user && <RosterPanel teamId={user.teamId} myRosterIds={myRosterIds} onOpenPlayer={onOpenPlayer} />}
+
+    {/* ── Import Rankings Modal ─────────────────────────────────────────────── */}
+    {showImportModal && (
+      <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.72)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}
+        onClick={e => { if (e.target===e.currentTarget) setShowImportModal(false); }}>
+        <div style={{ background:'var(--panel)', border:'1px solid var(--border-strong)', borderRadius:14, padding:24, width:440, maxWidth:'100%', maxHeight:'90vh', overflowY:'auto' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
+            <div style={{ fontSize:15, fontWeight:800 }}>↑ Import Rankings</div>
+            <button style={{ background:'none', border:'none', color:'var(--text-faint)', fontSize:18, cursor:'pointer' }} onClick={() => setShowImportModal(false)}>✕</button>
+          </div>
+          <div style={{ marginBottom:12 }}>
+            <label style={{ fontSize:11, color:'var(--text-faint)', display:'block', marginBottom:4 }}>Rankings Name</label>
+            <input className="input" value={importName} onChange={e => setImportName(e.target.value)} placeholder="e.g. My Pre-Draft Rankings" style={{ width:'100%', boxSizing:'border-box' }} />
+          </div>
+          <div style={{ marginBottom:12 }}>
+            <label style={{ fontSize:11, color:'var(--text-faint)', display:'block', marginBottom:4 }}>File <span style={{ fontWeight:400 }}>(CSV, JSON, or TXT)</span></label>
+            <input ref={importFileRef} type="file" accept=".csv,.json,.txt" style={{ display:'none' }} onChange={handleImportFile} />
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <button className="btn ghost sm" onClick={() => importFileRef.current?.click()}>Choose File</button>
+              {importFileName && <span style={{ fontSize:11, color:'var(--text-dim)', fontFamily:'var(--font-mono)' }}>{importFileName}</span>}
+              {!importFileName && <span style={{ fontSize:11, color:'var(--text-faint)' }}>No file chosen</span>}
+            </div>
+          </div>
+          <div style={{ background:'rgba(255,255,255,.04)', border:'1px solid var(--border)', borderRadius:7, padding:'10px 12px', marginBottom:14 }}>
+            <div style={{ fontSize:10, fontWeight:700, color:'var(--text-faint)', textTransform:'uppercase', letterSpacing:'.08em', marginBottom:6 }}>Supported Formats</div>
+            <div style={{ fontSize:11, color:'var(--text-dim)', lineHeight:1.7 }}>
+              <div><span style={{ fontFamily:'var(--font-mono)', color:'var(--accent-2)' }}>CSV</span> — with headers: <span style={{ fontFamily:'var(--font-mono)' }}>rank,name,pos,team</span> or <span style={{ fontFamily:'var(--font-mono)' }}>name,rank</span></div>
+              <div><span style={{ fontFamily:'var(--font-mono)', color:'var(--accent-2)' }}>JSON</span> — array of <span style={{ fontFamily:'var(--font-mono)' }}>{'{name, rank, pos}'}</span> or array of strings</div>
+              <div><span style={{ fontFamily:'var(--font-mono)', color:'var(--accent-2)' }}>TXT</span> — one player per line, optionally prefixed with rank (e.g. <span style={{ fontFamily:'var(--font-mono)' }}>1. Josh Allen</span>)</div>
+            </div>
+          </div>
+          {importError && <div style={{ color:'var(--danger)', fontSize:12, marginBottom:10, padding:'6px 10px', background:'rgba(255,90,110,.08)', borderRadius:5 }}>{importError}</div>}
+          {importFileText && !importError && (
+            <div style={{ fontSize:10, color:'var(--text-faint)', marginBottom:10, fontFamily:'var(--font-mono)' }}>
+              Preview: {importFileText.trim().split('\n').slice(0,3).map(l => l.slice(0,60)).join(' | ')}…
+            </div>
+          )}
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+            <button className="btn ghost sm" onClick={() => setShowImportModal(false)}>Cancel</button>
+            <button className="btn primary sm" onClick={handleImportSave} disabled={!importName.trim() || !importFileText}>Import Rankings</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Scrape Rankings Modal ─────────────────────────────────────────────── */}
+    {showScrapeModal && (
+      <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.72)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}
+        onClick={e => { if (e.target===e.currentTarget && !scrapeLoading) setShowScrapeModal(false); }}>
+        <div style={{ background:'var(--panel)', border:'1px solid var(--border-strong)', borderRadius:14, padding:24, width:460, maxWidth:'100%', maxHeight:'90vh', overflowY:'auto' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
+            <div style={{ fontSize:15, fontWeight:800 }}>🌐 Scrape Rankings</div>
+            <button style={{ background:'none', border:'none', color:'var(--text-faint)', fontSize:18, cursor:'pointer' }} onClick={() => { if (!scrapeLoading) setShowScrapeModal(false); }}>✕</button>
+          </div>
+          <div style={{ marginBottom:12 }}>
+            <label style={{ fontSize:11, color:'var(--text-faint)', display:'block', marginBottom:4 }}>Rankings Name</label>
+            <input className="input" value={scrapeName} onChange={e => setScrapeName(e.target.value)} placeholder="e.g. FantasyPros ECR Week 1" style={{ width:'100%', boxSizing:'border-box' }} disabled={scrapeLoading} />
+          </div>
+          <div style={{ marginBottom:12 }}>
+            <label style={{ fontSize:11, color:'var(--text-faint)', display:'block', marginBottom:4 }}>URL to Scrape</label>
+            <input className="input" value={scrapeUrl} onChange={e => setScrapeUrl(e.target.value)} placeholder="https://www.fantasypros.com/nfl/rankings/overall.php" style={{ width:'100%', boxSizing:'border-box' }} disabled={scrapeLoading} />
+          </div>
+          <div style={{ background:'rgba(78,168,255,.06)', border:'1px solid rgba(78,168,255,.2)', borderRadius:7, padding:'10px 12px', marginBottom:14, fontSize:11, color:'var(--text-dim)', lineHeight:1.7 }}>
+            <div style={{ fontWeight:700, color:'var(--accent-2)', marginBottom:3 }}>ℹ Best results from:</div>
+            <div>• FantasyPros overall / position rankings</div>
+            <div>• CBS Sports / ESPN rankings pages</div>
+            <div>• Sites with numbered lists or data tables</div>
+            <div style={{ marginTop:4, color:'var(--text-faint)', fontSize:10 }}>Note: sites behind login or heavy JavaScript may not parse correctly.</div>
+          </div>
+          {scrapeError && <div style={{ color:'var(--danger)', fontSize:12, marginBottom:10, padding:'6px 10px', background:'rgba(255,90,110,.08)', borderRadius:5 }}>{scrapeError}</div>}
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+            <button className="btn ghost sm" onClick={() => { if (!scrapeLoading) setShowScrapeModal(false); }}>Cancel</button>
+            <button className="btn primary sm" onClick={handleScrape} disabled={scrapeLoading || !scrapeName.trim() || !scrapeUrl.trim()}>
+              {scrapeLoading ? '⟳ Scraping…' : '🌐 Scrape & Import'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   );
 }

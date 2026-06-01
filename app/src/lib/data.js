@@ -406,7 +406,7 @@ export const FREE_DATA_SOURCES = [
   },
   {
     id: "leaguelogs-api",
-    name: "LeagueLogs API",
+    name: "LeagueLogs",
     url: "https://www.leaguelogs.com",
     rank: 3,
     auth: "account",
@@ -419,7 +419,7 @@ export const FREE_DATA_SOURCES = [
   },
   {
     id: "nflverse",
-    name: "nflverse / nflreadr",
+    name: "NFLVerse",
     url: "https://github.com/nflverse/nflverse-data",
     rank: 4,
     auth: "none",
@@ -432,7 +432,7 @@ export const FREE_DATA_SOURCES = [
   },
   {
     id: "espn-nfl",
-    name: "ESPN NFL API",
+    name: "ESPN",
     url: "https://site.api.espn.com/apis/site/v2/sports/football/nfl",
     rank: 5,
     auth: "none",
@@ -458,7 +458,7 @@ export const FREE_DATA_SOURCES = [
   },
   {
     id: "cbs-news",
-    name: "CBS League News",
+    name: "CBS",
     url: "https://atotauleague.football.cbssports.com",
     rank: 6,
     auth: "cbs-cookie",
@@ -475,7 +475,7 @@ export const FREE_DATA_SOURCES = [
 export const LIMITED_FREE_SOURCES = [
   {
     id: "apifootball",
-    name: "API-Football (American)",
+    name: "API-Football",
     url: "https://v1.american-football.api-sports.io",
     keyHeader: "x-apisports-key",
     authNote: "100 req/day free · api-sports.io account",

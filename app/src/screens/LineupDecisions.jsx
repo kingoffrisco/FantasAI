@@ -56,7 +56,8 @@ function DatabricksAIPanel({ myRosterIds }) {
   const injuryAlerts = Array.isArray(injuryData)
     ? injuryData.filter(r => {
         const match = PLAYERS.find(p => p.name?.toLowerCase() === r.player_name?.toLowerCase());
-        return match && myRosterIds.has(match.id) && r.status === 'Out';
+        const injSt = r.injury_status;
+        return match && myRosterIds.has(match.id) && (injSt === 'Out' || injSt === 'IR');
       })
     : [];
 
@@ -108,7 +109,9 @@ function DatabricksAIPanel({ myRosterIds }) {
               <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(255,80,80,.15)', color: 'var(--danger)', border: '1px solid rgba(255,80,80,.3)', flexShrink: 0, marginTop: 1 }}>OUT</span>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--danger)' }}>{r.player_name}</div>
-                {r.notes && <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{r.notes}</div>}
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                  {r.injury_status}{r.injury_notes ? ` · ${r.injury_notes}` : ''}
+                </div>
               </div>
             </div>
           ))}
