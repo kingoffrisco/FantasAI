@@ -1,0 +1,86 @@
+{
+  "table_name": "export_player_news",
+  "description": "Recent NFL player news articles from Google News RSS. Contains headlines, URLs, and publisher info. Frontend can scrape article content on-demand when user clicks 'Read More'.",
+  "refresh_schedule": "Daily at 08:00 UTC (via Google News ingestion job)",
+  "retention": "60 days",
+  "records": "1,075 articles (top 5 per player, 271 players)",
+  "use_case": "Player news feed in FantasAI UI. Users click article links to scrape full content on frontend.",
+  "columns": [
+    {
+      "name": "player_id",
+      "type": "string",
+      "description": "Master player ID from gold_player_dim (links to roster data)"
+    },
+    {
+      "name": "player_name",
+      "type": "string",
+      "description": "Player name as searched in Google News"
+    },
+    {
+      "name": "position",
+      "type": "string",
+      "description": "Player position (QB, RB, WR, TE, K, DEF)"
+    },
+    {
+      "name": "team",
+      "type": "string",
+      "description": "Player's current NFL team abbreviation"
+    },
+    {
+      "name": "headline",
+      "type": "string",
+      "description": "Article title/headline from Google News"
+    },
+    {
+      "article_url",
+      "type": "string",
+      "description": "Full URL to original article (clickable link for frontend scraper)"
+    },
+    {
+      "name": "publisher",
+      "type": "string",
+      "description": "Source name (e.g., ESPN, The New York Times, Sports Illustrated)"
+    },
+    {
+      "name": "published_at",
+      "type": "timestamp",
+      "description": "Article publication timestamp (ISO 8601 format)"
+    },
+    {
+      "name": "article_rank",
+      "type": "integer",
+      "description": "Rank (1-5) of article per player, ordered by recency (1 = most recent)"
+    }
+  ],
+  "relationships": {
+    "gold_player_dim": "player_id → master_player_id (join for full player bio)",
+    "bronze_google_news": "Source table (5,031 raw articles, deduplicated to top 5 per player)"
+  },
+  "frontend_usage": {
+    "display": "Show headline, publisher, published date, and clickable URL",
+    "scraping": "User clicks 'Read More' → Frontend scrapes article_url → Display full content in modal/sidebar",
+    "caching": "Frontend can cache scraped content per article_url to avoid re-scraping"
+  },
+  "sample_data": [
+    {
+      "player_name": "Aaron Rodgers",
+      "position": "QB",
+      "team": "GNB",
+      "headline": "Packers reunion in Pittsburgh exposes desperation of Aaron Rodgers' swan song",
+      "publisher": "Lombardi Ave",
+      "published_at": "2026-06-05T10:00:00Z",
+      "article_url": "https://news.google.com/...",
+      "article_rank": 1
+    },
+    {
+      "player_name": "A.St. Brown",
+      "position": "WR",
+      "team": "UNK",
+      "headline": "Detroit Lions Fantasy Football Team Preview For 2026",
+      "publisher": "Matthew Berry's Fantasy Life",
+      "published_at": "2026-06-05T10:30:00Z",
+      "article_url": "https://news.google.com/...",
+      "article_rank": 1
+    }
+  ]
+}

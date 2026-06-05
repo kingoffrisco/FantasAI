@@ -1,0 +1,121 @@
+{
+  "table_name": "main.fantasai.gold_player_dim",
+  "layer": "Gold",
+  "description": "Master player dimension with unified IDs across all data sources. Single source of truth for player identity.",
+  "version": "2.0",
+  "last_updated": "2026-06-05",
+  "refresh_schedule": "Daily at 06:00 UTC (after bronze/silver ingestion)",
+  "record_count": 9343,
+  "columns": [
+    {
+      "name": "master_player_id",
+      "type": "string",
+      "description": "Unified player ID (SHA-256 hash of normalized player name). Primary key.",
+      "primary_key": true,
+      "nullable": false,
+      "sample_values": ["5d400342c5c7dcb0347becf03ecb512a374801dd9d86b56998dad5f970097f87"]
+    },
+    {
+      "name": "display_name",
+      "type": "string",
+      "description": "Player display name (most common spelling across sources)",
+      "nullable": false,
+      "sample_values": ["Patrick Mahomes", "Travis Kelce", "Tyreek Hill"]
+    },
+    {
+      "name": "player_name_normalized",
+      "type": "string",
+      "description": "Uppercase normalized name for matching (no suffixes, special chars removed)",
+      "nullable": false,
+      "sample_values": ["PATRICK MAHOMES", "TRAVIS KELCE"]
+    },
+    {
+      "name": "position",
+      "type": "string",
+      "description": "Primary playing position. Uses highest priority position when multiple exist.",
+      "nullable": false,
+      "sample_values": ["QB", "RB", "WR", "TE", "K", "DEF"]
+    },
+    {
+      "name": "current_team",
+      "type": "string",
+      "description": "Current team abbreviation (3-letter code)",
+      "nullable": true,
+      "sample_values": ["KC", "BUF", "SF", "PHI", "UNK"]
+    },
+    {
+      "name": "headshot_url",
+      "type": "string",
+      "description": "Player headshot image URL (from nflverse when available)",
+      "nullable": true,
+      "sample_values": ["https://a.espncdn.com/i/headshots/nfl/players/full/3139477.png"]
+    },
+    {
+      "name": "sources",
+      "type": "array<string>",
+      "description": "List of data sources where this player appears",
+      "nullable": false,
+      "sample_values": [["sleeper", "nflverse"], ["espn_public"], ["sleeper"]]
+    },
+    {
+      "name": "source_count",
+      "type": "long",
+      "description": "Number of distinct sources player appears in (1-4)",
+      "nullable": false,
+      "sample_values": [1, 2]
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp",
+      "description": "Timestamp when player record was created in gold layer",
+      "nullable": false,
+      "sample_values": ["2026-06-05T11:59:22.455Z"]
+    }
+  ],
+  "relationships": [
+    {
+      "table": "gold_player_id_mapping",
+      "type": "one-to-many",
+      "join_key": "master_player_id",
+      "description": "Maps to source-specific player IDs (sleeper_id, espn_id, nflverse_id)"
+    },
+    {
+      "table": "gold_weekly_stats",
+      "type": "one-to-many",
+      "join_key": "master_player_id",
+      "description": "Player's weekly fantasy stats across all sources"
+    },
+    {
+      "table": "player_combine_results",
+      "type": "one-to-one",
+      "join_key": "player_name (fuzzy match)",
+      "description": "NFL Combine athletic testing results"
+    }
+  ],
+  "primary_keys": ["master_player_id"],
+  "partitioning": "None",
+  "data_quality_rules": [
+    "Player deduplication: Name-only matching (not name+position)",
+    "Position priority: Valid positions (QB/RB/WR/TE) override invalid (UNK/N/A)",
+    "Headshot URLs: Only from nflverse source (most reliable)"
+  ],
+  "common_queries": [
+    {
+      "description": "Get all active players",
+      "sql": "SELECT * FROM main.fantasai.gold_player_dim WHERE position IN ('QB', 'RB', 'WR', 'TE')"
+    },
+    {
+      "description": "Find player by name",
+      "sql": "SELECT * FROM main.fantasai.gold_player_dim WHERE display_name LIKE '%Patrick Mahomes%'"
+    },
+    {
+      "description": "Players in multiple sources (data quality check)",
+      "sql": "SELECT * FROM main.fantasai.gold_player_dim WHERE source_count > 1 ORDER BY source_count DESC"
+    }
+  ],
+  "frontend_usage": {
+    "player_search": "Use display_name for autocomplete/search",
+    "player_detail": "master_player_id is the key for all API calls",
+    "player_avatar": "headshot_url for player images (null fallback to default avatar)"
+  }
+}
