@@ -375,6 +375,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     return () => mq.removeEventListener('change', handler);
   }, []);
   const [dashTab, setDashTab] = React.useState('standings');
+  const [mobileScoringOpen, setMobileScoringOpen] = React.useState(false);
 
   const { data: cbsTeams } = useApi(() => api.teams(), []);
   const { data: r2Alerts, fetchedAt: r2AlertsFetchedAt } = useR2CriticalAlerts();
@@ -796,6 +797,11 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           </div>
         </div>
         <div className="flex gap-8" style={{ alignItems: 'center' }}>
+          <button
+            className="btn"
+            style={{ background: '#22c55e', border: 'none', color: '#fff', fontWeight: 700 }}
+            onClick={() => setMobileScoringOpen(true)}
+          >📱 Mobile Scoring</button>
           <button className="btn primary" onClick={() => onNav('draft')}>▶ Open Draft Room</button>
         </div>
       </div>
@@ -1471,6 +1477,16 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
 
       {/* ── Breakout Candidates (mobile only — desktop is viewport-fit) ── */}
+      {mobileScoringOpen && (
+        <MobileScoringPopup
+          onClose={() => setMobileScoringOpen(false)}
+          myTeamId={teamId}
+          week={currentWeek.num || null}
+          espnGameMap={espnGameMap}
+          espnPlayerActuals={espnPlayerActuals}
+        />
+      )}
+
       {isMobile && Array.isArray(r2Breakouts) && r2Breakouts.length > 0 && (
         <div style={{ padding: '0 14px 16px' }}>
           <div className="card" style={{ borderLeft: '3px solid #c6ff3a' }}>
@@ -1533,6 +1549,104 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         </div>
       )}
 
+    </div>
+  );
+}
+
+function MobileScoringPopup({ onClose, myTeamId, week, espnGameMap, espnPlayerActuals }) {
+  const wkNum   = typeof week === 'number' ? week : null;
+  const matchups = wkNum ? (RR_SCHEDULE[wkNum - 1] || []) : [];
+
+  function computeTeamScore(teamId) {
+    const roster   = TEAM_ROSTERS[teamId] || [];
+    const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
+    return starters.reduce((total, r) => {
+      const p = findPlayer(r.playerId);
+      if (!p) return total;
+      const proj     = p.proj || p.avg || 0;
+      const gameInfo = espnGameMap[(p.team || '').toUpperCase()];
+      const actual   = espnPlayerActuals[(p.name || '').toLowerCase()] ?? null;
+      if (!gameInfo || gameInfo.statusName === 'STATUS_SCHEDULED') return total + proj;
+      const progress = getGameProgress(gameInfo);
+      if (actual != null) return total + (progress >= 1 ? actual : actual + proj * (1 - progress));
+      return total + proj;
+    }, 0);
+  }
+
+  const TeamRow = ({ team, teamId, score, winning }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <span style={{
+        width: 44, height: 44, borderRadius: 10,
+        background: team?.color || '#555',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 18, fontWeight: 900, color: '#fff', flexShrink: 0,
+      }}>
+        {team?.logo || '??'}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{team?.name || 'Team'}</div>
+        {teamId === myTeamId && (
+          <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.06em' }}>YOU</span>
+        )}
+      </div>
+      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: winning ? 'var(--good)' : 'var(--text-dim)', lineHeight: 1 }}>
+        {score.toFixed(1)}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: 18, letterSpacing: '-.01em' }}>Week {wkNum ?? '—'} Scores</div>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>Live H2H Matchups</div>
+        </div>
+        <button
+          onClick={onClose}
+          style={{ background: 'rgba(255,255,255,.08)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 20, cursor: 'pointer', borderRadius: '50%', width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, flexShrink: 0 }}
+        >✕</button>
+      </div>
+
+      {/* Scrollable matchup cards */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 32px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {!wkNum ? (
+          <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 14, marginTop: 48 }}>No active week — check back during the season.</div>
+        ) : matchups.length === 0 ? (
+          <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 14, marginTop: 48 }}>No matchups found for this week.</div>
+        ) : (
+          matchups.map(([aId, bId]) => {
+            const teamA  = LEAGUE_TEAMS.find(t => t.id === aId);
+            const teamB  = LEAGUE_TEAMS.find(t => t.id === bId);
+            const scoreA = computeTeamScore(aId);
+            const scoreB = computeTeamScore(bId);
+            const isMyMatch = aId === myTeamId || bId === myTeamId;
+            const aWinning  = scoreA >= scoreB;
+            const diff      = Math.abs(scoreA - scoreB);
+
+            return (
+              <div key={`${aId}-${bId}`} style={{
+                background: 'var(--panel)',
+                border: `1px solid ${isMyMatch ? 'rgba(198,255,58,.35)' : 'var(--border)'}`,
+                borderRadius: 14,
+                padding: '16px 18px',
+                ...(isMyMatch ? { boxShadow: '0 0 0 1px rgba(198,255,58,.1)' } : {}),
+              }}>
+                <TeamRow team={teamA} teamId={aId} score={scoreA} winning={aWinning} />
+                <div style={{ margin: '12px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                  <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 800, color: aWinning ? 'var(--good)' : 'var(--danger)', background: aWinning ? 'rgba(76,175,130,.12)' : 'rgba(255,90,110,.12)', border: `1px solid ${aWinning ? 'rgba(76,175,130,.3)' : 'rgba(255,90,110,.3)'}`, borderRadius: 6, padding: '2px 10px' }}>
+                    {diff.toFixed(1)}
+                  </span>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                </div>
+                <TeamRow team={teamB} teamId={bId} score={scoreB} winning={!aWinning} />
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

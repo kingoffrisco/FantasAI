@@ -245,6 +245,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
         </div>
         )}
       </div>
+
     </div>
   );
 }
@@ -733,3 +734,4 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
     </div>
   );
 }
+

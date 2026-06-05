@@ -896,9 +896,38 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                 </span>
               )}
             </div>
-            <div className="sub" style={{ marginBottom: 8 }}>
+            <div className="sub" style={{ marginBottom: 4 }}>
               {team?.name || 'My Team'} · {fullRoster.filter(r => r.playerId).length} players
             </div>
+            {myMatchup && (() => {
+              const _opp     = LEAGUE_TEAMS.find(t => t.id === myMatchup.oppId);
+              const _projWin = Math.round(myMatchup.winPct * 100);
+              const _myAcc   = starters.reduce((s, e) => {
+                const p = e.playerId ? findPlayer(e.playerId) : null;
+                return s + (p ? buildScoringBreakdown(p, H2H_WEEK).accumulated : 0);
+              }, 0);
+              const _oppSt  = (TEAM_ROSTERS[myMatchup.oppId] || []).filter(r => r.slot !== 'BENCH' && r.playerId);
+              const _oppAcc = _oppSt.reduce((s, e) => {
+                const p = e.playerId ? findPlayer(e.playerId) : null;
+                return s + (p ? buildScoringBreakdown(p, H2H_WEEK).accumulated : 0);
+              }, 0);
+              const _isWin  = _myAcc >= _oppAcc;
+              const _liveWin = Math.round(_myAcc + _oppAcc > 0 ? _myAcc / (_myAcc + _oppAcc) * 100 : _projWin);
+              return (
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, cursor: 'pointer', flexWrap: 'wrap' }}
+                  onClick={() => setMatchupExpanded(e => !e)}
+                >
+                  <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', flexShrink: 0 }}>Wk {H2H_WEEK}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)' }}>vs {_opp?.name}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>{_myAcc.toFixed(1)} – {_oppAcc.toFixed(1)}</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: _isWin ? '#4caf82' : 'var(--danger)' }}>
+                    {_isWin ? '▲' : '▼'} {_liveWin}% live · Proj {_projWin}%
+                  </span>
+                  <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{matchupExpanded ? '▲' : '▼'}</span>
+                </div>
+              );
+            })()}
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20 }}>
               <div>
                 <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 1 }}>Base Proj</div>
@@ -1224,57 +1253,11 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
 
             const myBench  = fullRoster.filter(r => r.slot === 'BENCH' && r.playerId);
 
-            return (
-              <div style={{ margin: '10px 18px 4px' }}>
-                {/* ── Matchup header bar (click to expand) ── */}
-                <div
-                  style={{
-                    background: 'var(--panel)', border: '1px solid var(--border)',
-                    borderRadius: matchupExpanded ? '8px 8px 0 0' : 8,
-                    padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12,
-                    cursor: 'pointer', userSelect: 'none',
-                  }}
-                  onClick={() => setMatchupExpanded(e => !e)}
-                >
-                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', flexShrink: 0 }}>
-                    Wk {H2H_WEEK} Matchup
-                  </div>
-                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ width: 20, height: 20, borderRadius: '50%', background: myTeam?.color || 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, flexShrink: 0 }}>{myTeam?.logo}</span>
-                      <span style={{ fontWeight: 800, fontSize: 13, color: isWinning ? '#4caf82' : 'var(--accent)' }}>{myAccum.toFixed(1)}</span>
-                      <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>/{myMatchup.myProj}</span>
-                    </div>
-                    <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>vs</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ fontWeight: 800, fontSize: 13, color: !isWinning ? '#4caf82' : 'var(--text-dim)' }}>{oppAccum.toFixed(1)}</span>
-                      <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>/{myMatchup.oppProj}</span>
-                      <span style={{ width: 20, height: 20, borderRadius: '50%', background: opp?.color || '#555', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, flexShrink: 0 }}>{opp?.logo}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{opp?.name}</span>
-                    </div>
-                  </div>
-                  {/* Win probability chip */}
-                  <div style={{ flexShrink: 0, textAlign: 'right' }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: isWinning ? '#4caf82' : 'var(--danger)' }}>
-                      {isWinning ? '▲' : '▼'} {liveWinDisp}% Live Win
-                    </div>
-                    <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
-                      Proj Win: <span style={{ color: projWinDisp >= 50 ? '#4caf82' : 'var(--danger)', fontWeight: 700 }}>{projWinDisp}%</span>
-                      {' '}
-                      <span style={{ color: deltaWin > 0 ? '#4caf82' : deltaWin < 0 ? 'var(--danger)' : 'var(--text-faint)' }}>({deltaWin > 0 ? '+' : ''}{deltaWin}%)</span>
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 12, color: 'var(--text-faint)', flexShrink: 0 }}>
-                    {matchupExpanded ? '▲' : '▼'}
-                  </span>
-                </div>
-
-                {/* ── Expanded scoring breakdown ── */}
-                {matchupExpanded && (
+            return matchupExpanded ? (
                   <div style={{
+                    margin: '0 18px 8px',
                     background: 'var(--panel)', border: '1px solid var(--border)',
-                    borderTop: '1px solid rgba(255,255,255,.05)',
-                    borderRadius: '0 0 8px 8px', padding: '12px 14px',
+                    borderRadius: 8, padding: '12px 14px',
                   }}>
 
                     {/* Win probability bar */}
@@ -1353,15 +1336,9 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                       Simulated live scoring · ▲ = ahead of projection · ▼ = behind · yard bonuses in yellow
                     </div>
                   </div>
-                )}
-              </div>
-            );
+            ) : null;
           })()}
-          {/* Lineup drag-and-drop hint */}
-          <div style={{ margin: '8px 18px 0', padding: '7px 14px', borderRadius: 8, background: 'rgba(198,255,58,.05)', border: '1px solid rgba(198,255,58,.18)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-dim)' }}>
-            <span style={{ fontSize: 14 }}>⠿</span>
-            <span><strong style={{ color: 'var(--accent)' }}>Set Lineup:</strong> Drag any player row up or down to swap slots. Position rules are enforced — a TE can't fill a QB slot.</span>
-          </div>
+
           <table className="data-table">
             <thead>
               <tr>
