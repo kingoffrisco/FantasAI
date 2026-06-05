@@ -3,6 +3,10 @@ import { LEAGUE_TEAMS } from '../lib/data.js';
 import { findPlayer, findPlayerByName, getPlayers } from '../lib/playerStore.js';
 import { api } from '../api.js';
 
+// Cross-screen context bridge — Compare.jsx writes here so Quick Asks are player-aware
+let _compareCtx = [];
+export function setCompareContext(players) { _compareCtx = Array.isArray(players) ? players : []; }
+
 // Module-level cache — fetched once per page load from the worker-api Sleeper endpoint
 let _dynamicNames   = null; // string[] sorted longest-first, or null while loading
 let _dynamicNamesSet = new Set();
@@ -576,7 +580,20 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
         <div style={{ marginTop: 12 }}>
           <div className="mono faint" style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginBottom: 6 }}>Quick Asks</div>
           <div className="flex" style={{ gap: 6, flexWrap: 'wrap' }}>
-            {['Optimize my lineup', 'Top 3 waiver targets', 'Grade my roster', 'Who should I trade?'].map(q => (
+            {(active === 'compare' && _compareCtx.length >= 2
+              ? (() => {
+                  const names = _compareCtx.map(p => p.name);
+                  const [p1, p2] = _compareCtx;
+                  const nameStr = names.length === 2 ? `${p1.name} vs ${p2.name}` : names.slice(0, 3).join(', ');
+                  return [
+                    `Who should I start: ${nameStr}?`,
+                    'Who has the better ceiling this week?',
+                    `Is ${p1.name} worth trading for?`,
+                    `${nameStr} — who has the safer floor?`,
+                  ];
+                })()
+              : ['Optimize my lineup', 'Top 3 waiver targets', 'Grade my roster', 'Who should I trade?']
+            ).map(q => (
               <button key={q} className="btn sm ghost" onClick={() => send(q)} disabled={loading} style={{ fontSize: 10 }}>{q}</button>
             ))}
           </div>

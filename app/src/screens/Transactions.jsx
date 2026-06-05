@@ -1,6 +1,7 @@
 import React from 'react';
 import { api } from '../api.js';
 import { LEAGUE_TEAMS } from '../lib/data.js';
+import { findPlayerByName } from '../lib/playerStore.js';
 
 const CATEGORY_LABELS = {
   schedule:  { label: 'Schedule',  color: '#ffb547' },
@@ -24,6 +25,10 @@ const TYPE_META = {
   league_settings: { icon: '⚙', label: 'Settings', color: '#c6ff3a' },
 };
 
+const POS_COLORS = {
+  QB: '#ef4444', RB: '#22c55e', WR: '#3b82f6', TE: '#f59e0b', K: '#a78bfa', DST: '#64748b',
+};
+
 function timeAgo(ts) {
   const diff = Date.now() - new Date(ts).getTime();
   const m = Math.floor(diff / 60000);
@@ -35,115 +40,145 @@ function timeAgo(ts) {
   return d === 1 ? '1d ago' : `${d}d ago`;
 }
 
+function PlayerCard({ p, accent, compact = false }) {
+  const live = findPlayerByName(p.name);
+  const photo = live?.photoUrl || p.photoUrl || null;
+  const pos = p.pos || live?.pos || '';
+  const team = p.nflTeam || live?.team || '';
+  const avg = live?.avg ? `${live.avg.toFixed(1)} avg` : null;
+  const proj = live?.proj ? `${live.proj.toFixed(1)} proj` : null;
+  const ecr = live?.ecr && live.ecr < 500 ? `#${live.ecr} ECR` : null;
+  const posColor = POS_COLORS[pos] || 'var(--text-faint)';
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: compact ? 6 : 10,
+      padding: compact ? '5px 8px' : '8px 10px',
+      background: `${accent}0d`, border: `1px solid ${accent}28`,
+      borderRadius: 8, minWidth: 0,
+    }}>
+      {photo ? (
+        <img src={photo} alt={p.name} style={{ width: compact ? 28 : 36, height: compact ? 28 : 36, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, background: 'var(--bg-2)', border: `2px solid ${posColor}60` }} onError={e => { e.target.style.display = 'none'; }} />
+      ) : (
+        <div style={{ width: compact ? 28 : 36, height: compact ? 28 : 36, borderRadius: '50%', flexShrink: 0, background: `${posColor}22`, border: `2px solid ${posColor}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: compact ? 9 : 11, fontWeight: 900, color: posColor }}>
+          {pos || '?'}
+        </div>
+      )}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: compact ? 11 : 12, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+        <div style={{ display: 'flex', gap: 5, alignItems: 'center', marginTop: 2, flexWrap: 'wrap' }}>
+          {pos && <span style={{ fontSize: 9, fontWeight: 800, color: posColor, background: `${posColor}18`, borderRadius: 3, padding: '1px 4px', fontFamily: 'var(--font-mono)' }}>{pos}</span>}
+          {team && <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{team}</span>}
+          {!compact && avg && <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{avg}</span>}
+          {!compact && proj && <span style={{ fontSize: 9, color: '#4ea8ff', fontFamily: 'var(--font-mono)' }}>{proj}</span>}
+          {!compact && ecr && <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{ecr}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TxnRow({ tx }) {
   const meta = TYPE_META[tx.type] || { icon: '◈', label: tx.type, color: 'var(--text-faint)' };
   const isSettings = tx.type === 'league_settings';
   const isHighlight = isSettings && tx.highlight;
   const catInfo = isSettings ? (CATEGORY_LABELS[tx.category] || CATEGORY_LABELS.general) : null;
+  const isTrade = tx.type === 'trade' || tx.type === 'trade_offer';
+  const team = !isSettings ? LEAGUE_TEAMS.find(t => String(t.id) === String(tx.teamId)) : null;
 
   return (
     <div style={{
-      padding: '12px 18px',
+      padding: '14px 18px',
       borderBottom: '1px solid var(--border)',
       background: isHighlight ? 'rgba(255,181,71,.07)' : 'transparent',
       borderLeft: isHighlight ? '3px solid #ffb547' : '3px solid transparent',
     }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        {/* Icon */}
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <div style={{
-          width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+          width: 26, height: 26, borderRadius: 7, flexShrink: 0,
           background: `${meta.color}18`, border: `1px solid ${meta.color}40`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 13,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12,
         }}>
           {meta.icon}
         </div>
+        <span style={{ fontSize: 11, fontWeight: 800, color: meta.color, fontFamily: 'var(--font-mono)', letterSpacing: '.04em' }}>
+          {meta.label.toUpperCase()}
+        </span>
+        {catInfo && (
+          <span style={{ fontSize: 9, fontWeight: 800, color: catInfo.color, background: `${catInfo.color}20`, border: `1px solid ${catInfo.color}40`, borderRadius: 3, padding: '1px 6px', fontFamily: 'var(--font-mono)', letterSpacing: '.06em' }}>
+            {catInfo.label.toUpperCase()}
+          </span>
+        )}
+        {isHighlight && (
+          <span style={{ fontSize: 9, fontWeight: 800, color: '#ffb547', background: 'rgba(255,181,71,.2)', border: '1px solid rgba(255,181,71,.4)', borderRadius: 3, padding: '1px 6px', fontFamily: 'var(--font-mono)' }}>
+            ★ HIGHLIGHTED
+          </span>
+        )}
+        {/* Team badge */}
+        {team && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 2 }}>
+            <span style={{ width: 16, height: 16, borderRadius: 3, background: team.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 900, color: '#000', flexShrink: 0 }}>{team.logo}</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{tx.teamName || 'Unknown Team'}</span>
+          </span>
+        )}
+        {isSettings && (
+          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+            <strong style={{ color: 'var(--text)' }}>{tx.changedBy || tx.teamName || 'Commissioner'}</strong>
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+          {timeAgo(tx.timestamp)}
+          <span style={{ marginLeft: 6, color: 'var(--border)' }}>·</span>
+          <span style={{ marginLeft: 6 }}>{new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>
+        </span>
+      </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Top row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: meta.color, fontFamily: 'var(--font-mono)', letterSpacing: '.04em' }}>
-              {meta.label.toUpperCase()}
-            </span>
-            {catInfo && (
-              <span style={{ fontSize: 9, fontWeight: 800, color: catInfo.color, background: `${catInfo.color}20`, border: `1px solid ${catInfo.color}40`, borderRadius: 3, padding: '1px 6px', fontFamily: 'var(--font-mono)', letterSpacing: '.06em' }}>
-                {catInfo.label.toUpperCase()}
-              </span>
-            )}
-            {isHighlight && (
-              <span style={{ fontSize: 9, fontWeight: 800, color: '#ffb547', background: 'rgba(255,181,71,.2)', border: '1px solid rgba(255,181,71,.4)', borderRadius: 3, padding: '1px 6px', fontFamily: 'var(--font-mono)' }}>
-                ★ HIGHLIGHTED
-              </span>
-            )}
-            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
-              {timeAgo(tx.timestamp)}
-            </span>
-          </div>
+      {/* Settings description */}
+      {isSettings && tx.description && (
+        <div style={{ fontSize: 12, color: isHighlight ? '#ffb547' : 'var(--text-dim)', lineHeight: 1.5, marginLeft: 34 }}>
+          {tx.description}
+        </div>
+      )}
 
-          {/* Team / By */}
-          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: isSettings ? 4 : 0 }}>
-            {isSettings ? (
-              <span>
-                <strong style={{ color: 'var(--text)' }}>{tx.changedBy || tx.teamName || 'Commissioner'}</strong>
-                {' · '}
-                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>
-                  {new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                </span>
-              </span>
-            ) : (() => {
-              const team = LEAGUE_TEAMS.find(t => String(t.id) === String(tx.teamId));
-              return (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {team && <span style={{ width: 18, height: 18, borderRadius: 4, background: team.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 900, color: '#000', flexShrink: 0 }}>{team.logo}</span>}
-                  <strong style={{ color: 'var(--text)' }}>{tx.teamName || 'Unknown Team'}</strong>
-                  <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>
-                    · {new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                  </span>
-                </span>
-              );
-            })()}
-          </div>
-
-          {/* Description */}
-          {isSettings && tx.description && (
-            <div style={{ fontSize: 12, color: isHighlight ? '#ffb547' : 'var(--text-dim)', lineHeight: 1.5 }}>
-              {tx.description}
-            </div>
-          )}
-
-          {/* Player add/drop */}
-          {(tx.type === 'add' || tx.type === 'drop') && tx.players?.map((p, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 12 }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 800, color: tx.type === 'add' ? '#4caf82' : '#ff5a6e', width: 30 }}>
+      {/* Add/drop player cards */}
+      {(tx.type === 'add' || tx.type === 'drop') && tx.players?.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginLeft: 34 }}>
+          {tx.players.map((p, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 9, fontWeight: 900, color: tx.type === 'add' ? '#4caf82' : '#ff5a6e', fontFamily: 'var(--font-mono)', letterSpacing: '.06em', width: 32, flexShrink: 0 }}>
                 {tx.type === 'add' ? 'ADD' : 'DROP'}
               </span>
-              <span style={{ fontWeight: 600, color: 'var(--text)' }}>{p.name}</span>
-              <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.pos} · {p.nflTeam}</span>
+              <PlayerCard p={p} accent={tx.type === 'add' ? '#4caf82' : '#ff5a6e'} />
             </div>
           ))}
+        </div>
+      )}
 
-          {/* Trade */}
-          {(tx.type === 'trade' || tx.type === 'trade_offer') && (
-            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {tx.gave?.length > 0 && (
-                <div style={{ fontSize: 12 }}>
-                  <span style={{ fontSize: 9, fontWeight: 800, color: '#ff5a6e', fontFamily: 'var(--font-mono)', marginRight: 8 }}>GAVE</span>
-                  {tx.gave.map((p, i) => <span key={i} style={{ color: 'var(--text)', marginRight: 8 }}>{p.name} <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>({p.pos})</span></span>)}
-                </div>
-              )}
-              {tx.got?.length > 0 && (
-                <div style={{ fontSize: 12 }}>
-                  <span style={{ fontSize: 9, fontWeight: 800, color: '#4caf82', fontFamily: 'var(--font-mono)', marginRight: 8 }}>GOT</span>
-                  {tx.got.map((p, i) => <span key={i} style={{ color: 'var(--text)', marginRight: 8 }}>{p.name} <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>({p.pos})</span></span>)}
-                </div>
-              )}
-              {tx.type === 'trade_offer' && (
-                <div style={{ fontSize: 10, color: '#ffb547', fontFamily: 'var(--font-mono)', marginTop: 2 }}>Offer sent to {tx.otherTeamName || 'opponent'}</div>
-              )}
+      {/* Trade layout */}
+      {isTrade && (tx.gave?.length > 0 || tx.got?.length > 0) && (
+        <div style={{ marginLeft: 34, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {tx.gave?.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 9, fontWeight: 900, color: '#ff5a6e', fontFamily: 'var(--font-mono)', letterSpacing: '.06em', paddingTop: 10, flexShrink: 0, width: 32 }}>GAVE</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {tx.gave.map((p, i) => <PlayerCard key={i} p={p} accent="#ff5a6e" compact />)}
+              </div>
             </div>
           )}
+          {tx.got?.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 9, fontWeight: 900, color: '#4caf82', fontFamily: 'var(--font-mono)', letterSpacing: '.06em', paddingTop: 10, flexShrink: 0, width: 32 }}>GOT</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {tx.got.map((p, i) => <PlayerCard key={i} p={p} accent="#4caf82" compact />)}
+              </div>
+            </div>
+          )}
+          {tx.type === 'trade_offer' && (
+            <div style={{ fontSize: 10, color: '#ffb547', fontFamily: 'var(--font-mono)', marginTop: 2, marginLeft: 40 }}>Offer sent to {tx.otherTeamName || 'opponent'}</div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -187,8 +222,16 @@ export default function TransactionsScreen() {
 
   const highlightCount = txns.filter(t => t.type === 'league_settings' && t.highlight).length;
 
+  const stats = React.useMemo(() => ({
+    adds:   txns.filter(t => t.type === 'add').length,
+    drops:  txns.filter(t => t.type === 'drop').length,
+    trades: txns.filter(t => t.type === 'trade').length,
+    offers: txns.filter(t => t.type === 'trade_offer').length,
+    recent: txns.filter(t => Date.now() - new Date(t.timestamp) < 7 * 864e5).length,
+  }), [txns]);
+
   return (
-    <div style={{ padding: '20px 24px', maxWidth: 860, display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ padding: '20px 24px', maxWidth: 900, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="page-head" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div>
@@ -200,6 +243,24 @@ export default function TransactionsScreen() {
           </button>
         </div>
       </div>
+
+      {/* Stats strip */}
+      {!loading && txns.length > 0 && (
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {[
+            { label: 'Adds',    value: stats.adds,   color: '#4caf82' },
+            { label: 'Drops',   value: stats.drops,  color: '#ff5a6e' },
+            { label: 'Trades',  value: stats.trades, color: '#4ea8ff' },
+            { label: 'Offers',  value: stats.offers, color: '#ffb547' },
+            { label: 'This Week', value: stats.recent, color: 'var(--accent)' },
+          ].map(s => (
+            <div key={s.label} style={{ padding: '8px 14px', background: `${s.color}10`, border: `1px solid ${s.color}30`, borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 72 }}>
+              <span style={{ fontSize: 20, fontWeight: 900, color: s.color, fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{s.value}</span>
+              <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '.06em', textTransform: 'uppercase' }}>{s.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {highlightCount > 0 && (
         <div style={{ padding: '10px 14px', background: 'rgba(255,181,71,.1)', border: '1px solid rgba(255,181,71,.35)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -216,7 +277,7 @@ export default function TransactionsScreen() {
 
       <div className="card" style={{ overflow: 'hidden' }}>
         {/* Filter bar */}
-        <div style={{ display: 'flex', gap: 2, padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', gap: 2, padding: '10px 14px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
           {FILTERS.map(f => (
             <button key={f.id} onClick={() => setFilter(f.id)} style={{
               padding: '5px 12px', borderRadius: 6, fontSize: 11, fontWeight: filter === f.id ? 700 : 500,

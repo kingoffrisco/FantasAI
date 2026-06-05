@@ -441,15 +441,24 @@ function matchDraftPlayer(name) {
 
 // ── Import Rankings Modal ─────────────────────────────────────────────────────
 
-function ImportRankingsModal({ onClose, onImport }) {
-  const [importTab, setImportTab] = React.useState('file'); // 'file' | 'url' | 'paste'
+function ImportRankingsModal({ onClose, onImport, initialTab = 'file' }) {
+  const [importTab, setImportTab] = React.useState(initialTab); // 'file' | 'url' | 'paste'
   const [file, setFile] = React.useState(null);
   const [pasteText, setPasteText] = React.useState('');
   const [scrapeUrl, setScrapeUrl] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
   const [preview, setPreview] = React.useState(null); // [{rank,name,matched,player}]
+  const [rankingName, setRankingName] = React.useState('');
   const fileRef = React.useRef(null);
+
+  const defaultName = React.useMemo(() => {
+    if (importTab === 'file') return file ? file.name.replace(/\.[^.]+$/, '') : 'Imported Rankings';
+    if (importTab === 'url') {
+      try { return new URL(scrapeUrl.trim()).hostname.replace(/^www\./, '') + ' Rankings'; } catch { return 'Scraped Rankings'; }
+    }
+    return 'Pasted Rankings';
+  }, [importTab, file, scrapeUrl]);
 
   function buildPreview(entries) {
     const matched = [];
@@ -500,7 +509,8 @@ function ImportRankingsModal({ onClose, onImport }) {
 
   function handleImport() {
     if (!preview?.matched?.length) return;
-    onImport(preview.matched.map(e => e.player.id));
+    const name = rankingName.trim() || defaultName;
+    onImport(preview.matched.map(e => e.player.id), name, importTab);
     onClose();
   }
 
@@ -661,15 +671,29 @@ function ImportRankingsModal({ onClose, onImport }) {
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexShrink: 0 }}>
-          <button className="btn ghost" onClick={onClose}>Cancel</button>
-          <button
-            className="btn primary"
-            disabled={!preview?.matched?.length}
-            onClick={handleImport}
-          >
-            Import {preview?.matched?.length ? `${preview.matched.length} Players` : 'Rankings'}
-          </button>
+        <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
+          {preview?.matched?.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', letterSpacing: '.06em', whiteSpace: 'nowrap' }}>SAVE AS</span>
+              <input
+                className="input"
+                style={{ flex: 1, fontSize: 12 }}
+                placeholder={defaultName}
+                value={rankingName}
+                onChange={e => setRankingName(e.target.value)}
+              />
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn ghost" onClick={onClose}>Cancel</button>
+            <button
+              className="btn primary"
+              disabled={!preview?.matched?.length}
+              onClick={handleImport}
+            >
+              Import {preview?.matched?.length ? `${preview.matched.length} Players` : 'Rankings'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -678,16 +702,30 @@ function ImportRankingsModal({ onClose, onImport }) {
 
 export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
   const [tab, setTab] = React.useState('cbs');
+  const [savedRankings, setSavedRankings] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_saved_rankings') || '[]'); } catch { return []; }
+  });
   const [personalRanks, setPersonalRanks] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_personal_rankings') || '[]'); } catch { return []; }
   });
   const [prPos, setPrPos] = React.useState('ALL');
   const [prSearch, setPrSearch] = React.useState('');
   const [showImport, setShowImport] = React.useState(false);
+  const [importInitialTab, setImportInitialTab] = React.useState('file');
 
   const saveRanks = (ranks) => {
     setPersonalRanks(ranks);
     localStorage.setItem('fantasai_personal_rankings', JSON.stringify(ranks));
+  };
+
+  const persistSaved = (list) => {
+    setSavedRankings(list);
+    localStorage.setItem('fantasai_saved_rankings', JSON.stringify(list));
+  };
+
+  const deleteSaved = (id) => {
+    persistSaved(savedRankings.filter(r => r.id !== id));
+    if (tab === id) setTab('cbs');
   };
 
   const addPlayer = (id) => {
@@ -720,12 +758,12 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
     <div className="col" style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       {showImport && (
         <ImportRankingsModal
+          initialTab={importInitialTab}
           onClose={() => setShowImport(false)}
-          onImport={(ids) => {
-            // Merge: imported list first, then any previously ranked players not in the import
-            const importedSet = new Set(ids);
-            const existing = personalRanks.filter(id => !importedSet.has(id));
-            saveRanks([...ids, ...existing]);
+          onImport={(ids, name, source) => {
+            const newSet = { id: `saved_${Date.now()}`, name, source, createdAt: new Date().toISOString(), playerIds: ids };
+            persistSaved([...savedRankings, newSet]);
+            setTab(newSet.id);
           }}
         />
       )}
@@ -738,11 +776,27 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
           </div>
         </div>
         <div className="flex gap-8">
-          {[{ id: 'cbs', label: '▦ CBS Rankings' }, { id: 'personal', label: '★ Personal Rankings' }].map(t => (
-            <button key={t.id} className={`btn ${tab === t.id ? 'primary' : 'ghost'}`} onClick={() => setTab(t.id)}>
-              {t.label}
-            </button>
+          <button className="btn ghost" onClick={() => { setImportInitialTab('url'); setShowImport(true); }}>🌐 Scrape Rankings</button>
+          <button className="btn ghost" onClick={() => { setImportInitialTab('file'); setShowImport(true); }}>↑ Import Rankings</button>
+          <button className={`btn ${tab === 'cbs' ? 'primary' : 'ghost'}`} onClick={() => setTab('cbs')}>▦ CBS</button>
+          {savedRankings.map(r => (
+            <div key={r.id} style={{ display: 'flex', alignItems: 'center' }}>
+              <button
+                className={`btn ${tab === r.id ? 'primary' : 'ghost'}`}
+                style={{ borderRadius: '8px 0 0 8px', paddingRight: 8 }}
+                onClick={() => setTab(r.id)}
+              >
+                {r.source === 'url' ? '🌐' : r.source === 'paste' ? '📋' : '📄'} {r.name}
+              </button>
+              <button
+                className="btn ghost"
+                style={{ borderRadius: '0 8px 8px 0', paddingLeft: 6, paddingRight: 8, borderLeft: '1px solid var(--border)', fontSize: 11 }}
+                onClick={() => deleteSaved(r.id)}
+                title={`Delete "${r.name}"`}
+              >×</button>
+            </div>
           ))}
+          <button className={`btn ${tab === 'personal' ? 'primary' : 'ghost'}`} onClick={() => setTab('personal')}>★ Personal</button>
         </div>
       </div>
 
@@ -750,6 +804,16 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
         <div style={{ flex: 1, overflow: 'auto' }}>
           <CBSRankingsScreen onOpenPlayer={onOpenPlayer} />
         </div>
+      ) : tab !== 'personal' ? (
+        (() => {
+          const sr = savedRankings.find(r => r.id === tab);
+          if (!sr) return null;
+          return (
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <SavedRankingView ranking={sr} onOpenPlayer={onOpenPlayer} />
+            </div>
+          );
+        })()
       ) : (
         <div style={{ flex: 1, overflow: 'hidden', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
           {/* Left: player pool */}
@@ -818,6 +882,89 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SavedRankingView({ ranking, onOpenPlayer }) {
+  const [compare, setCompare] = React.useState(true);
+  const [pos, setPos] = React.useState('ALL');
+  const [search, setSearch] = React.useState('');
+
+  const srcLabel = ranking.source === 'url' ? '🌐 Scraped' : ranking.source === 'paste' ? '📋 Pasted' : '📄 Imported';
+  const savedDate = new Date(ranking.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  let rows = ranking.playerIds
+    .map((id, i) => ({ rank: i + 1, player: findPlayer(id) }))
+    .filter(r => r.player);
+  if (pos !== 'ALL') rows = rows.filter(r => r.player.pos === pos);
+  if (search) rows = rows.filter(r => r.player.name.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="col" style={{ height: '100%', overflow: 'auto' }}>
+      <div className="page-head">
+        <div className="flex gap-12" style={{ alignItems: 'center' }}>
+          <div style={{ fontSize: 32 }}>{ranking.source === 'url' ? '🌐' : ranking.source === 'paste' ? '📋' : '📄'}</div>
+          <div>
+            <h1>{ranking.name}</h1>
+            <div className="sub">{ranking.playerIds.length} players · {srcLabel} · saved {savedDate}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="toolbar">
+        <div className="chips">
+          {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => (
+            <div key={p} className={`chip ${pos === p ? 'accent active' : ''}`} onClick={() => setPos(p)}>{p}</div>
+          ))}
+        </div>
+        <input className="input search" placeholder="Filter by name" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 240 }} />
+        <div className="grow"></div>
+        <label className="cbs-toggle-inline">
+          <input type="checkbox" checked={compare} onChange={() => setCompare(!compare)} />
+          <span>Compare vs ECR</span>
+        </label>
+      </div>
+
+      <div style={{ padding: '0 24px 24px' }}>
+        <table className="data-table cbs-rank-table">
+          <thead>
+            <tr>
+              <th className="num">#</th>
+              <th>Player</th>
+              <th></th>
+              {compare && <th className="num">ECR</th>}
+              {compare && <th className="num">Δ vs ECR</th>}
+              <th className="num">ADP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ rank, player }) => {
+              const delta = player.ecr ? player.ecr - rank : null;
+              return (
+                <tr key={player.id} onClick={() => onOpenPlayer && onOpenPlayer(player.id)} style={{ cursor: 'pointer' }}>
+                  <td className="num">
+                    <strong style={{ fontSize: 14, fontFamily: 'var(--font-display)', fontStretch: '75%' }}>{rank}</strong>
+                  </td>
+                  <td><PlayerCell player={player} /></td>
+                  <td><PosBadge pos={player.pos} /></td>
+                  {compare && <td className="num faint">{player.ecr}</td>}
+                  {compare && (
+                    <td className="num">
+                      {delta !== null && Math.abs(delta) > 0 && (
+                        <span className={`delta-cell mono ${delta > 0 ? 'up' : 'down'}`}>
+                          {delta > 0 ? '+' : ''}{delta}
+                        </span>
+                      )}
+                    </td>
+                  )}
+                  <td className="num faint">{player.adp?.toFixed(1)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

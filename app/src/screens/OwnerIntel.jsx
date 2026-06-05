@@ -339,7 +339,7 @@ function OwnerRoster({ teamId, onOpenPlayer, isMyTeam, myRosterIds, slotOverride
     const settings  = (() => { try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch { return null; } })();
     const slotFrame = buildRosterFrame(settings);
     // Only show filled slots so count matches the other teams' display
-    roster = assignRoster(slotFrame, myRosterIds, slotOverrides || {}).filter(e => e.playerId);
+    roster = assignRoster(slotFrame, myRosterIds, slotOverrides || {}, findPlayer).filter(e => e.playerId);
   } else {
     roster = TEAM_ROSTERS[teamId] || [];
   }

@@ -26,6 +26,7 @@ export const api = {
   allPlayers: (limit = 2000) => fetch(`${API_BASE}/api/v1/players?limit=${limit}`).then(r => r.json()),
 
   r2: {
+    players2026:  () => r2Get('fantasai/players/export_players_2026_draft.json'),
     lineup:   () => r2Get('fantasai/analysis/lineup_recommendations.json'),
     injuries: () => r2Get('fantasai/injuries/silver_player_news.json'),
     trends:   () => r2Get('fantasai/analysis/performance_trends.json'),
@@ -37,7 +38,26 @@ export const api = {
     criticalAlerts: () => r2Get('fantasai/news/critical_alerts.json'),
     enrichedNews:        () => r2Get('fantasai/news/enriched_news.json'),
     aiSummaries:         () => r2Get('fantasai/news/ai_summaries.json'),
-    breakoutCandidates:  () => r2Get('fantasai/analysis/breakout_candidates.json'),
+    breakoutCandidates:  async () => {
+      // Try R2 first (Databricks export), then fall back to live Databricks SQL endpoint.
+      const r2 = await r2Get('fantasai/analysis/breakout_candidates.json');
+      if (r2) return r2;
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/opportunity/rankings`);
+        if (!res.ok) return null;
+        const json = await res.json();
+        const rows = json?.data || [];
+        return rows.map(r => ({
+          player_name:       r.player_name,
+          position:          r.position,
+          team:              r.team,
+          opportunity_score: parseFloat(r.opportunity_score) || 0,
+          snap_share_delta:  null,
+          avg_snap_share:    null,
+        }));
+      } catch { return null; }
+    },
+    sleeperPicks:        () => r2Get('fantasai/analysis/sleeper_picks.json'),
     weatherForecast:     () => r2Get('fantasai/analysis/weather_forecast.json'),
   },
 

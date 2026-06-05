@@ -1,13 +1,13 @@
 import React from 'react';
 import { TEAM_ROSTERS, findTeam, NEWS, LEAGUE_TEAMS, buildRosterFrame, assignRoster } from '../lib/data.js';
-import { findPlayer } from '../lib/playerStore.js';
+import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { PlayerCell, StatusDot, Sparkline, PosBadge, SourceBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
 import { useApi, useR2CriticalAlerts, useR2BreakoutCandidates } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 const SLOT_ELIGIBLE = {
   QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
-  K: ['K'], DST: ['DST'], FLEX: ['RB', 'WR', 'TE'],
+  K: ['K'], DST: ['DST'], FLEX: ['RB', 'WR'],
 };
 
 function computeOptimalLineup(startingSlots, allPlayers) {
@@ -28,7 +28,7 @@ function computeOptimalLineup(startingSlots, allPlayers) {
   }
   for (const { slot } of startingSlots) {
     if (slot !== 'FLEX') continue;
-    const eligible = ['RB', 'WR', 'TE'].flatMap(pos => byPos[pos] || []).filter(p => !assigned.has(p.id)).sort((a, b) => (b.proj ?? 0) - (a.proj ?? 0));
+    const eligible = ['RB', 'WR'].flatMap(pos => byPos[pos] || []).filter(p => !assigned.has(p.id)).sort((a, b) => (b.proj ?? 0) - (a.proj ?? 0));
     const best = eligible[0] ?? null;
     result.push({ slot, playerId: best?.id ?? null });
     if (best) assigned.add(best.id);
@@ -37,11 +37,12 @@ function computeOptimalLineup(startingSlots, allPlayers) {
 }
 
 function LineupSummaryCard({ myRosterIds, slotOverrides, onOpenPlayer }) {
+  const allPlayersList = usePlayers();
   const settings = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
   }, []);
   const frame = React.useMemo(() => buildRosterFrame(settings), [settings]);
-  const rosterEntries = React.useMemo(() => assignRoster(frame, [...myRosterIds], slotOverrides ?? {}), [frame, myRosterIds, slotOverrides]);
+  const rosterEntries = React.useMemo(() => assignRoster(frame, [...myRosterIds], slotOverrides ?? {}, findPlayer), [frame, myRosterIds, slotOverrides, allPlayersList]);
   const startingSlots = rosterEntries.filter(e => e.slot !== 'BENCH');
   const allPlayers = [...myRosterIds].map(id => findPlayer(id)).filter(Boolean);
   const optimalSlots = computeOptimalLineup(startingSlots, allPlayers);
@@ -366,6 +367,15 @@ function DraftCountdown({ canEdit }) {
 }
 
 export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new Set(), sourcesState, slotOverrides = {}, watchlistIds = new Set(), tradeOffers = [] }) {
+  const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  React.useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1100px)');
+    const handler = e => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  const [dashTab, setDashTab] = React.useState('standings');
+
   const { data: cbsTeams } = useApi(() => api.teams(), []);
   const { data: r2Alerts, fetchedAt: r2AlertsFetchedAt } = useR2CriticalAlerts();
   const { data: r2Breakouts } = useR2BreakoutCandidates();
@@ -459,6 +469,8 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const myStandingsRank = standings ? standings.findIndex(s => s.me) + 1 : null;
   const waiverPosition  = myStandingsRank ? (totalTeams - myStandingsRank + 1) : null;
 
+  const allPlayersList = usePlayers();
+
   // Build starting lineup from league settings frame (stays in sync with CurrentRoster)
   const rosterSettings = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch { return null; }
@@ -466,8 +478,8 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   }, []);
   const slotFrame  = React.useMemo(() => buildRosterFrame(rosterSettings), [rosterSettings]);
   const fullRoster = React.useMemo(
-    () => assignRoster(slotFrame, myRosterIds, slotOverrides),
-    [slotFrame, myRosterIds, slotOverrides],
+    () => assignRoster(slotFrame, myRosterIds, slotOverrides, findPlayer),
+    [slotFrame, myRosterIds, slotOverrides, allPlayersList],
   );
 
   const starters   = fullRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
@@ -475,11 +487,9 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const starterIds = new Set(starters.map(r => r.playerId).filter(Boolean));
   const totalProj  = starters.reduce((s, r) => s + (findPlayer(r.playerId)?.proj || 0), 0);
 
-  // Roster validity (same rules as HeadToHead isRosterSet)
-  const _hasSlot = slot => starters.some(r => r.slot === slot);
-  const _countSlot = slot => starters.filter(r => r.slot === slot).length;
-  const isValidRoster = _hasSlot('QB') && _hasSlot('DST') && _countSlot('RB') >= 1 && _countSlot('WR') >= 1
-    && starters.filter(r => ['RB', 'WR', 'TE', 'FLEX'].includes(r.slot)).length >= 5;
+  // Valid only when every starter slot has a player — no empty starters allowed.
+  const starterSlots = fullRoster.filter(r => r.slot !== 'BENCH');
+  const isValidRoster = starterSlots.length > 0 && starterSlots.every(r => r.playerId != null);
   const hasStarterInjury = starters.some(r => findPlayer(r.playerId)?.status !== 'OK');
 
   // ── Live roster data from Sleeper (projections + injury news) ─────────────
@@ -632,6 +642,10 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     try { return JSON.parse(localStorage.getItem('fantasai_champ_comments') || '[]'); } catch { return []; }
   });
   const [champCommentText, setChampCommentText] = React.useState('');
+  const [champCommentGifUrl, setChampCommentGifUrl] = React.useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
+  const [showGifInput, setShowGifInput] = React.useState(false);
+  const champTextareaRef = React.useRef(null);
 
   function startEditChampions() {
     setChampDraft(champions.map(c => ({ ...c })));
@@ -647,18 +661,36 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   }
   function addChampComment() {
     const text = champCommentText.trim();
-    if (!text) return;
+    const gifUrl = champCommentGifUrl.trim();
+    if (!text && !gifUrl) return;
     const comment = {
       id: Date.now().toString(),
       teamId: user?.teamId ?? null,
       teamName: team?.name || user?.teamName || 'League Member',
       text,
+      gifUrl: gifUrl || null,
       timestamp: new Date().toISOString(),
     };
     const updated = [comment, ...champComments];
     setChampComments(updated);
     localStorage.setItem('fantasai_champ_comments', JSON.stringify(updated));
     setChampCommentText('');
+    setChampCommentGifUrl('');
+    setShowGifInput(false);
+    setShowEmojiPicker(false);
+  }
+
+  function insertEmoji(emoji) {
+    const ta = champTextareaRef.current;
+    if (!ta) { setChampCommentText(t => t + emoji); return; }
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    const next  = champCommentText.slice(0, start) + emoji + champCommentText.slice(end);
+    setChampCommentText(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(start + emoji.length, start + emoji.length);
+    });
   }
 
   function deleteChampComment(id) {
@@ -679,6 +711,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   // ── League Transactions (from R2) ────────────────────────────────────────────
   const [transactions, setTransactions] = React.useState([]);
   const [txLoading, setTxLoading]       = React.useState(false);
+  const [txTeamFilter, setTxTeamFilter] = React.useState(null);
 
   React.useEffect(() => {
     setTxLoading(true);
@@ -724,8 +757,8 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   }, [starters, sleeperRosterData, espnGameMap, espnPlayerActuals, teamId, currentWeek]);
 
   return (
-    <div className="col" style={{ height: '100%', overflow: 'auto' }}>
-      <div className="page-head">
+    <div className="col" style={{ height: '100%', overflow: isMobile ? 'auto' : 'hidden', display: 'flex', flexDirection: 'column', paddingBottom: isMobile ? 0 : 24 }}>
+      <div className="page-head" style={{ flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
           {/* League name — large, far left */}
           <span style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', fontSize: 30, fontWeight: 900, color: '#FFD700', letterSpacing: '-.01em', lineHeight: 1, whiteSpace: 'nowrap' }}>
@@ -763,8 +796,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           </div>
         </div>
         <div className="flex gap-8" style={{ alignItems: 'center' }}>
-          <DraftCountdown canEdit={canEditCommish} />
-          <button className="btn ghost" onClick={() => onNav('roster')}>Set Lineup</button>
           <button className="btn primary" onClick={() => onNav('draft')}>▶ Open Draft Room</button>
         </div>
       </div>
@@ -779,7 +810,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         const liveColor  = liveCount > 0 ? 'var(--good)' : finalCount > 0 ? 'var(--accent)' : 'var(--text-faint)';
 
         return (
-          <div style={{ padding: '0 24px 16px' }}>
+          <div style={{ padding: '0 24px 16px', flexShrink: 0 }}>
             <div style={{
               borderRadius: 12,
               border: `1px solid ${isWinning ? 'rgba(76,175,130,.35)' : 'rgba(255,90,110,.3)'}`,
@@ -874,18 +905,21 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         );
       })()}
 
-      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+      <div style={{ padding: isMobile ? '12px 14px' : 24, display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 8 : 12, flexShrink: 0 }}>
         <div className="stat">
           <div className="k">Starters Projected</div>
           <div className="v accent">{totalProj.toFixed(1)}</div>
-          <div className="sub">{starters.length} of 8 slots filled</div>
+          <div className="sub">{weekLabel} · {starters.length} of 8 slots</div>
         </div>
         {h2hWinData ? (
           <div className="stat">
             <div className="k">Win Probability</div>
             <div className="v" style={{ color: h2hWinData.isWinning ? 'var(--good)' : 'var(--danger)' }}>{h2hWinData.winPct}%</div>
-            <div className="sub" style={{ color: h2hWinData.isWinning ? 'var(--good)' : 'var(--danger)' }}>
-              vs {h2hWinData.opp.name} · {h2hWinData.diff >= 0 ? '+' : ''}{h2hWinData.diff.toFixed(1)} pts
+            <div className="sub" style={{ color: 'var(--text-faint)' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: h2hWinData.isWinning ? 'var(--good)' : 'var(--text)' }}>{h2hWinData.myScore.toFixed(1)}</span>
+              {' – '}
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: !h2hWinData.isWinning ? 'var(--danger)' : 'var(--text-dim)' }}>{h2hWinData.oppScore.toFixed(1)}</span>
+              {' vs '}{h2hWinData.opp.name}
             </div>
           </div>
         ) : (
@@ -895,117 +929,76 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         <div className="stat"><div className="k">Playoff Odds</div><div className="v">84.2%</div><div className="sub">Top seed: 21.8%</div></div>
       </div>
 
-      <div style={{ padding: '0 24px 24px', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 16 }}>
-        <div className="card">
-          <div className="card-head">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1 }}>
-              {team?.logoImg ? (
-                <img src={team.logoImg} alt="logo" style={{ width: 56, height: 56, borderRadius: 10, objectFit: 'cover', flexShrink: 0, boxShadow: '0 2px 12px rgba(0,0,0,.4)' }} />
-              ) : (
-                <span style={{ width: 56, height: 56, borderRadius: 10, background: team?.color || 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 900, color: logoTextColor, flexShrink: 0, boxShadow: '0 2px 12px rgba(0,0,0,.4)' }}>
-                  {team?.logo || '??'}
-                </span>
-              )}
-            <div>
-              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                Starting Lineup — {teamName}
-                {(() => {
-                  const wkNum  = currentWeek.num;
-                  const opp    = wkNum ? getOpponent(teamId, wkNum) : null;
-                  const wkStr  = wkNum ? `Wk${wkNum}${opp ? ` vs ${opp.name}` : ''}` : null;
-                  if (!isValidRoster) {
-                    return (
-                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#fff', background: 'var(--danger)', borderRadius: 4, padding: '2px 7px' }}>
-                        Roster Not Set{wkStr ? ` · ${wkStr}` : ''}
-                      </span>
-                    );
-                  }
-                  if (hasStarterInjury) {
-                    return (
-                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1a0d00', background: 'var(--warn)', borderRadius: 4, padding: '2px 7px' }}>
-                        Valid Roster · Injury Watch{wkStr ? ` · ${wkStr}` : ''}
-                      </span>
-                    );
-                  }
-                  return (
-                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#042210', background: 'var(--good)', borderRadius: 4, padding: '2px 7px' }}>
-                      Valid Roster{wkStr ? ` · ${wkStr}` : ''}
-                    </span>
-                  );
-                })()}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span>Manager: <strong style={{ color: 'var(--text-dim)', fontWeight: 600 }}>{ownerName}</strong></span>
-                <span style={{ color: 'var(--border-strong)' }}>·</span>
-                <span>
-                  Record:{' '}
-                  <span className="mono" style={{ fontWeight: 700, color: record2026 === '0-0' ? 'var(--text-faint)' : 'var(--accent)', fontSize: 11 }}>
-                    {record2026}
-                  </span>
-                  {record2026 === '0-0' && (
-                    <span className="mono faint" style={{ fontSize: 9, marginLeft: 4 }}>no games yet</span>
-                  )}
-                </span>
-              </div>
-            </div>
-            </div>
-            <button className="btn sm ghost" onClick={() => onNav('roster')}>Edit →</button>
+      {/* ── League Standings + Commish + Transactions + Champions Corner ── */}
+      {isMobile && (
+        <div style={{ flexShrink: 0, background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
+          <div style={{ display: 'flex', overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {[
+              { id: 'standings',    label: 'Standings', icon: '🏆' },
+              { id: 'commish',      label: 'Commish',   icon: '📢' },
+              { id: 'transactions', label: 'Moves',     icon: '↔' },
+              { id: 'events',       label: 'Events',    icon: '📅' },
+              { id: 'champions',    label: 'Champions', icon: '🥇' },
+            ].map(t => (
+              <button key={t.id} onClick={() => setDashTab(t.id)} style={{
+                flex: '0 0 auto',
+                padding: '10px 16px 8px',
+                fontSize: 12, fontWeight: dashTab === t.id ? 700 : 500,
+                border: 'none',
+                borderBottom: `2px solid ${dashTab === t.id ? 'var(--accent)' : 'transparent'}`,
+                background: 'transparent',
+                color: dashTab === t.id ? 'var(--accent)' : 'var(--text-dim)',
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+              }}>
+                <span style={{ fontSize: 16 }}>{t.icon}</span>
+                <span>{t.label}</span>
+              </button>
+            ))}
           </div>
+        </div>
+      )}
+      <div style={{ padding: isMobile ? '0 14px 24px' : '0 24px 24px', display: isMobile ? 'block' : 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: isMobile ? undefined : '1fr', gap: 16, alignItems: 'stretch', flex: isMobile ? undefined : 1, minHeight: isMobile ? undefined : 0 }}>
+        {(!isMobile || dashTab === 'standings') && <div className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', marginBottom: isMobile ? 0 : undefined }}>
+          <div className="card-head" style={{ flexShrink: 0 }}>
+            <div className="card-title">League Standings · {weekLabel}</div>
+            <span className="mono faint" style={{ fontSize: 10 }}>{standings ? 'CBS · live' : 'mock data'}</span>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
           <table className="data-table">
             <thead>
-              <tr>
-                <th>Slot</th>
-                <th>Player</th>
-                <th>Opp</th>
-                {projCols.map(c => (
-                  <th key={c.id} className="num" style={{ whiteSpace: 'nowrap' }}>
-                    <span style={{ color: c.color }}>{c.label}</span>
-                    <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', fontWeight: 400, textTransform: 'uppercase', letterSpacing: '.06em', marginTop: 1 }}>{c.sub}</div>
-                  </th>
-                ))}
-                <th>Status</th>
-                <th className="num">Trend</th>
-              </tr>
+              <tr><th style={{ width: 32 }}>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">PF</th><th className="num">PA</th></tr>
             </thead>
             <tbody>
-              {starters.length === 0 && (
-                <tr>
-                  <td colSpan={4 + projCols.length} style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-faint)', fontSize: 12 }}>
-                    No starters found — <button className="btn ghost sm" onClick={() => onNav('roster')} style={{ fontSize: 11 }}>Set your lineup</button>
+              {(standings || LEAGUE_TEAMS.map(t => { const lt = findTeam(t.id); return { ...t, ...lt, w: 0, l: 0, pf: 0, pa: 0 }; })).map((row, i) => (
+                <tr key={row.id || i} style={row.me ? { background: 'rgba(198,255,58,.04)' } : {}}>
+                  <td className="mono dim" style={{ fontSize: 12 }}>{i + 1}</td>
+                  <td>
+                    <div className="flex gap-8" style={{ alignItems: 'center' }}>
+                      {row.logoImg
+                        ? <img src={row.logoImg} alt={row.logo} style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'cover', flexShrink: 0 }} />
+                        : <span className="logo" style={{ background: row.color, width: 22, height: 22, fontSize: 8 }}>{row.logo}</span>
+                      }
+                      <span style={row.me ? { color: 'var(--accent)', fontWeight: 700 } : {}}>{row.name}</span>
+                      {row.me && <span className="mono faint" style={{ fontSize: 9 }}>YOU</span>}
+                    </div>
                   </td>
+                  <td className="num mono" style={{ fontWeight: 700 }}>{row.w}</td>
+                  <td className="num mono dim">{row.l}</td>
+                  <td className="num mono">{typeof row.pf === 'number' && row.pf > 0 ? row.pf.toFixed(1) : '—'}</td>
+                  <td className="num mono dim">{typeof row.pa === 'number' && row.pa > 0 ? row.pa.toFixed(1) : '—'}</td>
                 </tr>
-              )}
-              {starters.map(r => {
-                const p = findPlayer(r.playerId);
-                if (!p) return null;
-                return (
-                  <tr key={r.playerId} onClick={() => onOpenPlayer(p.id)} style={{ cursor: 'pointer' }}>
-                    <td><PosBadge pos={r.slot} /></td>
-                    <td><PlayerCell player={p} /></td>
-                    <td className="mono dim" style={{ fontSize: 11 }}>vs {p.opp}</td>
-                    {projCols.map(c => (
-                      <td key={c.id} className="num">
-                        <strong style={{ color: c.color }}>{c.get(p)}</strong>
-                      </td>
-                    ))}
-                    <td>
-                      {p.status !== 'OK'
-                        ? <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>
-                        : <span className="faint" style={{ fontSize: 11 }}>—</span>}
-                    </td>
-                    <td className="num"><Sparkline data={p.trend} /></td>
-                  </tr>
-                );
-              })}
+              ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </div>}
 
-        {/* ── Middle column: Commissioner Message then Lineup Decisions ── */}
-        <div className="col gap-12" style={{ alignSelf: 'start' }}>
+        {/* ── Col 2: Commissioner Message + Transactions ── */}
+        {(!isMobile || dashTab === 'commish' || dashTab === 'transactions') && <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
 
-        {/* Commissioner Message — center column */}
-        <div className="card" style={{ borderLeft: '3px solid var(--accent)', alignSelf: 'start' }}>
+        {/* Commissioner Message */}
+        {(!isMobile || dashTab === 'commish') && <div className="card" style={{ borderLeft: '3px solid var(--accent)', flexShrink: 0, minHeight: 280 }}>
           <div className="card-head" style={{ paddingBottom: 6 }}>
             <div className="card-title" style={{ fontSize: 12 }}>
               <span style={{ marginRight: 6 }}>📢</span>Commissioner Message
@@ -1014,45 +1007,22 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 8px' }} onClick={startEditCommish}>Edit</button>
             )}
           </div>
-
           {editingCommish ? (
             <div style={{ padding: '0 16px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {/* Media preview while editing */}
               {commishMediaDraft?.url && (
                 <div style={{ position: 'relative' }}>
                   {commishMediaDraft.type === 'image'
                     ? <img src={commishMediaDraft.url} alt="" style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 6, display: 'block' }} />
                     : <video src={commishMediaDraft.url} controls autoPlay={false} style={{ width: '100%', maxHeight: 140, borderRadius: 6, display: 'block' }} />
                   }
-                  <button
-                    onClick={() => setCommishMediaDraft(null)}
-                    style={{ position: 'absolute', top: 5, right: 5, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}
-                  >✕ Remove</button>
+                  <button onClick={() => setCommishMediaDraft(null)} style={{ position: 'absolute', top: 5, right: 5, background: 'rgba(0,0,0,.7)', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}>✕ Remove</button>
                 </div>
               )}
-              {/* Message textarea */}
-              <textarea
-                className="input"
-                rows={4}
-                value={commishTextDraft}
-                onChange={e => setCommishTextDraft(e.target.value)}
-                style={{ resize: 'vertical', fontSize: 12, lineHeight: 1.6, width: '100%', boxSizing: 'border-box' }}
-                placeholder="Type your commissioner message…"
-              />
-              {/* Video URL */}
-              <input
-                className="input"
-                placeholder="YouTube / Vimeo URL (optional)…"
-                value={commishUrlDraft}
-                onChange={e => setCommishUrlDraft(e.target.value)}
-                style={{ fontSize: 12 }}
-              />
-              {/* File upload + actions */}
+              <textarea className="input" rows={4} value={commishTextDraft} onChange={e => setCommishTextDraft(e.target.value)} style={{ resize: 'vertical', fontSize: 12, lineHeight: 1.6, width: '100%', boxSizing: 'border-box' }} placeholder="Type your commissioner message…" />
+              <input className="input" placeholder="YouTube / Vimeo URL (optional)…" value={commishUrlDraft} onChange={e => setCommishUrlDraft(e.target.value)} style={{ fontSize: 12 }} />
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                 <input ref={commishMediaRef} type="file" accept="image/*,video/*" style={{ display: 'none' }} onChange={handleCommishMediaUpload} />
-                <button className="btn ghost sm" onClick={() => commishMediaRef.current?.click()} style={{ fontSize: 11 }}>
-                  📷 {commishMediaDraft?.url ? 'Replace File' : 'Upload Image / Video'}
-                </button>
+                <button className="btn ghost sm" onClick={() => commishMediaRef.current?.click()} style={{ fontSize: 11 }}>📷 {commishMediaDraft?.url ? 'Replace File' : 'Upload Image / Video'}</button>
                 <button className="btn primary sm" onClick={saveCommishMessage}>Save</button>
                 <button className="btn ghost sm" onClick={() => setEditingCommish(false)}>Cancel</button>
               </div>
@@ -1069,165 +1039,132 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               )}
               {commishData.media?.videoUrl && (
                 <div style={{ padding: '0 16px 8px' }}>
-                  <iframe
-                    src={getCommishEmbedUrl(commishData.media.videoUrl)}
-                    style={{ width: '100%', height: 180, borderRadius: 6, border: 'none', display: 'block' }}
-                    allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    title="Commissioner Video"
-                  />
+                  <iframe src={getCommishEmbedUrl(commishData.media.videoUrl)} style={{ width: '100%', height: 180, borderRadius: 6, border: 'none', display: 'block' }} allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen title="Commissioner Video" />
                 </div>
               )}
               {commishData.text && (
-                <div style={{ padding: '4px 16px 14px', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.65 }}>
-                  {commishData.text}
-                </div>
+                <div style={{ padding: '4px 16px 14px', fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.65 }}>{commishData.text}</div>
               )}
             </>
           )}
-        </div>
+        </div>}
 
-        {/* Combined Lineup Decisions + Lineup News card */}
-        <div className="card">
-          <div className="card-head">
-            <div className="card-title">{ownerName}'s Lineup</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {newsLoading && <span className="mono faint" style={{ fontSize: 9 }}>fetching…</span>}
-              {sleeperOn && !newsLoading && liveNewsItems.length > 0 && (
-                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', background: 'rgba(78,168,255,.1)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 3, padding: '1px 5px' }}>
-                  SLEEPER · LIVE
+        {/* Transactions */}
+        {(!isMobile || dashTab === 'transactions') && <div className="card" style={{ width: '100%', boxSizing: 'border-box', flex: '0 1 615px', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className="card-head" style={{ flexShrink: 0 }}>
+            <div className="card-title">Transactions</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+              {waiverPosition != null && (
+                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'rgba(234,179,8,.14)', border: '1px solid rgba(234,179,8,.4)', borderRadius: 5, padding: '2px 8px', color: '#facc15' }}>
+                  WVR Pick #{waiverPosition} of {totalTeams}
                 </span>
               )}
-              {r2Alerts && (
-                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#c6ff3a', background: 'rgba(198,255,58,.1)', border: '1px solid rgba(198,255,58,.25)', borderRadius: 3, padding: '1px 5px' }}>
-                  ◆ FANTASAI
-                </span>
-              )}
-              {!sleeperOn && <span className="mono faint" style={{ fontSize: 9 }}>mock data</span>}
+              {txLoading && <span className="mono faint" style={{ fontSize: 9 }}>fetching…</span>}
             </div>
           </div>
-
-          {/* ── Decisions section ── */}
-          <div style={{ padding: '10px 14px 14px', borderBottom: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10 }}>
-              Lineup Decisions
-            </div>
-            <LineupSummaryCard myRosterIds={myRosterIds} slotOverrides={slotOverrides} onOpenPlayer={onOpenPlayer} />
-          </div>
-
-          {/* ── FantasAI Critical Alerts ── */}
-          {(() => {
-            const alerts = Array.isArray(r2Alerts) ? r2Alerts : [];
-            const starterNames = new Set(starters.map(r => findPlayer(r.playerId)?.name?.toLowerCase()).filter(Boolean));
-            const relevant = alerts.filter(a => {
-              const players = Array.isArray(a.impacted_players) ? a.impacted_players : [];
-              return players.some(p => starterNames.has((p.player_name || '').toLowerCase())) || a.priority_level === 'critical';
-            }).slice(0, 3);
-            if (!relevant.length) return null;
+          {/* Team filter chips */}
+          {!txLoading && transactions.length > 0 && (() => {
+            const teams = [...new Set(transactions.map(tx => tx.teamName).filter(Boolean))];
+            if (teams.length < 2) return null;
             return (
-              <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 2 }}>
-                <div style={{ padding: '6px 14px 4px', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#c6ff3a', letterSpacing: '.1em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#c6ff3a', display: 'inline-block', flexShrink: 0 }} />
-                  FantasAI Alerts
-                  {r2AlertsFetchedAt && (
-                    <span style={{ color: 'var(--text-faint)', fontWeight: 400, marginLeft: 4 }}>
-                      · {Math.round((Date.now() - r2AlertsFetchedAt) / 60000)}m ago
-                    </span>
-                  )}
-                </div>
-                {relevant.map((alert, i) => {
-                  const impactColor = alert.priority_level === 'critical' ? 'var(--danger)'
-                                    : alert.priority_level === 'high'     ? 'var(--warn)'
-                                    : 'var(--accent-2)';
-                  const players = Array.isArray(alert.impacted_players) ? alert.impacted_players : [];
-                  return (
-                    <div key={i} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', borderLeft: `2px solid ${impactColor}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, lineHeight: 1.4, flex: 1 }}>{alert.summary_text}</div>
-                        {alert.priority_level && (
-                          <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, color: impactColor, background: `${impactColor}22`, border: `1px solid ${impactColor}55`, borderRadius: 3, padding: '1px 5px', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                            {alert.priority_level.toUpperCase()}
-                          </span>
-                        )}
-                      </div>
-                      {alert.fantasy_insight && (
-                        <div style={{ fontSize: 11, color: '#c6ff3a', lineHeight: 1.4, marginBottom: 3 }}>{alert.fantasy_insight}</div>
-                      )}
-                      {players.length > 0 && (
-                        <div style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
-                          {players.slice(0, 3).map(p => p.player_name).join(' · ')}
-                          {alert.fantasy_relevance_score != null && (
-                            <span style={{ marginLeft: 6, color: 'var(--accent)', fontWeight: 700 }}>
-                              {Math.round(alert.fantasy_relevance_score)}% relevant
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+              <div style={{ padding: '5px 10px 6px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 4, overflowX: 'auto', flexShrink: 0 }}>
+                <button
+                  onClick={() => setTxTeamFilter(null)}
+                  style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, border: `1px solid ${txTeamFilter === null ? 'var(--accent)' : 'var(--border)'}`, background: txTeamFilter === null ? 'rgba(198,255,58,.14)' : 'transparent', color: txTeamFilter === null ? 'var(--accent)' : 'var(--text-faint)', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: txTeamFilter === null ? 700 : 400, flexShrink: 0 }}
+                >All</button>
+                {teams.map(name => (
+                  <button
+                    key={name}
+                    onClick={() => setTxTeamFilter(n => n === name ? null : name)}
+                    style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, border: `1px solid ${txTeamFilter === name ? 'var(--accent)' : 'var(--border)'}`, background: txTeamFilter === name ? 'rgba(198,255,58,.14)' : 'transparent', color: txTeamFilter === name ? 'var(--accent)' : 'var(--text-faint)', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: txTeamFilter === name ? 700 : 400, flexShrink: 0 }}
+                  >{name}</button>
+                ))}
               </div>
             );
           })()}
-
-          {/* ── News items ── */}
-          <div>
-            {rosterNews.length === 0 && !newsLoading && !r2Alerts && (
-              <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)' }}>No news for your starters — all clear.</div>
-            )}
-            {newsLoading && rosterNews.length === 0 && (
-              <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="ai-orb" style={{ width: 12, height: 12 }} />
-                Checking Sleeper for roster news…
-              </div>
-            )}
-            {rosterNews.map(n => {
-              const p = findPlayer(n.playerId);
-              if (!p) return null;
-              const impactColor = n.impact === 'high' ? 'var(--danger)' : n.impact === 'good' ? 'var(--good)' : n.impact === 'med' ? 'var(--warn)' : 'var(--text-faint)';
-              return (
-                <div
-                  key={n.id}
-                  style={{
-                    padding: '10px 14px',
-                    borderBottom: '1px solid var(--border)',
-                    fontSize: 12,
-                    cursor: 'pointer',
-                    borderLeft: n.live ? `2px solid ${impactColor}` : undefined,
-                  }}
-                  onClick={() => onOpenPlayer(p.id)}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                    <span className="mono dim" style={{ fontSize: 11 }}>{p.name} · {p.pos} · {p.team}</span>
-                    <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                      {n.live && (
-                        <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)' }}>LIVE</span>
-                      )}
-                      <span className={`news-impact impact-${n.impact}`} style={{ fontSize: 9 }}>{n.impact}</span>
-                    </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+          {txLoading ? (
+            <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="ai-orb" style={{ width: 12, height: 12 }} />Loading transactions…
+            </div>
+          ) : transactions.length === 0 ? (
+            <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--text-faint)' }}>No transactions yet — adds, drops, and trades will appear here.</div>
+          ) : (
+            <div>
+              {transactions.filter(tx => !txTeamFilter || tx.teamName === txTeamFilter).map((tx, idx) => {
+                const isTrade   = tx.type === 'trade' || tx.type === 'trade_offer';
+                const typeLabel = isTrade ? (tx.type === 'trade_offer' ? 'Offer' : 'Trade') : tx.type === 'drop' ? 'Drop' : 'Add';
+                const typeColor = isTrade ? '#c6ff3a' : tx.type === 'drop' ? 'var(--danger)' : 'var(--good)';
+                const diff = Date.now() - new Date(tx.date || tx.timestamp || 0).getTime();
+                const ago  = diff < 3600000 ? `${Math.round(diff / 60000)}m ago` : diff < 86400000 ? `${Math.round(diff / 3600000)}h ago` : `${Math.round(diff / 86400000)}d ago`;
+                const PlayerLine = ({ p, action }) => (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                    <span style={{ color: action === 'add' ? 'var(--good)' : 'var(--danger)', fontWeight: 700, fontSize: 10, minWidth: 10 }}>{action === 'add' ? '+' : '−'}</span>
+                    <span style={{ fontWeight: 600, color: action === 'add' ? 'var(--text)' : 'var(--text-dim)' }}>{p.name || '—'}</span>
+                    {p.pos && <span style={{ fontSize: 9, color: 'var(--accent-2)', fontFamily: 'var(--font-mono)' }}>{p.pos}</span>}
+                    {p.nflTeam && <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.nflTeam}</span>}
                   </div>
-                  <div style={{ fontWeight: 600, marginBottom: n.body ? 3 : 0 }}>{n.title}</div>
-                  {n.body && <div className="dim" style={{ fontSize: 11, lineHeight: 1.4 }}>{n.body}</div>}
-                  <div style={{ marginTop: 4 }}><SourceBadge source={n.source} /></div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+                );
+                if (isTrade) return (
+                  <div key={tx.id || idx} style={{ padding: '9px 14px', borderBottom: '1px solid var(--border)', borderLeft: `2px solid ${typeColor}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, background: `${typeColor}18`, border: `1px solid ${typeColor}44`, borderRadius: 3, padding: '1px 5px' }}>{typeLabel.toUpperCase()}</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{ago}</span>
+                    </div>
+                    <div style={{ marginBottom: 5 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 2 }}>{tx.teamName || tx.teamId}</div>
+                      {(tx.got  || []).map((p, i) => <PlayerLine key={i} p={p} action="add" />)}
+                      {(tx.gave || []).map((p, i) => <PlayerLine key={i} p={p} action="drop" />)}
+                    </div>
+                    {tx.otherTeamName && (
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 2 }}>{tx.otherTeamName}</div>
+                        {(tx.gave || []).map((p, i) => <PlayerLine key={i} p={p} action="add" />)}
+                        {(tx.got  || []).map((p, i) => <PlayerLine key={i} p={p} action="drop" />)}
+                      </div>
+                    )}
+                  </div>
+                );
+                const players = tx.players || [];
+                const isMyAdd = tx.type === 'add' && (tx.teamId === user?.teamId || tx.teamName === user?.teamName);
+                const wvrBefore = tx.waiverPick ?? (isMyAdd ? waiverPosition : null);
+                const wvrAfter  = tx.newWaiverPick ?? (isMyAdd && wvrBefore != null ? totalTeams : null);
+                return (
+                  <div key={tx.id || idx} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', borderLeft: `2px solid ${typeColor}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, background: `${typeColor}18`, border: `1px solid ${typeColor}44`, borderRadius: 3, padding: '1px 5px' }}>{typeLabel.toUpperCase()}</span>
+                        {wvrBefore != null && (
+                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#facc15', background: 'rgba(234,179,8,.12)', border: '1px solid rgba(234,179,8,.35)', borderRadius: 3, padding: '1px 5px' }}>
+                            WVR #{wvrBefore}{wvrAfter != null ? ` → #${wvrAfter}` : ''}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{ago}</span>
+                    </div>
+                    {tx.teamName && <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 3 }}>{tx.teamName}</div>}
+                    {players.map((p, i) => <PlayerLine key={i} p={p} action={p.action || tx.type} />)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          </div>{/* end scroll wrapper */}
+        </div>}
 
-        </div>{/* end middle column */}
+        </div>}{/* end col 2 */}
 
-        {/* Right column: Champions Corner + News */}
-        <div className="col gap-12">
+        {/* ── Col 3: Weekly Events ── */}
+        {(!isMobile || dashTab === 'events') && <WeeklyCalendar weekLabel={weekLabel} waiverPosition={waiverPosition} totalTeams={totalTeams} user={user} currentWeek={currentWeek} onNav={onNav} />}
 
-        {/* ── Champions Corner — expandable card ── */}
-        <div style={{
+        {/* ── Col 4: Champions Corner ── */}
+        {(!isMobile || dashTab === 'champions') && <div style={{
           background: 'linear-gradient(135deg, rgba(255,215,0,.07) 0%, rgba(255,215,0,.02) 100%)',
           border: '1px solid rgba(255,215,0,.22)',
           borderRadius: 10,
           overflow: 'hidden',
-          alignSelf: 'start',
           width: '100%',
+          height: '100%',
           boxSizing: 'border-box',
         }}>
           {/* Header / toggle bar */}
@@ -1262,7 +1199,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                       <img src={latest.photo} alt={latest.champion} style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', border: '1px solid rgba(255,215,0,.4)', flexShrink: 0 }} />
                     )}
                     <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'rgba(255,215,0,.5)' }}>{latest.year}</span>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: '#FFD700' }}>{latest.champion}{latest.asterisk ? '*' : ''}</span>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: '#FFD700' }}>{latest.champion}{latest.asterisk ? '*' : ''}</span>
                   </>
                 ) : (
                   <span style={{ fontSize: 11, color: 'rgba(255,255,255,.2)', fontFamily: 'var(--font-mono)' }}>No data yet</span>
@@ -1312,7 +1249,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                           style={{ marginTop: 4, fontSize: 10, padding: '2px 7px', background: 'rgba(255,215,0,.04)', borderColor: 'rgba(255,215,0,.15)', width: '100%', boxSizing: 'border-box' }}
                         />
                       )}
-                      {/* Photo upload — only shown for rows that have a champion name */}
                       {c.champion && (
                         <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                           {c.photo && (
@@ -1346,7 +1282,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                   const featuredChamp = [...champions].reverse().find(c => c.champion && c.photo);
                   return (
                     <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
-                      {/* Year list */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         {champions.map((c, i) => {
                           const hasNote = c.asterisk && c.note;
@@ -1360,9 +1295,9 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                               {c.photo && (!featuredChamp || c.year !== featuredChamp.year) && (
                                 <img src={c.photo} alt={c.champion} style={{ width: 26, height: 26, borderRadius: 4, objectFit: 'cover', border: '1px solid rgba(255,215,0,.35)', flexShrink: 0 }} />
                               )}
-                              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'rgba(255,215,0,.5)', fontWeight: 700, minWidth: 36 }}>{c.year}</span>
+                              <span style={{ fontSize: 14, fontFamily: 'var(--font-mono)', color: 'rgba(255,215,0,.5)', fontWeight: 700, minWidth: 42 }}>{c.year}</span>
                               {c.champion ? (
-                                <span style={{ fontSize: 12, fontWeight: 700, color: '#FFD700', flex: 1 }}>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: '#FFD700', flex: 1 }}>
                                   {c.champion}
                                   {c.asterisk && <span style={{ fontSize: 10, color: 'rgba(255,215,0,.55)', marginLeft: 1, cursor: hasNote ? 'help' : 'default' }}>*</span>}
                                 </span>
@@ -1374,7 +1309,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                                   position: 'absolute', bottom: '110%', left: 0, zIndex: 50,
                                   background: 'var(--card)', border: '1px solid rgba(255,215,0,.35)',
                                   borderRadius: 6, padding: '5px 10px', whiteSpace: 'nowrap',
-                                  fontSize: 11, color: 'var(--text-dim)', boxShadow: '0 4px 16px rgba(0,0,0,.5)',
+                                  fontSize: 14, color: 'var(--text-dim)', boxShadow: '0 4px 16px rgba(0,0,0,.5)',
                                   pointerEvents: 'none',
                                 }}>
                                   <span style={{ color: '#FFD700', fontWeight: 700, marginRight: 4 }}>*</span>{c.note}
@@ -1384,9 +1319,8 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                           );
                         })}
                       </div>
-                      {/* Featured champion photo — full height, right side */}
                       {featuredChamp && (
-                        <div style={{ width: 130, flexShrink: 0, borderRadius: 8, overflow: 'hidden', border: '2px solid rgba(255,215,0,.45)', position: 'relative' }}>
+                        <div style={{ width: 180, flexShrink: 0, borderRadius: 8, overflow: 'hidden', border: '2px solid rgba(255,215,0,.45)', position: 'relative' }}>
                           <img
                             src={featuredChamp.photo}
                             alt={featuredChamp.champion}
@@ -1401,7 +1335,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                             <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,215,0,.7)', fontWeight: 700, letterSpacing: '.08em', marginBottom: 2 }}>
                               {featuredChamp.year} CHAMPION
                             </div>
-                            <div style={{ fontSize: 11, fontWeight: 800, color: '#FFD700', lineHeight: 1.2 }}>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: '#FFD700', lineHeight: 1.2 }}>
                               {featuredChamp.champion}
                             </div>
                           </div>
@@ -1419,26 +1353,79 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                 <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'rgba(255,215,0,.55)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 9 }}>
                   💬 Comments
                 </div>
-
-                {/* Input row */}
-                <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                <div style={{ position: 'relative', marginBottom: 10 }}>
                   <textarea
+                    ref={champTextareaRef}
                     className="input"
                     value={champCommentText}
                     onChange={e => setChampCommentText(e.target.value)}
-                    placeholder="Leave a comment…"
+                    placeholder="Leave a comment… (emojis welcome!)"
                     rows={2}
-                    style={{ flex: 1, resize: 'none', fontSize: 11, background: 'rgba(255,215,0,.04)', borderColor: 'rgba(255,215,0,.15)', lineHeight: 1.5 }}
+                    style={{ width: '100%', boxSizing: 'border-box', resize: 'none', fontSize: 11, background: 'rgba(255,215,0,.04)', borderColor: 'rgba(255,215,0,.15)', lineHeight: 1.5 }}
                     onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) addChampComment(); }}
+                    onFocus={() => setShowEmojiPicker(false)}
                   />
-                  <button
-                    onClick={addChampComment}
-                    disabled={!champCommentText.trim()}
-                    style={{ alignSelf: 'flex-end', padding: '5px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid rgba(255,215,0,.35)', borderRadius: 6, background: 'rgba(255,215,0,.1)', color: '#FFD700', opacity: champCommentText.trim() ? 1 : 0.4 }}
-                  >Post</button>
+                  {/* Emoji picker popup */}
+                  {showEmojiPicker && (
+                    <div style={{
+                      position: 'absolute', top: '100%', left: 0, zIndex: 100, marginTop: 4,
+                      background: 'var(--card)', border: '1px solid rgba(255,215,0,.3)', borderRadius: 8,
+                      padding: 8, boxShadow: '0 6px 24px rgba(0,0,0,.5)', width: 240,
+                    }}>
+                      {[
+                        ['😂','😭','🔥','💀','🏆','👑','💯','🎉','😤','🤣'],
+                        ['😎','🙏','👀','💪','🤡','🥶','😬','🤦','🎯','⚡'],
+                        ['🏈','🦅','🐻','🐅','🦁','🐆','🐝','🦅','🐺','🦊'],
+                        ['📉','📈','💸','🚀','💣','🧠','🎲','🃏','⏰','🔔'],
+                      ].map((row, ri) => (
+                        <div key={ri} style={{ display: 'flex', gap: 2, marginBottom: 2 }}>
+                          {row.map(em => (
+                            <button key={em} onClick={() => insertEmoji(em)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, padding: '2px 3px', borderRadius: 4, lineHeight: 1 }}
+                              title={em}
+                            >{em}</button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* GIF URL input */}
+                  {showGifInput && (
+                    <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <input
+                        className="input"
+                        value={champCommentGifUrl}
+                        onChange={e => setChampCommentGifUrl(e.target.value)}
+                        placeholder="Paste GIF URL (Tenor, Giphy, direct .gif)…"
+                        style={{ flex: 1, fontSize: 10, padding: '3px 8px', background: 'rgba(255,215,0,.04)', borderColor: 'rgba(255,215,0,.2)' }}
+                      />
+                      {champCommentGifUrl && (
+                        <button onClick={() => setChampCommentGifUrl('')} style={{ background: 'none', border: 'none', color: 'rgba(255,100,100,.6)', cursor: 'pointer', fontSize: 14, padding: 0 }}>✕</button>
+                      )}
+                    </div>
+                  )}
+                  {/* GIF preview */}
+                  {champCommentGifUrl.trim() && (
+                    <img src={champCommentGifUrl.trim()} alt="GIF preview" style={{ marginTop: 6, maxWidth: '100%', maxHeight: 120, borderRadius: 6, border: '1px solid rgba(255,215,0,.25)', display: 'block' }} />
+                  )}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                    <button
+                      onClick={() => { setShowEmojiPicker(p => !p); setShowGifInput(false); }}
+                      style={{ background: 'none', border: '1px solid rgba(255,215,0,.2)', borderRadius: 5, padding: '3px 8px', cursor: 'pointer', fontSize: 13, color: 'rgba(255,215,0,.7)', lineHeight: 1 }}
+                      title="Emoji picker"
+                    >😊</button>
+                    <button
+                      onClick={() => { setShowGifInput(p => !p); setShowEmojiPicker(false); }}
+                      style={{ background: showGifInput ? 'rgba(255,215,0,.12)' : 'none', border: '1px solid rgba(255,215,0,.2)', borderRadius: 5, padding: '3px 8px', cursor: 'pointer', fontSize: 10, fontWeight: 700, color: 'rgba(255,215,0,.7)', fontFamily: 'var(--font-mono)' }}
+                      title="Attach GIF"
+                    >GIF</button>
+                    <button
+                      onClick={addChampComment}
+                      disabled={!champCommentText.trim() && !champCommentGifUrl.trim()}
+                      style={{ marginLeft: 'auto', padding: '5px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid rgba(255,215,0,.35)', borderRadius: 6, background: 'rgba(255,215,0,.1)', color: '#FFD700', opacity: (champCommentText.trim() || champCommentGifUrl.trim()) ? 1 : 0.4 }}
+                    >Post</button>
+                  </div>
                 </div>
-
-                {/* Comments list */}
                 {champComments.length === 0 ? (
                   <div style={{ fontSize: 11, color: 'rgba(255,255,255,.18)', fontFamily: 'var(--font-mono)' }}>No comments yet — be the first!</div>
                 ) : (
@@ -1460,7 +1447,15 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                               )}
                             </div>
                           </div>
-                          <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.55 }}>{c.text}</div>
+                          {c.text && <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.55 }}>{c.text}</div>}
+                          {c.gifUrl && (
+                            <img
+                              src={c.gifUrl}
+                              alt="gif"
+                              style={{ marginTop: c.text ? 6 : 0, maxWidth: '100%', maxHeight: 180, borderRadius: 6, display: 'block', border: '1px solid rgba(255,215,0,.15)' }}
+                              loading="lazy"
+                            />
+                          )}
                         </div>
                       );
                     })}
@@ -1470,104 +1465,14 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
             )}
             </>
           )}
-        </div>
-
-        {/* ── Transactions ── */}
-        <div className="card" style={{ alignSelf: 'start', width: '100%', boxSizing: 'border-box' }}>
-          <div className="card-head">
-            <div className="card-title">Transactions</div>
-            {txLoading && <span className="mono faint" style={{ fontSize: 9 }}>fetching…</span>}
-          </div>
-
-          {txLoading ? (
-            <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div className="ai-orb" style={{ width: 12, height: 12 }} />
-              Loading transactions…
-            </div>
-          ) : transactions.length === 0 ? (
-            <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--text-faint)' }}>
-              No transactions yet — adds, drops, and trades will appear here.
-            </div>
-          ) : (
-            <div>
-              {transactions.map((tx, idx) => {
-                const isTrade  = tx.type === 'trade' || tx.type === 'trade_offer';
-                const typeLabel = isTrade ? (tx.type === 'trade_offer' ? 'Offer' : 'Trade')
-                               : tx.type === 'drop' ? 'Drop' : 'Add';
-                const typeColor = isTrade            ? '#c6ff3a'
-                               : tx.type === 'drop' ? 'var(--danger)'
-                               : 'var(--good)';
-                const ago = tx.timestamp ? (() => {
-                  const diff = Date.now() - new Date(tx.timestamp).getTime();
-                  if (diff < 3600000)  return `${Math.round(diff / 60000)}m ago`;
-                  if (diff < 86400000) return `${Math.round(diff / 3600000)}h ago`;
-                  return `${Math.round(diff / 86400000)}d ago`;
-                })() : '';
-
-                const PlayerLine = ({ p, action }) => (
-                  <div style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 5, marginBottom: 1 }}>
-                    <span style={{ color: action === 'add' ? 'var(--good)' : 'var(--danger)', fontWeight: 700, fontSize: 10, minWidth: 10 }}>
-                      {action === 'add' ? '+' : '−'}
-                    </span>
-                    <span style={{ fontWeight: 600, color: action === 'add' ? 'var(--text)' : 'var(--text-dim)' }}>{p.name || '—'}</span>
-                    {p.pos && <span style={{ fontSize: 9, color: 'var(--accent-2)', fontFamily: 'var(--font-mono)' }}>{p.pos}</span>}
-                    {p.nflTeam && <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.nflTeam}</span>}
-                  </div>
-                );
-
-                if (isTrade) {
-                  return (
-                    <div key={tx.id || idx} style={{ padding: '9px 14px', borderBottom: '1px solid var(--border)', borderLeft: `2px solid ${typeColor}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-                        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, background: `${typeColor}18`, border: `1px solid ${typeColor}44`, borderRadius: 3, padding: '1px 5px' }}>
-                          {typeLabel.toUpperCase()}
-                        </span>
-                        <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{ago}</span>
-                      </div>
-                      {/* Side A */}
-                      <div style={{ marginBottom: 5 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 2 }}>{tx.teamName || tx.teamId}</div>
-                        {(tx.got  || []).map((p, i) => <PlayerLine key={i} p={p} action="add" />)}
-                        {(tx.gave || []).map((p, i) => <PlayerLine key={i} p={p} action="drop" />)}
-                      </div>
-                      {/* Side B */}
-                      {tx.otherTeamName && (
-                        <div>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 2 }}>{tx.otherTeamName}</div>
-                          {(tx.gave || []).map((p, i) => <PlayerLine key={i} p={p} action="add" />)}
-                          {(tx.got  || []).map((p, i) => <PlayerLine key={i} p={p} action="drop" />)}
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-
-                // Add or Drop
-                const players = tx.players || [];
-                return (
-                  <div key={tx.id || idx} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', borderLeft: `2px solid ${typeColor}` }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, background: `${typeColor}18`, border: `1px solid ${typeColor}44`, borderRadius: 3, padding: '1px 5px' }}>
-                        {typeLabel.toUpperCase()}
-                      </span>
-                      <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{ago}</span>
-                    </div>
-                    {tx.teamName && (
-                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 3 }}>{tx.teamName}</div>
-                    )}
-                    {players.map((p, i) => <PlayerLine key={i} p={p} action={p.action || tx.type} />)}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        </div>
+        </div>}{/* end col 4 / Champions Corner */}
       </div>
-      {/* ── Breakout Candidates (full-width, above standings) ── */}
-      {Array.isArray(r2Breakouts) && r2Breakouts.length > 0 && (
-        <div style={{ padding: '0 24px 16px' }}>
+
+
+
+      {/* ── Breakout Candidates (mobile only — desktop is viewport-fit) ── */}
+      {isMobile && Array.isArray(r2Breakouts) && r2Breakouts.length > 0 && (
+        <div style={{ padding: '0 14px 16px' }}>
           <div className="card" style={{ borderLeft: '3px solid #c6ff3a' }}>
             <div className="card-head">
               <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1628,43 +1533,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         </div>
       )}
 
-      <div style={{ padding: '0 24px 24px', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 16, alignItems: 'start' }}>
-        <div className="card">
-          <div className="card-head">
-            <div className="card-title">League Standings · {weekLabel}</div>
-            <span className="mono faint" style={{ fontSize: 10 }}>{standings ? 'CBS · live' : 'mock data'}</span>
-          </div>
-          <table className="data-table">
-            <thead>
-              <tr><th style={{ width: 32 }}>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">PF</th><th className="num">PA</th></tr>
-            </thead>
-            <tbody>
-              {(standings || LEAGUE_TEAMS.map(t => { const lt = findTeam(t.id); return { ...t, ...lt, w: 0, l: 0, pf: 0, pa: 0 }; })).map((row, i) => (
-                <tr key={row.id || i} style={row.me ? { background: 'rgba(198,255,58,.04)' } : {}}>
-                  <td className="mono dim" style={{ fontSize: 12 }}>{i + 1}</td>
-                  <td>
-                    <div className="flex gap-8" style={{ alignItems: 'center' }}>
-                      {row.logoImg
-                        ? <img src={row.logoImg} alt={row.logo} style={{ width: 22, height: 22, borderRadius: 5, objectFit: 'cover', flexShrink: 0 }} />
-                        : <span className="logo" style={{ background: row.color, width: 22, height: 22, fontSize: 8 }}>{row.logo}</span>
-                      }
-                      <span style={row.me ? { color: 'var(--accent)', fontWeight: 700 } : {}}>{row.name}</span>
-                      {row.me && <span className="mono faint" style={{ fontSize: 9 }}>YOU</span>}
-                    </div>
-                  </td>
-                  <td className="num mono" style={{ fontWeight: 700 }}>{row.w}</td>
-                  <td className="num mono dim">{row.l}</td>
-                  <td className="num mono">{typeof row.pf === 'number' && row.pf > 0 ? row.pf.toFixed(1) : '—'}</td>
-                  <td className="num mono dim">{typeof row.pa === 'number' && row.pa > 0 ? row.pa.toFixed(1) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ gridColumn: 'span 2' }}>
-          <WeeklyCalendar weekLabel={weekLabel} waiverPosition={waiverPosition} totalTeams={totalTeams} user={user} />
-        </div>
-      </div>
     </div>
   );
 }
@@ -1703,13 +1571,278 @@ function formatGameTime(isoDate) {
   } catch { return null; }
 }
 
+function fmtTimeCompact(isoDate) {
+  if (!isoDate) return null;
+  try {
+    return new Date(isoDate)
+      .toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })
+      .replace(':00', '').replace(' AM', 'a').replace(' PM', 'p');
+  } catch { return null; }
+}
+
+function isGameLocked(isoDate) {
+  if (!isoDate) return false;
+  return new Date(isoDate) <= new Date();
+}
+
 function formatSpread(odds, away, home) {
   if (!odds?.details) return null;
   // ESPN "details" is already formatted, e.g. "KC -3" or "PK"
   return odds.details;
 }
 
-function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
+// ── Roster Deadlines Countdown ────────────────────────────────────────────────
+function useCountdown(targetDate) {
+  const [ms, setMs] = React.useState(targetDate ? targetDate - Date.now() : 0);
+  React.useEffect(() => {
+    if (!targetDate) return;
+    const id = setInterval(() => setMs(targetDate - Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [targetDate]);
+  if (!targetDate || ms <= 0) return null;
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  return `${m}m ${s}s`;
+}
+
+function nextSundayLock() {
+  const now  = new Date();
+  const d    = new Date(now);
+  const day  = d.getDay(); // 0=Sun
+  const diff = day === 0 ? 0 : 7 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(13, 0, 0, 0); // 1:00 PM ET  ≈ 18:00 UTC (not adjusting tz here)
+  if (d <= now) d.setDate(d.getDate() + 7);
+  return d;
+}
+
+function nextWaiverRun() {
+  const now = new Date();
+  const d   = new Date(now);
+  // Next Wednesday 11:59 PM
+  const daysUntilWed = ((3 - d.getDay()) + 7) % 7 || 7;
+  d.setDate(d.getDate() + daysUntilWed);
+  d.setHours(23, 59, 0, 0);
+  return d;
+}
+
+function RosterDeadlines({ currentWeek, onNav }) {
+  const settings = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
+  }, []);
+  const lockTarget   = React.useMemo(() => nextSundayLock().getTime(),  []);
+  const waiverTarget = React.useMemo(() => nextWaiverRun().getTime(),   []);
+  const tradeWeekCutoff = settings?.tradeCutoffWeek ?? 11;
+  const isOffseason = !currentWeek.num;
+
+  const lockCountdown   = useCountdown(lockTarget);
+  const waiverCountdown = useCountdown(waiverTarget);
+
+  const items = [
+    {
+      label: 'Lineup Lock',
+      icon: '🔒',
+      countdown: lockCountdown ?? 'Locked',
+      urgent: lockTarget - Date.now() < 4 * 3600 * 1000,
+      action: () => onNav('roster'),
+      actionLabel: 'Set Lineup',
+      color: 'var(--danger)',
+    },
+    {
+      label: 'Waivers Run',
+      icon: '📋',
+      countdown: waiverCountdown ?? 'Processing',
+      urgent: waiverTarget - Date.now() < 12 * 3600 * 1000,
+      action: () => onNav('players'),
+      actionLabel: 'View Players',
+      color: 'var(--warn)',
+    },
+    {
+      label: 'Trade Deadline',
+      icon: '↔',
+      countdown: currentWeek.num >= tradeWeekCutoff ? 'Closed' : `Week ${tradeWeekCutoff}`,
+      urgent: false,
+      action: () => onNav('trade'),
+      actionLabel: 'Trade Analyzer',
+      color: 'var(--accent-2)',
+    },
+    {
+      label: 'Playoff Picture',
+      icon: '🏆',
+      countdown: isOffseason ? 'Starts Wk13' : currentWeek.num >= 13 ? 'IN PLAYOFFS' : `${13 - (currentWeek.num || 0)} weeks away`,
+      urgent: currentWeek.num >= 13,
+      action: () => onNav('power'),
+      actionLabel: 'Power Rankings',
+      color: '#FFD700',
+    },
+  ];
+
+  return (
+    <div style={{ padding: '0 24px 16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+        {items.map(it => (
+          <div key={it.label} style={{ background: 'var(--panel)', border: `1px solid ${it.urgent ? it.color + '66' : 'var(--border)'}`, borderRadius: 10, padding: '10px 14px', transition: 'border-color .2s' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span style={{ fontSize: 14 }}>{it.icon}</span>
+              <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '.08em' }}>{it.label}</span>
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 15, color: it.urgent ? it.color : 'var(--text)', marginBottom: 6, lineHeight: 1 }}>
+              {it.countdown}
+              {it.urgent && <span style={{ width: 6, height: 6, borderRadius: '50%', background: it.color, display: 'inline-block', marginLeft: 6, animation: 'pulse 2s infinite', verticalAlign: 'middle' }} />}
+            </div>
+            <button onClick={it.action} style={{ fontSize: 10, padding: '3px 8px', background: 'none', border: `1px solid var(--border)`, borderRadius: 4, color: 'var(--text-faint)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
+              {it.actionLabel} →
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Playoff Schedule Optimizer ─────────────────────────────────────────────────
+function PlayoffOptimizer({ teamId, currentWeek, inline = false }) {
+  const ids = LEAGUE_TEAMS.map(t => t.id);
+  const n   = ids.length;
+  const PLAYOFF_WEEKS = [13, 14, 15];
+
+  const schedule = React.useMemo(() => {
+    return Array.from({ length: 15 }, (_, w) => {
+      const rest   = ids.slice(1);
+      const rot    = w % (n - 1);
+      const circle = [ids[0], ...[...rest.slice(rot), ...rest.slice(0, rot)]];
+      return Array.from({ length: n / 2 }, (_, i) => [circle[i], circle[n - 1 - i]]);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function simTeamScore(tid, week) {
+    const roster   = TEAM_ROSTERS[tid] || [];
+    const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
+    const base = starters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
+    const noise = Math.sin(tid * 11.3 + week * 7.1) * 12 + Math.cos(tid * 3.7 + week * 2.9) * 6;
+    return Math.max(0, Math.round((base + noise) * 10) / 10);
+  }
+
+  const playoffData = React.useMemo(() => {
+    if (!teamId) return null;
+    return PLAYOFF_WEEKS.map(wk => {
+      const matchup = schedule[wk - 1]?.find(([a, b]) => a === teamId || b === teamId);
+      if (!matchup) return { week: wk, opp: null, myProj: 0, oppProj: 0, winPct: 50 };
+      const oppId   = matchup[0] === teamId ? matchup[1] : matchup[0];
+      const opp     = LEAGUE_TEAMS.find(t => t.id === oppId);
+      const myProj  = simTeamScore(teamId, wk);
+      const oppProj = simTeamScore(oppId, wk);
+      const winPct  = myProj + oppProj > 0 ? Math.round(myProj / (myProj + oppProj) * 100) : 50;
+      return { week: wk, opp, myProj, oppProj, winPct };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamId, schedule]);
+
+  if (!playoffData) return null;
+  const combined = playoffData.reduce((acc, w) => acc * (w.winPct / 100), 1);
+
+  const inner = (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: inline ? 8 : 12 }}>
+        <span style={{ fontSize: inline ? 14 : 18 }}>🏆</span>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: inline ? 11 : 13 }}>Playoff Schedule Optimizer</div>
+          <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>Wks 13–15 · Projected matchups</div>
+        </div>
+        <div style={{ marginLeft: 'auto', textAlign: 'center' }}>
+          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 2 }}>Champ Odds</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: inline ? 18 : 22, color: '#FFD700', lineHeight: 1 }}>{Math.round(combined * 100)}%</div>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: inline ? 6 : 10 }}>
+        {playoffData.map(({ week, opp, myProj, oppProj, winPct }) => {
+          const isCurrentWeek = week === currentWeek.num;
+          const color = winPct >= 60 ? 'var(--good)' : winPct >= 45 ? 'var(--accent)' : 'var(--danger)';
+          return (
+            <div key={week} style={{
+              background: isCurrentWeek ? 'rgba(198,255,58,.08)' : (inline ? 'rgba(255,255,255,.03)' : 'var(--panel)'),
+              border: `1px solid ${isCurrentWeek ? 'rgba(198,255,58,.3)' : 'rgba(255,215,0,.15)'}`,
+              borderRadius: 8, padding: inline ? '8px 10px' : '10px 12px',
+            }}>
+              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 4 }}>
+                Wk{week}{isCurrentWeek ? ' · NOW' : week === 15 ? ' · CHAMP' : ''}
+              </div>
+              {opp ? (
+                <>
+                  <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>vs {opp.name}</div>
+                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', marginBottom: 4 }}>
+                    {myProj.toFixed(1)} – {oppProj.toFixed(1)}
+                  </div>
+                  <div style={{ height: 3, background: 'rgba(255,255,255,.08)', borderRadius: 2, overflow: 'hidden', marginBottom: 3 }}>
+                    <div style={{ height: '100%', width: `${winPct}%`, background: color, borderRadius: 2, transition: 'width .5s' }} />
+                  </div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color }}>{winPct}%</div>
+                </>
+              ) : (
+                <div style={{ color: 'var(--text-faint)', fontSize: 11 }}>TBD</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  if (inline) {
+    return (
+      <div style={{ padding: '10px 14px 12px', borderBottom: '1px solid var(--border)', background: 'linear-gradient(135deg, rgba(255,215,0,.04) 0%, rgba(198,255,58,.02) 100%)' }}>
+        {inner}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '0 24px 16px' }}>
+      <div style={{ background: 'linear-gradient(135deg, rgba(255,215,0,.06) 0%, rgba(198,255,58,.04) 100%)', border: '1px solid rgba(255,215,0,.25)', borderRadius: 12, padding: '14px 18px' }}>
+        {inner}
+      </div>
+    </div>
+  );
+}
+
+function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWeek, onNav }) {
+  const lockTarget   = React.useMemo(() => nextSundayLock().getTime(), []);
+  const waiverTarget = React.useMemo(() => nextWaiverRun().getTime(),  []);
+
+  // Fantasy matchup — who am I playing this week?
+  const myTeamId  = user?.teamId ?? LEAGUE_TEAMS.find(t => t.me)?.id;
+  const oppTeam   = React.useMemo(() => getOpponent(myTeamId, currentWeek?.num), [myTeamId, currentWeek?.num]);
+  // slotMap: playerId → { slot, isBench }
+  const mySlotMap  = React.useMemo(() => {
+    const m = {};
+    (TEAM_ROSTERS[myTeamId] || []).forEach(r => { if (r.playerId) m[r.playerId] = r.slot; });
+    return m;
+  }, [myTeamId]);
+  const oppSlotMap = React.useMemo(() => {
+    const m = {};
+    (oppTeam ? TEAM_ROSTERS[oppTeam.id] || [] : []).forEach(r => { if (r.playerId) m[r.playerId] = r.slot; });
+    return m;
+  }, [oppTeam]);
+  const dlSettings   = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
+  }, []);
+  const tradeWeekCutoff    = dlSettings?.tradeCutoffWeek ?? 11;
+  const isDeadlineOffseason = !currentWeek?.num;
+  const lockCountdown   = useCountdown(lockTarget);
+  const waiverCountdown = useCountdown(waiverTarget);
+  const deadlineItems = [
+    { label: 'Lineup Lock',    icon: '🔒', countdown: lockCountdown   ?? 'Locked',     urgent: lockTarget   - Date.now() < 4  * 3600000, action: () => onNav?.('roster'),  actionLabel: 'Set Lineup',     color: 'var(--danger)'   },
+    { label: 'Waivers Run',    icon: '📋', countdown: waiverCountdown ?? 'Processing', urgent: waiverTarget - Date.now() < 12 * 3600000, action: () => onNav?.('players'), actionLabel: 'View Players',   color: 'var(--warn)'     },
+    { label: 'Trade Deadline', icon: '↔', countdown: (currentWeek?.num ?? 0) >= tradeWeekCutoff ? 'Closed' : `Week ${tradeWeekCutoff}`, urgent: false, action: () => onNav?.('trade'), actionLabel: 'Trade Analyzer', color: 'var(--accent-2)' },
+    { label: 'Playoff Picture', icon: '🏆', countdown: isDeadlineOffseason ? 'Starts Wk13' : (currentWeek?.num ?? 0) >= 13 ? 'IN PLAYOFFS' : `${13 - (currentWeek?.num || 0)} wks away`, urgent: (currentWeek?.num ?? 0) >= 13, action: () => onNav?.('power'), actionLabel: 'Power Rankings', color: '#FFD700' },
+  ];
+
   const events = React.useMemo(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
@@ -1827,8 +1960,6 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
     localStorage.setItem('fantasai_draft_rsvp', JSON.stringify(updated));
   }
 
-  const myTeamId = user?.teamId ? String(user.teamId) : null;
-
   const grouped = React.useMemo(() => {
     const g = {};
     for (const evt of events) {
@@ -1855,46 +1986,143 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
 
   const activeDays = DAY_ORDER.filter(d => grouped[d]?.length > 0);
 
+  // Compute Sun–Sat dates for this NFL week (calendar display)
+  const calWeekDates = React.useMemo(() => {
+    const now = new Date();
+    const sun = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+    const NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const ABBRS = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+    return NAMES.map((name, i) => ({
+      name,
+      abbr: ABBRS[i],
+      num: new Date(sun.getFullYear(), sun.getMonth(), sun.getDate() + i).getDate(),
+    }));
+  }, []);
+
   return (
     <>
-    <div className="card" style={{ position: 'sticky', top: 0 }}>
-      <div className="card-head">
+    <div className="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div className="card-head" style={{ flexShrink: 0 }}>
         <div className="card-title">Weekly Events</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button className="btn primary sm" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.02em' }} onClick={openHHModal}>🍺 Create Happy Hour</button>
           <span className="mono faint" style={{ fontSize: 10 }}>{weekLabel}</span>
         </div>
       </div>
-      <div>
-        {activeDays.map(day => {
-          const isToday = day === todayDay;
-          const dayEvts = [...(grouped[day] || [])].sort((a, b) => a.time.localeCompare(b.time));
-          return (
-            <div key={day} style={{ borderTop: '1px solid var(--border)' }}>
-              <div style={{
-                padding: '6px 14px 4px', fontSize: 10, fontWeight: 700,
-                letterSpacing: '.1em', textTransform: 'uppercase',
-                color: isToday ? 'var(--accent)' : 'var(--text-faint)',
-                background: isToday ? 'rgba(198,255,58,.06)' : undefined,
-                display: 'flex', alignItems: 'center', gap: 6,
+      {/* ── Deadline strip ── */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
+        {deadlineItems.map((it, idx) => (
+          <button key={it.label} onClick={it.action} style={{
+            flex: 1, padding: '9px 0 8px', cursor: 'pointer', background: it.urgent ? `${it.color}09` : 'none',
+            border: 'none', borderRight: idx < 3 ? '1px solid var(--border)' : 'none',
+            borderTop: `2px solid ${it.urgent ? it.color : 'transparent'}`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+            transition: 'background .12s',
+          }}>
+            <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: it.urgent ? it.color : 'var(--text-faint)', lineHeight: 1, display: 'flex', alignItems: 'center', gap: 3 }}>
+              {it.icon} {it.label}
+            </span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: 13, color: it.urgent ? it.color : 'var(--text)', lineHeight: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+              {it.countdown}
+              {it.urgent && <span style={{ width: 5, height: 5, borderRadius: '50%', background: it.color, animation: 'pulse 2s infinite', display: 'inline-block', flexShrink: 0 }} />}
+            </span>
+          </button>
+        ))}
+      </div>
+      {/* ── Week Calendar + Events ── */}
+      <div style={{ padding: '12px 12px 0' }}>
+        {/* ── 7-column calendar grid ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
+          {calWeekDates.map(({ name, abbr, num }, colIdx) => {
+            const isToday = name === todayDay;
+            const dayEvts = [...(grouped[name] || [])].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+            return (
+              <div key={name} style={{
+                display: 'flex', flexDirection: 'column',
+                borderRight: colIdx < 6 ? '1px solid var(--border)' : 'none',
+                background: isToday ? 'rgba(198,255,58,.04)' : 'transparent',
+                minHeight: 110,
               }}>
+                {/* Day header cell */}
+                <div style={{
+                  padding: '6px 4px 5px', textAlign: 'center',
+                  borderBottom: '1px solid var(--border)',
+                  background: isToday ? 'rgba(198,255,58,.09)' : 'rgba(255,255,255,.02)',
+                }}>
+                  <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: isToday ? 'var(--accent)' : 'var(--text-faint)', marginBottom: 3 }}>{abbr}</div>
+                  <div style={{
+                    width: 22, height: 22, borderRadius: '50%', margin: '0 auto',
+                    background: isToday ? 'var(--accent)' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: isToday ? 900 : 500,
+                    color: isToday ? 'var(--accent-ink)' : 'var(--text-dim)',
+                  }}>{num}</div>
+                </div>
+                {/* Event slots */}
+                <div style={{ padding: '4px 3px', display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
+                  {dayEvts.map(evt => {
+                    if (evt._isHH) return (
+                      <div key={evt.id} title={evt.title || 'Happy Hour'} style={{ fontSize: 12, fontWeight: 700, background: 'rgba(255,180,0,.18)', border: '1px solid rgba(255,180,0,.35)', borderRadius: 3, padding: '2px 4px', color: '#ffb400', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🍺 {evt.title || 'Happy Hour'}</div>
+                    );
+                    if (evt._isDraft) return (
+                      <div key="__draft__" title="Fantasy Draft" style={{ fontSize: 12, fontWeight: 700, background: 'rgba(198,255,58,.15)', border: '1px solid rgba(198,255,58,.35)', borderRadius: 3, padding: '2px 4px', color: '#c6ff3a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🏈 Draft</div>
+                    );
+                    if (evt.type === 'lock') return null;
+                    const isPrimetime = evt.id === 'mon-mnf' || evt.id === 'sun-snf';
+                    const typeColor   = isPrimetime ? '#FFD700' : (TYPE_COLOR[evt.type] ?? TYPE_COLOR.other);
+                    const chipLabel   = isPrimetime ? (evt.id === 'mon-mnf' ? 'MNF' : 'SNF') : (TYPE_LABEL[evt.type] ?? evt.label);
+                    const chipGame    = slotGame[evt.id];
+                    const chipTime    = chipGame ? fmtTimeCompact(chipGame.date) : null;
+                    const chipLocked  = chipGame ? isGameLocked(chipGame.date) : false;
+                    return (
+                      <div key={evt.id} title={`${evt.label}${chipTime ? ' · ' + chipTime : ''}${chipLocked ? ' · LOCKED' : ''}`} style={{
+                        fontSize: isPrimetime ? 14 : 12,
+                        fontWeight: 700,
+                        letterSpacing: '.02em',
+                        color: chipLocked ? 'var(--text-faint)' : typeColor,
+                        background: chipLocked ? 'rgba(255,255,255,.04)' : isPrimetime ? 'rgba(255,215,0,.15)' : `${typeColor}1a`,
+                        border: `1px solid ${chipLocked ? 'rgba(255,255,255,.1)' : isPrimetime ? 'rgba(255,215,0,.45)' : typeColor + '44'}`,
+                        borderRadius: 3, padding: '2px 3px', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 1,
+                      }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 2 }}>
+                          {chipLocked && <span style={{ fontSize: isPrimetime ? 13 : 11 }}>🔒</span>}
+                          {chipLabel}
+                        </span>
+                        {chipTime && <span style={{ fontSize: isPrimetime ? 13 : 11, opacity: 0.75, whiteSpace: 'nowrap' }}>{chipTime}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── Rich event detail cards (HH, Draft, primetime games) ── */}
+        {DAY_ORDER.flatMap(day => {
+          const isToday = day === todayDay;
+          const dayEvts = [...(grouped[day] || [])].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+          const richEvts = dayEvts.filter(evt => evt._isHH || evt._isDraft || !!slotGame[evt.id]);
+          if (richEvts.length === 0) return [];
+          return [(
+            <div key={day} style={{ borderTop: '1px solid var(--border)' }}>
+              <div style={{ padding: '5px 14px 3px', fontSize: 12, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: isToday ? 'var(--accent)' : 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {day}
                 {isToday && <span style={{ fontSize: 8, background: 'var(--accent)', color: '#0a1300', borderRadius: 3, padding: '1px 5px', fontWeight: 800 }}>TODAY</span>}
               </div>
-
-              {dayEvts.map(evt => {
+              {richEvts.map(evt => {
                 // ── Happy Hour event ──
                 if (evt._isHH) {
                   const dateLabel = (() => { try { return new Date(evt.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return evt.date; } })();
                   const allTeams = (evt.teamIds || []).length === LEAGUE_TEAMS.length;
                   return (
-                    <div key={evt.id} style={{ margin: '4px 10px 6px', borderRadius: 7, border: '1px solid rgba(255,180,0,.28)', background: 'rgba(255,180,0,.05)', overflow: 'hidden', display: 'flex', alignItems: 'stretch' }}>
-                      {/* Left: event details */}
-                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                    <div key={evt.id} style={{ margin: '4px 10px 6px', borderRadius: 7, border: '1px solid rgba(255,180,0,.28)', background: 'rgba(255,180,0,.05)', overflow: 'hidden' }}>
+                      {/* Event details */}
+                      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px 6px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
                           <span style={{ fontSize: 15 }}>🍺</span>
                           <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{evt.title || 'Happy Hour'}</div>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{evt.title || 'Happy Hour'}</div>
                             <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,180,0,.8)', marginTop: 1 }}>
                               {dateLabel}{evt.time ? ` · ${fmt12(evt.time)}` : ''}
                             </div>
@@ -1971,13 +2199,15 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
                           );
                         })()}
                       </div>
-                      {/* Right: map — full height of card */}
+                      {/* Map — below details, constrained width */}
                       {evt.address && (
-                        <iframe
-                          title={`Map: ${evt.address}`}
-                          src={`https://maps.google.com/maps?q=${encodeURIComponent(evt.address)}&output=embed`}
-                          style={{ width: 240, flexShrink: 0, border: 'none', borderLeft: '1px solid rgba(255,180,0,.15)', display: 'block', minHeight: 220, alignSelf: 'stretch' }}
-                        />
+                        <div style={{ padding: '0 10px 10px' }}>
+                          <iframe
+                            title={`Map: ${evt.address}`}
+                            src={`https://maps.google.com/maps?q=${encodeURIComponent(evt.address)}&output=embed`}
+                            style={{ width: '100%', maxWidth: 400, height: 160, border: 'none', borderRadius: 6, display: 'block', opacity: 0.9 }}
+                          />
+                        </div>
                       )}
                     </div>
                   );
@@ -1995,8 +2225,8 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
                     else if (r === 'no') draftNotGoing.push(t);
                   }
                   return (
-                    <div key="__draft__" style={{ margin: '4px 10px 6px', borderRadius: 7, border: '1px solid rgba(198,255,58,.3)', background: 'rgba(198,255,58,.05)', overflow: 'hidden', display: 'flex', alignItems: 'stretch' }}>
-                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                    <div key="__draft__" style={{ margin: '4px 10px 6px', borderRadius: 7, border: '1px solid rgba(198,255,58,.3)', background: 'rgba(198,255,58,.05)', overflow: 'hidden' }}>
+                      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px 6px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
                           <span style={{ fontSize: 15 }}>🏈</span>
                           <div style={{ flex: 1 }}>
@@ -2049,38 +2279,21 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
                           )}
                         </div>
                       </div>
-                      {/* Right: map — full height of card */}
+                      {/* Map — below details, constrained */}
                       {evt.address && (
-                        <iframe title="Draft location map" src={`https://maps.google.com/maps?q=${encodeURIComponent(evt.address)}&output=embed`}
-                          style={{ width: 240, flexShrink: 0, border: 'none', borderLeft: '1px solid rgba(198,255,58,.15)', display: 'block', minHeight: 220, alignSelf: 'stretch' }} />
+                        <div style={{ padding: '0 10px 10px' }}>
+                          <iframe title="Draft location map" src={`https://maps.google.com/maps?q=${encodeURIComponent(evt.address)}&output=embed`}
+                            style={{ width: '100%', maxWidth: 400, height: 160, border: 'none', borderRadius: 6, display: 'block', opacity: 0.9 }} />
+                        </div>
                       )}
                     </div>
                   );
                 }
 
-                const game     = slotGame[evt.id];
-                const isWaiver = evt.type === 'waiver';
+                const game      = slotGame[evt.id];
                 const typeColor = TYPE_COLOR[evt.type] ?? TYPE_COLOR.other;
 
-                // For non-game events or events without live data — compact row
-                if (!game) {
-                  return (
-                    <div key={evt.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 14px 5px 18px' }}>
-                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, flexShrink: 0, width: 44 }}>
-                        {TYPE_LABEL[evt.type] ?? 'EVENT'}
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{evt.label}</span>
-                        {isWaiver && waiverPosition && (
-                          <span style={{ marginLeft: 7, fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--warn)' }}>
-                            #{waiverPosition}{totalTeams ? ` of ${totalTeams}` : ''} priority
-                          </span>
-                        )}
-                      </div>
-                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', flexShrink: 0 }}>{evt.time}</span>
-                    </div>
-                  );
-                }
+                if (!game) return null;
 
                 // Rich game card for primetime matchups with live ESPN data
                 const awayAbbr   = game.away?.abbr?.toUpperCase() ?? '';
@@ -2088,6 +2301,7 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
                 const awayName   = game.away?.name ?? awayAbbr;
                 const homeName   = game.home?.name ?? homeAbbr;
                 const gameTime   = formatGameTime(game.date);
+                const gameLocked = isGameLocked(game.date);
                 const spread     = formatSpread(game.odds, game.away, game.home);
                 const overUnder  = game.odds?.overUnder != null ? `O/U ${game.odds.overUnder}` : null;
                 const network    = game.broadcasts?.filter(b => b && b.trim()).join(' · ') || null;
@@ -2096,15 +2310,18 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
                 const hasInjuries  = awayInjuries.length > 0 || homeInjuries.length > 0;
 
                 return (
-                  <div key={evt.id} style={{ margin: '4px 10px 6px', borderRadius: 7, border: `1px solid rgba(78,168,255,.18)`, background: 'rgba(78,168,255,.04)', overflow: 'hidden' }}>
+                  <div key={evt.id} style={{ margin: '4px 10px 6px', borderRadius: 7, border: `1px solid ${gameLocked ? 'rgba(255,255,255,.1)' : 'rgba(78,168,255,.18)'}`, background: gameLocked ? 'rgba(255,255,255,.02)' : 'rgba(78,168,255,.04)', overflow: 'hidden' }}>
                     {/* Header row: label + time */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px 4px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
-                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeColor, flexShrink: 0 }}>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: gameLocked ? 'var(--text-faint)' : typeColor, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {gameLocked && <span title="Game locked — lineup frozen">🔒</span>}
                         {TYPE_LABEL[evt.type] ?? 'GAME'}
                       </span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', flex: 1 }}>{evt.label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: gameLocked ? 'var(--text-dim)' : 'var(--text)', flex: 1 }}>{evt.label}</span>
                       {gameTime && (
-                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', flexShrink: 0 }}>{gameTime}</span>
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: gameLocked ? 'var(--danger)' : 'var(--text-faint)', flexShrink: 0, fontWeight: gameLocked ? 700 : 400 }}>
+                          {gameLocked ? 'LOCKED' : gameTime}
+                        </span>
                       )}
                     </div>
 
@@ -2153,15 +2370,45 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user }) {
                         )}
                       </div>
                     )}
+
+                    {/* Fantasy matchup — show for MNF / SNF only */}
+                    {(evt.id === 'mon-mnf' || evt.id === 'sun-snf') && (() => {
+                      const gameTeams = new Set([awayAbbr, homeAbbr]);
+                      const myPlayers  = Object.entries(mySlotMap)
+                        .map(([pid, slot]) => ({ p: findPlayer(Number(pid)), slot }))
+                        .filter(({ p }) => p && gameTeams.has((p.team || '').toUpperCase()));
+                      const oppPlayers = oppTeam ? Object.entries(oppSlotMap)
+                        .map(([pid, slot]) => ({ p: findPlayer(Number(pid)), slot }))
+                        .filter(({ p }) => p && gameTeams.has((p.team || '').toUpperCase())) : [];
+                      if (!myPlayers.length && !oppPlayers.length) return null;
+                      const renderList = (players, accentColor, label) => (
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, color: accentColor, letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 4 }}>{label}</div>
+                          {players.map(({ p, slot }) => {
+                            const isBench = slot === 'BENCH';
+                            return (
+                              <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3, opacity: isBench ? 0.55 : 1 }}>
+                                <PosBadge pos={p.pos} />
+                                <span style={{ fontSize: 12, fontWeight: isBench ? 400 : 700, color: isBench ? 'var(--text-dim)' : 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                                {isBench && <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', flexShrink: 0 }}>BENCH</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                      return (
+                        <div style={{ margin: '0 10px 8px', borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 7, display: 'flex', gap: 12 }}>
+                          {myPlayers.length > 0  && renderList(myPlayers,  '#4caf82', 'My Team')}
+                          {oppPlayers.length > 0 && renderList(oppPlayers, 'var(--danger)', `vs ${oppTeam?.name ?? 'Opp'}`)}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
             </div>
-          );
+          )];
         })}
-        {activeDays.length === 0 && (
-          <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)' }}>No events — set them in Rules &amp; Settings → Schedule.</div>
-        )}
       </div>
     </div>
 

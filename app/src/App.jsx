@@ -1,7 +1,9 @@
 import React from 'react';
-import { findTeam, MY_ROSTER, TEAM_ROSTERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster } from './lib/data.js';
-import { findPlayer, getPlayers, setPlayers, normalizePlayerList } from './lib/playerStore.js';
+import { findTeam, MY_ROSTER, TEAM_ROSTERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, refreshTeamRosters, clearAllRosters } from './lib/data.js';
+import { findPlayer, getPlayers, setPlayers, patchPlayers, normalizePlayerList, BYE_WEEKS_2026 } from './lib/playerStore.js';
 import { api } from './api.js';
+import { getPlayerMap } from './lib/sleeper.js';
+import { registerServiceWorker, getSubscriptionState, requestNotificationPermission, showLocalNotification } from './lib/pushNotifications.js';
 import { applyLeagueData, clearLeagueData } from './lib/leagueStore.js';
 import { Sidebar, TopBar, MobileNav } from './components/layout.jsx';
 import AICopilot from './components/AICopilot.jsx';
@@ -13,7 +15,6 @@ import Dashboard from './screens/Dashboard.jsx';
 import PlayersScreen, { PlayerDetail } from './screens/Players.jsx';
 import NewsScreen from './screens/News.jsx';
 import CompareScreen from './screens/Compare.jsx';
-import WatchlistScreen from './screens/Watchlist.jsx';
 import TradeScreen from './screens/Trade.jsx';
 import DraftRoom from './screens/DraftRoom.jsx';
 import OwnerIntelScreen from './screens/OwnerIntel.jsx';
@@ -23,11 +24,146 @@ import AdminOwners from './screens/AdminOwners.jsx';
 import ScoringTestScreen from './screens/ScoringTest.jsx';
 import LeagueSettings from './screens/LeagueSettings.jsx';
 import CurrentRosterScreen from './screens/CurrentRoster.jsx';
-import WaiversScreen from './screens/Waivers.jsx';
 import HeadToHeadScreen from './screens/HeadToHead.jsx';
 import AccountEditScreen from './screens/AccountEdit.jsx';
-import LineupDecisions from './screens/LineupDecisions.jsx';
 import TransactionsScreen from './screens/Transactions.jsx';
+import PowerRankingsScreen from './screens/PowerRankings.jsx';
+import DraftRecapScreen from './screens/DraftRecap.jsx';
+
+// ── Live Score Ticker ─────────────────────────────────────────────────────────
+const TICKER_SEASON_START = new Date('2026-09-09');
+
+function tickerSimScore(teamId, week) {
+  const roster   = TEAM_ROSTERS[teamId] || [];
+  const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
+  const base = starters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
+  const noise = Math.sin(teamId * 11.3 + week * 7.1) * 12 + Math.cos(teamId * 3.7 + week * 2.9) * 6;
+  return Math.max(0, Math.round((base + noise) * 10) / 10);
+}
+
+function buildTickerSchedule(ids, weeks) {
+  const n = ids.length;
+  return Array.from({ length: weeks }, (_, w) => {
+    const rest   = ids.slice(1);
+    const rot    = w % (n - 1);
+    const circle = [ids[0], ...[...rest.slice(rot), ...rest.slice(0, rot)]];
+    return Array.from({ length: n / 2 }, (_, i) => [circle[i], circle[n - 1 - i]]);
+  });
+}
+
+function LiveScoreTicker({ myTeamId, onNav }) {
+  const [visible, setVisible] = React.useState(true);
+  const today = new Date();
+  const isInSeason = today >= TICKER_SEASON_START;
+  const week = isInSeason
+    ? Math.min(Math.floor((today - TICKER_SEASON_START) / (7 * 86400000)) + 1, 14)
+    : null;
+
+  const matchups = React.useMemo(() => {
+    if (!week) return [];
+    const ids  = LEAGUE_TEAMS.map(t => t.id);
+    const sched = buildTickerSchedule(ids, 14);
+    return (sched[week - 1] || []).map(([aId, bId]) => {
+      const a    = LEAGUE_TEAMS.find(t => t.id === aId);
+      const b    = LEAGUE_TEAMS.find(t => t.id === bId);
+      const aScore = tickerSimScore(aId, week);
+      const bScore = tickerSimScore(bId, week);
+      const isMe   = aId === myTeamId || bId === myTeamId;
+      return { a, b, aScore, bScore, isMe };
+    });
+  }, [week, myTeamId]);
+
+  if (!week || matchups.length === 0 || !visible) return null;
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 5000,
+      background: 'rgba(8,12,8,.96)', backdropFilter: 'blur(8px)',
+      borderBottom: '1px solid rgba(198,255,58,.2)',
+      display: 'flex', alignItems: 'center', gap: 0,
+      height: 32, overflow: 'hidden',
+    }}>
+      <div style={{ flexShrink: 0, padding: '0 10px', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.1em', borderRight: '1px solid rgba(255,255,255,.1)', height: '100%', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#c6ff3a', display: 'inline-block', animation: 'pulse 2s infinite' }} />
+        Wk{week}
+      </div>
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <div style={{ display: 'flex', gap: 0, animation: matchups.length > 5 ? 'ticker-scroll 30s linear infinite' : 'none', whiteSpace: 'nowrap' }}>
+          {[...matchups, ...matchups].map(({ a, b, aScore, bScore, isMe }, i) => {
+            const aWin = aScore > bScore;
+            return (
+              <div key={i} onClick={() => onNav('h2h')} style={{
+                cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
+                padding: '0 14px', height: 32, borderRight: '1px solid rgba(255,255,255,.06)',
+                background: isMe ? 'rgba(198,255,58,.06)' : 'transparent',
+              }}>
+                <span style={{ fontSize: 10, fontWeight: aWin ? 800 : 400, color: aWin ? 'var(--text)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{a?.abbr ?? a?.logo}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: aWin ? 'var(--accent)' : 'var(--text-dim)' }}>{aScore}</span>
+                <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>–</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: !aWin ? 'var(--accent)' : 'var(--text-dim)' }}>{bScore}</span>
+                <span style={{ fontSize: 10, fontWeight: !aWin ? 800 : 400, color: !aWin ? 'var(--text)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{b?.abbr ?? b?.logo}</span>
+                {isMe && <span style={{ fontSize: 8, color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>YOU</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <button onClick={() => setVisible(false)} style={{ flexShrink: 0, background: 'none', border: 'none', color: 'var(--text-faint)', cursor: 'pointer', padding: '0 10px', fontSize: 14, height: '100%', display: 'flex', alignItems: 'center' }}>
+        ✕
+      </button>
+      <style>{`
+        @keyframes ticker-scroll {
+          from { transform: translateX(0); }
+          to   { transform: translateX(-50%); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Push Notification Button ──────────────────────────────────────────────────
+function PushNotificationButton() {
+  const [state, setState] = React.useState('loading'); // loading | unsupported | default | granted | subscribed | denied | error
+
+  React.useEffect(() => {
+    getSubscriptionState().then(setState);
+  }, []);
+
+  async function handleEnable() {
+    const perm = await requestNotificationPermission();
+    if (perm === 'granted') {
+      showLocalNotification('FantasAI Alerts Enabled', 'You\'ll be notified about lineup locks, waiver claims, and trades.');
+      setState('subscribed');
+    } else {
+      setState(perm);
+    }
+  }
+
+  if (state === 'loading' || state === 'unsupported') return null;
+  if (state === 'subscribed' || state === 'granted') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--good)', fontFamily: 'var(--font-mono)', padding: '6px 0' }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--good)', display: 'inline-block' }} />
+        Push Alerts On
+      </div>
+    );
+  }
+  if (state === 'denied') {
+    return (
+      <div style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+        Notifications blocked in browser
+      </div>
+    );
+  }
+  return (
+    <button
+      onClick={handleEnable}
+      style={{ fontSize: 10, padding: '5px 10px', background: 'rgba(198,255,58,.1)', border: '1px solid rgba(198,255,58,.3)', borderRadius: 6, color: 'var(--accent)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+    >
+      🔔 Enable Push Alerts
+    </button>
+  );
+}
 
 function loadLeagueSettings() {
   try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
@@ -46,6 +182,45 @@ async function fetchS3Roster(teamId) {
     if (!data.fromS3 || data.playerIds === null) return null;
     return data.playerIds.map(Number);
   } catch { return null; }
+}
+
+// Build the authoritative roster for a team by merging:
+//   1. Saved draft picks (primary — captures every pick made in the draft room)
+//   2. S3 roster (adds/drops made after the draft)
+// Excludes players currently on waivers (dropped).
+function buildMergedRoster(teamId, s3Ids) {
+  try {
+    const waiverRaw  = JSON.parse(localStorage.getItem('fantasai_waivers') || '{}');
+    const droppedIds = new Set(Object.keys(waiverRaw).map(Number));
+
+    // Use whichever pick source has the most filled picks for this team
+    const tryParse = key => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; } };
+    const live  = tryParse('fantasai_live_picks');
+    const saved = tryParse('fantasai_mock_picks_saved');
+    const wip   = tryParse('fantasai_mock_picks_wip');
+    const countForTeam = arr => Array.isArray(arr) ? arr.filter(p => Number(p.teamId) === Number(teamId) && p.playerId).length : 0;
+    let picks;
+    if (countForTeam(live) >= countForTeam(saved) && countForTeam(live) >= countForTeam(wip)) picks = live;
+    else if (countForTeam(saved) >= countForTeam(wip)) picks = saved;
+    else picks = wip;
+
+    const pickIds = Array.isArray(picks)
+      ? picks
+          .filter(p => Number(p.teamId) === Number(teamId) && p.playerId && !droppedIds.has(Number(p.playerId)))
+          .map(p => Number(p.playerId))
+      : [];
+
+    // Start from draft picks, layer in S3 additions, exclude drops
+    const merged = new Set(pickIds);
+    if (s3Ids) {
+      for (const id of s3Ids) {
+        if (!droppedIds.has(Number(id))) merged.add(Number(id));
+      }
+    }
+    return merged;
+  } catch {
+    return new Set(s3Ids || []);
+  }
 }
 
 async function loadLeagueData(leagueId) {
@@ -109,10 +284,17 @@ function validateRosterAdd(playerId, currentIds) {
     { key: 'DST',rosterTotal: 'No Limit' },
   ];
 
-  if (currentIds.size >= totalMax) {
+  // Count filled slots by running the same assignRoster logic the UI uses.
+  // Counting raw IDs in the Set is wrong — old IDs from trades/drops accumulate
+  // and inflate the count past the slot cap even when bench spots are truly open.
+  const frame      = buildRosterFrame(settings);
+  const totalSlots = frame.length;
+  const assigned   = assignRoster(frame, currentIds, {}, findPlayer);
+  const filledSlots = assigned.filter(e => e.playerId != null).length;
+  if (filledSlots >= totalSlots) {
     return {
-      title: 'Invalid Roster Request',
-      detail: `Your roster is full (${currentIds.size}/${totalMax} players). Drop a player first or see Rules & Settings.`,
+      title: 'Roster Full',
+      detail: `All ${totalSlots} roster spots are filled (${filledSlots} players). Drop a player first, or see Rules & Settings.`,
     };
   }
 
@@ -149,21 +331,20 @@ const ACCENT_INK = {
 };
 
 const CRUMBS = {
-  dashboard: ['League', 'Dashboard'],
-  players:   ['League', 'Players'],
-  news:      ['League', 'Player News'],
-  roster:    ['League', 'Current Roster'],
-  lineup:    ['League', 'Lineup Decisions'],
-  waivers:   ['League', 'Waivers'],
+  dashboard:    ['League', 'Dashboard'],
+  players:      ['League', 'Players'],
+  news:         ['League', 'Player News'],
+  roster:       ['League', 'Current Roster'],
+  waivers:      ['League', 'Waivers'],
   h2h:          ['League', 'Head to Head'],
   transactions: ['League', 'Transactions'],
-  compare:   ['Tools', 'Compare'],
-  watchlist: ['Tools', 'Watchlist'],
-  trade:     ['Tools', 'Trade Analyzer'],
-  draft:     ['Draft', 'Live Draft Room'],
-  owners:    ['Draft', 'Owner Intel · Draft DNA'],
-  cbs:       ['Draft', 'Player Draft Rankings'],
-  sources:       ['Setup', 'Sources & Connections'],
+  power:        ['League', 'Power Rankings'],
+  compare:      ['Tools', 'Compare'],
+  trade:        ['Tools', 'Trade Analyzer'],
+  draft:        ['Draft', 'Draft Room'],
+  owners:       ['Draft', 'Owner Intel · Draft DNA'],
+  cbs:          ['Draft', 'Player Draft Rankings'],
+  sources:          ['Setup', 'Sources & Connections'],
   'admin-owners':   ['Admin', 'Owner Management'],
   'admin-scoring':  ['Admin', 'Scoring System Test'],
   settings:         ['Setup', 'Rules & League Settings'],
@@ -187,7 +368,33 @@ export default function App() {
   const showMobile = tweaks.showMobile || isMobileDevice;
 
   const [active, setActive] = React.useState('dashboard');
+  const [settingsInitialTab, setSettingsInitialTab] = React.useState('general');
   const [openPlayer, setOpenPlayer] = React.useState(null);
+
+  // 'mock' | 'live' | null — set by DraftRoom via onDraftStatusChange callback
+  // Also seed from localStorage so a page refresh still shows the banner
+  const [draftTab, setDraftTab] = React.useState('room'); // 'room' | 'recap'
+  const [playersTab, setPlayersTab] = React.useState('players'); // 'players' | 'watchlist'
+
+  // Redirect legacy 'watchlist' nav to Players › Watchlist tab
+  React.useEffect(() => {
+    if (active === 'watchlist') { setActive('players'); setPlayersTab('watchlist'); }
+  }, [active]);
+
+  const [draftInProgress, setDraftInProgress] = React.useState(() => {
+    try {
+      const session = JSON.parse(localStorage.getItem('fantasai_mock_session') || 'null');
+      const wip     = JSON.parse(localStorage.getItem('fantasai_mock_picks_wip') || 'null');
+      return session?.active === true && Array.isArray(wip) && wip.length > 0 ? 'mock' : null;
+    } catch { return null; }
+  });
+  const [draftMeta, setDraftMeta] = React.useState(() => {
+    try { return { isMyTurn: false, picksAway: 0, seconds: 90, currentPickNum: 1, draftComplete: false, draftPaused: JSON.parse(localStorage.getItem('fantasai_draft_paused') || 'false') }; } catch { return { isMyTurn: false, picksAway: 0, seconds: 90, currentPickNum: 1, draftComplete: false, draftPaused: false }; }
+  });
+  const handleDraftStatusChange = React.useCallback((type, meta) => {
+    setDraftInProgress(type);
+    if (meta) setDraftMeta(meta);
+  }, []);
   const [user, setUser] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_user') || 'null'); } catch { return null; }
   });
@@ -210,7 +417,7 @@ export default function App() {
   const lineupAlertCount = React.useMemo(() => {
     const settings  = loadLeagueSettings();
     const slotFrame = buildRosterFrame(settings);
-    const starters  = assignRoster(slotFrame, myRosterIds, rosterSlotOverrides)
+    const starters  = assignRoster(slotFrame, myRosterIds, rosterSlotOverrides, findPlayer)
       .filter(e => e.slot !== 'BENCH' && e.playerId);
     return starters.filter(e => {
       const p = findPlayer(e.playerId);
@@ -235,7 +442,7 @@ export default function App() {
     if (u.teamId) {
       setRosterLoading(true);
       fetchS3Roster(u.teamId).then(s3Ids => {
-        setMyRosterIds(new Set(s3Ids ?? []));
+        setMyRosterIds(buildMergedRoster(u.teamId, s3Ids));
         setRosterLoading(false);
       });
     } else {
@@ -254,6 +461,9 @@ export default function App() {
     }
   }, [user]);
 
+  // Register service worker for push notifications (once on mount)
+  React.useEffect(() => { registerServiceWorker(); }, []);
+
   // On cold load (already logged in): restore league data from cache, then fetch fresh
   React.useEffect(() => {
     const leagueId = user?.leagueId || 'tau';
@@ -266,31 +476,80 @@ export default function App() {
     if (!user?.teamId) { setRosterLoading(false); return; }
     setRosterLoading(true);
     fetchS3Roster(user.teamId).then(s3Ids => {
-      setMyRosterIds(new Set(s3Ids ?? []));
+      setMyRosterIds(buildMergedRoster(user.teamId, s3Ids));
       setRosterLoading(false);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally runs only once on mount
 
   // Load live player list from Databricks → Sleeper fallback.
+  // Load live 2026 player list: players_2026_draft (R2) → dbPlayers → Sleeper fallback.
   // Runs once on mount; the store already holds the static seed so the UI
   // renders immediately and updates reactively when live data arrives.
   React.useEffect(() => {
-    api.dbPlayers()
+    // Primary: ML-ranked 2026 draft table from Databricks via R2
+    api.r2.players2026()
       .then(data => {
-        const rows = data?.players || [];
-        if (rows.length > 0) {
-          setPlayers(normalizePlayerList(rows));
-          return;
-        }
+        const rows = Array.isArray(data) ? data.filter(p => (p.isDraftable ?? p.is_draftable) !== false) : [];
+        if (rows.length > 0) { setPlayers(normalizePlayerList(rows)); return; }
         throw new Error('empty');
       })
+      // Secondary: legacy dbPlayers endpoint (news table). Deduplicate by name+team,
+      // then only accept the result if it includes K and DST entries — news articles
+      // rarely mention kickers/defenses, so a result missing them means we should
+      // fall through to Sleeper which has the full player pool.
+      .catch(() =>
+        api.dbPlayers()
+          .then(data => {
+            const raw = data?.players || [];
+            const seenRaw = new Map();
+            const rows = raw.filter(p => {
+              const key = `${(p.full_name || p.name || '').toLowerCase().trim()}|${(p.team || '').toLowerCase()}`;
+              if (seenRaw.has(key)) return false;
+              seenRaw.set(key, true);
+              return true;
+            });
+            const hasK   = rows.some(p => (p.position || p.pos) === 'K');
+            const hasDST = rows.some(p => ['DEF', 'DST'].includes(p.position || p.pos));
+            if (rows.length > 0 && hasK && hasDST) { setPlayers(normalizePlayerList(rows)); return; }
+            throw new Error('missing K/DST');
+          })
+      )
+      // Tertiary: Sleeper
       .catch(() =>
         api.allPlayers(2000).then(raw => {
           const arr = raw?.players || (Array.isArray(raw) ? raw : []);
           const normalized = normalizePlayerList(arr.filter(p => p.team && p.status !== 'Inactive'));
+          if (normalized.length > 0) { setPlayers(normalized); return; }
+          throw new Error('empty');
+        })
+      )
+      .catch(() =>
+        getPlayerMap().then(map => {
+          const arr = Object.values(map).filter(p => p.team && p.status !== 'Inactive');
+          const normalized = normalizePlayerList(arr);
           if (normalized.length > 0) setPlayers(normalized);
-        }).catch(() => {/* keep static seed */})
+        }).catch(() => {})
+      )
+      // After players are loaded (regardless of source), backfill bye weeks from Sleeper.
+      // Chained here so patchPlayers always runs after setPlayers, avoiding the race where
+      // the separate effect would win and find _players still empty.
+      .then(() =>
+        getPlayerMap().then(map => {
+          const byeByName = {};
+          for (const p of Object.values(map)) {
+            if (!p.bye_week) continue;
+            const full = p.full_name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
+            if (full) byeByName[full.toLowerCase().trim()] = p.bye_week;
+          }
+          // Apply Sleeper bye_week when available; otherwise fall back to the hardcoded 2026 schedule.
+          patchPlayers(player => {
+            if (player.bye > 0) return player;
+            const fromSleeper = byeByName[player.name?.toLowerCase().trim()];
+            const bye = fromSleeper || BYE_WEEKS_2026[player.team] || 0;
+            return bye ? { ...player, bye } : player;
+          });
+        }).catch(() => {})
       );
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -308,7 +567,7 @@ export default function App() {
     clearLeagueData();
   }
 
-  // Admin / Commissioner: reset all rosters on S3 and clear local state
+  // Commissioner: wipe all rosters everywhere — R2, localStorage, and in-memory state.
   const [rosterResetState, setRosterResetState] = React.useState('idle'); // idle | loading | done | error
   async function handleRosterReset() {
     setRosterResetState('loading');
@@ -319,8 +578,24 @@ export default function App() {
         body:    '{}',
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // Clear local roster for whoever is looking
+
+      // Wipe every localStorage key that carries roster or draft state
+      [
+        'fantasai_mock_picks_saved',
+        'fantasai_live_picks',
+        'fantasai_mock_picks_wip',
+        'fantasai_mock_session',
+        'fantasai_waivers',
+        'fantasai_slot_overrides',
+        'fantasai_waiver_queue',
+      ].forEach(k => localStorage.removeItem(k));
+
+      // Reset in-memory TEAM_ROSTERS so all screens see empty state immediately
+      clearAllRosters();
+
+      // Reset React state for the current session
       setMyRosterIds(new Set());
+      setRosterSlotOverrides({});
       setRosterResetState('done');
       setTimeout(() => setRosterResetState('idle'), 4000);
     } catch {
@@ -351,21 +626,33 @@ export default function App() {
     let nextIds = null;
     setMyRosterIds(prev => {
       const err = validateRosterAdd(id, prev);
-      if (err) { setRosterError(err); return prev; }
+      if (err) { setRosterError({ ...err, addingPlayerId: id }); return prev; }
       nextIds = new Set([...prev, id]);
       return nextIds;
     });
     if (nextIds && userRef.current?.teamId) {
       doSync(userRef.current.teamId, nextIds);
       const p = findPlayer(id);
-      if (p) api.transactions.log({
-        id: `${Date.now()}-add-${id}`,
-        type: 'add',
-        timestamp: new Date().toISOString(),
-        teamId:   userRef.current.teamId,
-        teamName: userRef.current.teamName || userRef.current.teamId,
-        players:  [{ id, name: p.name, pos: p.pos, nflTeam: p.team, action: 'add' }],
-      });
+      if (p) {
+        const totalTeams = LEAGUE_TEAMS.length;
+        const sorted = [...LEAGUE_TEAMS].sort((a, b) => {
+          const [aw] = (a.record || '0-0').split('-').map(Number);
+          const [bw] = (b.record || '0-0').split('-').map(Number);
+          return bw - aw;
+        });
+        const myRank = sorted.findIndex(t => t.me) + 1;
+        const waiverPick = myRank ? totalTeams - myRank + 1 : null;
+        api.transactions.log({
+          id: `${Date.now()}-add-${id}`,
+          type: 'add',
+          timestamp: new Date().toISOString(),
+          teamId:      userRef.current.teamId,
+          teamName:    userRef.current.teamName || userRef.current.teamId,
+          players:     [{ id, name: p.name, pos: p.pos, nflTeam: p.team, action: 'add' }],
+          waiverPick,
+          newWaiverPick: waiverPick != null ? totalTeams : null,
+        });
+      }
     }
   }, []);
   const [waiverQueue, setWaiverQueue] = React.useState(() => {
@@ -481,6 +768,51 @@ export default function App() {
     });
   }, []);
 
+  // Atomic claim: drop + add in one state update so validation sees the freed slot.
+  const handleClaimPlayer = React.useCallback((addId, dropId) => {
+    let nextIds = null;
+    setMyRosterIds(prev => {
+      const working = new Set(prev);
+      if (dropId) working.delete(dropId);
+      const err = validateRosterAdd(addId, working);
+      if (err) { setRosterError(err); return prev; }
+      working.add(addId);
+      nextIds = working;
+      return working;
+    });
+    if (nextIds && userRef.current?.teamId) {
+      doSync(userRef.current.teamId, nextIds);
+      const addedPlayer  = findPlayer(addId);
+      const droppedPlayer = dropId ? findPlayer(dropId) : null;
+      const players = [];
+      if (addedPlayer)  players.push({ id: addId,  name: addedPlayer.name,  pos: addedPlayer.pos,  nflTeam: addedPlayer.team,  action: 'add' });
+      if (droppedPlayer) players.push({ id: dropId, name: droppedPlayer.name, pos: droppedPlayer.pos, nflTeam: droppedPlayer.team, action: 'drop' });
+      if (players.length) {
+        api.transactions.log({
+          id: `${Date.now()}-claim-${addId}`,
+          type: dropId ? 'waiver_claim' : 'add',
+          timestamp: new Date().toISOString(),
+          teamId:   userRef.current.teamId,
+          teamName: userRef.current.teamName || userRef.current.teamId,
+          players,
+        });
+      }
+    }
+    if (dropId) {
+      const drop = new Date();
+      const earliest = new Date(drop.getTime() + 24 * 60 * 60 * 1000);
+      earliest.setHours(23, 59, 0, 0);
+      const waiver_days = new Set([3, 4, 5, 6]);
+      while (!waiver_days.has(earliest.getDay())) earliest.setDate(earliest.getDate() + 1);
+      const entry = { droppedAt: drop.toISOString(), expiresAt: earliest.toISOString(), teamId: userRef.current?.teamId };
+      setWaiverQueue(prev => {
+        const next = { ...prev, [dropId]: entry };
+        localStorage.setItem('fantasai_waivers', JSON.stringify(next));
+        return next;
+      });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [watchlistIds, setWatchlistIds] = React.useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem('fantasai_watchlist') || '[]')); } catch { return new Set(); }
   });
@@ -556,7 +888,8 @@ export default function App() {
 
   const aiMode = tweaks.aiMode;
   const showAI = tweaks.showChat;
-  const shellClass = `shell ${showAI ? 'has-ai' : ''} ${showMobile ? 'mobile-mode' : ''}`;
+  const _draftPausedOnOtherPage = draftInProgress && active !== 'draft' && draftMeta?.draftPaused && !draftMeta?.draftComplete;
+  const shellClass = `shell ${showAI ? 'has-ai' : ''} ${showMobile ? 'mobile-mode' : ''} ${_draftPausedOnOtherPage ? 'draft-paused' : ''}`;
   const playerObj = openPlayer ? findPlayer(openPlayer) : null;
 
   if (resetToken) return (
@@ -570,6 +903,7 @@ export default function App() {
 
   return (
     <React.Fragment>
+      <LiveScoreTicker myTeamId={user?.teamId} onNav={setActive} />
       <div className={shellClass} style={tweaks.showMobile && !isMobileDevice ? { maxWidth: 414, margin: '0 auto', boxShadow: '0 0 60px rgba(0,0,0,.6)' } : {}}>
         <div className="logo-area">
           <span className="logo-dot"></span>
@@ -583,72 +917,198 @@ export default function App() {
           onToggleChat={() => setTweak('showChat', !tweaks.showChat)}
           user={user}
           onLogout={handleLogout}
-          onExport={handleExport}
-          right={
-            <div className="flex gap-8 hide-mobile">
-              <button className="btn ghost sm" onClick={() => setActive('roster')}>+ Add / Drop</button>
-              <button className="btn ghost sm" onClick={() => setActive('trade')}>↔ Trades</button>
-              <button className="btn ghost sm" onClick={() => setActive('waivers')}>⏰ Waivers</button>
-            </div>
-          }
+          draftInProgress={active !== 'draft' ? draftInProgress : null}
+          draftMeta={draftMeta}
         />
         <Sidebar active={active} onNav={setActive} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} />
 
         <div className="main">
           {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} tradeOffers={tradeOffers} />}
-          {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} />}
+          {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onClaimPlayer={handleClaimPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} playersTab={playersTab} onPlayersTabChange={setPlayersTab} />}
           {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} user={user} />}
           {active === 'roster'    && <CurrentRosterScreen onNav={setActive} user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} rosterSyncBadge={rosterSyncBadge} rosterLoading={rosterLoading} />}
-          {active === 'lineup'    && <LineupDecisions myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} onOpenPlayer={setOpenPlayer} />}
-          {active === 'waivers'   && <WaiversScreen user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} />}
           {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'compare'   && <CompareScreen />}
-          {active === 'watchlist' && <WatchlistScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} onSendTradeOffer={handleSendTradeOffer} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} onDeleteTradeOffer={handleDeleteTradeOffer} />}
-          {active === 'draft'     && <DraftRoom aiMode={aiMode} user={user} onNav={setActive} onDraftPick={id => {
-            let nextIds = null;
-            setMyRosterIds(prev => {
-              const next = new Set([...prev, id]);
-              nextIds = next;
-              return next;
-            });
-            if (nextIds && userRef.current?.teamId) doSync(userRef.current.teamId, nextIds);
-          }} />}
+          {(active === 'draft' || active === 'draftrecap') && (() => {
+            const tab = active === 'draftrecap' ? 'recap' : draftTab;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <div className="tabs" style={{ padding: '0 18px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
+                  <div className={`tab ${tab === 'room' ? 'active' : ''}`} onClick={() => { setActive('draft'); setDraftTab('room'); }}>● Draft Room</div>
+                  <div className={`tab ${tab === 'recap' ? 'active' : ''}`} onClick={() => { setActive('draft'); setDraftTab('recap'); }}>🏆 Draft Recap</div>
+                </div>
+                <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+                  {tab === 'room' && <DraftRoom aiMode={aiMode} user={user} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onDraftPick={id => {
+                    let nextIds = null;
+                    setMyRosterIds(prev => {
+                      const next = new Set([...prev, id]);
+                      nextIds = next;
+                      return next;
+                    });
+                    if (nextIds && userRef.current?.teamId) doSync(userRef.current.teamId, nextIds);
+                  }} onDraftComplete={() => {
+                    // Rebuild TEAM_ROSTERS and myRosterIds from the just-saved draft picks
+                    refreshTeamRosters();
+                    if (userRef.current?.teamId) {
+                      const merged = buildMergedRoster(userRef.current.teamId, null);
+                      setMyRosterIds(merged);
+                      doSync(userRef.current.teamId, merged);
+                    }
+                  }} />}
+                  {tab === 'recap' && <DraftRecapScreen user={user} />}
+                </div>
+              </div>
+            );
+          })()}
           {active === 'owners'    && <OwnerIntelScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'cbs'       && <PlayerDraftRankingsScreen onOpenPlayer={setOpenPlayer} />}
           {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} user={user} myRosterIds={myRosterIds} />}
           {active === 'admin-owners'  && <AdminOwners />}
           {active === 'admin-scoring'  && <ScoringTestScreen user={user} />}
           {active === 'transactions'  && <TransactionsScreen />}
+          {active === 'power'         && <PowerRankingsScreen user={user} />}
           {active === 'account'       && <AccountEditScreen user={user} />}
-          {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} />}
+          {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} initialTab={settingsInitialTab} />}
         </div>
 
         {showAI && <AICopilot active={active} aiMode={aiMode} user={user} myRosterIds={myRosterIds} />}
         <MobileNav active={active} onNav={setActive} user={user} lineupAlertCount={lineupAlertCount} />
+
+        {/* Return-to-Draft floating banner — shown when a mock or live draft is active and user navigated away */}
+        {draftInProgress && active !== 'draft' && (() => {
+          const isMock      = draftInProgress === 'mock';
+          const isPaused    = draftMeta?.draftPaused;
+          const isComplete  = draftMeta?.draftComplete;
+          const accent      = isComplete ? '#4caf82' : isPaused ? '#ff5a6e' : isMock ? '#ffb547' : 'var(--accent-2)';
+          const { isMyTurn, picksAway, seconds, currentPickNum } = draftMeta;
+          const clockStr    = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+          return (
+            <div style={{
+              position: 'fixed', top: 36, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 9000, display: 'flex', alignItems: 'center', gap: 14,
+              background: isComplete ? 'rgba(4,24,14,.97)' : isPaused ? 'rgba(40,8,12,.97)' : isMock ? 'rgba(30,24,0,.97)' : 'rgba(0,20,40,.97)',
+              border: `1.5px solid ${accent}`,
+              borderRadius: 16, padding: '12px 20px',
+              boxShadow: `0 8px 40px rgba(0,0,0,.7), 0 0 28px ${isComplete ? 'rgba(76,175,130,.4)' : isPaused ? 'rgba(255,90,110,.35)' : isMock ? 'rgba(255,181,71,.3)' : 'rgba(78,168,255,.3)'}`,
+              cursor: 'pointer', minWidth: 340,
+              animation: isPaused && !isComplete ? 'blink 1s ease-in-out infinite' : 'none',
+            }} onClick={() => setActive('draft')}>
+              {/* Status dot */}
+              <div style={{ width: 12, height: 12, borderRadius: '50%', background: accent, boxShadow: `0 0 10px ${accent}`, animation: isComplete ? 'none' : 'blink 0.8s infinite', flexShrink: 0 }} />
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {/* Top row */}
+                <div style={{ fontSize: 11, fontWeight: 800, color: accent, letterSpacing: '.08em', textTransform: 'uppercase', lineHeight: 1 }}>
+                  {isComplete ? '✓ DRAFT COMPLETE' : isPaused ? '⏸ DRAFT PAUSED' : `${isMock ? 'Mock Draft' : 'Live Draft'} · Pick #${currentPickNum}`}
+                </div>
+                {/* Bottom row */}
+                {isComplete ? (
+                  <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>
+                    All picks are in — <span style={{ color: accent, fontWeight: 700 }}>view the Draft Recap</span>
+                  </div>
+                ) : isPaused ? (
+                  <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>
+                    Commissioner paused — <span style={{ color: accent, fontWeight: 700 }}>return to draft to resume</span>
+                  </div>
+                ) : isMyTurn ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                    <span style={{ fontSize: 15, fontWeight: 900, color: '#4caf82', letterSpacing: '.06em', animation: 'blink 0.75s infinite' }}>⚡ YOUR PICK</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 20, fontWeight: 900, color: seconds < 10 ? '#ff5a6e' : seconds < 30 ? '#ff9800' : '#4caf82', animation: seconds < 10 ? 'blink 0.5s infinite' : 'none' }}>{clockStr}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>left on clock</span>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>
+                    <span style={{ color: 'var(--text)', fontWeight: 700 }}>{picksAway}</span> pick{picksAway !== 1 ? 's' : ''} until your turn
+                  </div>
+                )}
+              </div>
+
+              <button
+                style={{ background: accent, color: isPaused ? '#fff' : isMock ? '#000' : 'var(--accent-2-ink)', border: 'none', borderRadius: 10, padding: '8px 18px', fontSize: 12, fontWeight: 900, cursor: 'pointer', flexShrink: 0, letterSpacing: '.05em', whiteSpace: 'nowrap' }}
+                onClick={e => { e.stopPropagation(); setActive('draft'); }}
+              >
+                ▶ Return
+              </button>
+            </div>
+          );
+        })()}
       </div>
 
-      {playerObj && <PlayerDetail player={playerObj} onClose={() => setOpenPlayer(null)} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} sourcesState={sourcesState} />}
+      {playerObj && <PlayerDetail player={playerObj} onClose={() => setOpenPlayer(null)} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onTradePlayer={handleTradePlayer} sourcesState={sourcesState} />}
 
-      {rosterError && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(4px)' }}
-          onClick={() => setRosterError(null)}>
-          <div style={{ background: 'var(--card)', border: '1px solid #ff5a6e', borderRadius: 14, padding: '28px 32px', maxWidth: 400, width: '90%', boxShadow: '0 24px 60px rgba(0,0,0,.5)' }}
-            onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <span style={{ fontSize: 22 }}>🚫</span>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#ff5a6e' }}>{rosterError.title}</div>
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.65, marginBottom: 20 }}>{rosterError.detail}</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn ghost sm" onClick={() => { setRosterError(null); setActive('settings'); }}>
-                View Rules & Settings
-              </button>
-              <button className="btn primary sm" onClick={() => setRosterError(null)}>OK</button>
+      {rosterError && (() => {
+        const isRosterFull = rosterError.title === 'Roster Full' && rosterError.addingPlayerId;
+        const addingPlayer = isRosterFull ? findPlayer(rosterError.addingPlayerId) : null;
+        const POS_ORDER = ['QB','RB','WR','TE','K','DST'];
+        const rosterPlayers = isRosterFull
+          ? [...myRosterIds]
+              .map(id => findPlayer(id))
+              .filter(Boolean)
+              .sort((a, b) => (POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos)) || (b.avg || 0) - (a.avg || 0))
+          : [];
+        const POS_COLOR = { QB: 'var(--pos-qb)', RB: 'var(--pos-rb)', WR: 'var(--pos-wr)', TE: 'var(--pos-te)', K: 'var(--pos-k)', DST: 'var(--pos-dst)' };
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.65)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setRosterError(null)}>
+            <div style={{ background: 'var(--card)', border: `1px solid ${isRosterFull ? 'var(--border)' : '#ff5a6e'}`, borderRadius: 14, padding: isRosterFull ? '0' : '28px 32px', maxWidth: isRosterFull ? 460 : 400, width: '94%', boxShadow: '0 24px 60px rgba(0,0,0,.55)', display: 'flex', flexDirection: 'column', maxHeight: '85vh' }}
+              onClick={e => e.stopPropagation()}>
+              {isRosterFull ? (
+                <>
+                  {/* Header */}
+                  <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>Drop a player to add</div>
+                    {addingPlayer && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <span style={{ fontSize: 10, fontWeight: 800, fontFamily: 'var(--font-mono)', color: POS_COLOR[addingPlayer.pos] || 'var(--accent)', background: `${POS_COLOR[addingPlayer.pos] || 'var(--accent)'}22`, border: `1px solid ${POS_COLOR[addingPlayer.pos] || 'var(--accent)'}55`, borderRadius: 4, padding: '1px 5px' }}>{addingPlayer.pos}</span>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)' }}>{addingPlayer.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{addingPlayer.team}</span>
+                        {addingPlayer.avg != null && <span style={{ fontSize: 11, color: 'var(--good)', fontFamily: 'var(--font-mono)', marginLeft: 2 }}>{(+addingPlayer.avg).toFixed(1)} avg</span>}
+                      </div>
+                    )}
+                  </div>
+                  {/* Roster list */}
+                  <div style={{ overflowY: 'auto', flex: 1, padding: '6px 0' }}>
+                    {rosterPlayers.map(p => (
+                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 18px', borderBottom: '1px solid rgba(255,255,255,.04)' }}>
+                        <span style={{ fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-mono)', color: POS_COLOR[p.pos] || 'var(--text-dim)', background: `${POS_COLOR[p.pos] || '#888'}22`, border: `1px solid ${POS_COLOR[p.pos] || '#888'}44`, borderRadius: 3, padding: '1px 4px', flexShrink: 0 }}>{p.pos}</span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                        <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{p.team}</span>
+                        {p.avg != null && <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', flexShrink: 0, minWidth: 32, textAlign: 'right' }}>{(+p.avg).toFixed(1)}</span>}
+                        <button
+                          onClick={() => { handleClaimPlayer(rosterError.addingPlayerId, p.id); setRosterError(null); }}
+                          style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(255,90,110,.5)', background: 'rgba(255,90,110,.12)', color: '#ff5a6e', cursor: 'pointer' }}
+                        >Drop & Add</button>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Footer */}
+                  <div style={{ padding: '10px 18px', borderTop: '1px solid var(--border)', flexShrink: 0, display: 'flex', gap: 8 }}>
+                    <button className="btn ghost sm" onClick={() => setRosterError(null)}>Cancel</button>
+                    <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={() => { setRosterError(null); setSettingsInitialTab('roster'); setActive('settings'); }}>
+                      Roster Rules
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div style={{ padding: '28px 32px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                    <span style={{ fontSize: 22 }}>🚫</span>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: '#ff5a6e' }}>{rosterError.title}</div>
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.65, marginBottom: 20 }}>{rosterError.detail}</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn ghost sm" onClick={() => { setRosterError(null); setSettingsInitialTab('roster'); setActive('settings'); }}>
+                      View Roster Rules
+                    </button>
+                    <button className="btn primary sm" onClick={() => setRosterError(null)}>OK</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {rosterSyncBadge && (
         <div style={{ position: 'fixed', bottom: 80, right: 20, zIndex: 9998, display: 'flex', alignItems: 'center', gap: 8,

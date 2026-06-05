@@ -29,6 +29,7 @@ export const PlayerAvatar = ({ player, size, src }) => {
   const team = NFL_TEAMS.find(t => t.abbr === player.team) || { color: '#333' };
   const initials = player.name.split(' ').map(n => n[0]).join('').slice(0, 2);
   const sizeClass = size === 'lg' ? 'lg' : size === 'xl' ? 'xl' : '';
+  const imgSrc = src || (player.sleeperId ? `https://sleepercdn.com/content/nfl/players/thumb/${player.sleeperId}.jpg` : null);
   return (
     <div className={`avatar ${sizeClass}`} style={{
       background: `linear-gradient(135deg, ${team.color}cc, ${team.color}55)`,
@@ -36,9 +37,9 @@ export const PlayerAvatar = ({ player, size, src }) => {
     }}>
       <span className="stripe"></span>
       <span style={{ position: 'relative', zIndex: 1 }}>{initials}</span>
-      {src && (
+      {imgSrc && (
         <img
-          src={src}
+          src={imgSrc}
           alt={player.name}
           style={{
             position: 'absolute', inset: 0, width: '100%', height: '100%',
@@ -51,20 +52,34 @@ export const PlayerAvatar = ({ player, size, src }) => {
   );
 };
 
-export const PlayerCell = ({ player, showStatus = true, watched = false }) => (
-  <div className="player-cell">
-    <PlayerAvatar player={player} />
-    <div style={{ minWidth: 0, flex: 1 }}>
-      <div className={`player-name${watched ? ' watched' : ''}`}>
-        {watched && <span style={{ marginRight: 4, fontSize: 11 }}>★</span>}
-        {showStatus && <StatusDot status={player.status} />} {player.name}
-      </div>
-      <div className="player-meta">
-        <PosBadge pos={player.pos} /> {player.team} · #{player.num} · BYE {player.bye}
+const TIER_STYLE = {
+  Elite: { color: '#FFD700', bg: 'rgba(255,215,0,.15)', border: 'rgba(255,215,0,.4)' },
+  High:  { color: '#4caf82', bg: 'rgba(76,175,130,.15)', border: 'rgba(76,175,130,.4)' },
+  Mid:   { color: 'var(--accent-2)', bg: 'rgba(100,180,255,.12)', border: 'rgba(100,180,255,.3)' },
+  Low:   { color: 'var(--text-faint)', bg: 'transparent', border: 'rgba(255,255,255,.1)' },
+};
+
+export const PlayerCell = ({ player, showStatus = true, watched = false }) => {
+  const tierKey = player.seasonTier ? player.seasonTier.charAt(0).toUpperCase() + player.seasonTier.slice(1).toLowerCase() : null;
+  const ts = tierKey && TIER_STYLE[tierKey] ? TIER_STYLE[tierKey] : null;
+  return (
+    <div className="player-cell">
+      <PlayerAvatar player={player} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div className={`player-name${watched ? ' watched' : ''}`}>
+          {watched && <span style={{ marginRight: 4, fontSize: 11 }}>★</span>}
+          {showStatus && <StatusDot status={player.status} />} {player.name}
+          {ts && tierKey !== 'Low' && (
+            <span style={{ marginLeft: 5, fontSize: 8, fontWeight: 800, fontFamily: 'var(--font-mono)', letterSpacing: '.04em', color: ts.color, background: ts.bg, border: `1px solid ${ts.border}`, borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>{tierKey.toUpperCase()}</span>
+          )}
+        </div>
+        <div className="player-meta">
+          <PosBadge pos={player.pos} /> {player.team} · #{player.num} · BYE {player.bye}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export const Sparkline = ({ data, color = 'var(--accent)', width = 60, height = 18 }) => {
   if (!data || !data.length) return null;
@@ -104,11 +119,11 @@ export const Delta = ({ from, to }) => {
 export const AIHint = ({ children }) => <span className="ai-inline">{children}</span>;
 
 export const TeamLogoBadge = ({ team, size = 36 }) => {
-  const prefs = (() => { try { return JSON.parse(localStorage.getItem('fantasai_team_prefs') || 'null') || {}; } catch { return {}; } })();
+  const prefs = (!team) ? (() => { try { return JSON.parse(localStorage.getItem('fantasai_team_prefs') || 'null') || {}; } catch { return {}; } })() : {};
   const color    = prefs.color    ?? team?.color ?? 'var(--accent)';
-  const logo     = prefs.logo     ?? team?.logo  ?? '??';
+  const logo     = prefs.logo     ?? team?.logo  ?? (team?.name ? team.name.slice(0, 2).toUpperCase() : '??');
   const logoImg  = prefs.logoImg  ?? team?.logoImg ?? null;
-  const textColor = prefs.logoTextColor ?? '#000000';
+  const textColor = prefs.logoTextColor ?? (team?.color ? '#ffffff' : '#000000');
   const radius = Math.round(size * 0.28);
   return logoImg ? (
     <img src={logoImg} alt={logo} style={{ width: size, height: size, borderRadius: radius, objectFit: 'cover', flexShrink: 0 }} />

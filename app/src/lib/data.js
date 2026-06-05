@@ -20,7 +20,9 @@ export const NFL_TEAMS = [
   { abbr: "TB",  color: "#D50A0A" }, { abbr: "WAS", color: "#5A1414" },
 ];
 
-export const PLAYERS = [
+// Private — used only by buildCBSRankings below. All player data shown in the UI
+// comes from live Databricks / Sleeper data via playerStore.js.
+const PLAYERS = [
   // QBs
   { id: 1, name: "Josh Allen", pos: "QB", team: "BUF", num: 17, age: 28, status: "OK", bye: 12, adp: 18.2, ecr: 16, tier: 1, proj: 24.8, last: 28.4, avg: 23.6, owned: 99.7, trend: [22,18,28,24,31,28], news: "", opp: "MIA", oppRank: 22 },
   { id: 2, name: "Jalen Hurts", pos: "QB", team: "PHI", num: 1, age: 26, status: "OK", bye: 10, adp: 22.4, ecr: 21, tier: 1, proj: 23.9, last: 19.7, avg: 22.1, owned: 99.4, trend: [19,24,22,18,26,20], news: "", opp: "DAL", oppRank: 14 },
@@ -77,8 +79,8 @@ export const PLAYERS = [
   { id: 101, name: "Brandon Aubrey", pos: "K", team: "DAL", num: 17, age: 31, status: "OK", bye: 7, adp: 124.6, ecr: 122, tier: 1, proj: 9.6, last: 12.0, avg: 9.4, owned: 91.4, trend: [10,8,12,9,12,12], news: "", opp: "PHI", oppRank: 6 },
   { id: 102, name: "Harrison Butker", pos: "K", team: "KC", num: 7, age: 30, status: "OK", bye: 10, adp: 132.2, ecr: 130, tier: 1, proj: 8.8, last: 9.0, avg: 8.6, owned: 88.2, trend: [9,7,10,8,7,9], news: "", opp: "LAC", oppRank: 12 },
   // DST
-  { id: 120, name: "Steelers D/ST", pos: "DST", team: "PIT", num: 0, age: 0, status: "OK", bye: 9, adp: 122.4, ecr: 118, tier: 1, proj: 9.4, last: 14.0, avg: 9.6, owned: 89.4, trend: [8,12,6,11,5,14], news: "", opp: "CLE", oppRank: 3 },
-  { id: 121, name: "Eagles D/ST",      pos: "DST", team: "PHI", num: 0, age: 0,  status: "OK", bye: 10, adp: 134.6, ecr: 130, tier: 1, proj: 8.6,  last: 7.0,  avg: 8.4,  owned: 82.4, trend: [9,6,8,10,5,7],    news: "Top sack rate",                              opp: "DAL", oppRank: 8  },
+  { id: 120, name: "PIT D/ST", pos: "DST", team: "PIT", num: 0, age: 0, status: "OK", bye: 9, adp: 122.4, ecr: 118, tier: 1, proj: 9.4, last: 14.0, avg: 9.6, owned: 89.4, trend: [8,12,6,11,5,14], news: "", opp: "CLE", oppRank: 3 },
+  { id: 121, name: "PHI D/ST",          pos: "DST", team: "PHI", num: 0, age: 0,  status: "OK", bye: 10, adp: 134.6, ecr: 130, tier: 1, proj: 8.6,  last: 7.0,  avg: 8.4,  owned: 82.4, trend: [9,6,8,10,5,7],    news: "Top sack rate",                              opp: "DAL", oppRank: 8  },
   // QBs (continued)
   { id: 9,  name: "Jordan Love",        pos: "QB",  team: "GB",  num: 10, age: 26, status: "OK", bye: 5,  adp: 62.4,  ecr: 60,  tier: 3, proj: 19.2, last: 21.4, avg: 18.6, owned: 86.2, trend: [18,22,14,20,18,21], news: "",                   opp: "DET", oppRank: 17 },
   { id: 10, name: "Sam Darnold",        pos: "QB",  team: "MIN", num: 14, age: 27, status: "OK", bye: 6,  adp: 88.6,  ecr: 86,  tier: 4, proj: 17.8, last: 16.2, avg: 16.8, owned: 72.4, trend: [16,14,18,12,16,16], news: "",                opp: "GB",  oppRank: 24 },
@@ -125,19 +127,19 @@ export const PLAYERS = [
   { id: 90, name: "Tucker Kraft",       pos: "TE",  team: "GB",  num: 85, age: 24, status: "OK", bye: 5,  adp: 86.4,  ecr: 82,  tier: 3, proj: 8.2,  last: 9.4,  avg: 7.8,  owned: 78.4, trend: [6,10,8,9,6,9],   news: "Rising TE2 in Love's offense",            opp: "DET", oppRank: 18 },
   { id: 91, name: "Isaiah Likely",      pos: "TE",  team: "BAL", num: 80, age: 25, status: "OK", bye: 14, adp: 94.2,  ecr: 90,  tier: 3, proj: 7.8,  last: 10.2, avg: 7.6,  owned: 74.6, trend: [6,8,10,7,6,10],  news: "Fringe TE1 if Andrews misses time",       opp: "CIN", oppRank: 16 },
   // DSTs (continued)
-  { id: 122, name: "Cowboys D/ST",      pos: "DST", team: "DAL", num: 0, age: 0,  status: "OK", bye: 7,  adp: 122.4, ecr: 118, tier: 2, proj: 8.4,  last: 9.0,  avg: 8.2,  owned: 82.4, trend: [8,9,7,10,7,9],   news: "Top pass-rush unit",                      opp: "PHI", oppRank: 8  },
-  { id: 123, name: "Bills D/ST",        pos: "DST", team: "BUF", num: 0, age: 0,  status: "OK", bye: 12, adp: 126.4, ecr: 122, tier: 2, proj: 8.2,  last: 8.0,  avg: 8.4,  owned: 80.6, trend: [8,8,10,7,8,8],   news: "Consistent pressure unit",                opp: "MIA", oppRank: 14 },
-  { id: 124, name: "Buccaneers D/ST",   pos: "DST", team: "TB",  num: 0, age: 0,  status: "OK", bye: 11, adp: 128.6, ecr: 124, tier: 2, proj: 7.8,  last: 10.0, avg: 8.0,  owned: 78.2, trend: [6,10,8,9,8,10],  news: "Todd Bowles scheme effective",            opp: "NO",  oppRank: 18 },
-  { id: 125, name: "Ravens D/ST",       pos: "DST", team: "BAL", num: 0, age: 0,  status: "OK", bye: 14, adp: 124.4, ecr: 120, tier: 2, proj: 8.6,  last: 11.0, avg: 8.8,  owned: 83.4, trend: [8,11,9,10,8,11],  news: "Elite unit with Roquan Smith",            opp: "CIN", oppRank: 10 },
-  { id: 126, name: "Chiefs D/ST",       pos: "DST", team: "KC",  num: 0, age: 0,  status: "OK", bye: 10, adp: 130.4, ecr: 126, tier: 2, proj: 7.6,  last: 8.0,  avg: 7.8,  owned: 76.4, trend: [8,8,6,9,7,8],   news: "Spagnuolo D consistent",                  opp: "LAC", oppRank: 12 },
-  { id: 127, name: "Browns D/ST",       pos: "DST", team: "CLE", num: 0, age: 0,  status: "OK", bye: 10, adp: 136.2, ecr: 132, tier: 3, proj: 7.2,  last: 6.0,  avg: 7.4,  owned: 68.4, trend: [6,6,8,7,5,6],   news: "Myles Garrett carries the load",          opp: "PIT", oppRank: 6  },
-  { id: 128, name: "Patriots D/ST",     pos: "DST", team: "NE",  num: 0, age: 0,  status: "OK", bye: 14, adp: 142.4, ecr: 138, tier: 3, proj: 6.8,  last: 5.0,  avg: 7.0,  owned: 62.4, trend: [6,4,8,6,4,5],   news: "Rebuilding — upside in matchups",         opp: "NYJ", oppRank: 22 },
-  { id: 129, name: "Saints D/ST",       pos: "DST", team: "NO",  num: 0, age: 0,  status: "OK", bye: 11, adp: 138.6, ecr: 134, tier: 3, proj: 7.0,  last: 7.0,  avg: 7.2,  owned: 64.6, trend: [6,7,8,6,7,7],   news: "Strong defensive line",                   opp: "TB",  oppRank: 16 },
-  { id: 130, name: "Bengals D/ST",      pos: "DST", team: "CIN", num: 0, age: 0,  status: "OK", bye: 12, adp: 140.2, ecr: 136, tier: 3, proj: 6.6,  last: 7.0,  avg: 7.0,  owned: 60.4, trend: [4,8,6,7,6,7],   news: "Average unit — situational play",         opp: "BAL", oppRank: 12 },
-  { id: 131, name: "Jets D/ST",         pos: "DST", team: "NYJ", num: 0, age: 0,  status: "OK", bye: 12, adp: 144.6, ecr: 140, tier: 3, proj: 6.4,  last: 8.0,  avg: 6.8,  owned: 58.4, trend: [4,8,6,8,4,8],   news: "Good front — QB play drags down value",   opp: "NE",  oppRank: 20 },
-  { id: 132, name: "Chargers D/ST",     pos: "DST", team: "LAC", num: 0, age: 0,  status: "OK", bye: 5,  adp: 132.4, ecr: 128, tier: 2, proj: 7.4,  last: 9.0,  avg: 7.6,  owned: 70.4, trend: [6,8,10,7,6,9],   news: "Harmon bringing pressure",                opp: "KC",  oppRank: 14 },
-  { id: 133, name: "Lions D/ST",        pos: "DST", team: "DET", num: 0, age: 0,  status: "OK", bye: 5,  adp: 134.4, ecr: 130, tier: 2, proj: 7.2,  last: 7.0,  avg: 7.4,  owned: 68.2, trend: [6,6,8,8,6,7],   news: "Schoen's D improving each week",          opp: "GB",  oppRank: 14 },
-  { id: 134, name: "Bears D/ST",        pos: "DST", team: "CHI", num: 0, age: 0,  status: "OK", bye: 7,  adp: 138.4, ecr: 134, tier: 3, proj: 6.8,  last: 5.0,  avg: 7.0,  owned: 62.4, trend: [6,4,8,6,4,5],   news: "Rebuilding — matchup dependent",          opp: "ARI", oppRank: 20 },
+  { id: 122, name: "DAL D/ST",           pos: "DST", team: "DAL", num: 0, age: 0,  status: "OK", bye: 7,  adp: 122.4, ecr: 118, tier: 2, proj: 8.4,  last: 9.0,  avg: 8.2,  owned: 82.4, trend: [8,9,7,10,7,9],   news: "Top pass-rush unit",                      opp: "PHI", oppRank: 8  },
+  { id: 123, name: "BUF D/ST",           pos: "DST", team: "BUF", num: 0, age: 0,  status: "OK", bye: 12, adp: 126.4, ecr: 122, tier: 2, proj: 8.2,  last: 8.0,  avg: 8.4,  owned: 80.6, trend: [8,8,10,7,8,8],   news: "Consistent pressure unit",                opp: "MIA", oppRank: 14 },
+  { id: 124, name: "TB D/ST",            pos: "DST", team: "TB",  num: 0, age: 0,  status: "OK", bye: 11, adp: 128.6, ecr: 124, tier: 2, proj: 7.8,  last: 10.0, avg: 8.0,  owned: 78.2, trend: [6,10,8,9,8,10],  news: "Todd Bowles scheme effective",            opp: "NO",  oppRank: 18 },
+  { id: 125, name: "BAL D/ST",           pos: "DST", team: "BAL", num: 0, age: 0,  status: "OK", bye: 14, adp: 124.4, ecr: 120, tier: 2, proj: 8.6,  last: 11.0, avg: 8.8,  owned: 83.4, trend: [8,11,9,10,8,11],  news: "Elite unit with Roquan Smith",            opp: "CIN", oppRank: 10 },
+  { id: 126, name: "KC D/ST",            pos: "DST", team: "KC",  num: 0, age: 0,  status: "OK", bye: 10, adp: 130.4, ecr: 126, tier: 2, proj: 7.6,  last: 8.0,  avg: 7.8,  owned: 76.4, trend: [8,8,6,9,7,8],   news: "Spagnuolo D consistent",                  opp: "LAC", oppRank: 12 },
+  { id: 127, name: "CLE D/ST",           pos: "DST", team: "CLE", num: 0, age: 0,  status: "OK", bye: 10, adp: 136.2, ecr: 132, tier: 3, proj: 7.2,  last: 6.0,  avg: 7.4,  owned: 68.4, trend: [6,6,8,7,5,6],   news: "Myles Garrett carries the load",          opp: "PIT", oppRank: 6  },
+  { id: 128, name: "NE D/ST",            pos: "DST", team: "NE",  num: 0, age: 0,  status: "OK", bye: 14, adp: 142.4, ecr: 138, tier: 3, proj: 6.8,  last: 5.0,  avg: 7.0,  owned: 62.4, trend: [6,4,8,6,4,5],   news: "Rebuilding — upside in matchups",         opp: "NYJ", oppRank: 22 },
+  { id: 129, name: "NO D/ST",            pos: "DST", team: "NO",  num: 0, age: 0,  status: "OK", bye: 11, adp: 138.6, ecr: 134, tier: 3, proj: 7.0,  last: 7.0,  avg: 7.2,  owned: 64.6, trend: [6,7,8,6,7,7],   news: "Strong defensive line",                   opp: "TB",  oppRank: 16 },
+  { id: 130, name: "CIN D/ST",           pos: "DST", team: "CIN", num: 0, age: 0,  status: "OK", bye: 12, adp: 140.2, ecr: 136, tier: 3, proj: 6.6,  last: 7.0,  avg: 7.0,  owned: 60.4, trend: [4,8,6,7,6,7],   news: "Average unit — situational play",         opp: "BAL", oppRank: 12 },
+  { id: 131, name: "NYJ D/ST",           pos: "DST", team: "NYJ", num: 0, age: 0,  status: "OK", bye: 12, adp: 144.6, ecr: 140, tier: 3, proj: 6.4,  last: 8.0,  avg: 6.8,  owned: 58.4, trend: [4,8,6,8,4,8],   news: "Good front — QB play drags down value",   opp: "NE",  oppRank: 20 },
+  { id: 132, name: "LAC D/ST",           pos: "DST", team: "LAC", num: 0, age: 0,  status: "OK", bye: 5,  adp: 132.4, ecr: 128, tier: 2, proj: 7.4,  last: 9.0,  avg: 7.6,  owned: 70.4, trend: [6,8,10,7,6,9],   news: "Harmon bringing pressure",                opp: "KC",  oppRank: 14 },
+  { id: 133, name: "DET D/ST",           pos: "DST", team: "DET", num: 0, age: 0,  status: "OK", bye: 5,  adp: 134.4, ecr: 130, tier: 2, proj: 7.2,  last: 7.0,  avg: 7.4,  owned: 68.2, trend: [6,6,8,8,6,7],   news: "Schoen's D improving each week",          opp: "GB",  oppRank: 14 },
+  { id: 134, name: "CHI D/ST",           pos: "DST", team: "CHI", num: 0, age: 0,  status: "OK", bye: 7,  adp: 138.4, ecr: 134, tier: 3, proj: 6.8,  last: 5.0,  avg: 7.0,  owned: 62.4, trend: [6,4,8,6,4,5],   news: "Rebuilding — matchup dependent",          opp: "ARI", oppRank: 20 },
   // Waiver-wire depth RBs
   { id: 47,  name: "Travis Etienne Jr.", pos: "RB", team: "JAX", num: 1,  age: 25, status: "OK", bye: 12, adp: 92.4,  ecr: 88,  tier: 4, proj: 11.2, last: 13.4, avg: 11.8, owned: 82.4, trend: [10,14,12,9,11,13],  news: "Volume back — lead role secured",         opp: "HOU", oppRank: 14 },
   { id: 48,  name: "Zach Charbonnet",    pos: "RB", team: "SEA", num: 26, age: 24, status: "OK", bye: 5,  adp: 96.2,  ecr: 92,  tier: 4, proj: 10.8, last: 11.6, avg: 10.4, owned: 78.6, trend: [8,12,10,11,8,12],   news: "Emerging with Walker banged up",           opp: "SF",  oppRank: 16 },
@@ -164,43 +166,13 @@ export const PLAYERS = [
   { id: 172, name: "Cade Otton",         pos: "TE", team: "TB",  num: 88, age: 25, status: "OK", bye: 11, adp: 104.6, ecr: 100, tier: 3, proj: 7.2,  last: 8.4,  avg: 7.0,  owned: 64.6, trend: [6,8,8,8,6,8],   news: "Consistent role in Tampa offense",        opp: "NO",  oppRank: 14 },
 ];
 
-const findPlayer = (id) => PLAYERS.find(p => p.id === id);
+// Compact name→id map exported for playerStore ID-preservation only.
+// All player stats shown in the UI come from live Databricks / Sleeper data.
+export const PLAYER_ID_MAP = PLAYERS.map(p => ({ id: p.id, name: p.name }));
 
-// Advanced stats overlay: [depth-chart pos, targetShare %, routes/game]
-// Applied after declaration so player objects stay concise above.
-;((adv) => {
-  PLAYERS.forEach(p => {
-    const a = adv[p.id] || [1, 0, 0];
-    p.depth = a[0]; p.targetShare = a[1]; p.routes = a[2];
-  });
-})({
-  // QBs (depth only)
-  1:[1,0,0], 2:[1,0,0], 3:[1,0,0], 4:[1,0,0], 5:[1,0,0], 6:[1,0,0], 7:[1,0,0], 8:[1,0,0],
-  9:[1,0,0], 10:[1,0,0], 11:[1,0,0], 12:[1,0,0], 13:[1,0,0], 14:[1,0,0], 15:[1,0,0],
-  16:[1,0,0], 17:[1,0,0], 18:[1,0,0], 19:[1,0,0],
-  // RBs
-  20:[1,14.2,22], 21:[1,12.8,18], 22:[1,13.6,20], 23:[1,16.4,26], 24:[1,15.8,24],
-  25:[1,8.4,12],  26:[1,12.2,18], 27:[1,9.8,14],  28:[1,8.6,12],  29:[1,10.4,16],
-  30:[1,11.2,17], 31:[1,9.6,15],  32:[1,18.4,28], 33:[1,9.2,13],  34:[1,10.6,15],
-  35:[1,11.4,17], 36:[2,9.2,14],  37:[2,7.8,11],  38:[1,8.4,12],  39:[1,9.6,14],
-  40:[1,8.2,11],  41:[1,7.4,10],  42:[1,12.6,19], 43:[2,7.2,10],  44:[1,6.8,9],
-  45:[1,8.4,12],  46:[2,11.8,18], 47:[1,10.6,15], 48:[1,9.8,14],  49:[2,8.4,12],
-  155:[2,6.4,9],  156:[3,5.8,8],  157:[1,8.0,11], 158:[2,6.2,9],  159:[2,7.2,10],
-  160:[2,8.8,13], 161:[2,7.4,11], 162:[2,6.6,9],  163:[3,5.4,8],  164:[2,7.8,12],
-  165:[2,6.0,9],  166:[2,7.6,11],
-  // WRs
-  50:[1,26.4,42], 51:[1,28.2,44], 52:[1,24.6,40], 53:[1,22.8,38], 54:[1,26.0,44],
-  55:[1,22.4,40], 56:[1,20.8,36], 57:[1,18.6,34], 58:[1,16.4,32], 59:[1,19.2,36],
-  60:[1,16.8,30], 61:[1,14.6,28], 62:[1,15.4,30], 63:[1,14.8,28], 64:[2,13.2,26],
-  65:[1,14.6,28], 66:[1,12.8,26], 67:[1,18.4,34], 68:[2,16.2,30], 69:[1,14.4,28],
-  70:[2,12.8,24], 71:[2,13.6,26], 72:[2,14.2,28], 73:[2,12.4,25], 74:[2,14.8,28],
-  75:[2,12.2,24], 76:[2,11.4,22], 77:[2,11.8,22], 78:[2,10.6,20], 79:[3,10.2,20],
-  167:[2,10.4,20], 168:[2,9.8,18], 169:[2,11.2,22], 170:[2,10.0,19],
-  // TEs
-  80:[1,22.4,32], 81:[1,18.6,28], 82:[1,14.8,24], 83:[2,12.4,20], 84:[1,14.6,24],
-  85:[2,10.2,18], 86:[2,12.8,22], 87:[1,14.4,24], 88:[2,10.6,18], 89:[2,8.8,15],
-  90:[2,9.4,16],  91:[3,8.2,14],  171:[2,11.4,20], 172:[2,10.2,18],
-});
+// Private lookup used only by assignRoster for slot assignment by position.
+// Not exported — use findPlayer() from playerStore for live data lookups.
+const _findPlayerLocal = (id) => PLAYERS.find(p => p.id === id);
 
 // Game weather keyed by opponent team abbr (mock data for current week).
 // Dome = indoor stadium; wind 0. Cold/Rain affects K/DST/passing game.
@@ -271,25 +243,10 @@ export function findTeam(id) {
   return base;
 }
 
-export const MY_ROSTER = [
-  { slot: "QB",   playerId: 1 },
-  { slot: "RB",   playerId: 22 },
-  { slot: "RB",   playerId: 27 },
-  { slot: "WR",   playerId: 50 },
-  { slot: "WR",   playerId: 54 },
-  { slot: "TE",   playerId: 80 },
-  { slot: "FLEX", playerId: 30 },
-  { slot: "K",    playerId: 101 },
-  { slot: "DST",  playerId: 120 },
-  { slot: "BENCH",playerId: 23 },
-  { slot: "BENCH",playerId: 56 },
-  { slot: "BENCH",playerId: 59 },
-  { slot: "BENCH",playerId: 85 },
-  { slot: "BENCH",playerId: 7  },
-];
+// Rosters are populated only by the draft and subsequent waivers — never pre-seeded.
+export const MY_ROSTER = [];
 
 export const WATCHLIST = {
-  "Sleepers": [62, 6, 63],
   "Buy Low": [53, 5],
   "Sell High": [60, 25],
 };
@@ -903,21 +860,18 @@ export const CBS_DRAFT_HISTORY = {
   },
 };
 
-// Draft picks (snake, round 4 in progress at pick 40)
+// Draft picks — 14 rounds × 12 teams = 168 picks, all null (rosters populated only by draft).
+// 14 matches the league roster max: 8 starters + 6 bench.
 const TEAMS_ORDER = [2, 5, 11, 7, 12, 1, 8, 3, 10, 4, 9, 6];
+export const DRAFT_ROUNDS = 14;
 function buildDraftPicks() {
   const picks = [];
-  const r1 = [20, 50, 21, 22, 51, 23, 1, 24, 54, 52, 55, 80];
-  const r2 = [25, 53, 81, 56, 2, 26, 27, 28, 57, 58, 59, 82];
-  const r3 = [29, 60, 30, 32, 61, 31, 3, 62, 4, 83, 5, 63];
-  const r4so = [85, 64, 65];
   const teamFor = (round, idx) => round % 2 === 1 ? TEAMS_ORDER[idx] : TEAMS_ORDER[11 - idx];
-  const push = (round, players) => players.forEach((pid, i) => picks.push({
-    pickNum: (round - 1) * 12 + i + 1, round, slot: i + 1, teamId: teamFor(round, i), playerId: pid,
-  }));
-  push(1, r1); push(2, r2); push(3, r3);
-  push(4, r4so.concat(new Array(12 - r4so.length).fill(null)));
-  for (let r = 5; r <= 16; r++) push(r, new Array(12).fill(null));
+  for (let r = 1; r <= DRAFT_ROUNDS; r++) {
+    for (let i = 0; i < 12; i++) {
+      picks.push({ pickNum: (r - 1) * 12 + i + 1, round: r, slot: i + 1, teamId: teamFor(r, i), playerId: null });
+    }
+  }
   return picks;
 }
 export const DRAFT_PICKS = buildDraftPicks();
@@ -934,7 +888,7 @@ export const ROSTER_CONFIG = {
     { slot: 'RB',   count: 1, eligible: ['RB'] },
     { slot: 'WR',   count: 1, eligible: ['WR'] },
     { slot: 'TE',   count: 1, eligible: ['TE'] },
-    { slot: 'FLEX', count: 3, eligible: ['RB', 'WR', 'TE'] },
+    { slot: 'FLEX', count: 3, eligible: ['RB', 'WR'] },
     { slot: 'DST',  count: 1, eligible: ['DST'] },
   ],
   rosterLimits: { QB: 2 },   // all other positions: no limit
@@ -944,6 +898,8 @@ export const ROSTER_CONFIG = {
 export const SLOT_ELIGIBILITY = Object.fromEntries([
   ...ROSTER_CONFIG.slots.map(s => [s.slot, s.eligible]),
   ['BENCH', ['QB', 'RB', 'WR', 'TE', 'K', 'DST']],
+  ['K',     ['K']],    // kickers must go in K slot
+  ['DST',   ['DST']],  // explicit override (also set by ROSTER_CONFIG above)
 ]);
 
 // Half PPR scoring (CBS Atotau League defaults — fetch live via /api/cbs/scoring when worker is running)
@@ -958,40 +914,66 @@ export const SCORING_RULES = {
                pts0: 10, pts1_6: 7, pts7_13: 4, pts14_20: 1, pts21_27: 0, pts28_34: -1, pts35plus: -4 },
 };
 
-// Per-team rosters derived from 2025 CBS_DRAFT_HISTORY picks
+// All team rosters start empty — populated only by the 2026 draft, then waivers.
 function buildTeamRosters() {
-  const posMap = { Q: 'QB', R: 'RB', W: 'WR', T: 'TE', K: 'K', D: 'DST' };
   const rosters = {};
-  for (const [tid, hist] of Object.entries(CBS_DRAFT_HISTORY)) {
-    const yr = hist[2025];
-    if (!yr?.picks) continue;
-    // Dedicated starter slots per actual league rules
-    const dedicated = { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1 };
-    const used = {};
-    const slots = [];
-    let flexUsed = 0;
-    for (let i = 0; i < yr.picks.length; i++) {
-      const pid = yr.picks[i];
-      const pos = posMap[yr.rounds?.[i]];
-      if (!pos) { slots.push({ slot: 'BENCH', playerId: pid }); continue; }
-      const dedUsed = used[pos] || 0;
-      if (dedUsed < (dedicated[pos] || 0)) {
-        // Fill dedicated slot for this position
-        slots.push({ slot: pos, playerId: pid });
-        used[pos] = dedUsed + 1;
-      } else if (flexUsed < 3 && (pos === 'RB' || pos === 'WR' || pos === 'TE')) {
-        // Fill FLEX slot (only RB or WR allowed)
-        slots.push({ slot: 'FLEX', playerId: pid });
-        flexUsed++;
-      } else {
-        slots.push({ slot: 'BENCH', playerId: pid });
-      }
-    }
-    rosters[Number(tid)] = slots;
-  }
+  for (const t of LEAGUE_TEAMS) rosters[t.id] = [];
   return rosters;
 }
 export const TEAM_ROSTERS = buildTeamRosters();
+
+/** Reset all in-memory team rosters to empty (call after commish roster reset). */
+export function clearAllRosters() {
+  for (const t of LEAGUE_TEAMS) TEAM_ROSTERS[t.id] = [];
+}
+
+// Rebuild TEAM_ROSTERS from saved draft picks (localStorage) so all screens
+// share the same post-draft roster truth. Call on app load, after draft, and
+// when navigating to roster-aware screens (H2H, Players).
+export function refreshTeamRosters() {
+  try {
+    // Live picks first, then completed mock snapshot, then in-progress WIP mock
+    const liveRaw  = localStorage.getItem('fantasai_live_picks');
+    const savedRaw = localStorage.getItem('fantasai_mock_picks_saved');
+    const wipRaw   = localStorage.getItem('fantasai_mock_picks_wip');
+
+    let picks = null;
+
+    const tryParse = raw => { try { return JSON.parse(raw || 'null'); } catch { return null; } };
+
+    const live  = tryParse(liveRaw);
+    const saved = tryParse(savedRaw);
+    const wip   = tryParse(wipRaw);
+
+    // Use whichever source has the most filled picks
+    const filledCount = arr => Array.isArray(arr) ? arr.filter(p => p.playerId).length : 0;
+    const liveCount  = filledCount(live);
+    const savedCount = filledCount(saved);
+    const wipCount   = filledCount(wip);
+
+    if (liveCount >= savedCount && liveCount >= wipCount) picks = live;
+    else if (savedCount >= wipCount) picks = saved;
+    else picks = wip;
+
+    if (!Array.isArray(picks) || picks.length < 1) return;
+
+    // Group picks by team, keeping only filled slots
+    const byTeam = {};
+    for (const pk of picks) {
+      if (!pk.playerId) continue;
+      const tid = Number(pk.teamId);
+      if (!byTeam[tid]) byTeam[tid] = [];
+      byTeam[tid].push({ slot: 'BENCH', playerId: Number(pk.playerId) });
+    }
+    // Mutate TEAM_ROSTERS in-place so all importers see the live data
+    for (const [tid, slots] of Object.entries(byTeam)) {
+      TEAM_ROSTERS[Number(tid)] = slots;
+    }
+  } catch {}
+}
+
+// Auto-refresh on module load so first render already sees draft data
+refreshTeamRosters();
 
 // ─── Settings-based roster frame helpers ──────────────────────────────────────
 const _KEY_TO_SLOT = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', RBWR: 'FLEX', DST: 'DST', K: 'K' };
@@ -1003,7 +985,7 @@ const _DEFAULT_POSITIONS = [
   { key: 'RBWR', activeMax: 3 },
   { key: 'DST',  activeMax: 1 },
 ];
-const _FLEX_ELIGIBLE = ['RB', 'WR', 'TE'];
+const _FLEX_ELIGIBLE = ['RB', 'WR'];
 
 export function buildRosterFrame(settings) {
   const positions  = settings?.positions ?? _DEFAULT_POSITIONS;
@@ -1018,7 +1000,9 @@ export function buildRosterFrame(settings) {
   return frame;
 }
 
-export function assignRoster(frame, playerIds, slotOverrides = {}) {
+// playerLookup: optional (id) => {pos, ...} fallback for IDs not in the static array.
+// Pass findPlayer from playerStore so newly added live players are placed correctly.
+export function assignRoster(frame, playerIds, slotOverrides = {}, playerLookup = null) {
   const entries  = frame.map(slot => ({ slot, playerId: null }));
   const ids      = [...(playerIds || [])].filter(Boolean);
   const unplaced = [];
@@ -1035,7 +1019,7 @@ export function assignRoster(frame, playerIds, slotOverrides = {}) {
 
   // Second pass: auto-assign by player position → dedicated slot → FLEX → BENCH
   for (const pid of unplaced) {
-    const p = findPlayer(pid);
+    const p = _findPlayerLocal(pid) ?? (playerLookup ? playerLookup(pid) : null);
     if (!p) continue;
     let idx = entries.findIndex(e => !e.playerId && e.slot === p.pos);
     if (idx < 0 && _FLEX_ELIGIBLE.includes(p.pos))

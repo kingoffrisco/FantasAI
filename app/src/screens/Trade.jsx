@@ -199,6 +199,104 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
         </div>
       </div>
 
+      {/* ── FantasAI Deep Evaluator ── */}
+      {bothSided && (() => {
+        // Position impact analysis
+        const givePosMap = {};
+        const getPosMap  = {};
+        for (const id of myGive) { const p = findPlayer(id); if (p) givePosMap[p.pos] = (givePosMap[p.pos] || 0) + 1; }
+        for (const id of myGet)  { const p = findPlayer(id); if (p) getPosMap[p.pos]  = (getPosMap[p.pos]  || 0) + 1; }
+
+        // Roster depth: how many of each pos do we have?
+        const myPosDepth = {};
+        for (const id of myRosterArr) { const p = findPlayer(id); if (p) myPosDepth[p.pos] = (myPosDepth[p.pos] || 0) + 1; }
+
+        // Identify needs: pos with 1 or fewer players after give
+        const needs = [];
+        for (const [pos, cnt] of Object.entries(myPosDepth)) {
+          const afterGive = cnt - (givePosMap[pos] || 0);
+          if (afterGive <= 1 && !getPosMap[pos]) needs.push(pos);
+        }
+        // Identify upgrades: getting high-avg players
+        const topGet = myGet.map(id => findPlayer(id)).filter(Boolean).sort((a, b) => (b.avg || 0) - (a.avg || 0));
+
+        // Age/upside analysis
+        const avgAgeGive = myGive.map(id => findPlayer(id)).filter(Boolean).reduce((s, p, _, a) => s + (p.age || 27) / a.length, 0);
+        const avgAgeGet  = myGet.map(id => findPlayer(id)).filter(Boolean).reduce((s, p, _, a) => s + (p.age || 27) / a.length, 0);
+        const isYounger  = avgAgeGet < avgAgeGive - 1;
+        const isOlder    = avgAgeGet > avgAgeGive + 1;
+
+        // Trade type classification
+        const tradeType = diff > 3 ? 'value-win'
+          : diff < -3 ? 'value-loss'
+          : isYounger ? 'win-now-for-youth'
+          : needs.length > 0 ? 'depth-risk'
+          : 'balanced';
+
+        const typeLabels = {
+          'value-win':         { label: 'Clear Win',       color: '#c6ff3a', icon: '🏆' },
+          'value-loss':        { label: 'Overpay Risk',    color: '#ff5a6e', icon: '⚠️' },
+          'win-now-for-youth': { label: 'Youth Upside',    color: '#4ea8ff', icon: '📈' },
+          'depth-risk':        { label: 'Depth Risk',      color: '#ff9500', icon: '⚡' },
+          'balanced':          { label: 'Balanced Offer',  color: 'var(--text-dim)', icon: '⚖️' },
+        };
+        const typeMeta = typeLabels[tradeType];
+
+        // Recommendation text
+        const topGetName  = topGet[0]?.name ?? 'the player';
+        const posNeed     = Object.keys(getPosMap)[0] ?? '';
+        let recommendation = '';
+        if (diff > 5)  recommendation = `Strong accept — ${topGetName} significantly upgrades your starting lineup.`;
+        else if (diff > 1) recommendation = `Lean accept — you improve your ${posNeed || 'overall'} scoring average.`;
+        else if (diff > -2) recommendation = `Coin flip. Consider roster depth and schedule before deciding.`;
+        else if (diff > -5) recommendation = `Lean decline — you're giving more value than you receive.`;
+        else recommendation = `Decline — significant value imbalance. Counter-offer with fewer assets.`;
+        if (needs.length > 0) recommendation += ` Watch out: trading away ${needs.join('/')} leaves you thin there.`;
+
+        const insights = [
+          { label: 'Avg Pts Differential', value: `${diff > 0 ? '+' : ''}${diff.toFixed(1)} pts/wk`, color: diff > 0 ? '#c6ff3a' : '#ff5a6e' },
+          { label: 'Position Balance', value: Object.keys(getPosMap).join(', ') || '—', color: 'var(--text-dim)' },
+          { label: 'Roster Depth Risk', value: needs.length > 0 ? `Thin at ${needs.join(', ')}` : 'Acceptable', color: needs.length > 0 ? '#ff9500' : '#4caf82' },
+          { label: 'Age / Upside', value: isYounger ? 'Getting younger (+upside)' : isOlder ? 'Getting older (win-now)' : 'Similar age range', color: isYounger ? '#4ea8ff' : 'var(--text-dim)' },
+        ];
+
+        return (
+          <div style={{ padding: '0 24px 16px' }}>
+            <div style={{ background: 'rgba(198,255,58,.04)', border: '1px solid rgba(198,255,58,.2)', borderRadius: 12, padding: '16px 20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <span style={{ fontSize: 16 }}>{typeMeta.icon}</span>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 13 }}>
+                    <span style={{ background: 'rgba(198,255,58,.15)', color: 'var(--accent)', fontSize: 9, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 3, fontWeight: 700, marginRight: 6, verticalAlign: 'middle' }}>AI</span>
+                    FantasAI Deep Evaluator
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>Multi-factor trade analysis</div>
+                </div>
+                <div style={{ marginLeft: 'auto' }}>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: typeMeta.color, background: typeMeta.color + '22', border: `1px solid ${typeMeta.color}55`, borderRadius: 4, padding: '3px 10px' }}>
+                    {typeMeta.label}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 14 }}>
+                {insights.map(ins => (
+                  <div key={ins.label} style={{ background: 'var(--panel)', borderRadius: 8, padding: '8px 12px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 3 }}>{ins.label}</div>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: ins.color }}>{ins.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ background: 'var(--panel)', borderRadius: 8, padding: '10px 14px', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginBottom: 6 }}>◆ Recommendation</div>
+                <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.65 }}>{recommendation}</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Incoming offers awaiting my approval ── */}
       {incomingOffers.length > 0 && (
         <div style={{ padding: '0 24px 8px' }}>
@@ -337,8 +435,8 @@ function TradeOfferPlayers({ giveLabel, getLabel, giveIds, getIds }) {
         {giveIds.map(id => { const p = findPlayer(id); return p ? (
           <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
             <PosBadge pos={p.pos} />
-            <span style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</span>
-            <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.avg.toFixed(1)}</span>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.avg.toFixed(1)}</span>
           </div>
         ) : null; })}
       </div>
@@ -348,7 +446,7 @@ function TradeOfferPlayers({ giveLabel, getLabel, giveIds, getIds }) {
         {getIds.map(id => { const p = findPlayer(id); return p ? (
           <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
             <PosBadge pos={p.pos} />
-            <span style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</span>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
             <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.avg.toFixed(1)}</span>
           </div>
         ) : null; })}

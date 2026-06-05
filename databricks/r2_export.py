@@ -194,7 +194,8 @@ except Exception as e:
     errors.append(f"injury_report: {e}")
 
 # ── 5. breakout_candidates ────────────────────────────────────────────────────
-# Source: main.fantasai.breakout_training_data
+# Source: main.fantasai.breakout_training_data (in-season snap data)
+# Pre-season fallback: main.fantasai.players_2026_draft (projected opportunity)
 # Threshold: snap_share_delta > 10%, opportunity_score > 4
 print("5. breakout_candidates")
 try:
@@ -219,7 +220,32 @@ try:
         )
         .limit(30)
     )
-    r2_put("fantasai/analysis/breakout_candidates.json", to_records(df))
+    rows = to_records(df)
+
+    # Pre-season fallback: no snap-delta data yet — use projected opportunity from draft table
+    if len(rows) == 0:
+        print("  ↩ No in-season snap data — falling back to players_2026_draft projections")
+        df = (
+            spark.table("main.fantasai.players_2026_draft")  # noqa: F821
+            .filter(F.col("is_draftable") == True)           # noqa: E712
+            .filter(F.col("position").isin("RB", "WR", "TE", "QB"))
+            .filter(F.col("projected_avg_points") >= 8.0)
+            .select(
+                F.col("full_name").alias("player_name"),
+                F.col("team"),
+                F.col("position"),
+                F.lit(None).cast("int").alias("week"),
+                F.lit(2026).alias("season"),
+                F.lit(None).cast("double").alias("snap_share_delta"),
+                F.col("projected_avg_points").alias("opportunity_score"),
+                F.lit(None).cast("double").alias("avg_snap_share"),
+            )
+            .orderBy(F.col("projected_avg_points").desc())
+            .limit(30)
+        )
+        rows = to_records(df)
+
+    r2_put("fantasai/analysis/breakout_candidates.json", rows)
 except Exception as e:
     print(f"  ✗ {e}")
     errors.append(f"breakout_candidates: {e}")
@@ -261,6 +287,76 @@ try:
 except Exception as e:
     print(f"  ✗ {e}")
     errors.append(f"waiver_wire: {e}")
+
+# ── 7. players_2026_draft ────────────────────────────────────────────────────
+# Source: main.fantasai.players_2026_draft
+# Shape: normalized player records the frontend can consume directly.
+# Filter: is_draftable = TRUE only (1,338 players after exclusions).
+# Sort:   projected_avg_points DESC (ML-powered ranking).
+print("7. players_2026_draft")
+try:
+    df = (
+        spark.table("main.fantasai.players_2026_draft")  # noqa: F821
+        .filter(F.col("is_draftable") == True)           # noqa: E712
+        .select(
+            F.col("master_player_id"),
+            F.col("full_name").alias("full_name"),
+            F.col("position"),
+            F.col("team"),
+            F.col("projected_avg_points"),
+            F.col("position_rank"),
+            F.col("season_tier"),
+            F.col("player_status"),
+            F.col("is_draftable"),
+            # optional enrichment columns — coalesce so missing cols don't fail
+            F.coalesce(F.col("age"),         F.lit(None)).alias("age"),
+            F.coalesce(F.col("bye_week"),    F.lit(None)).alias("bye_week"),
+            F.coalesce(F.col("adp"),         F.lit(None)).alias("adp"),
+            F.coalesce(F.col("ecr"),         F.lit(None)).alias("ecr"),
+            F.coalesce(F.col("headshot_url"),F.lit(None)).alias("headshot_url"),
+        )
+        .orderBy(F.col("projected_avg_points").desc())
+    )
+    rows = to_records(df)
+    r2_put("fantasai/players/players_2026_draft.json", rows)
+except Exception as e:
+    print(f"  ✗ {e}")
+    errors.append(f"players_2026_draft: {e}")
+
+# ── 8. sleeper_picks ─────────────────────────────────────────────────────────
+# "Sleeper" = player drafted significantly later than expert ranking suggests.
+# Definition: ADP > ECR + 8 — flying under the radar relative to projections.
+# ownership_pct: derived from ADP using the same linear formula the live
+#   worker uses for /api/v1/players  (MAX(0, 98 - adp * 0.31)).
+# Source: main.fantasai.players_2026_draft
+print("8. sleeper_picks")
+try:
+    df = spark.sql("""  -- noqa: F821
+        SELECT
+            full_name                                                 AS player_name,
+            position,
+            team,
+            COALESCE(adp, 999)                                        AS adp,
+            COALESCE(ecr, 999)                                        AS ecr,
+            ROUND(COALESCE(adp, 999) - COALESCE(ecr, 999), 1)        AS value_gap,
+            ROUND(projected_avg_points, 2)                            AS projected_avg_points,
+            position_rank,
+            season_tier,
+            bye_week,
+            -- Ownership derived from ADP (same formula as /api/v1/players worker):
+            --   ADP ~1   → ~98%   ADP ~150 → ~51%   ADP ~300 → ~5%
+            GREATEST(0.0, ROUND(98.0 - COALESCE(adp, 300) * 0.31, 1)) AS ownership_pct
+        FROM main.fantasai.players_2026_draft
+        WHERE is_draftable = TRUE
+          AND projected_avg_points >= 6.0
+          AND COALESCE(adp, 999) > COALESCE(ecr, 50) + 8
+        ORDER BY value_gap DESC, projected_avg_points DESC
+        LIMIT 30
+    """)
+    r2_put("fantasai/analysis/sleeper_picks.json", to_records(df))
+except Exception as e:
+    print(f"  ✗ {e}")
+    errors.append(f"sleeper_picks: {e}")
 
 # ── summary ───────────────────────────────────────────────────────────────────
 print(f"\n=== Export complete — {len(errors)} error(s) ===")

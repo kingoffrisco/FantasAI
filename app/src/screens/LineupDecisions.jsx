@@ -8,7 +8,7 @@ const API_BASE = 'https://api.fantasai.net';
 
 const SLOT_ELIGIBLE = {
   QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
-  K: ['K'], DST: ['DST'], FLEX: ['RB', 'WR', 'TE'],
+  K: ['K'], DST: ['DST'], FLEX: ['RB', 'WR'],
 };
 
 const SLOT_COLOR = {
@@ -174,7 +174,7 @@ function computeOptimal(startingSlots, allPlayers, getProj) {
 
   for (const { slot } of startingSlots) {
     if (slot !== 'FLEX') continue;
-    const eligible = ['RB', 'WR', 'TE']
+    const eligible = ['RB', 'WR']
       .flatMap(pos => byPos[pos] || [])
       .filter(p => !assigned.has(p.id))
       .sort((a, b) => getProj(b) - getProj(a));
@@ -204,7 +204,7 @@ export default function LineupDecisions({
   const frame = React.useMemo(() => buildRosterFrame(settings), [settings]);
 
   const rosterEntries = React.useMemo(
-    () => assignRoster(frame, [...myRosterIds], slotOverrides),
+    () => assignRoster(frame, [...myRosterIds], slotOverrides, findPlayer),
     [frame, myRosterIds, slotOverrides],
   );
 

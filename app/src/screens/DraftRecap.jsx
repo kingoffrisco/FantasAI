@@ -1,0 +1,355 @@
+import React from 'react';
+import { LEAGUE_TEAMS, TEAMS_ORDER } from '../lib/data.js';
+import { findPlayer } from '../lib/playerStore.js';
+import { PosBadge } from '../components/ui.jsx';
+import { useR2BreakoutCandidates, useR2SleeperPicks } from '../hooks.js';
+
+const ADP_OVERRIDES = {
+  'Lamar Jackson': 12, 'Josh Allen': 8, 'Patrick Mahomes': 15, 'Jalen Hurts': 6,
+  'Dak Prescott': 52, 'Joe Burrow': 38, 'Trevor Lawrence': 60, 'Justin Herbert': 70,
+  'Kyler Murray': 85, 'Tua Tagovailoa': 95, 'Jordan Love': 75,
+  'Christian McCaffrey': 1, 'Breece Hall': 3, 'Saquon Barkley': 4, 'De\'Von Achane': 7,
+  'Bijan Robinson': 5, 'Derrick Henry': 20, 'Jonathan Taylor': 18, 'Tony Pollard': 35,
+  'Travis Etienne': 22, 'James Cook': 25, 'Rachaad White': 45, 'Isiah Pacheco': 40,
+  'Aaron Jones': 65, 'D\'Andre Swift': 55, 'Rhamondre Stevenson': 48,
+  'Tyreek Hill': 2, 'Justin Jefferson': 9, 'CeeDee Lamb': 10, 'Davante Adams': 30,
+  'Stefon Diggs': 28, 'Ja\'Marr Chase': 11, 'Cooper Kupp': 42, 'Keenan Allen': 58,
+  'Deebo Samuel': 50, 'DJ Moore': 55, 'Tee Higgins': 36, 'Amon-Ra St. Brown': 19,
+  'Jaylen Waddle': 24, 'DK Metcalf': 32, 'Mike Evans': 29, 'Diontae Johnson': 72,
+  'Travis Kelce': 13, 'Sam LaPorta': 44, 'Mark Andrews': 34, 'T.J. Hockenson': 46,
+  'Darren Waller': 80, 'George Kittle': 31, 'Dallas Goedert': 37, 'Evan Engram': 68,
+  'Justin Tucker': 148, 'Evan McPherson': 152, 'Tyler Bass': 155, 'Harrison Butker': 156,
+  'San Francisco 49ers': 120, 'Dallas Cowboys': 130, 'New England Patriots': 160,
+};
+
+const POS_CELL_BG = {
+  QB:  'rgba(15,65,180,.62)',
+  RB:  'rgba(5,105,60,.60)',
+  WR:  'rgba(155,88,0,.62)',
+  TE:  'rgba(130,40,210,.58)',
+  K:   'rgba(160,70,0,.62)',
+  DST: 'rgba(180,30,30,.58)',
+};
+const POS_CELL_COLOR = {
+  QB:  '#4da6ff',
+  RB:  '#10d98a',
+  WR:  '#f5b82e',
+  TE:  '#b56ef5',
+  K:   '#f97316',
+  DST: '#f05050',
+};
+
+function getADP(player) {
+  if (!player) return 200;
+  return ADP_OVERRIDES[player.name] ?? (100 + Math.abs(Math.sin(player.id * 3.7) * 80));
+}
+
+// Grade colors mirror H2H: win=accent, my-team=good, neutral=text-dim, danger=danger
+function gradePickVsADP(pickNum, adp) {
+  const diff = adp - pickNum;
+  if (diff >= 10) return { grade: 'A+', color: 'var(--accent)',    label: 'Steal' };
+  if (diff >= 4)  return { grade: 'A',  color: '#4caf82',          label: 'Value' };
+  if (diff >= -3) return { grade: 'B',  color: 'var(--text-dim)',  label: 'Fair' };
+  if (diff >= -8) return { grade: 'C',  color: '#ff9500',          label: 'Reach' };
+  return                { grade: 'D',  color: 'var(--danger)',     label: 'Overdraft' };
+}
+
+function gradeTeam(picks) {
+  if (!picks.length) return { letter: '—', score: 0, color: 'var(--text-faint)' };
+  let total = 0;
+  const gradeMap = { 'A+': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1 };
+  for (const p of picks) {
+    const player = findPlayer(p.playerId);
+    const adp    = getADP(player);
+    const { grade } = gradePickVsADP(p.pickNum, adp);
+    total += gradeMap[grade] ?? 3;
+  }
+  const avg = total / picks.length;
+  if (avg >= 4.5) return { letter: 'A+', score: avg, color: 'var(--accent)'   };
+  if (avg >= 3.8) return { letter: 'A',  score: avg, color: '#4caf82'         };
+  if (avg >= 3.2) return { letter: 'B+', score: avg, color: '#4caf82'         };
+  if (avg >= 2.8) return { letter: 'B',  score: avg, color: 'var(--text-dim)' };
+  if (avg >= 2.2) return { letter: 'C',  score: avg, color: '#ff9500'         };
+  return                { letter: 'D',  score: avg, color: 'var(--danger)'   };
+}
+
+
+export default function DraftRecapScreen({ user, onNav }) {
+  const myTeamId = user?.teamId;
+  const [mockView, setMockView] = React.useState('roster'); // 'roster' | 'board'
+
+  // Read saved mock picks
+  const mockPicks = React.useMemo(() => {
+    try {
+      const raw = localStorage.getItem('fantasai_mock_picks_saved');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return null;
+  }, []);
+
+  const hasMockResults = mockPicks && mockPicks.filter(p => p.teamId === myTeamId && p.playerId).length > 0;
+
+  const mockMyPicks = React.useMemo(() =>
+    hasMockResults ? mockPicks.filter(p => p.teamId === myTeamId && p.playerId).sort((a, b) => a.pickNum - b.pickNum) : [],
+  [mockPicks, myTeamId, hasMockResults]);
+
+  const mockGrade = React.useMemo(() => {
+    if (!mockMyPicks.length) return null;
+    return gradeTeam(mockMyPicks.map(pk => ({
+      pickNum: pk.pickNum,
+      playerId: pk.playerId,
+    })));
+  }, [mockMyPicks]);
+
+  // Per-team mock draft grades for the board header
+  const mockTeamGrades = React.useMemo(() => {
+    if (!mockPicks) return {};
+    const byTeam = {};
+    for (const pk of mockPicks) {
+      if (!pk.playerId) continue;
+      if (!byTeam[pk.teamId]) byTeam[pk.teamId] = [];
+      byTeam[pk.teamId].push({ pickNum: pk.pickNum, playerId: pk.playerId });
+    }
+    const result = {};
+    for (const [tid, picks] of Object.entries(byTeam)) {
+      result[Number(tid)] = gradeTeam(picks);
+    }
+    return result;
+  }, [mockPicks]);
+
+  // Organise mock picks by round × team for the board view
+  const mockByRoundTeam = React.useMemo(() => {
+    if (!mockPicks) return {};
+    const map = {};
+    for (const pk of mockPicks) {
+      if (!map[pk.round]) map[pk.round] = {};
+      map[pk.round][pk.teamId] = pk;
+    }
+    return map;
+  }, [mockPicks]);
+
+  const mockTotalRounds = React.useMemo(() => {
+    if (!mockPicks || !mockPicks.length) return 16;
+    return Math.max(...mockPicks.map(p => p.round || 1));
+  }, [mockPicks]);
+
+  const { data: r2Breakouts } = useR2BreakoutCandidates();
+  const { data: r2Sleepers  } = useR2SleeperPicks();
+
+  const breakoutNames = React.useMemo(() => {
+    if (!Array.isArray(r2Breakouts)) return new Set();
+    return new Set(r2Breakouts.map(b => (b.player_name || '').toLowerCase()));
+  }, [r2Breakouts]);
+
+  const sleeperNames = React.useMemo(() => {
+    if (!Array.isArray(r2Sleepers)) return new Set();
+    return new Set(r2Sleepers.map(s => (s.player_name || '').toLowerCase()));
+  }, [r2Sleepers]);
+
+  function clearMockResults() {
+    try { localStorage.removeItem('fantasai_mock_picks_saved'); } catch {}
+    window.location.reload();
+  }
+
+
+
+  return (
+    <div className="col" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div className="page-head" style={{ flexShrink: 0 }}>
+        <div>
+          <h1>Draft Recap</h1>
+          <div className="sub">Pick grades vs consensus ADP · Value, reaches &amp; steals</div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, padding: '6px 12px', display: 'flex', flexDirection: 'column' }}>
+        {hasMockResults ? (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--panel)', border: '1px solid rgba(76,175,130,.4)', borderRadius: 12, overflow: 'hidden' }}>
+
+            {/* Header — matches H2H "my matchup" card style */}
+            <div style={{ flexShrink: 0, padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(76,175,130,.06)', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 900, fontSize: 16, letterSpacing: '-.01em', color: 'var(--text)' }}>Mock Draft Results</div>
+                <div style={{ fontSize: 11, color: '#4caf82', fontFamily: 'var(--font-mono)', fontWeight: 700, marginTop: 2, letterSpacing: '.06em' }}>
+                  {mockPicks.length} PICKS RECORDED · {mockMyPicks.length} FOR YOUR TEAM
+                </div>
+              </div>
+              {mockGrade && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '.06em' }}>YOUR GRADE</div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 28, color: mockGrade.color, lineHeight: 1 }}>{mockGrade.letter}</div>
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button className={`btn sm ${mockView === 'roster' ? 'primary' : 'ghost'}`} onClick={() => setMockView('roster')}>My Picks</button>
+                <button className={`btn sm ${mockView === 'board' ? 'primary' : 'ghost'}`} onClick={() => setMockView('board')}>Full Board</button>
+                <button className="btn sm ghost" onClick={clearMockResults} style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>Clear</button>
+              </div>
+            </div>
+
+            {/* Scrollable content */}
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              {mockView === 'roster' && (
+                <table className="table" style={{ width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 50 }}>Pick</th>
+                      <th>Player</th>
+                      <th className="num">ADP</th>
+                      <th className="num">Diff</th>
+                      <th className="num">Grade</th>
+                      <th>Verdict</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mockMyPicks.map(pick => {
+                      const p = findPlayer(pick.playerId);
+                      if (!p) return null;
+                      const adp = getADP(p);
+                      const { grade, color, label } = gradePickVsADP(pick.pickNum, adp);
+                      const diff = adp - pick.pickNum;
+                      return (
+                        <tr key={pick.playerId}>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-faint)' }}>
+                            R{pick.round}.{String(pick.slot).padStart(2, '0')}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <PosBadge pos={p.pos} />
+                              <div>
+                                <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
+                                <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>{p.team}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="num" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{Math.round(adp)}</td>
+                          <td className="num" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: diff >= 0 ? 'var(--good)' : 'var(--danger)', fontWeight: 700 }}>
+                            {diff >= 0 ? `+${Math.round(diff)}` : Math.round(diff)}
+                          </td>
+                          <td className="num">
+                            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 18, color, lineHeight: 1 }}>{grade}</span>
+                          </td>
+                          <td>
+                            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: 4, background: color + '22', color, border: `1px solid ${color}55` }}>{label}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+
+              {mockView === 'board' && (
+                <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
+                  <colgroup>
+                    <col style={{ width: 44 }} />
+                    {TEAMS_ORDER.map(tid => <col key={tid} />)}
+                  </colgroup>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                    {/* Team name row */}
+                    <tr style={{ background: 'var(--bg-2)' }}>
+                      <th style={{ padding: '8px 6px', textAlign: 'left', fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', fontWeight: 700, letterSpacing: '.06em', borderBottom: '1px solid var(--border)' }}>RD</th>
+                      {TEAMS_ORDER.map(tid => {
+                        const t    = LEAGUE_TEAMS.find(x => x.id === tid);
+                        const isMe = tid === myTeamId;
+                        const g    = mockTeamGrades[tid];
+                        return (
+                          <th key={tid} style={{ padding: '6px 4px 4px', textAlign: 'center', borderBottom: 'none', borderLeft: '1px solid var(--border)', background: isMe ? 'rgba(76,175,130,.08)' : 'var(--bg-2)' }}>
+                            <div style={{ fontSize: 11, fontWeight: isMe ? 900 : 600, color: isMe ? '#4caf82' : 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {t?.name || tid}
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                    {/* Grade row */}
+                    <tr style={{ background: 'var(--bg-2)' }}>
+                      <th style={{ padding: '4px 6px', borderBottom: '2px solid var(--border)', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', fontWeight: 600, textAlign: 'left' }}>GRD</th>
+                      {TEAMS_ORDER.map(tid => {
+                        const g    = mockTeamGrades[tid];
+                        const isMe = tid === myTeamId;
+                        return (
+                          <th key={tid} style={{ padding: '4px 4px 6px', textAlign: 'center', borderBottom: '2px solid var(--border)', borderLeft: '1px solid var(--border)', background: isMe ? 'rgba(76,175,130,.08)' : 'var(--bg-2)' }}>
+                            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 20, color: g?.color || 'var(--text-faint)', textShadow: g ? `0 0 10px ${g.color}66` : 'none', lineHeight: 1 }}>
+                              {g?.letter || '—'}
+                            </span>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: mockTotalRounds }, (_, ri) => {
+                      const round = ri + 1;
+                      return (
+                        <tr key={round} style={{ background: round % 2 === 0 ? 'rgba(255,255,255,.02)' : 'transparent' }}>
+                          <td style={{ padding: '6px 6px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', borderBottom: '1px solid rgba(255,255,255,.05)', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                            R{round}
+                          </td>
+                          {TEAMS_ORDER.map(tid => {
+                            const pk       = mockByRoundTeam[round]?.[tid];
+                            const p        = pk ? findPlayer(pk.playerId) : null;
+                            const isMe     = tid === myTeamId;
+                            const posBg    = p ? POS_CELL_BG[p.pos]    : null;
+                            const posColor = p ? POS_CELL_COLOR[p.pos] : null;
+                            const { grade, color: gradeColor } = p ? gradePickVsADP(pk.pickNum, getADP(p)) : {};
+                            const pName      = p ? p.name.toLowerCase() : '';
+                            const isBreakout = p ? breakoutNames.has(pName) : false;
+                            const isSleeper  = p ? sleeperNames.has(pName) : false;
+                            return (
+                              <td key={tid} style={{
+                                padding: '3px 3px',
+                                textAlign: 'center',
+                                borderBottom: '1px solid rgba(255,255,255,.05)',
+                                borderLeft: '1px solid rgba(255,255,255,.04)',
+                                background: posBg || (isMe ? 'rgba(76,175,130,.08)' : 'transparent'),
+                                outline: isMe && posBg ? '1px inset rgba(76,175,130,.4)' : 'none',
+                              }}>
+                                {p ? (
+                                  <div title={`${p.name} · ${p.pos} · ${p.team} · Pick ${pk.pickNum}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                    {/* Pos · last name · grade on one line */}
+                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, width: '100%', justifyContent: 'center' }}>
+                                      <span style={{ fontSize: 10, fontWeight: 800, color: posColor, fontFamily: 'var(--font-mono)', flexShrink: 0, letterSpacing: '.04em' }}>{p.pos}</span>
+                                      <span style={{ fontSize: 16, fontWeight: isMe ? 700 : 500, color: isMe ? '#4caf82' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {p.name.split(' ').slice(-1)[0]}
+                                      </span>
+                                      {grade && <span style={{ fontSize: 12, fontWeight: 900, color: gradeColor, fontFamily: 'var(--font-display)', fontStretch: '75%', lineHeight: 1, flexShrink: 0 }}>{grade}</span>}
+                                    </div>
+                                    <div style={{ fontSize: 8, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.team}</div>
+                                    {(isBreakout || isSleeper) && (
+                                      <div style={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+                                        {isBreakout && <span style={{ fontSize: 7, fontWeight: 800, padding: '1px 3px', borderRadius: 2, background: 'rgba(249,115,22,.22)', color: '#f97316', fontFamily: 'var(--font-mono)', letterSpacing: '.03em' }}>🔥BRKOUT</span>}
+                                        {isSleeper  && <span style={{ fontSize: 7, fontWeight: 800, padding: '1px 3px', borderRadius: 2, background: 'rgba(139,92,246,.22)', color: '#a78bfa', fontFamily: 'var(--font-mono)', letterSpacing: '.03em' }}>💤SLPR</span>}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span style={{ color: 'rgba(255,255,255,.12)', fontSize: 11 }}>—</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, color: 'var(--text-faint)' }}>
+            <div style={{ fontSize: 36 }}>📋</div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>No mock draft results yet</div>
+            <div style={{ fontSize: 12 }}>Complete a mock draft in the Draft Room to see your grades here.</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

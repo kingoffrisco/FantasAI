@@ -1,24 +1,90 @@
 import React from 'react';
-import { LEAGUE_TEAMS, DRAFT_PICKS, TEAMS_ORDER, QUEUE as INIT_QUEUE, CHAT_MESSAGES } from '../lib/data.js';
+import { LEAGUE_TEAMS, DRAFT_PICKS, TEAMS_ORDER, DRAFT_ROUNDS, QUEUE as INIT_QUEUE, CHAT_MESSAGES } from '../lib/data.js';
 import { getPlayers, findPlayer } from '../lib/playerStore.js';
 import { predictPicks } from '../lib/draft.js';
 import { PosBadge, PlayerAvatar, PlayerCell, TeamLogoBadge } from '../components/ui.jsx';
+import { useR2BreakoutCandidates } from '../hooks.js';
 
-export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
+// ── Next Gen stat definitions per position ────────────────────────────────
+const NG_STATS = {
+  QB: [
+    { id: 'snap_pct',   label: 'Snap%',     tip: 'Average snap share %' },
+    { id: 'opp_score',  label: 'Opp Score', tip: 'Opportunity Score — snap + target opportunity combined' },
+  ],
+  RB: [
+    { id: 'opp_score',  label: 'Opp Score', tip: 'Opportunity Score — snap + touch + target opportunity combined' },
+    { id: 'snap_pct',   label: 'Snap%',     tip: 'Average snap share %' },
+    { id: 'snap_delta', label: 'Snap Δ',    tip: 'Snap share change vs prior weeks (positive = trending up)' },
+    { id: 'tgt_share',  label: 'Tgt Share', tip: 'Target share — % of team targets' },
+    { id: 'yac',        label: 'YAC',       tip: 'Yards after catch per reception' },
+  ],
+  WR: [
+    { id: 'opp_score',  label: 'Opp Score', tip: 'Opportunity Score' },
+    { id: 'tgt_share',  label: 'Tgt Share', tip: 'Target share — % of team targets' },
+    { id: 'snap_pct',   label: 'Snap%',     tip: 'Average snap share %' },
+    { id: 'yac',        label: 'YAC',       tip: 'Yards after catch per reception' },
+    { id: 'snap_delta', label: 'Snap Δ',    tip: 'Snap share change vs prior weeks' },
+  ],
+  TE: [
+    { id: 'opp_score',  label: 'Opp Score', tip: 'Opportunity Score' },
+    { id: 'tgt_share',  label: 'Tgt Share', tip: 'Target share — % of team targets' },
+    { id: 'snap_pct',   label: 'Snap%',     tip: 'Average snap share %' },
+  ],
+};
+
+function getNgVal(p, statId, breakoutByName) {
+  const b = breakoutByName?.get(p.name.toLowerCase());
+  switch (statId) {
+    case 'opp_score':  return b?.opportunity_score != null ? +b.opportunity_score.toFixed(1) : null;
+    case 'snap_pct':   return b?.avg_snap_share != null ? +(b.avg_snap_share * 100).toFixed(1) : null;
+    case 'snap_delta': return b?.snap_share_delta != null ? +(b.snap_share_delta * 100).toFixed(1) : null;
+    case 'tgt_share':  return p.targetShare > 0 ? +(p.targetShare * 100).toFixed(1) : null;
+    case 'yac':        return p.yac > 0 ? +p.yac.toFixed(1) : null;
+    default:           return null;
+  }
+}
+
+function fmtNg(val, statId) {
+  if (val == null) return '—';
+  if (statId === 'snap_delta') return (val > 0 ? '+' : '') + val.toFixed(0) + '%';
+  if (statId === 'snap_pct' || statId === 'tgt_share') return val.toFixed(0) + '%';
+  if (statId === 'opp_score') return val.toFixed(1);
+  return String(val);
+}
+
+export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftComplete, onDraftStatusChange }) {
   const REAL_currentPickNum = 40;
   const isCommissioner = user?.isAdmin || user?.isCommissioner;
 
-  // Mock draft mode
-  const [mockActive, setMockActive]       = React.useState(false);
-  const [mockPicks, setMockPicks]         = React.useState(() => {
-    // Restore in-progress mock picks so navigating away mid-draft doesn't lose them
+  // Mock draft mode — state is persisted to localStorage so navigating away and back resumes seamlessly
+  const [mockPicks, setMockPicks] = React.useState(() => {
     try { const s = JSON.parse(localStorage.getItem('fantasai_mock_picks_wip') || 'null'); return Array.isArray(s) ? s : []; } catch { return []; }
   });
-  const [mockPickNum, setMockPickNum]     = React.useState(1);
-  const [mockUserTeamId, setMockUserTeamId]   = React.useState(null);
+  const _session = (() => { try { return JSON.parse(localStorage.getItem('fantasai_mock_session') || 'null'); } catch { return null; } })();
+  const _hasWip  = (() => { try { const s = JSON.parse(localStorage.getItem('fantasai_mock_picks_wip') || 'null'); return Array.isArray(s) && s.length > 0; } catch { return false; } })();
+  const [mockActive, setMockActive]           = React.useState(() => _session?.active === true && _hasWip);
+  const [mockPickNum, setMockPickNum]         = React.useState(() => _session?.active === true && _hasWip ? (_session.pickNum ?? 1) : 1);
+  const [mockUserTeamId, setMockUserTeamId]   = React.useState(() => _session?.userTeamId ?? null);
   const [mockSetup, setMockSetup]             = React.useState(false);
-  const [mockTeamsOrder, setMockTeamsOrder]   = React.useState([...TEAMS_ORDER]);
-  const [mockSlotIndex, setMockSlotIndex]     = React.useState(null); // 0-based slot the user chose
+  const [mockTeamsOrder, setMockTeamsOrder]   = React.useState(() => _session?.teamsOrder ?? [...TEAMS_ORDER]);
+  const [mockSlotIndex, setMockSlotIndex]     = React.useState(null);
+
+  // Persist mock session to localStorage whenever active state changes
+  React.useEffect(() => {
+    if (mockActive) {
+      try {
+        localStorage.setItem('fantasai_mock_session', JSON.stringify({
+          active: true,
+          userTeamId: mockUserTeamId,
+          teamsOrder: mockTeamsOrder,
+          pickNum: mockPickNum,
+        }));
+      } catch {}
+    } else {
+      try { localStorage.removeItem('fantasai_mock_session'); } catch {}
+    }
+    onDraftStatusChange?.(mockActive ? 'mock' : null);
+  }, [mockActive, mockUserTeamId, mockTeamsOrder, mockPickNum]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Scheduled mock drafts ──────────────────────────────────────────────────
   const [mockSchedule, setMockSchedule] = React.useState(() => {
@@ -26,7 +92,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
     catch { return []; }
   });
   const [showScheduleModal, setShowScheduleModal] = React.useState(false);
-  const [scheduleDraft, setScheduleDraft] = React.useState({ date: '', rounds: 16, format: 'Snake' });
+  const [scheduleDraft, setScheduleDraft] = React.useState({ date: '', rounds: DRAFT_ROUNDS, format: 'Snake' });
   const [joinDraftId, setJoinDraftId]     = React.useState(null);
   const [joinSlot, setJoinSlot]           = React.useState(null);
 
@@ -54,11 +120,14 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
     setMockPicks([]);
     setMockPickNum(1);
     try { localStorage.removeItem('fantasai_mock_picks_wip'); } catch {}
+    try { localStorage.removeItem('fantasai_mock_session'); } catch {}
     setMockUserTeamId(null);
     setMockSetup(false);
     setMockSlotIndex(null);
     setMockTeamsOrder([...TEAMS_ORDER]);
     setPaused(false);
+    try { localStorage.removeItem('fantasai_draft_paused'); } catch {}
+    onDraftStatusChange?.(null);
   }
   function draftPlayer(playerId) {
     if (!mockActive) return;
@@ -66,12 +135,28 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
     const s     = (mockPickNum - 1) % 12;
     setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId: mockUserTeamId || 1, playerId, round, slot: s + 1 }]);
     setMockPickNum(n => n + 1);
+    setSeconds(clockSeconds);
     setQueue(q => q.filter(id => id !== playerId));
     // NOTE: mock draft intentionally does NOT call onDraftPick — it never affects the real roster
   }
+  // Commish draft-on-behalf in mock mode: records pick for an arbitrary team at the current pick slot
+  function commishMockPick(playerId, forTeamId) {
+    if (!mockActive) return;
+    const round = Math.ceil(mockPickNum / 12);
+    const s     = (mockPickNum - 1) % 12;
+    setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId: forTeamId, playerId, round, slot: s + 1 }]);
+    setMockPickNum(n => n + 1);
+    setSeconds(clockSeconds);
+    setQueue(q => q.filter(id => id !== playerId));
+  }
 
   const [seconds, setSeconds] = React.useState(73);
-  const [paused, setPaused]   = React.useState(false);
+  const [paused, setPaused]   = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_draft_paused') || 'false'); } catch { return false; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem('fantasai_draft_paused', JSON.stringify(paused)); } catch {}
+  }, [paused]);
   const [queue, setQueue]     = React.useState(INIT_QUEUE);
 
   // Ref so the setTimeout callback inside AI auto-pick always reads current mockPicks,
@@ -81,7 +166,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
 
   // AI auto-picks non-user slots during mock draft
   React.useEffect(() => {
-    if (!mockActive || mockSetup || paused || mockPickNum > 192 || !mockUserTeamId) return;
+    if (!mockActive || mockSetup || paused || mockPickNum > TOTAL_PICKS || !mockUserTeamId) return;
     const round = Math.ceil(mockPickNum / 12);
     const s     = (mockPickNum - 1) % 12;
     // Use current mockTeamsOrder (now in deps — no stale closure)
@@ -89,12 +174,12 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
     if (onClockId === mockUserTeamId) return; // user's turn — wait
     const t = setTimeout(() => {
       // Read from ref so we never use a stale draftedSet even after a quick pick
-      const draftedSet = new Set(mockPicksRef.current.map(p => p.playerId));
-      const preds = predictPicks(onClockId, mockPickNum, draftedSet, 1);
-      const pick  = preds[0];
-      if (pick) {
-        setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId: onClockId, playerId: pick.player.id, round, slot: s + 1 }]);
-        setQueue(q => q.filter(id => id !== pick.player.id));
+      const currentPicks = mockPicksRef.current;
+      const draftedSet = new Set(currentPicks.map(p => p.playerId));
+      const pickedId = pickForTeamAuto(onClockId, mockPickNum, currentPicks, draftedSet);
+      if (pickedId) {
+        setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId: onClockId, playerId: pickedId, round, slot: s + 1 }]);
+        setQueue(q => q.filter(id => id !== pickedId));
       }
       setMockPickNum(n => n + 1);
     }, 450);
@@ -107,16 +192,42 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
   });
   const draftDate = draftSettings.date ? new Date(draftSettings.date) : null;
   const isLive = !draftDate || draftDate <= new Date();
+  const DRAFT_TEAM_COUNT  = draftSettings.teams  || LEAGUE_TEAMS.length;
+  const DRAFT_ROUND_COUNT = draftSettings.rounds || DRAFT_ROUNDS; // 14 = 8 starters + 6 bench
+  const TOTAL_PICKS       = DRAFT_TEAM_COUNT * DRAFT_ROUND_COUNT;
+
+  const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 900px)').matches);
+  React.useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const h = e => setIsMobile(e.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
+  const [mobileDraftTab, setMobileDraftTab] = React.useState('board'); // 'board' | 'picks' | 'chat'
 
   const [boardPos, setBoardPos] = React.useState('ALL');
   const [boardSearch, setBoardSearch] = React.useState('');
   const [boardSortCol, setBoardSortCol] = React.useState('rank'); // 'rank' | 'tier' | 'adp'
+  const [ngColsByPos, setNgColsByPos] = React.useState({
+    QB: new Set(),
+    RB: new Set(['opp_score']),
+    WR: new Set(['opp_score', 'tgt_share']),
+    TE: new Set(['opp_score', 'tgt_share']),
+  });
+  function toggleNgCol(pos, statId) {
+    setNgColsByPos(prev => {
+      const cur = new Set(prev[pos] || []);
+      if (cur.has(statId)) cur.delete(statId); else cur.add(statId);
+      return { ...prev, [pos]: cur };
+    });
+  }
   const [boardSortDir, setBoardSortDir] = React.useState('asc');
   const [hideDrafted, setHideDrafted] = React.useState(false); // false = show greyed, true = remove drafted
   const [showRecap, setShowRecap] = React.useState(false);
-  const [hidden, setHidden] = React.useState({ ghosts: false, queue: false, picklog: false, teams: false });
+  const [hidden, setHidden] = React.useState({ ghosts: false, queue: true, picklog: false, teams: false });
   const [chatMessages, setChatMessages] = React.useState(CHAT_MESSAGES);
   const [chatInput, setChatInput] = React.useState('');
+  const [rosterPanelView, setRosterPanelView] = React.useState('roster'); // 'roster' | 'grid' | 'chat'
   const togglePanel = id => setHidden(h => ({ ...h, [id]: !h[id] }));
 
   // Mutable picks (so commissioner can undo/reset) — persisted so navigation doesn't lose state
@@ -145,6 +256,12 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
   });
   const [justFreedIds, setJustFreedIds] = React.useState(new Set()); // briefly highlighted after reversal
   const [teamModes, setTeamModes] = React.useState({}); // teamId -> 'manual'|'auto'|'ai'
+  const [userDraftMode, setUserDraftMode] = React.useState('manual'); // 'manual' | 'auto' | 'ai'
+  const myName = user?.name || user?.email?.split('@')[0] || 'You';
+  function postChat(msg, extra = {}) {
+    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setChatMessages(prev => [...prev, { who: '⚡ System', color: 'var(--text-faint)', ts, msg, ai: true, ...extra }]);
+  }
   const [commishPickSearch, setCommishPickSearch] = React.useState('');
   const [commishPickTeamId, setCommishPickTeamId] = React.useState(null); // null = use onClockTeamId
   const [apiPlayers, setApiPlayers]   = React.useState(null);
@@ -164,11 +281,11 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
   }, [livePickNum, mockActive]);
 
   // Persist in-progress mock picks (WIP) so navigating away mid-draft doesn't lose them.
-  // Save as completed when the pick counter passes 192 OR all 192 picks are recorded.
+  // Save as completed when the pick counter passes TOTAL_PICKS OR all picks are recorded.
   React.useEffect(() => {
     if (!mockActive) return;
     try { localStorage.setItem('fantasai_mock_picks_wip', JSON.stringify(mockPicks)); } catch {}
-    if (mockPicks.length >= 192 || mockPickNum > 192) {
+    if (mockPicks.length >= TOTAL_PICKS || mockPickNum > TOTAL_PICKS) {
       try { localStorage.setItem('fantasai_mock_picks_saved', JSON.stringify(mockPicks)); } catch {}
     }
   }, [mockPicks, mockPickNum, mockActive]);
@@ -193,7 +310,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
       createdAt:   new Date().toISOString(),
     }]);
     setShowScheduleModal(false);
-    setScheduleDraft({ date: '', rounds: 16, format: 'Snake' });
+    setScheduleDraft({ date: '', rounds: DRAFT_ROUNDS, format: 'Snake' });
   }
 
   function joinScheduledMock(draftId, slot) {
@@ -253,6 +370,15 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
       .finally(() => setApiLoading(false));
   }
   React.useEffect(() => { fetchApiPlayers(); }, []);
+
+  // Next gen stats from R2 breakout candidates (opp score, snap%, etc.)
+  const { data: r2BreakoutsNg } = useR2BreakoutCandidates();
+  const breakoutByName = React.useMemo(() => {
+    if (!Array.isArray(r2BreakoutsNg)) return new Map();
+    const m = new Map();
+    r2BreakoutsNg.forEach(b => { if (b.player_name) m.set(b.player_name.toLowerCase(), b); });
+    return m;
+  }, [r2BreakoutsNg]);
 
   // ── Ranking sources ──────────────────────────────────────────────────────
   const RANK_SOURCES = [
@@ -343,10 +469,22 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
 
   React.useEffect(() => {
     if (seconds === 0 && !paused) {
-      const r = setTimeout(() => setSeconds(clockSeconds), 1200);
+      const r = setTimeout(() => {
+        if (isMyTurn && !draftComplete) {
+          const draftedSet = new Set(allPicks.filter(p => p.playerId).map(p => p.playerId));
+          const myPickIds  = allPicks.filter(p => p.teamId === (mockActive ? mockUserTeamId : myDraftTeamId) && p.playerId).map(p => p.playerId);
+          const pickId = pickBestAvailable(draftedSet, myPickIds, currentPickNum, 'auto');
+          if (pickId) {
+            if (mockActive) { draftPlayer(pickId); } else { commishPick(pickId); }
+            return;
+          }
+        }
+        setSeconds(clockSeconds);
+      }, 900);
       return () => clearTimeout(r);
     }
-  }, [seconds, paused, clockSeconds]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seconds, paused, clockSeconds]); // isMyTurn/draftComplete defined after this hook — read via closure in callback, not dep array
 
   function flashFreed(ids) {
     const s = new Set(ids);
@@ -363,7 +501,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
     const freedPlayerIds = picks.map(pk => pk.playerId);
     setReversalLog(prev => [...prev, ...picks.map(pk => ({ ...pk, type: 'reversal', reversedAt: ts }))]);
     const minPick = Math.min(...picks.map(p => p.pickNum));
-    setPaused(true); // hold clock so auto-draft can't fire immediately after reversal
+    setPaused(true);
     if (mockActive) {
       setMockPicks(prev => prev.filter(p => !picksSet.has(p.pickNum)));
       setMockPickNum(minPick);
@@ -373,11 +511,14 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
     }
     setSelectedPicks(new Set());
     flashFreed(freedPlayerIds);
+    // Auto-resume after 3 seconds so the commish doesn't have to manually click Resume
+    setTimeout(() => setPaused(false), 3000);
   }
 
   function removeLastPicks(n) {
     const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setPaused(true); // hold clock so auto-draft can't fire immediately after undo
+    setPaused(true);
+    setTimeout(() => setPaused(false), 3000);
     if (mockActive) {
       setMockPicks(prev => {
         const filled = prev.filter(p => p.playerId).sort((a, b) => a.pickNum - b.pickNum);
@@ -463,18 +604,17 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
 
   // Auto-draft for live mode when a team's mode is 'auto' or 'ai'
   React.useEffect(() => {
-    if (mockActive || paused || livePickNum > 192) return;
+    if (mockActive || paused || livePickNum > TOTAL_PICKS) return;
     const mode = teamModes[onClockTeamId];
     if (!mode || mode === 'manual') return;
     const draftedSet = new Set(livePicks.filter(p => p.playerId).map(p => p.playerId));
     const t = setTimeout(() => {
       let pickId = null;
       if (mode === 'ai') {
-        const preds = predictPicks(onClockTeamId, livePickNum, draftedSet, 1);
-        pickId = preds[0]?.player?.id ?? null;
+        pickId = pickForTeamAuto(onClockTeamId, livePickNum, livePicks, draftedSet);
       } else {
         const queueId = queue.find(id => !draftedSet.has(id));
-        pickId = queueId ?? getPlayers().filter(p => !draftedSet.has(p.id)).sort((a, b) => a.ecr - b.ecr)[0]?.id ?? null;
+        pickId = queueId ?? pickForTeamAuto(onClockTeamId, livePickNum, livePicks, draftedSet);
       }
       if (pickId) {
         const pickNum = livePickNum;
@@ -489,9 +629,9 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
   }, [mockActive, paused, livePickNum, teamModes, onClockTeamId]);
 
   const upcoming = [];
-  for (let i = 1; i <= 6; i++) {
+  for (let i = 1; i <= 12; i++) {
     const pn = currentPickNum + i;
-    if (pn > 192) break;
+    if (pn > TOTAL_PICKS) break;
     const round = Math.ceil(pn / 12);
     const s = ((pn - 1) % 12);
     const tid = round % 2 === 1 ? teamsOrder[s] : teamsOrder[11 - s];
@@ -534,11 +674,82 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
     return boardSortDir === 'asc' ? av - bv : bv - av;
   };
 
-  const FLEX_POS = new Set(['RB', 'WR', 'TE']);
+  const FLEX_POS = new Set(['RB', 'WR']);
   function matchesPos(p, pos) {
     if (pos === 'ALL') return true;
     if (pos === 'FLEX') return FLEX_POS.has(p.pos);
     return p.pos === pos;
+  }
+
+  const DRAFT_MAX = { QB: 2, RB: 6, WR: 6, TE: 2, K: 1, DST: 1 };
+  const DRAFT_MIN = { QB: 1, RB: 2, WR: 2, TE: 1, K: 1, DST: 1 };
+
+  // Position-aware auto-pick for a given team (non-user AI turns + live auto mode)
+  function pickForTeamAuto(teamId, pickNum, currentPicks, draftedSet) {
+    const allPlayers = getPlayers();
+    const available = allPlayers.filter(p => !draftedSet.has(p.id));
+    const teamPickIds = currentPicks.filter(p => p.teamId === teamId && p.playerId).map(p => p.playerId);
+    const posCounts = {};
+    teamPickIds.forEach(pid => {
+      const pl = allPlayers.find(x => x.id === pid);
+      if (pl) posCounts[pl.pos] = (posCounts[pl.pos] || 0) + 1;
+    });
+    const round = Math.ceil(pickNum / (DRAFT_TEAM_COUNT || 12));
+    // Late rounds: force fill any missing position minimums
+    if (round >= 11) {
+      for (const [pos, min] of Object.entries(DRAFT_MIN)) {
+        if ((posCounts[pos] || 0) < min) {
+          const fill = available.filter(p => p.pos === pos).sort((a, b) => (a.ecr || 999) - (b.ecr || 999))[0];
+          if (fill) return fill.id;
+        }
+      }
+    }
+    // Use predictPicks but filter out positions that hit their max
+    const preds = predictPicks(teamId, pickNum, draftedSet, 5);
+    const validPred = preds.find(pred => (posCounts[pred.player.pos] || 0) < (DRAFT_MAX[pred.player.pos] ?? 99));
+    if (validPred) return validPred.player.id;
+    // Fallback: best ECR available within max caps
+    const best = available
+      .filter(p => (posCounts[p.pos] || 0) < (DRAFT_MAX[p.pos] ?? 99))
+      .sort((a, b) => (a.ecr || 999) - (b.ecr || 999))[0];
+    return best?.id ?? available.sort((a, b) => (a.ecr || 999) - (b.ecr || 999))[0]?.id ?? null;
+  }
+
+  function pickBestAvailable(draftedSet, myPickIds, pickNum, mode) {
+    const allPlayers = getPlayers();
+    const available = allPlayers.filter(p => !draftedSet.has(p.id));
+    const posCounts = {};
+    myPickIds.forEach(pid => {
+      const pl = allPlayers.find(x => x.id === pid);
+      if (pl) posCounts[pl.pos] = (posCounts[pl.pos] || 0) + 1;
+    });
+
+    // 1. Queue first
+    const queueId = queue.find(id => !draftedSet.has(id));
+    if (queueId) return queueId;
+
+    // 2. AI mode — use predictPicks
+    if (mode === 'ai') {
+      const preds = predictPicks(onClockTeamId, pickNum, draftedSet, 1);
+      return preds[0]?.player?.id ?? null;
+    }
+
+    // 3. Late-round emergency: fill missing minimums starting round 11
+    const round = Math.ceil(pickNum / (draftSettings.teams || 12));
+    if (round >= 11) {
+      for (const [pos, min] of Object.entries(DRAFT_MIN)) {
+        if ((posCounts[pos] || 0) < min) {
+          const fill = available.filter(p => p.pos === pos).sort((a, b) => getRank(a) - getRank(b))[0];
+          if (fill) return fill.id;
+        }
+      }
+    }
+
+    // 4. Best available respecting MAX limits
+    const best = available
+      .filter(p => (posCounts[p.pos] || 0) < (DRAFT_MAX[p.pos] ?? 99))
+      .sort((a, b) => getRank(a) - getRank(b))[0];
+    return best?.id ?? available.sort((a, b) => getRank(a) - getRank(b))[0]?.id ?? null;
   }
 
   // bestAvail = available only (used by commissioner search + "N available" count)
@@ -562,20 +773,18 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allPicks]);
 
-  const aiSuggestions = [
-    { id: 31, why: 'Tier-2 RB with three-down workload — perfect handcuff to your CMC. Last #28 ECR available.' },
-    { id: 82, why: 'TE5 still on the board. Position scarcity hits hard after pick 50; lock this now.' },
-    { id: 6, why: "QB room is thin if Burrow tweaks again. Caleb is the contingency w/ rushing floor." },
-  ];
+  // Derived from currentPrediction so Big Board blue highlights match Ghost Picks exactly
+  const aiSuggestions = currentPrediction.map((g, i) => ({
+    id: g.player.id,
+    why: `AI pick #${i + 1} for ${onClockTeam?.name ?? 'this team'} · ${g.likelihood}% likelihood · ${g.player.pos} ${g.player.name}`,
+  }));
 
-  const rosterSlots = [
-    { slot: 'QB', filled: 1 }, { slot: 'RB', filled: 1 }, { slot: 'RB', filled: 0 },
-    { slot: 'WR', filled: 1 }, { slot: 'WR', filled: 0 }, { slot: 'TE', filled: 0 },
-    { slot: 'FLEX', filled: 0 }, { slot: 'K', filled: 0 }, { slot: 'DST', filled: 0 },
-    { slot: 'BENCH', filled: 0 }, { slot: 'BENCH', filled: 0 }, { slot: 'BENCH', filled: 0 },
-    { slot: 'BENCH', filled: 0 }, { slot: 'BENCH', filled: 0 }, { slot: 'BENCH', filled: 0 },
-    { slot: 'BENCH', filled: 0 },
-  ];
+  // Active next gen stat columns for the current board position filter
+  const activeNgCols = React.useMemo(() => {
+    if (!NG_STATS[boardPos]) return [];
+    const active = ngColsByPos[boardPos] || new Set();
+    return NG_STATS[boardPos].filter(s => active.has(s.id));
+  }, [boardPos, ngColsByPos]);
 
   const myDraftTeamId = mockActive ? (mockUserTeamId || 1) : (user?.teamId || 1);
   const myPicks = allPicks.filter(p => p.teamId === myDraftTeamId && p.playerId);
@@ -596,33 +805,127 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
   const clockClass = seconds < 10 ? 'danger' : seconds < 30 ? 'warn' : '';
   const isMyTurn = onClockTeamId === myDraftTeamId;
 
-  const draftComplete = currentPickNum > 192;
+  const draftComplete = currentPickNum > TOTAL_PICKS;
+
+  // Count picks until the user's next turn (0 when it's their turn)
+  const picksAway = React.useMemo(() => {
+    if (isMyTurn) return 0;
+    const total = teamsOrder.length || 12;
+    for (let p = currentPickNum; p <= TOTAL_PICKS; p++) {
+      const r = Math.ceil(p / total) - 1;
+      const s = (p - 1) % total;
+      const ord = r % 2 === 0 ? teamsOrder : [...teamsOrder].reverse();
+      if (ord[s] === myDraftTeamId) return p - currentPickNum;
+    }
+    return 0;
+  }, [isMyTurn, currentPickNum, teamsOrder, myDraftTeamId]);
+
+  // Play audio alert when it becomes the user's turn
+  const isMyTurnRef = React.useRef(false);
+  React.useEffect(() => {
+    if (isMyTurn && !isMyTurnRef.current && !draftComplete && !paused) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const now = ctx.currentTime;
+        [880, 1100, 1320].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0, now + i * 0.15);
+          gain.gain.linearRampToValueAtTime(0.25, now + i * 0.15 + 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.3);
+          osc.start(now + i * 0.15);
+          osc.stop(now + i * 0.15 + 0.3);
+        });
+      } catch {}
+    }
+    isMyTurnRef.current = isMyTurn;
+  }, [isMyTurn, draftComplete, paused]);
+
+  // Push live draft metadata to App.jsx so the Return-to-Draft banner can show pick count & clock
+  React.useEffect(() => {
+    if (!mockActive && !isLive) return;
+    const type = mockActive ? 'mock' : 'live';
+    // Compute picks until next user turn
+    let picksAway = 0;
+    if (!isMyTurn) {
+      const total = teamsOrder.length || 12;
+      for (let p = currentPickNum; p <= TOTAL_PICKS; p++) {
+        const r = Math.ceil(p / total) - 1;
+        const s = (p - 1) % total;
+        const ord = r % 2 === 0 ? teamsOrder : [...teamsOrder].reverse();
+        if (ord[s] === myDraftTeamId) { picksAway = p - currentPickNum; break; }
+      }
+    }
+    onDraftStatusChange?.(type, { isMyTurn, picksAway, seconds, currentPickNum, draftComplete, draftPaused: paused, onClockTeamName: onClockTeam?.name, onClockTeamLogo: onClockTeam?.logo });
+  }, [mockActive, isLive, isMyTurn, currentPickNum, seconds, draftComplete, paused]); // eslint-disable-line react-hooks/exhaustive-deps
   const draftStatusText  = draftComplete ? 'Draft Complete' : paused ? 'Commissioner Paused Draft' : 'Draft Active';
   const draftStatusColor = draftComplete ? '#4caf82' : paused ? '#ff9800' : '#4caf82';
 
+  // Timer expiry auto-pick: when the clock hits 0 on the user's turn, auto-draft best available
+  React.useEffect(() => {
+    if (seconds !== 0 || paused || !isMyTurn || draftComplete) return;
+    const r = setTimeout(() => {
+      const draftedSet = new Set(allPicks.filter(p => p.playerId).map(p => p.playerId));
+      const myPickIds  = allPicks.filter(p => p.teamId === myDraftTeamId && p.playerId).map(p => p.playerId);
+      const pickId = pickBestAvailable(draftedSet, myPickIds, currentPickNum, 'auto');
+      if (pickId) {
+        if (mockActive) { draftPlayer(pickId); }
+        else { commishPick(pickId); }
+      } else {
+        setSeconds(clockSeconds);
+      }
+    }, 900);
+    return () => clearTimeout(r);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seconds, paused, isMyTurn, draftComplete, currentPickNum, clockSeconds, mockActive]);
+
+  // User autodraft/AI-draft: fires automatically on the user's turn when they've opted in
+  React.useEffect(() => {
+    if (paused || userDraftMode === 'manual' || !isMyTurn || draftComplete) return;
+    const draftedSet = new Set(allPicks.filter(p => p.playerId).map(p => p.playerId));
+    const myPickIds  = allPicks.filter(p => p.teamId === myDraftTeamId && p.playerId).map(p => p.playerId);
+    const t = setTimeout(() => {
+      const pickId = pickBestAvailable(draftedSet, myPickIds, currentPickNum, userDraftMode);
+      if (pickId) {
+        if (mockActive) { draftPlayer(pickId); }
+        else { commishPick(pickId); }
+      }
+    }, 1500);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMyTurn, userDraftMode, paused, draftComplete, currentPickNum, mockActive]);
+
+  // When draft finishes, show DRAFT COMPLETE banner for 60 s then clear everything
+  React.useEffect(() => {
+    if (!draftComplete) return;
+    // Notify parent so it can sync rosters from draft picks immediately
+    onDraftComplete?.();
+    const t = setTimeout(() => {
+      onDraftStatusChange?.(null);
+      try { localStorage.removeItem('fantasai_draft_paused'); } catch {}
+      if (mockActive) {
+        try { localStorage.removeItem('fantasai_mock_session'); } catch {}
+        try { localStorage.removeItem('fantasai_mock_picks_wip'); } catch {}
+      }
+    }, 60000);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftComplete]);
+
+  // Notify parent when live draft is active (no mock running)
+  React.useEffect(() => {
+    if (isLive && !mockActive && !draftComplete) {
+      onDraftStatusChange?.('live');
+      return () => onDraftStatusChange?.(null);
+    }
+  }, [isLive, mockActive, draftComplete]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!isLive && !mockActive) {
-    const savedMockPicks = (() => { try { return JSON.parse(localStorage.getItem('fantasai_mock_picks_saved') || 'null') || []; } catch { return []; } })();
     const myTeamId = user?.teamId || 1;
-    const savedMyPicks = savedMockPicks.filter(p => p.teamId === myTeamId && p.playerId);
-    const hasMockResults = savedMyPicks.length > 0;
-
-    function gradeResult(picks) {
-      const myPks = picks.filter(p => p.teamId === myTeamId && p.playerId);
-      if (!myPks.length) return { letter: '—', color: 'var(--text-faint)' };
-      const adpAvg = myPks.reduce((s, pk) => {
-        const p = findP(pk.playerId); return s + ((p?.adp || 200) - (pk.round * 12 + pk.slot));
-      }, 0) / myPks.length;
-      const letter = adpAvg > 8 ? 'A+' : adpAvg > 4 ? 'A' : adpAvg > 1 ? 'B+' : adpAvg > -2 ? 'B' : adpAvg > -5 ? 'C' : 'D';
-      const color  = adpAvg > 1 ? 'var(--good)' : adpAvg > -3 ? 'var(--warn)' : 'var(--danger)';
-      return { letter, color, adpAvg };
-    }
-    const grade = hasMockResults ? gradeResult(savedMockPicks) : null;
-
-    const savedByRoundTeam = {};
-    for (const pk of savedMockPicks) {
-      if (!savedByRoundTeam[pk.round]) savedByRoundTeam[pk.round] = {};
-      savedByRoundTeam[pk.round][pk.teamId] = pk;
-    }
+    const hasMockResults = (() => { try { const s = JSON.parse(localStorage.getItem('fantasai_mock_picks_saved') || 'null'); return Array.isArray(s) && s.filter(p => p.teamId === myTeamId && p.playerId).length > 0; } catch { return false; } })();
 
     const fmt = draftDate.toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
     const msLeft = draftDate - new Date();
@@ -850,106 +1153,19 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
               </div>
             )}
 
-            {/* Mock Draft Results (if any previous mock was completed) */}
-            {hasMockResults && <>
-          {/* Header with grade */}
-          <div style={{ padding: '16px 24px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0, background: 'var(--panel-1)' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 900, fontSize: 16, color: 'var(--text)', letterSpacing: '-.01em' }}>Mock Draft Results</div>
-              <div style={{ fontSize: 11, color: '#ff9800', fontFamily: 'var(--font-mono)', fontWeight: 700, marginTop: 2, letterSpacing: '.06em' }}>
-                {savedMockPicks.length} PICKS RECORDED · {savedMyPicks.length} FOR YOUR TEAM
-              </div>
-            </div>
-            {grade && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                {grade.adpAvg != null && (
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '.06em' }}>VS ADP</div>
-                    <div style={{ fontSize: 14, fontFamily: 'var(--font-mono)', fontWeight: 700, color: grade.color }}>
-                      {grade.adpAvg > 0 ? '+' : ''}{grade.adpAvg.toFixed(1)}
-                    </div>
-                  </div>
-                )}
-                <div style={{ width: 54, height: 54, borderRadius: 12, background: `${grade.color}22`, border: `2px solid ${grade.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: 28, fontStretch: '75%', color: grade.color }}>{grade.letter}</span>
+            {/* Mock results banner — links to Draft Recap page */}
+            {hasMockResults && (
+              <div style={{ padding: '16px 24px', borderBottom: activeMocks.length > 0 ? '1px solid var(--border)' : 'none', display: 'flex', alignItems: 'center', gap: 14, background: 'rgba(255,165,0,.06)', borderTop: '1px solid rgba(255,165,0,.25)' }}>
+                <div style={{ fontSize: 22 }}>📋</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14 }}>Mock Draft Results Available</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>Your last mock draft has been graded — see picks, ADP comparison, and full board.</div>
                 </div>
+                <button className="btn primary sm" onClick={() => onNav?.('draftrecap')}>
+                  View Draft Recap →
+                </button>
               </div>
             )}
-          </div>
-
-          {/* My Roster */}
-          <div style={{ padding: '14px 24px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 10 }}>
-              My Roster
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 6 }}>
-              {[...savedMyPicks].sort((a, b) => a.pickNum - b.pickNum).map(pk => {
-                const p = findP(pk.playerId);
-                if (!p) return null;
-                return (
-                  <div key={pk.pickNum} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 8px', borderRadius: 7, background: 'var(--panel-2)', border: '1px solid var(--border)' }}>
-                    <span className={`pos-badge pos-${p.pos}`} style={{ fontSize: 9, minWidth: 28 }}>{p.pos}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
-                      <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>R{pk.round}.{String(pk.slot).padStart(2, '0')}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Full Draft Board by Round × Team */}
-          <div style={{ padding: '14px 24px 20px', flex: 1 }}>
-            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 10 }}>
-              Full Draft Board
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
-                <thead>
-                  <tr>
-                    <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', fontWeight: 700, letterSpacing: '.06em', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>RD</th>
-                    {TEAMS_ORDER.map(tid => {
-                      const t = LEAGUE_TEAMS.find(x => x.id === tid);
-                      const isMe = tid === myTeamId;
-                      return (
-                        <th key={tid} style={{ padding: '4px 6px', textAlign: 'center', fontSize: 9, color: isMe ? 'var(--accent)' : 'var(--text-faint)', fontWeight: isMe ? 900 : 600, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', minWidth: 70 }}>
-                          {t?.name?.split(' ').pop() || t?.name || tid}
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {Array.from({ length: 16 }, (_, ri) => {
-                    const round = ri + 1;
-                    return (
-                      <tr key={round} style={{ background: round % 2 === 0 ? 'rgba(255,255,255,.018)' : 'transparent' }}>
-                        <td style={{ padding: '3px 8px', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-faint)', borderBottom: '1px solid rgba(255,255,255,.04)', whiteSpace: 'nowrap' }}>R{round}</td>
-                        {TEAMS_ORDER.map(tid => {
-                          const pk = savedByRoundTeam[round]?.[tid];
-                          const p  = pk ? findP(pk.playerId) : null;
-                          const isMe = tid === myTeamId;
-                          return (
-                            <td key={tid} style={{ padding: '4px 6px', textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,.04)', background: isMe ? 'rgba(198,255,58,.07)' : 'transparent', maxWidth: 90 }}>
-                              {p ? (
-                                <div title={`${p.name} (${p.pos}) R${pk.round}.${pk.slot}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10, fontWeight: isMe ? 700 : 400, color: isMe ? 'var(--accent)' : 'var(--text-dim)' }}>
-                                  {p.name.split(' ').slice(-1)[0]}
-                                </div>
-                              ) : (
-                                <span style={{ color: 'var(--border-strong)', fontSize: 9 }}>—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          </>}
         </div>
         </div>
       </>
@@ -1029,8 +1245,8 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
   return (
     <div className="draft-grid">
       {/* CLOCK BAR */}
-      <div className="draft-clock">
-        <div style={{ padding: '0 24px', borderRight: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 16, alignSelf: 'stretch' }}>
+      <div className="draft-clock" style={paused ? { background: 'linear-gradient(180deg, rgba(255,90,110,.18) 0%, rgba(255,90,110,.08) 100%)', animation: 'blink 1.2s infinite' } : isMyTurn ? { background: 'linear-gradient(180deg, rgba(76,175,130,.22) 0%, rgba(76,175,130,.10) 100%)' } : {}}>
+        <div style={{ padding: '0 24px', borderRight: `1px solid ${paused ? 'rgba(255,90,110,.3)' : 'var(--border)'}`, display: 'flex', alignItems: 'center', gap: 16, alignSelf: 'stretch' }}>
           <span className={`clock-time ${clockClass}`} style={{ fontSize: 48 }}>
             {`${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`}
           </span>
@@ -1046,13 +1262,33 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
           </div>
           <div>
             <div className="name">{onClockTeam.name}</div>
-            <div className="pick">{onClockTeam.owner} {isMyTurn && <span style={{ color: 'var(--accent)', marginLeft: 6 }}>· YOU'RE UP</span>}</div>
+            <div className="pick">{onClockTeam.owner}</div>
+            {paused ? (
+              <div style={{ fontSize: 13, fontWeight: 900, color: '#ff5a6e', letterSpacing: '.10em', textTransform: 'uppercase', animation: 'blink 1s infinite', marginTop: 3 }}>
+                ⏸ DRAFT PAUSED
+              </div>
+            ) : isMyTurn ? (
+              <div style={{ fontSize: 13, fontWeight: 900, color: '#4caf82', letterSpacing: '.10em', textTransform: 'uppercase', animation: 'blink 0.75s infinite', marginTop: 3 }}>
+                ⚡ YOUR PICK
+              </div>
+            ) : !draftComplete && myDraftTeamId && (
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#ffb547', letterSpacing: '.08em', textTransform: 'uppercase', marginTop: 3 }}>
+                PICK IN {picksAway} TURN{picksAway !== 1 ? 'S' : ''}
+              </div>
+            )}
           </div>
           <div className="up-next">
-            <span>UP NEXT →</span>
-            {upcoming.map(u => (
-              <span key={u.pick} className={`tn ${u.team.me ? 'me' : ''}`}>{u.pick}. {u.team.logo}</span>
-            ))}
+            <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-faint)', letterSpacing: '.14em', textTransform: 'uppercase', flexShrink: 0, writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>NEXT</div>
+            {upcoming.map((u, i) => {
+              const isMe = u.team?.me || u.teamId === myDraftTeamId;
+              return (
+                <div key={u.pick} className={`tn ${isMe ? 'me' : ''}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '4px 7px', gap: 2, position: 'relative', minWidth: 36 }}>
+                  <div style={{ fontSize: 11, lineHeight: 1 }}>{u.team?.logo ?? '?'}</div>
+                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: isMe ? 'inherit' : 'var(--text-dim)', lineHeight: 1 }}>#{u.pick}</div>
+                  {isMe && <div style={{ fontSize: 7, fontWeight: 900, letterSpacing: '.06em', lineHeight: 1, color: 'var(--accent-ink)' }}>YOU</div>}
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -1081,10 +1317,6 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
             {mockActive && (
               <button className="btn ghost sm" style={{ color: '#ff6b6b', borderColor: 'rgba(255,107,107,.4)' }} onClick={exitMockDraft}>✕ Exit Mock</button>
             )}
-            {isMyTurn && !mockActive && <button className="btn primary">▶ Draft Best Available</button>}
-            {mockActive && isMyTurn && (
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', animation: 'pulse 1s infinite' }}>YOUR PICK</span>
-            )}
             {mockActive && !isMyTurn && !paused && (
               <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>AI picking…</span>
             )}
@@ -1111,8 +1343,30 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
         </div>
       </div>
 
-      {/* GHOST PICKS STRIP */}
-      <div className="draft-ghosts" style={hidden.ghosts ? { display: 'none' } : {}}>
+      {/* Mobile tab bar — only visible on small screens */}
+      {isMobile && (
+        <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)', gridColumn: '1 / -1' }}>
+          {[
+            { id: 'board', label: 'Board',   icon: '📋' },
+            { id: 'picks', label: 'Picks',   icon: '🎯' },
+            { id: 'chat',  label: 'Chat',    icon: '💬' },
+          ].map(t => (
+            <button key={t.id} onClick={() => setMobileDraftTab(t.id)} style={{
+              flex: 1, padding: '10px 0', fontSize: 12, fontWeight: mobileDraftTab === t.id ? 700 : 500,
+              border: 'none', borderBottom: mobileDraftTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
+              background: 'transparent', color: mobileDraftTab === t.id ? 'var(--accent)' : 'var(--text-dim)',
+              cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+            }}>
+              <span style={{ fontSize: 16 }}>{t.icon}</span>
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* GHOST PICKS STRIP + CONCIERGE (right side) */}
+      <div className="draft-ghosts" style={(hidden.ghosts || (isMobile && mobileDraftTab !== 'board')) ? { display: 'none' } : {}}>
+        <div className="draft-ghosts-inner">
         <div className="ghost-label">
           <div className="ai-orb" style={{ width: 16, height: 16 }}></div>
           <span>GHOST PICKS</span>
@@ -1133,7 +1387,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
           </div>
 
           {upcoming.slice(0, 5).map(u => {
-            const ghostPreds = predictPicks(u.teamId, u.pick, draftedIds, 2);
+            const ghostPreds = predictPicks(u.teamId, u.pick, draftedIds, 3);
             return (
               <div key={u.pick} className={`ghost-card ${u.team.me ? 'me' : ''}`}>
                 <div className="ghost-head sm">
@@ -1149,122 +1403,130 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
             );
           })}
         </div>
-      </div>
-
-      {/* COMMISSIONER'S CONCIERGE — horizontal bar between ghost picks and big board */}
-      {isCommissioner && (
+        </div>{/* closes draft-ghosts-inner */}
+        {isCommissioner && (
         <div className="draft-concierge">
 
           {/* Label */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '0 12px', borderRight: '1px solid rgba(255,180,0,.2)', flexShrink: 0 }}>
-            <span style={{ fontSize: 13 }}>👑</span>
-            <div style={{ fontSize: 9, fontWeight: 900, color: '#ffb547', letterSpacing: '.07em', textTransform: 'uppercase', lineHeight: 1.2 }}>
-              Commish<br />Concierge
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, paddingRight: 10, borderRight: '1px solid rgba(255,180,0,.2)' }}>
+            <span style={{ fontSize: 14 }}>👑</span>
+            <span style={{ fontSize: 11, fontWeight: 900, color: '#ffb547', letterSpacing: '.07em', textTransform: 'uppercase', lineHeight: 1.2 }}>Commish<br/>Concierge</span>
           </div>
 
-          {/* ── Clock ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 12px', borderRight: '1px solid rgba(255,180,0,.15)' }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,180,0,.55)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Clock</div>
-            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px', ...(paused ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : {}) }} onClick={() => { const next = !paused; setPaused(next); logCommish(next ? 'pause' : 'resume', next ? 'Commissioner paused the draft clock' : 'Commissioner resumed the draft clock'); }}>
-                {paused ? '▶ Resume' : '⏸ Pause'}
+          {/* Pause / Resume */}
+          <button
+            style={{
+              padding: '5px 16px', fontSize: 13, fontWeight: 900, flexShrink: 0,
+              borderRadius: 6, cursor: 'pointer', letterSpacing: '.05em',
+              border: `1.5px solid ${paused ? 'var(--accent)' : 'rgba(255,180,0,.5)'}`,
+              background: paused ? 'rgba(198,255,58,.12)' : 'rgba(255,180,0,.1)',
+              color: paused ? 'var(--accent)' : '#ffb547',
+              boxShadow: paused ? '0 0 12px rgba(198,255,58,.2)' : 'none',
+              transition: 'all .2s',
+            }}
+            onClick={() => {
+              const next = !paused;
+              setPaused(next);
+              logCommish(next ? 'pause' : 'resume', next ? 'Commissioner paused the draft clock' : 'Commissioner resumed the draft clock');
+            }}
+          >
+            {paused ? '▶ Resume' : '⏸ Pause'}
+          </button>
+
+          {/* Clock controls */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, paddingLeft: 2, borderLeft: '1px solid rgba(255,180,0,.15)' }}>
+            <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={() => { setSeconds(clockSeconds); setPaused(false); }}>↺ Reset</button>
+            <select
+              className="input"
+              style={{ fontSize: 12, padding: '2px 4px', width: 64 }}
+              value={clockSeconds}
+              onChange={e => { const v = Number(e.target.value); setClockSeconds(v); setSeconds(v); logCommish('clock', `Commissioner set pick clock to ${v < 60 ? `${v}s` : `${v / 60}m`}`); }}
+              title="Seconds per pick"
+            >
+              {[30, 60, 90, 120, 180, 300].map(s => (
+                <option key={s} value={s}>{s < 60 ? `${s}s` : `${s/60}m`}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Undo picks */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, paddingLeft: 2, borderLeft: '1px solid rgba(255,180,0,.15)' }}>
+            <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={() => removeLastPicks(1)}>↩ Undo Last</button>
+            {selectedPicks.size > 0 ? (
+              <button style={{ fontSize: 12, padding: '3px 10px', background: '#ff9800', color: '#000', border: '1px solid #ff9800', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }} onClick={() => reverseSelectedPicks()}>
+                ↩ {selectedPicks.size} sel.
               </button>
-              <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={() => { setSeconds(clockSeconds); setPaused(false); }}>
-                ↺ Reset
-              </button>
-              <select
-                className="input"
-                style={{ fontSize: 10, padding: '2px 4px', width: 70 }}
-                value={clockSeconds}
-                onChange={e => { const v = Number(e.target.value); setClockSeconds(v); setSeconds(v); logCommish('clock', `Commissioner set pick clock to ${v < 60 ? `${v}s` : `${v / 60}m`}`); }}
-                title="Seconds per pick"
-              >
-                {[30, 60, 90, 120, 180, 300].map(s => (
-                  <option key={s} value={s}>{s < 60 ? `${s}s` : `${s/60}m`}</option>
-                ))}
-              </select>
-            </div>
+            ) : (
+              <span style={{ fontSize: 12, color: 'var(--text-faint)', fontStyle: 'italic' }}>select in log</span>
+            )}
           </div>
 
-          {/* ── Undo Picks ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 12px', borderRight: '1px solid rgba(255,180,0,.15)' }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,180,0,.55)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Undo Picks</div>
-            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={() => removeLastPicks(1)}>↩ Last</button>
-              {selectedPicks.size > 0 ? (
-                <button
-                  style={{ fontSize: 10, padding: '2px 8px', background: '#ff9800', color: '#000', border: '1px solid #ff9800', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }}
-                  onClick={() => reverseSelectedPicks()}
-                >
-                  ↩ {selectedPicks.size} selected
-                </button>
-              ) : (
-                <span style={{ fontSize: 10, color: 'var(--text-faint)', fontStyle: 'italic' }}>select in log ↓</span>
-              )}
-            </div>
-          </div>
-
-          {/* ── Make Pick — always visible to commissioner in live mode ── */}
-          {!mockActive && (() => {
+          {/* Draft on behalf of — team + player picker, works in both mock and live mode */}
+          {(() => {
             const pickTeamId = commishPickTeamId ?? onClockTeamId;
             const pickTeam   = LEAGUE_TEAMS.find(t => t.id === pickTeamId);
+            const searchPool = mockActive
+              ? playerPool.filter(p => !new Set(mockPicks.map(x => x.playerId)).has(p.id))
+              : bestAvail;
             const matches    = commishPickSearch.trim()
-              ? bestAvail.filter(p => p.name.toLowerCase().includes(commishPickSearch.toLowerCase())).slice(0, 7)
+              ? searchPool.filter(p => p.name.toLowerCase().includes(commishPickSearch.toLowerCase())).slice(0, 7)
               : [];
+            function handleDraftOnBehalf(p) {
+              if (mockActive) {
+                commishMockPick(p.id, pickTeamId);
+              } else {
+                commishPick(p.id, pickTeamId);
+                setPaused(false);
+              }
+              setCommishPickSearch('');
+              setCommishPickTeamId(null);
+              logCommish('pick', `Commissioner drafted ${p.name} (${p.pos}) for ${pickTeam?.name}`);
+            }
             return (
-              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 12px', borderRight: '1px solid rgba(78,168,255,.3)', background: 'rgba(78,168,255,.06)', flexShrink: 0 }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent-2)', textTransform: 'uppercase', letterSpacing: '.08em' }}>
-                  Make Pick · Pick #{livePickNum}
+              <div style={{ position: 'relative', display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, paddingLeft: 10, borderLeft: '1px solid rgba(78,168,255,.3)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent-2)', textTransform: 'uppercase', letterSpacing: '.07em', lineHeight: 1.2 }}>Draft on</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent-2)', textTransform: 'uppercase', letterSpacing: '.07em', lineHeight: 1.2 }}>behalf of</span>
                 </div>
-                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <select
-                    className="input"
-                    style={{ fontSize: 10, padding: '2px 4px', width: 100 }}
-                    value={pickTeamId}
-                    onChange={e => setCommishPickTeamId(Number(e.target.value))}
-                    title="Team receiving this pick"
-                  >
-                    {LEAGUE_TEAMS.map(t => (
-                      <option key={t.id} value={t.id}>{t.logo} {t.name}</option>
-                    ))}
-                  </select>
-                  <input
-                    className="input"
-                    style={{ fontSize: 10, padding: '2px 6px', width: 120 }}
-                    placeholder="Search player…"
-                    value={commishPickSearch}
-                    onChange={e => setCommishPickSearch(e.target.value)}
-                    autoComplete="off"
-                  />
-                </div>
+                <select
+                  className="input"
+                  style={{ fontSize: 12, padding: '2px 4px', width: 110 }}
+                  value={pickTeamId}
+                  onChange={e => setCommishPickTeamId(Number(e.target.value))}
+                >
+                  {LEAGUE_TEAMS.map(t => (
+                    <option key={t.id} value={t.id}>{t.logo} {t.name}</option>
+                  ))}
+                </select>
+                <input
+                  className="input"
+                  style={{ fontSize: 12, padding: '2px 6px', width: 148 }}
+                  placeholder="Search player…"
+                  value={commishPickSearch}
+                  onChange={e => setCommishPickSearch(e.target.value)}
+                  autoComplete="off"
+                />
                 {matches.length > 0 && (
                   <div style={{
                     position: 'absolute', top: '100%', left: 0, zIndex: 60,
                     background: 'var(--panel-2)', border: '1px solid var(--border-strong)',
-                    borderRadius: 6, minWidth: 240, boxShadow: '0 6px 24px rgba(0,0,0,.6)', overflow: 'hidden',
+                    borderRadius: 6, minWidth: 280, boxShadow: '0 6px 24px rgba(0,0,0,.6)', overflow: 'hidden',
                   }}>
-                    <div style={{ padding: '5px 10px', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', background: 'rgba(78,168,255,.08)', borderBottom: '1px solid var(--border)' }}>
-                      {pickTeam?.logo} {pickTeam?.name} · click to draft
+                    <div style={{ padding: '5px 10px', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', background: 'rgba(78,168,255,.08)', borderBottom: '1px solid var(--border)' }}>
+                      {pickTeam?.logo} {pickTeam?.name} · Pick #{currentPickNum}{mockActive ? ' (mock)' : ''}
                     </div>
                     {matches.map((p, i) => (
                       <div
                         key={p.id}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', borderBottom: i < matches.length - 1 ? '1px solid var(--border)' : 'none' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px', cursor: 'pointer', borderBottom: i < matches.length - 1 ? '1px solid var(--border)' : 'none' }}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
                         onMouseLeave={e => e.currentTarget.style.background = ''}
-                        onClick={() => {
-                          commishPick(p.id, pickTeamId);
-                          setCommishPickSearch('');
-                          setCommishPickTeamId(null);
-                          setPaused(false);
-                          logCommish('pick', `Commissioner drafted ${p.name} (${p.pos}) for ${pickTeam?.name}`);
-                        }}
+                        onClick={() => handleDraftOnBehalf(p)}
                       >
-                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 3, background: 'rgba(78,168,255,.15)', color: 'var(--accent-2)', flexShrink: 0 }}>{p.pos}</span>
-                        <span style={{ fontWeight: 600, fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-faint)', flexShrink: 0 }}>{p.team}</span>
-                        <span style={{ fontSize: 10, color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 700, flexShrink: 0 }}>{p.proj?.toFixed(1)}</span>
+                        <span style={{ fontSize: 11, padding: '1px 5px', borderRadius: 3, background: 'rgba(78,168,255,.15)', color: 'var(--accent-2)', flexShrink: 0 }}>{p.pos}</span>
+                        <span style={{ fontWeight: 600, fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.team}</span>
+                        <span style={{ fontSize: 12, color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{p.proj?.toFixed(1)}</span>
                       </div>
                     ))}
                   </div>
@@ -1273,75 +1535,61 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
             );
           })()}
 
-          {/* ── Draft Date ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 12px', borderRight: '1px solid rgba(255,180,0,.15)' }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,180,0,.55)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Draft Date</div>
+          {/* Draft Date */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, paddingLeft: 8, borderLeft: '1px solid rgba(255,180,0,.15)' }}>
             {editingDraftDate ? (
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <input
-                  type="datetime-local"
-                  className="input"
-                  style={{ fontSize: 10, padding: '2px 4px' }}
-                  value={draftDateDraft}
-                  onChange={e => setDraftDateDraft(e.target.value)}
-                />
-                <button className="btn primary sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={saveDraftDate}>Save</button>
-                <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={() => setEditingDraftDate(false)}>✕</button>
-              </div>
+              <>
+                <input type="datetime-local" className="input" style={{ fontSize: 12, padding: '2px 4px' }} value={draftDateDraft} onChange={e => setDraftDateDraft(e.target.value)} />
+                <button className="btn primary sm" style={{ fontSize: 12 }} onClick={saveDraftDate}>Save</button>
+                <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={() => setEditingDraftDate(false)}>✕</button>
+              </>
             ) : (
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-                  {draftSettings.date ? new Date(draftSettings.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Not set'}
+              <>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                  {draftSettings.date ? new Date(draftSettings.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Date not set'}
                 </span>
-                <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={() => { setDraftDateDraft(draftSettings.date || ''); setEditingDraftDate(true); }}>Edit</button>
-              </div>
+                <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={() => { setDraftDateDraft(draftSettings.date || ''); setEditingDraftDate(true); }}>Edit</button>
+              </>
             )}
           </div>
 
-          {/* ── Mock Draft ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 12px', borderRight: '1px solid rgba(255,180,0,.15)' }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,180,0,.55)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Mock Draft</div>
+          {/* Mock Draft */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, paddingLeft: 8, borderLeft: '1px solid rgba(255,180,0,.15)' }}>
             {mockActive ? (
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
-                  {mockPickNum > 192 ? '✓ Done' : `Pick #${mockPickNum}`}
-                </span>
-                <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={exitMockDraft}>✕ Exit</button>
-              </div>
+              <>
+                <span style={{ fontSize: 12, color: '#ffb547', whiteSpace: 'nowrap' }}>Mock · {mockPickNum > TOTAL_PICKS ? 'Done' : `Pick #${mockPickNum}`}</span>
+                <button className="btn ghost sm" style={{ fontSize: 12, color: '#ff5a6e' }} onClick={exitMockDraft}>✕ Exit</button>
+              </>
             ) : (
-              <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={startMockDraft} disabled={isLive}>
-                ▶ Start Mock
-              </button>
+              <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={startMockDraft} disabled={isLive}>▶ Mock Draft</button>
             )}
           </div>
 
-          {/* ── Danger Zone ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: '0 12px', marginLeft: 'auto' }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,80,80,.5)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Danger</div>
+          {/* Danger — pushed to far right */}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center', paddingLeft: 8, borderLeft: '1px solid rgba(255,80,80,.2)' }}>
             {resetDraftConfirm2 ? (
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap' }}>
-                <span style={{ fontSize: 9, color: '#ff5a6e', whiteSpace: 'nowrap' }}>Absolutely sure?</span>
-                <button className="btn sm" style={{ fontSize: 10, padding: '2px 7px', background: '#ff5a6e', color: '#fff', borderColor: '#ff5a6e', fontWeight: 900 }} onClick={resetDraft}>YES, RESET</button>
-                <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={() => { setResetDraftConfirm(false); setResetDraftConfirm2(false); }}>No</button>
-              </div>
+              <>
+                <span style={{ fontSize: 11, color: '#ff5a6e', whiteSpace: 'nowrap' }}>Absolutely sure?</span>
+                <button className="btn sm" style={{ fontSize: 12, background: '#ff5a6e', color: '#fff', borderColor: '#ff5a6e', fontWeight: 900 }} onClick={resetDraft}>YES, RESET</button>
+                <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={() => { setResetDraftConfirm(false); setResetDraftConfirm2(false); }}>No</button>
+              </>
             ) : resetDraftConfirm ? (
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <span style={{ fontSize: 10, color: '#ff5a6e' }}>Sure?</span>
-                <button className="btn sm" style={{ fontSize: 10, padding: '2px 7px', background: '#ff9800', color: '#000', borderColor: '#ff9800' }} onClick={() => setResetDraftConfirm2(true)}>Yes</button>
-                <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px' }} onClick={() => setResetDraftConfirm(false)}>No</button>
-              </div>
+              <>
+                <span style={{ fontSize: 12, color: '#ff5a6e' }}>Sure?</span>
+                <button className="btn sm" style={{ fontSize: 12, background: '#ff9800', color: '#000', borderColor: '#ff9800' }} onClick={() => setResetDraftConfirm2(true)}>Yes</button>
+                <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={() => setResetDraftConfirm(false)}>No</button>
+              </>
             ) : (
-              <button className="btn ghost sm" style={{ fontSize: 10, padding: '2px 7px', color: '#ff5a6e', borderColor: 'rgba(255,90,110,.35)' }} onClick={() => setResetDraftConfirm(true)}>
-                ⚠ Reset Draft
-              </button>
+              <button className="btn ghost sm" style={{ fontSize: 12, color: '#ff5a6e', borderColor: 'rgba(255,90,110,.3)' }} onClick={() => setResetDraftConfirm(true)}>⚠ Reset Draft</button>
             )}
           </div>
 
         </div>
-      )}
+        )}{/* closes isCommissioner concierge */}
+      </div>{/* closes draft-ghosts */}
 
       {/* BIG BOARD */}
-      <div className="draft-board">
+      <div className="draft-board" style={isMobile && mobileDraftTab !== 'board' ? { display: 'none' } : {}}>
         <div className="toolbar" style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', borderTop: 0 }}>
           <div className="card-title" style={{ flex: 1 }}>
             Big Board · {bestAvail.length} available
@@ -1351,6 +1599,32 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
               </span>
             )}
           </div>
+          <button
+            className={`btn ${userDraftMode === 'auto' ? 'primary' : 'secondary'} sm`}
+            onClick={() => {
+              const next = userDraftMode === 'auto' ? 'manual' : 'auto';
+              setUserDraftMode(next);
+              postChat(next === 'auto'
+                ? `${myName} enabled Autodraft — picking best available automatically each round ⚡`
+                : `${myName} disabled Autodraft — back to manual picking`);
+            }}
+            title="Autodraft — picks best available based on ranking and roster needs"
+          >
+            {userDraftMode === 'auto' ? '⏸ Autodraft ON' : '⚡ Autodraft'}
+          </button>
+          <button
+            className={`btn ${userDraftMode === 'ai' ? 'primary' : 'secondary'} sm`}
+            onClick={() => {
+              const next = userDraftMode === 'ai' ? 'manual' : 'ai';
+              setUserDraftMode(next);
+              postChat(next === 'ai'
+                ? `${myName} enabled AI-Draft (Ghost) — AI is picking for them each round 🤖`
+                : `${myName} disabled AI-Draft (Ghost) — back to manual picking`);
+            }}
+            title="AI-Draft (Ghost) — AI picks for you every round"
+          >
+            {userDraftMode === 'ai' ? '⏸ AI-Draft ON' : '🤖 AI-Draft (Ghost)'}
+          </button>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {apiLoading && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>loading…</span>}
             {!apiLoading && apiPlayers && (
@@ -1438,6 +1712,75 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
         <div style={{ padding: '8px 12px' }}>
           <input className="input search" placeholder="Find player" value={boardSearch} onChange={e => setBoardSearch(e.target.value)} style={{ width: '100%' }} />
         </div>
+
+        {/* Next Gen stat column selector — shown when a position is filtered */}
+        {NG_STATS[boardPos] && (
+          <div style={{ padding: '5px 12px 7px', borderBottom: '1px solid var(--border)', background: 'rgba(198,255,58,.025)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-mono)', color: '#c6ff3a', textTransform: 'uppercase', letterSpacing: '.1em', flexShrink: 0, opacity: 0.7 }}>
+                Next Gen
+              </span>
+              {NG_STATS[boardPos].map(stat => {
+                const on = (ngColsByPos[boardPos] || new Set()).has(stat.id);
+                return (
+                  <button
+                    key={stat.id}
+                    onClick={() => toggleNgCol(boardPos, stat.id)}
+                    title={stat.tip}
+                    style={{
+                      fontSize: 10, padding: '2px 9px', borderRadius: 10,
+                      border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+                      background: on ? 'rgba(198,255,58,.14)' : 'transparent',
+                      color: on ? 'var(--accent)' : 'var(--text-faint)',
+                      cursor: 'pointer', fontWeight: on ? 700 : 400,
+                    }}
+                  >
+                    {on ? '✓ ' : ''}{stat.label}
+                  </button>
+                );
+              })}
+              {activeNgCols.length > 0 && (
+                <span style={{ fontSize: 9, color: 'var(--text-faint)', marginLeft: 2, fontStyle: 'italic' }}>
+                  columns added ↓
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Autodraft / AI-Draft active banner */}
+        {userDraftMode !== 'manual' && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '7px 12px',
+            background: userDraftMode === 'ai' ? 'rgba(78,168,255,.10)' : 'rgba(198,255,58,.08)',
+            borderBottom: `1px solid ${userDraftMode === 'ai' ? 'rgba(78,168,255,.28)' : 'rgba(198,255,58,.28)'}`,
+            borderLeft: `3px solid ${userDraftMode === 'ai' ? 'var(--accent-2)' : 'var(--accent)'}`,
+          }}>
+            <div className="live-dot" style={{
+              background: userDraftMode === 'ai' ? 'var(--accent-2)' : 'var(--accent)',
+              boxShadow: `0 0 0 4px ${userDraftMode === 'ai' ? 'rgba(78,168,255,.18)' : 'rgba(198,255,58,.18)'}`,
+              flexShrink: 0,
+            }} />
+            <span style={{ fontSize: 11, fontWeight: 800, fontFamily: 'var(--font-mono)', color: userDraftMode === 'ai' ? 'var(--accent-2)' : 'var(--accent)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+              {userDraftMode === 'ai' ? 'AI-Draft Active' : 'Autodraft Active'}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+              — {userDraftMode === 'ai' ? 'AI is picking for you each round' : 'picking best available each round'}
+            </span>
+            <button
+              className="btn ghost sm"
+              style={{ fontSize: 10, padding: '1px 7px', marginLeft: 'auto', color: 'var(--text-faint)', flexShrink: 0 }}
+              onClick={() => {
+                setUserDraftMode('manual');
+                postChat(`${myName} disabled ${userDraftMode === 'ai' ? 'AI-Draft (Ghost)' : 'Autodraft'} — back to manual picking`);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         {justFreedIds.size > 0 && (
           <div style={{ padding: '8px 12px', background: 'rgba(76,175,130,.12)', borderBottom: '1px solid rgba(76,175,130,.3)' }}>
             <div style={{ fontSize: 9, fontWeight: 800, color: '#4caf82', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 5 }}>
@@ -1497,14 +1840,21 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
                 >
                   {rankSource === 'sleeper' ? 'ADP' : rankSource === 'cbs' ? 'CBS' : rankSource === 'fp' ? 'FP ECR' : 'ADP'} {boardSortCol === 'adp' ? (boardSortDir === 'asc' ? '▲' : '▼') : ''}
                 </th>
+                {activeNgCols.map(s => (
+                  <th key={s.id} className="num" title={s.tip} style={{ fontSize: 10, color: '#c6ff3a', whiteSpace: 'nowrap', opacity: 0.85, cursor: 'default', letterSpacing: '.02em' }}>
+                    {s.label}
+                  </th>
+                ))}
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {boardDisplay.slice(0, 120).map((p, idx) => {
+              {(boardPos === 'K' || boardPos === 'DST' ? boardDisplay : boardDisplay.slice(0, 150)).map((p, idx) => {
                 const isDrafted   = draftedIds.has(p.id);
                 const inQueue     = queue.includes(p.id);
                 const isJustFreed = justFreedIds.has(p.id);
+                const isAiPick    = aiSuggestions.some(s => s.id === p.id);
+                const aiPickRank  = isAiPick ? aiSuggestions.findIndex(s => s.id === p.id) : -1;
                 const rank        = getRank(p);
                 const displayRank = rankSource === 'owner'
                   ? (ownerRanks[p.id] != null ? ownerRanks[p.id] : '—')
@@ -1521,13 +1871,18 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
                         <div className="player-cell">
                           <PlayerAvatar player={p} />
                           <div style={{ minWidth: 0, flex: 1 }}>
-                            <div style={{ fontSize: 12, color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'line-through', textDecorationColor: 'rgba(255,255,255,.3)' }}>{p.name}</div>
+                            <div style={{ fontSize: 14, color: 'var(--text-dim)', fontWeight: 600, textDecoration: 'line-through', textDecorationColor: 'rgba(255,255,255,.3)' }}>{p.name}</div>
                             <div className="player-meta"><PosBadge pos={p.pos} /> {p.team}</div>
                           </div>
                         </div>
                       </td>
                       <td className="tier" style={{ color: 'var(--text-faint)' }}>T{p.tier}</td>
                       <td className="num faint" style={{ fontSize: 11 }}>{p.adp != null ? p.adp.toFixed(1) : '—'}</td>
+                      {activeNgCols.map(s => (
+                        <td key={s.id} className="num" style={{ fontSize: 10, color: 'var(--text-faint)', opacity: 0.5 }}>
+                          {fmtNg(getNgVal(p, s.id, breakoutByName), s.id)}
+                        </td>
+                      ))}
                       <td>
                         {pickLabel && (
                           <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
@@ -1540,13 +1895,24 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
                 }
 
                 return (
-                  <tr key={p.id} style={isJustFreed ? { background: 'rgba(76,175,130,.1)', outline: '1px solid rgba(76,175,130,.3)' } : {}}>
+                  <tr key={p.id} style={
+                    isJustFreed ? { background: 'rgba(76,175,130,.1)', outline: '1px solid rgba(76,175,130,.3)' }
+                    : isAiPick  ? { background: 'rgba(78,168,255,.08)', outline: `1px solid rgba(78,168,255,${aiPickRank === 0 ? '.45' : '.22'})` }
+                    : {}
+                  }>
                     <td className="rank" style={{ color: rank < 9999 ? undefined : 'var(--text-faint)' }}>{displayRank}</td>
                     <td>
                       <div className="player-cell">
                         <PlayerAvatar player={p} />
                         <div style={{ minWidth: 0, flex: 1 }}>
-                          <div className="player-name" style={{ fontSize: 12 }}>{p.name}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <div className="player-name" style={{ fontSize: 14 }}>{p.name}</div>
+                            {isAiPick && (
+                              <span style={{ fontSize: 8, fontWeight: 900, letterSpacing: '.05em', background: 'var(--accent-2)', color: 'var(--accent-2-ink)', borderRadius: 3, padding: '1px 4px', lineHeight: 1.4, flexShrink: 0 }}>
+                                AI#{aiPickRank + 1}
+                              </span>
+                            )}
+                          </div>
                           <div className="player-meta"><PosBadge pos={p.pos} /> {p.team}</div>
                         </div>
                       </div>
@@ -1566,6 +1932,20 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
                         p.adp != null ? p.adp.toFixed(1) : '—'
                       )}
                     </td>
+                    {activeNgCols.map(s => {
+                      const val = getNgVal(p, s.id, breakoutByName);
+                      const isHot = val != null && (
+                        (s.id === 'opp_score'  && val >= 7) ||
+                        (s.id === 'snap_pct'   && val >= 70) ||
+                        (s.id === 'snap_delta' && val >= 8) ||
+                        (s.id === 'tgt_share'  && val >= 20)
+                      );
+                      return (
+                        <td key={s.id} className="num" style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: isHot ? 700 : 400, color: isHot ? '#c6ff3a' : val != null ? 'var(--text-dim)' : 'var(--text-faint)', whiteSpace: 'nowrap' }}>
+                          {fmtNg(val, s.id)}
+                        </td>
+                      );
+                    })}
                     <td>
                       <div className="flex" style={{ gap: 4 }}>
                         <button className="btn sm icon" title="Add to queue"
@@ -1575,11 +1955,12 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
                         </button>
                         {(isMyTurn || (isCommissioner && !mockActive)) && (
                           <button
-                            className="btn sm primary"
+                            className={`btn sm ${aiSuggestions.some(s => s.id === p.id) ? 'ai' : 'primary'}`}
                             style={{ padding: '4px 8px' }}
                             onClick={() => mockActive ? draftPlayer(p.id) : commishPick(p.id)}
+                            title={aiSuggestions.find(s => s.id === p.id)?.why}
                           >
-                            {isCommissioner && !isMyTurn ? `→ ${onClockTeam?.logo}` : 'DRAFT'}
+                            {isCommissioner && !isMyTurn ? `→ ${onClockTeam?.logo}` : (aiSuggestions.some(s => s.id === p.id) ? '★ DRAFT' : 'DRAFT')}
                           </button>
                         )}
                       </div>
@@ -1592,8 +1973,10 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
         </div>
       </div>
 
+      {/* MIDDLE COLUMN: Queue (1/3) + Pick Log (2/3) */}
+      <div className="draft-middle" style={isMobile && mobileDraftTab !== 'picks' ? { display: 'none' } : {}}>
       {/* MY QUEUE */}
-      <div className="draft-queue" style={hidden.queue ? { overflow: 'hidden' } : {}}>
+      <div className="draft-queue" style={hidden.queue ? { flex: '0 0 auto', maxHeight: 42, overflow: 'hidden' } : {}}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
           <div className="card-title" style={{ flex: 1 }}>My Queue · {queue.length}</div>
           <button className="btn sm icon ghost" onClick={() => togglePanel('queue')} title={hidden.queue ? 'Expand' : 'Minimize'} style={{ marginRight: 4, fontSize: 10 }}>
@@ -1613,7 +1996,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
                 <span className="num">{i + 1}</span>
                 <PlayerAvatar player={p} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="player-name" style={{ fontSize: 12 }}>{p.name}</div>
+                  <div className="player-name" style={{ fontSize: 14 }}>{p.name}</div>
                   <div className="player-meta"><PosBadge pos={p.pos} /> {p.team} · ECR #{p.ecr}</div>
                 </div>
                 {canPick && (
@@ -1640,6 +2023,48 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
             <div className="empty">Queue empty<br /><span className="faint" style={{ fontSize: 11 }}>Add players from the Big Board.</span></div>
           )}
         </div>
+        {/* TEAMS GRID — below Queue */}
+        <div className="draft-teams" style={hidden.teams ? { display: 'none' } : {}}>
+          <div className="teams-grid">
+            {teamsForCols.map((t, colIdx) => {
+              if (!t) return null;
+              const teamPicks = allPicks.filter(pk => pk.teamId === t.id);
+              return (
+                <div key={t.id} className={`team-col ${t.me ? 'me' : ''} ${t.id === onClockTeamId ? 'active' : ''}`}>
+                  <div className="hdr">
+                    <span>#{colIdx + 1}</span>
+                    <span className="pts">{Math.round(teamPicks.filter(p => p.playerId).reduce((s, p) => s + (findP(p.playerId)?.avg || 0), 0))}</span>
+                  </div>
+                  <div className="team-name">{t.logo} {t.name}</div>
+                  {isCommissioner && (
+                    <select
+                      value={teamModes[t.id] || 'manual'}
+                      onChange={e => setTeamModes(prev => ({ ...prev, [t.id]: e.target.value }))}
+                      style={{ fontSize: 9, padding: '2px 3px', width: '100%', background: 'var(--panel)', color: teamModes[t.id] === 'ai' ? 'var(--accent)' : teamModes[t.id] === 'auto' ? '#ffb547' : 'var(--text-faint)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', marginBottom: 2, fontWeight: 700 }}
+                    >
+                      <option value="manual">Manual</option>
+                      <option value="auto">Auto Draft</option>
+                      <option value="ai">AI Draft</option>
+                    </select>
+                  )}
+                  {teamPicks.slice(0, 8).map(pk => {
+                    if (!pk.playerId) return (
+                      <div key={pk.pickNum} className="pick-cell empty"><span>R{pk.round}.{pk.slot}</span></div>
+                    );
+                    const p = findP(pk.playerId);
+                    if (!p) return null;
+                    return (
+                      <div key={pk.pickNum} className="pick-cell" style={{ borderLeftWidth: 2, borderLeftStyle: 'solid', borderLeftColor: `var(--pos-${p.pos.toLowerCase() === 'dst' ? 'dst' : p.pos.toLowerCase()})` }}>
+                        <PosBadge pos={p.pos} />
+                        <span className="nm">{p.name.split(' ').slice(-1)[0]}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* PICK LOG */}
@@ -1657,19 +2082,23 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
           <button className="btn sm icon ghost" onClick={() => togglePanel('picklog')} title={hidden.picklog ? 'Expand' : 'Minimize'} style={{ marginRight: 8, fontSize: 10 }}>
             {hidden.picklog ? '▼' : '▲'}
           </button>
-          <span className="mono faint" style={{ fontSize: 10 }}>{currentPickNum - 1}/192</span>
+          <span className="mono faint" style={{ fontSize: 10 }}>{currentPickNum - 1}/{TOTAL_PICKS}</span>
         </div>
         <div style={{ flex: 1, overflow: 'auto', display: hidden.picklog ? 'none' : undefined }}>
           {/* Commissioner event entries — most recent first */}
-          {commishLog.slice().reverse().map(entry => (
-            <div key={`cl-${entry.id}`} style={{ padding: '6px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, background: entry.type === 'reset' ? 'rgba(255,90,110,.08)' : 'rgba(91,156,246,.06)', borderLeft: `3px solid ${entry.type === 'reset' ? '#ff5a6e' : '#5b9cf6'}` }}>
-              <span style={{ fontSize: 14, flexShrink: 0 }}>{entry.type === 'reset' ? '⚠' : entry.type === 'pause' ? '⏸' : entry.type === 'resume' ? '▶' : '⚙'}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: entry.type === 'reset' ? '#ff5a6e' : '#5b9cf6', fontWeight: 700, fontSize: 11 }}>{entry.message}</div>
-                <div style={{ color: 'var(--text-faint)', fontSize: 10 }}>{entry.ts}</div>
+          {commishLog.slice().reverse().map(entry => {
+            const entryColor = entry.type === 'reset' ? '#ff5a6e' : entry.type === 'pause' ? '#ff5a6e' : entry.type === 'resume' ? '#4caf82' : '#5b9cf6';
+            const entryBg    = entry.type === 'reset' ? 'rgba(255,90,110,.08)' : entry.type === 'pause' ? 'rgba(255,90,110,.07)' : entry.type === 'resume' ? 'rgba(76,175,130,.07)' : 'rgba(91,156,246,.06)';
+            return (
+              <div key={`cl-${entry.id}`} style={{ padding: '6px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, background: entryBg, borderLeft: `3px solid ${entryColor}` }}>
+                <span style={{ fontSize: 14, flexShrink: 0 }}>{entry.type === 'reset' ? '⚠' : entry.type === 'pause' ? '⏸' : entry.type === 'resume' ? '▶' : '⚙'}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: entryColor, fontWeight: 700, fontSize: 11 }}>{entry.message}</div>
+                  <div style={{ color: 'var(--text-faint)', fontSize: 10 }}>{entry.ts}</div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {/* Reversal audit entries — most recent first */}
           {reversalLog.slice().reverse().map((entry, i) => {
             const rp = findPlayer(entry.playerId);
@@ -1699,6 +2128,9 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
             const ghostMatch = ghost?.player?.id === pk.playerId;
             const deltaColor = adpDelta >= 3 ? '#4caf82' : adpDelta <= -3 ? '#ff5a6e' : 'var(--text-dim)';
             const isSelected = selectedPicks.has(pk.pickNum);
+            const gradeVal = Math.round(((p.adp ?? p.ecr ?? pk.pickNum) - pk.pickNum + 20) / 6);
+            const grade = gradeVal > 4 ? 'A+' : gradeVal > 3 ? 'A' : gradeVal > 2 ? 'B+' : gradeVal > 1 ? 'B' : gradeVal > 0 ? 'C' : 'D';
+            const gradeColor = gradeVal > 3 ? 'var(--accent)' : gradeVal > 1 ? 'var(--warn)' : 'var(--danger)';
             return (
               <div key={pk.pickNum} style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, background: isSelected ? 'rgba(255,152,0,.1)' : t.me ? 'rgba(198,255,58,.03)' : '' }}>
                 {isCommissioner && (
@@ -1709,11 +2141,14 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
                     style={{ cursor: 'pointer', accentColor: '#ff9800', width: 13, height: 13, flexShrink: 0 }}
                   />
                 )}
-                <div className="mono faint" style={{ width: 38, fontSize: 11, flexShrink: 0 }}>{pk.round}.{pk.slot.toString().padStart(2, '0')}</div>
+                <div className="mono faint" style={{ width: 42, fontSize: 11, flexShrink: 0, lineHeight: 1.3 }}>
+                  {pk.round}.{pk.slot.toString().padStart(2, '0')}
+                  <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>#{pk.pickNum}</div>
+                </div>
                 <PosBadge pos={p.pos} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'nowrap', overflow: 'hidden' }}>
-                    <span className="player-name" style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                    <span className="player-name" style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
                     <span className="faint mono" style={{ fontSize: 10, flexShrink: 0 }}>{p.team}</span>
                     <span style={{ fontSize: 10, fontWeight: 700, color: deltaColor, flexShrink: 0, marginLeft: 'auto' }}>
                       {adpDelta >= 0 ? '+' : ''}{adpDelta.toFixed(1)}
@@ -1728,209 +2163,179 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick }) {
                     )}
                   </div>
                 </div>
+                <div style={{ textAlign: 'center', flexShrink: 0 }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', fontWeight: 900, fontSize: 16, color: gradeColor, lineHeight: 1 }}>{grade}</div>
+                  <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>AI</div>
+                </div>
+                {(() => {
+                  const myRank = getRank(p);
+                  const rankLabel = rankSource === 'owner' ? 'My Rnk' : rankSource === 'cbs' ? 'CBS' : rankSource === 'fp' ? 'FP' : 'ECR';
+                  return (
+                    <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 36 }}>
+                      <div className="mono" style={{ fontSize: 11, fontWeight: 700, color: myRank < 9999 ? 'var(--text)' : 'var(--text-faint)' }}>
+                        {myRank < 9999 ? `#${myRank}` : '—'}
+                      </div>
+                      <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{rankLabel}</div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
         </div>
       </div>
+      </div>{/* /draft-middle */}
 
-      {/* RIGHT: AI + Roster + Chat */}
-      <div className="draft-roster">
-        {/* AI Pick Engine */}
-        <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <div className="suggest-card">
-            <div className="head" style={{ marginBottom: 8 }}>
-              <div className="ai-orb"></div>
-              <span className="label">FantasAI Pick Engine</span>
-              <span className="grow"></span>
-              <span className="mono faint" style={{ fontSize: 10 }}>0.2s ago</span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {aiSuggestions.map((s, i) => {
-                const p = findPlayer(s.id);
-                if (!p) return null;
-                return (
-                  <div key={s.id} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span className="mono accent" style={{ fontSize: 10, fontWeight: 700, flexShrink: 0 }}>#{i + 1}</span>
-                    <PlayerAvatar player={p} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="player-name" style={{ fontSize: 11 }}>{p.name}</div>
-                      <div className="player-meta"><PosBadge pos={p.pos} /> {p.team}</div>
-                    </div>
-                    {(aiMode === 'centerpiece' || aiMode === 'copilot') && isMyTurn && (
-                      <button className="btn ai sm" style={{ padding: '3px 8px', fontSize: 10 }}>DRAFT</button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+      {/* RIGHT: Roster / All Teams / Chat panel */}
+      <div className="draft-roster" style={isMobile && mobileDraftTab !== 'chat' ? { display: 'none' } : { display: 'flex', flexDirection: 'column' }}>
+        {/* Tab strip */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          {[
+            { id: 'roster', label: '🏈 My Roster' },
+            { id: 'grid',   label: '▦ All Teams' },
+            { id: 'chat',   label: '💬 Chat' },
+          ].map(tab => (
+            <button key={tab.id}
+              onClick={() => setRosterPanelView(tab.id)}
+              style={{
+                flex: 1, padding: '8px 4px', fontSize: 11, fontWeight: rosterPanelView === tab.id ? 800 : 500,
+                background: rosterPanelView === tab.id ? 'rgba(198,255,58,.08)' : 'transparent',
+                color: rosterPanelView === tab.id ? 'var(--accent)' : 'var(--text-dim)',
+                border: 'none', borderBottom: rosterPanelView === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
+                cursor: 'pointer', transition: 'all 0.15s',
+              }}
+            >{tab.label}</button>
+          ))}
         </div>
-        {(() => {
-          const myTeamName = LEAGUE_TEAMS.find(t => t.id === myDraftTeamId)?.name || 'My Team';
-          const isMock = mockActive;
-          const savedMockPicks = (() => { try { return JSON.parse(localStorage.getItem('fantasai_mock_picks_saved') || 'null') || []; } catch { return []; } })();
-          const displayPicks = myPicks; // always current (mock or live)
 
-          // Grade based on avg ECR of picks
-          function gradeMock(picks) {
-            if (!picks.length) return { letter: '—', color: 'var(--text-faint)' };
-            const myTeamPicks = picks.filter(p => p.teamId === myDraftTeamId && p.playerId);
-            if (!myTeamPicks.length) return { letter: '—', color: 'var(--text-faint)' };
-            const avgEcr = myTeamPicks.reduce((s, pk) => s + (findP(pk.playerId)?.ecr || 200), 0) / myTeamPicks.length;
-            const adpAvg = myTeamPicks.reduce((s, pk, _i, arr) => {
-              const p = findP(pk.playerId); return s + ((p?.adp || 200) - (pk.round * 12 + pk.slot));
-            }, 0) / myTeamPicks.length;
-            const letter = adpAvg > 8 ? 'A+' : adpAvg > 4 ? 'A' : adpAvg > 1 ? 'B+' : adpAvg > -2 ? 'B' : adpAvg > -5 ? 'C' : 'D';
-            const color  = adpAvg > 1 ? 'var(--good)' : adpAvg > -3 ? 'var(--warn)' : 'var(--danger)';
-            return { letter, color, adpAvg, avgEcr };
-          }
-
+        {/* MY ROSTER view */}
+        {rosterPanelView === 'roster' && (() => {
+          const POS_ORDER = ['QB', 'RB', 'WR', 'TE', 'DST'];
+          const grouped = POS_ORDER.map(pos => ({
+            pos,
+            picks: myPicks.map(pk => findP(pk.playerId)).filter(p => p?.pos === pos),
+          }));
           return (
-            <>
-              <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="ai-orb" style={{ width: 18, height: 18, background: isMock ? '#ff9800' : 'var(--accent)', boxShadow: `0 0 8px ${isMock ? '#ff9800' : 'var(--accent)'}` }}></div>
-                <div style={{ flex: 1 }}>
-                  <div className="card-title" style={{ fontSize: 12 }}>{myTeamName}</div>
-                  {isMock && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#ff9800', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>Mock Draft · No real roster impact</div>}
-                </div>
-                <div className="mono faint" style={{ fontSize: 11 }}>{displayPicks.length}/16</div>
-              </div>
-              {/* Flat pick list sorted by draft order — works for all positions including 3rd+ RB/WR */}
-              <div style={{ padding: '6px 0', maxHeight: '50%', overflow: 'auto' }}>
-                {displayPicks.length === 0 && (
-                  <div className="faint" style={{ fontSize: 11, padding: '12px 14px' }}>No picks yet</div>
-                )}
-                {[...displayPicks].sort((a, b) => a.pickNum - b.pickNum).map(pk => {
-                  const player = findP(pk.playerId);
-                  if (!player) return null;
-                  return (
-                    <div key={pk.pickNum} style={{ padding: '4px 14px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, borderBottom: '1px solid var(--border)', minHeight: 38 }}>
-                      <span className={`pos-badge pos-${player.pos}`} style={{ minWidth: 32, fontSize: 9 }}>{player.pos}</span>
-                      <PlayerAvatar player={player} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="player-name" style={{ fontSize: 12 }}>{player.name}</div>
-                        <div className="player-meta">{player.team} · ECR #{player.ecr}</div>
-                      </div>
-                      <div className="mono faint" style={{ fontSize: 10, flexShrink: 0 }}>R{pk.round}.{pk.slot}</div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Previous mock roster (shown only when not currently in a mock draft and a saved mock exists) */}
-              {!isMock && savedMockPicks.length > 0 && (() => {
-                const savedMyPicks = savedMockPicks.filter(p => p.teamId === myDraftTeamId && p.playerId);
-                if (!savedMyPicks.length) return null;
-                const grade = gradeMock(savedMockPicks);
-                return (
-                  <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px 6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#ff9800', flex: 1 }}>
-                        Previous Mock Draft
-                      </div>
-                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 18, color: grade.color, lineHeight: 1 }}>{grade.letter}</div>
-                      {grade.adpAvg != null && (
-                        <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: grade.color }}>
-                          {grade.adpAvg > 0 ? '+' : ''}{grade.adpAvg.toFixed(1)} vs ADP
-                        </div>
-                      )}
-                    </div>
-                    {savedMyPicks.slice(0, 8).map((pk, i) => {
-                      const p = findP(pk.playerId);
-                      if (!p) return null;
-                      return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', borderBottom: i < Math.min(7, savedMyPicks.length - 1) ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
-                          <span className={`pos-badge pos-${p.pos}`} style={{ fontSize: 9 }}>{p.pos}</span>
-                          <span style={{ fontSize: 11, fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-                          <span className="mono faint" style={{ fontSize: 10 }}>R{pk.round}.{pk.slot}</span>
-                        </div>
-                      );
-                    })}
-                    {savedMyPicks.length > 8 && (
-                      <div style={{ fontSize: 10, color: 'var(--text-faint)', paddingTop: 4 }}>+{savedMyPicks.length - 8} more picks</div>
-                    )}
+            <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+              {grouped.map(({ pos, picks }) => (
+                <div key={pos}>
+                  <div style={{ padding: '4px 12px 2px', fontSize: 9, fontWeight: 800, color: `var(--pos-${pos.toLowerCase() === 'dst' ? 'dst' : pos.toLowerCase()})`, letterSpacing: '.14em', textTransform: 'uppercase', background: 'var(--bg-2)' }}>
+                    {pos}
                   </div>
-                );
-              })()}
-            </>
+                  {picks.length === 0 ? (
+                    <div style={{ padding: '5px 12px', fontSize: 11, color: 'var(--text-faint)', fontStyle: 'italic' }}>— open —</div>
+                  ) : picks.map((p, i) => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,.02)' }}>
+                      <PlayerAvatar player={p} size={24} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{p.team} · avg {p.avg?.toFixed(1) ?? '—'}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {myPicks.length === 0 && (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>No picks yet</div>
+              )}
+            </div>
           );
         })()}
 
-        <div style={{ borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
-            <div className="card-title">League Chat</div>
-          </div>
-          <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
-            {chatMessages.map((m, i) => (
-              <div key={i} className="chat-msg" style={m.ai ? { borderLeft: '2px solid var(--accent)', background: 'rgba(198,255,58,.04)' } : {}}>
-                <span className="ts">{m.ts}</span>
-                <span className="who" style={{ color: m.color }}>{m.who}</span>
-                <span>{m.msg}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ padding: 8, borderTop: '1px solid var(--border)' }}>
-            <input
-              className="input"
-              placeholder="Type to chat..."
-              style={{ width: '100%', fontSize: 12 }}
-              value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && chatInput.trim()) {
-                  const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  const myName = user?.name || user?.email?.split('@')[0] || 'You';
-                  setChatMessages(prev => [...prev, { who: myName, color: '#c6ff3a', ts, msg: chatInput.trim() }]);
-                  setChatInput('');
-                }
-              }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* TEAMS GRID */}
-      <div className="draft-teams" style={hidden.teams ? { display: 'none' } : {}}>
-        <div className="teams-grid">
-          {teamsForCols.map((t, colIdx) => {
-            if (!t) return null;
-            const teamPicks = allPicks.filter(pk => pk.teamId === t.id);
-            return (
-              <div key={t.id} className={`team-col ${t.me ? 'me' : ''} ${t.id === onClockTeamId ? 'active' : ''}`}>
-                <div className="hdr">
-                  <span>#{colIdx + 1}</span>
-                  <span className="pts">{Math.round(teamPicks.filter(p => p.playerId).reduce((s, p) => s + (findP(p.playerId)?.avg || 0), 0))}</span>
-                </div>
-                <div className="team-name">{t.logo} {t.name}</div>
-                {isCommissioner && (
-                  <select
-                    value={teamModes[t.id] || 'manual'}
-                    onChange={e => setTeamModes(prev => ({ ...prev, [t.id]: e.target.value }))}
-                    style={{ fontSize: 9, padding: '2px 3px', width: '100%', background: 'var(--panel)', color: teamModes[t.id] === 'ai' ? 'var(--accent)' : teamModes[t.id] === 'auto' ? '#ffb547' : 'var(--text-faint)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', marginBottom: 2, fontWeight: 700 }}
-                  >
-                    <option value="manual">Manual</option>
-                    <option value="auto">Auto Draft</option>
-                    <option value="ai">AI Draft</option>
-                  </select>
-                )}
-                {teamPicks.slice(0, 8).map(pk => {
-                  if (!pk.playerId) return (
-                    <div key={pk.pickNum} className="pick-cell empty"><span>R{pk.round}.{pk.slot}</span></div>
-                  );
-                  const p = findP(pk.playerId);
-                  if (!p) return null;
-                  return (
-                    <div key={pk.pickNum} className="pick-cell" style={{ borderLeftWidth: 2, borderLeftStyle: 'solid', borderLeftColor: `var(--pos-${p.pos.toLowerCase() === 'dst' ? 'dst' : p.pos.toLowerCase()})` }}>
-                      <PosBadge pos={p.pos} />
-                      <span className="nm">{p.name.split(' ').slice(-1)[0]}</span>
+        {/* ALL TEAMS grid view */}
+        {rosterPanelView === 'grid' && (
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            {teamsForCols.map((t) => {
+              if (!t) return null;
+              const teamPicks = allPicks.filter(pk => pk.teamId === t.id && pk.playerId);
+              // Team draft grade: average of all pick grades
+              const teamGradeSum = teamPicks.reduce((s, pk) => {
+                const p = findP(pk.playerId);
+                const adp = p?.adp ?? pk.pickNum;
+                return s + Math.round(((adp - pk.pickNum + 20) / 6));
+              }, 0);
+              const teamGradeAvg = teamPicks.length ? teamGradeSum / teamPicks.length : 0;
+              const teamGradeLabel = teamGradeAvg > 4 ? 'A+' : teamGradeAvg > 3 ? 'A' : teamGradeAvg > 2 ? 'B+' : teamGradeAvg > 1 ? 'B' : teamGradeAvg > 0 ? 'C' : 'D';
+              const teamGradeColor = teamGradeAvg > 3 ? 'var(--accent)' : teamGradeAvg > 1 ? 'var(--warn)' : 'var(--danger)';
+              return (
+                <div key={t.id} style={{ borderBottom: '1px solid var(--border)', background: t.id === onClockTeamId ? 'rgba(76,175,130,.06)' : t.me ? 'rgba(198,255,58,.04)' : 'transparent' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', background: t.id === onClockTeamId ? 'rgba(76,175,130,.12)' : 'var(--bg-2)' }}>
+                    <span style={{ fontSize: 14 }}>{t.logo}</span>
+                    <span style={{ fontSize: 11, fontWeight: t.me ? 800 : 600, color: t.id === onClockTeamId ? '#4caf82' : 'var(--text)', flex: 1 }}>{t.name}</span>
+                    {teamPicks.length > 0 && (
+                      <span style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', fontWeight: 900, fontSize: 15, color: teamGradeColor }}>{teamGradeLabel}</span>
+                    )}
+                    {t.id === onClockTeamId && <span style={{ fontSize: 9, fontWeight: 900, color: '#4caf82', letterSpacing: '.1em' }}>ON CLOCK</span>}
+                    <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{teamPicks.length}</span>
+                  </div>
+                  {teamPicks.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '3px 10px 6px' }}>
+                      {teamPicks.map(pk => {
+                        const p = findP(pk.playerId);
+                        if (!p) return null;
+                        const gradeVal = Math.round(((p.adp ?? pk.pickNum) - pk.pickNum + 20) / 6);
+                        const grade = gradeVal > 4 ? 'A+' : gradeVal > 3 ? 'A' : gradeVal > 2 ? 'B+' : gradeVal > 1 ? 'B' : gradeVal > 0 ? 'C' : 'D';
+                        const gradeColor = gradeVal > 3 ? 'var(--accent)' : gradeVal > 1 ? 'var(--warn)' : 'var(--danger)';
+                        const round = Math.ceil(pk.pickNum / 12);
+                        return (
+                          <div key={pk.pickNum} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', width: 32, flexShrink: 0 }}>R{round}.{pk.slot ?? ((pk.pickNum - 1) % 12) + 1}</span>
+                            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', width: 22, flexShrink: 0 }}>#{pk.pickNum}</span>
+                            <PosBadge pos={p.pos} />
+                            <span style={{ fontSize: 11, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                            <span style={{ fontSize: 10, fontWeight: 800, color: gradeColor, flexShrink: 0 }}>{grade}</span>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* CHAT view */}
+        {rosterPanelView === 'chat' && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+              {chatMessages.map((m, i) => (
+                <div key={i} className="chat-msg" style={m.ai ? { borderLeft: '2px solid var(--accent)', background: 'rgba(198,255,58,.04)' } : {}}>
+                  <span className="ts">{m.ts}</span>
+                  <span className="who" style={{ color: m.color }}>{m.who}</span>
+                  <span>{m.msg}</span>
+                </div>
+              ))}
+            </div>
+            {/* Emoji quick-picks */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '6px 8px', borderTop: '1px solid var(--border)', background: 'var(--bg-2)' }}>
+              {['🏈','⚡','🔥','💪','⭐','🏆','🎯','👑','💯','🎉','😤','🙌','👏','🤯','💀','😱','🥶','😂'].map(emoji => (
+                <button key={emoji}
+                  onClick={() => setChatInput(prev => prev + emoji)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, padding: '2px', borderRadius: 4, lineHeight: 1 }}
+                  title={emoji}
+                >{emoji}</button>
+              ))}
+            </div>
+            <div style={{ padding: 8, borderTop: '1px solid var(--border)' }}>
+              <input
+                className="input"
+                placeholder="Type to chat..."
+                style={{ width: '100%', fontSize: 12 }}
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && chatInput.trim()) {
+                    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const myName = user?.name || user?.email?.split('@')[0] || 'You';
+                    setChatMessages(prev => [...prev, { who: myName, color: '#c6ff3a', ts, msg: chatInput.trim() }]);
+                    setChatInput('');
+                  }
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {showRecap && <DraftRecap round={currentRound - 1} onClose={() => setShowRecap(false)} />}

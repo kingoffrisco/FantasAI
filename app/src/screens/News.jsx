@@ -509,7 +509,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
 
   if (filter !== 'all') news = news.filter(n => n.sources?.some(s => s.type === filter));
   if (pos === 'FLEX') {
-    news = news.filter(n => ['RB', 'WR', 'TE'].includes(findPlayer(n.playerId)?.pos));
+    news = news.filter(n => ['RB', 'WR'].includes(findPlayer(n.playerId)?.pos));
   } else if (pos === 'DST') {
     const dstTeams = new Set(getPlayers().filter(p => p.pos === 'DST').map(p => p.team));
     news = news.filter(n => {

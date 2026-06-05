@@ -1,6 +1,6 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam } from '../lib/data.js';
-import { findPlayer } from '../lib/playerStore.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters } from '../lib/data.js';
+import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 
 const NUM_WEEKS = 14;
@@ -65,11 +65,8 @@ function getActualPtsFromLocked(locked, roster) {
 }
 
 function isRosterValid(roster) {
-  const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
-  const has   = slot => starters.some(r => r.slot === slot);
-  const count = slot => starters.filter(r => r.slot === slot).length;
-  if (!has('QB') || !has('DST') || count('RB') < 1 || count('WR') < 1) return false;
-  return starters.filter(r => ['RB', 'WR', 'TE', 'FLEX'].includes(r.slot)).length >= 5;
+  const starterSlots = roster.filter(r => r.slot !== 'BENCH');
+  return starterSlots.length > 0 && starterSlots.every(r => r.playerId != null);
 }
 
 function parseRecord(r = '0-0') {
@@ -78,9 +75,26 @@ function parseRecord(r = '0-0') {
 }
 
 export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slotOverrides }) {
+  const allPlayers = usePlayers(); // subscribe so roster re-assigns when player data loads
   const [week, setWeek] = React.useState(CURRENT_WEEK);
   const [expanded, setExpanded] = React.useState(0);
   const [showAll, setShowAll] = React.useState(false);
+  const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 900px)').matches);
+  const [h2hMobileTab, setH2hMobileTab] = React.useState('matchups'); // 'matchups' | 'scores'
+
+  // Sync TEAM_ROSTERS from localStorage whenever H2H is opened so drafted players appear
+  const [rosterVersion, setRosterVersion] = React.useState(0);
+  React.useEffect(() => {
+    refreshTeamRosters();
+    setRosterVersion(v => v + 1);
+  }, []);
+
+  React.useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const h = e => setIsMobile(e.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
 
   const myTeamId = user?.teamId ?? LEAGUE_TEAMS.find(t => t.me)?.id;
 
@@ -107,10 +121,22 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch { return null; }
   }, []);
   const slotFrame = React.useMemo(() => buildRosterFrame(rosterSettings), [rosterSettings]);
+  // allPlayers in deps: re-assign when live player data loads (findPlayer depends on the store)
   const myLiveRoster = React.useMemo(
-    () => (myRosterIds && slotFrame) ? assignRoster(slotFrame, myRosterIds, slotOverrides || {}) : null,
-    [slotFrame, myRosterIds, slotOverrides],
+    () => (myRosterIds && slotFrame) ? assignRoster(slotFrame, myRosterIds, slotOverrides || {}, findPlayer) : null,
+    [slotFrame, myRosterIds, slotOverrides, allPlayers],
   );
+
+  // Build assigned rosters for ALL teams so H2H shows starter slots, not raw BENCH picks
+  const allTeamRosters = React.useMemo(() => {
+    const rosters = {};
+    for (const t of LEAGUE_TEAMS) {
+      const rawIds = (TEAM_ROSTERS[t.id] || []).map(e => e.playerId).filter(Boolean);
+      if (rawIds.length === 0) { rosters[t.id] = []; continue; }
+      rosters[t.id] = assignRoster(slotFrame, new Set(rawIds), {}, findPlayer);
+    }
+    return rosters;
+  }, [slotFrame, rosterVersion, allPlayers]);
 
   const standings = React.useMemo(() => {
     return LEAGUE_TEAMS.map(t => {
@@ -168,7 +194,20 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 20, alignItems: 'start' }}>
+      {isMobile && (
+        <div style={{ display: 'flex', gap: 0, background: 'var(--panel)', borderRadius: 8, padding: 3, alignSelf: 'flex-start' }}>
+          {[{ id: 'matchups', label: 'Matchups' }, { id: 'scores', label: 'NFL Scores' }].map(t => (
+            <button key={t.id} onClick={() => setH2hMobileTab(t.id)} style={{
+              padding: '6px 16px', borderRadius: 6, fontSize: 12, fontWeight: h2hMobileTab === t.id ? 700 : 500,
+              cursor: 'pointer', border: 'none',
+              background: h2hMobileTab === t.id ? 'var(--accent)' : 'transparent',
+              color: h2hMobileTab === t.id ? 'var(--accent-ink)' : 'var(--text-dim)',
+            }}>{t.label}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: isMobile ? 'block' : 'grid', gridTemplateColumns: '1fr 280px', gap: 20, alignItems: 'start' }}>
+        {(!isMobile || h2hMobileTab === 'matchups') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 2 }}>
             Week {week} · {week < CURRENT_WEEK ? 'Final' : week === CURRENT_WEEK ? 'In Progress' : 'Upcoming'}
@@ -190,28 +229,33 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
                 onOpenPlayer={onOpenPlayer}
                 myTeamId={myTeamId}
                 myLiveRoster={myLiveRoster}
+                allTeamRosters={allTeamRosters}
                 homeRecord={homeRec ? `${homeRec.w}–${homeRec.l}` : null}
                 awayRecord={awayRec ? `${awayRec.w}–${awayRec.l}` : null}
               />
             );
           })}
         </div>
+        )}
 
         {/* Right column: NFL Scores */}
+        {(!isMobile || h2hMobileTab === 'scores') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <NflScores week={week} />
         </div>
+        )}
       </div>
     </div>
   );
 }
 
-function MatchupCard({ homeId, awayId, week, season, isLive, isFinal, expanded, onToggle, onOpenPlayer, myTeamId, myLiveRoster, homeRecord, awayRecord }) {
+function MatchupCard({ homeId, awayId, week, season, isLive, isFinal, expanded, onToggle, onOpenPlayer, myTeamId, myLiveRoster, allTeamRosters, homeRecord, awayRecord }) {
   const home = findTeam(homeId);
   const away = findTeam(awayId);
 
-  const homeRoster = homeId === myTeamId && myLiveRoster ? myLiveRoster : (TEAM_ROSTERS[homeId] || []);
-  const awayRoster = awayId === myTeamId && myLiveRoster ? myLiveRoster : (TEAM_ROSTERS[awayId] || []);
+  // Use assigned rosters (with proper starter slots) for all teams
+  const homeRoster = homeId === myTeamId && myLiveRoster ? myLiveRoster : (allTeamRosters?.[homeId] || TEAM_ROSTERS[homeId] || []);
+  const awayRoster = awayId === myTeamId && myLiveRoster ? myLiveRoster : (allTeamRosters?.[awayId] || TEAM_ROSTERS[awayId] || []);
 
   const homeProj  = computeScore(homeRoster, homeId, week);
   const awayProj  = computeScore(awayRoster, awayId, week);
@@ -246,11 +290,135 @@ function MatchupCard({ homeId, awayId, week, season, isLive, isFinal, expanded, 
       </div>
 
       {expanded && (
-        <div style={{ borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
-          <RosterBreakdown roster={homeRoster} teamId={homeId} week={week} onOpenPlayer={onOpenPlayer} isProjected={!isLive && !isFinal} locked={locked} />
-          <RosterBreakdown roster={awayRoster} teamId={awayId} week={week} onOpenPlayer={onOpenPlayer} side="away" isProjected={!isLive && !isFinal} locked={locked} />
+        <>
+          <div style={{ borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+            <RosterBreakdown roster={homeRoster} teamId={homeId} week={week} onOpenPlayer={onOpenPlayer} isProjected={!isLive && !isFinal} locked={locked} />
+            <RosterBreakdown roster={awayRoster} teamId={awayId} week={week} onOpenPlayer={onOpenPlayer} side="away" isProjected={!isLive && !isFinal} locked={locked} />
+          </div>
+          <SmackTalkWall matchupKey={`${week}-${homeId}-${awayId}`} homeTeam={home} awayTeam={away} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function SmackTalkWall({ matchupKey, homeTeam, awayTeam }) {
+  const storageKey = `fantasai_smack_${matchupKey}`;
+  const [comments, setComments] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem(storageKey) || '[]'); } catch { return []; }
+  });
+  const [text, setText] = React.useState('');
+  const [authorTeamId, setAuthorTeamId] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_user') || 'null')?.teamId ?? null; } catch { return null; }
+  });
+  const inputRef = React.useRef(null);
+
+  function post() {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const comment = {
+      id: Date.now().toString(),
+      teamId: authorTeamId,
+      text: trimmed,
+      emoji: pickEmoji(trimmed),
+      timestamp: new Date().toISOString(),
+    };
+    const next = [...comments, comment];
+    setComments(next);
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    setText('');
+    inputRef.current?.focus();
+  }
+
+  function remove(id) {
+    const next = comments.filter(c => c.id !== id);
+    setComments(next);
+    localStorage.setItem(storageKey, JSON.stringify(next));
+  }
+
+  function pickEmoji(txt) {
+    const t = txt.toLowerCase();
+    if (t.includes('win') || t.includes('beat')) return '🏆';
+    if (t.includes('trash') || t.includes('weak')) return '🗑️';
+    if (t.includes('good') || t.includes('nice')) return '👍';
+    if (t.includes('lol') || t.includes('haha')) return '😂';
+    if (t.includes('fire') || t.includes('hot')) return '🔥';
+    return '💬';
+  }
+
+  function teamName(teamId) {
+    if (teamId === homeTeam?.id) return homeTeam?.name ?? 'Home';
+    if (teamId === awayTeam?.id) return awayTeam?.name ?? 'Away';
+    const t = LEAGUE_TEAMS.find(x => x.id === teamId);
+    return t?.name ?? 'League Member';
+  }
+
+  function teamColor(teamId) {
+    if (teamId === homeTeam?.id) return homeTeam?.color ?? '#c6ff3a';
+    if (teamId === awayTeam?.id) return awayTeam?.color ?? '#4ea8ff';
+    return '#888';
+  }
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', padding: '14px 18px', background: 'rgba(255,255,255,.015)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 14 }}>💬</span>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>Smack Talk Wall</span>
+        {comments.length > 0 && (
+          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px', color: 'var(--text-faint)' }}>
+            {comments.length}
+          </span>
+        )}
+      </div>
+
+      {/* Comment list */}
+      {comments.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+          {comments.map(c => {
+            const color = teamColor(c.teamId);
+            return (
+              <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <span style={{ width: 24, height: 24, borderRadius: '50%', background: color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0, fontWeight: 700 }}>
+                  {c.emoji}
+                </span>
+                <div style={{ flex: 1, background: 'var(--panel)', borderRadius: 8, padding: '7px 10px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color }}>{teamName(c.teamId)}</span>
+                    <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+                      {new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>{c.text}</div>
+                </div>
+                <button onClick={() => remove(c.id)} style={{ background: 'none', border: 'none', color: 'var(--text-faint)', cursor: 'pointer', fontSize: 12, padding: '4px 6px', flexShrink: 0, lineHeight: 1 }}>✕</button>
+              </div>
+            );
+          })}
         </div>
       )}
+
+      {/* Input */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <select
+          value={authorTeamId ?? ''}
+          onChange={e => setAuthorTeamId(Number(e.target.value) || null)}
+          style={{ fontSize: 11, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', padding: '4px 8px', flexShrink: 0 }}
+        >
+          <option value="">Team…</option>
+          {[homeTeam, awayTeam].filter(Boolean).map(t => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+        <input
+          ref={inputRef}
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); post(); } }}
+          placeholder="Drop some trash talk…"
+          style={{ flex: 1, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', padding: '6px 10px', fontSize: 12, outline: 'none', fontFamily: 'inherit' }}
+        />
+        <button className="btn primary sm" onClick={post} style={{ flexShrink: 0 }}>Post</button>
+      </div>
     </div>
   );
 }

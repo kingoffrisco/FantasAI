@@ -1,6 +1,7 @@
 import React from 'react';
 import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster } from '../lib/data.js';
 import { findPlayer } from '../lib/playerStore.js';
+import { getSubscriptionState, requestNotificationPermission, showLocalNotification } from '../lib/pushNotifications.js';
 
 function getDraftStatus() {
   try {
@@ -39,15 +40,39 @@ function h2hProj(teamId, week) {
   return Math.max(0, base + h2hSeed(teamId, week));
 }
 
-export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showChat, onToggleChat, user, onLogout, onExport }) => (
-  <div className="topbar">
-    <div className="crumbs">
+export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showChat, onToggleChat, user, onLogout, onExport, draftInProgress, draftMeta }) => {
+  const isComplete = draftInProgress && draftMeta?.draftComplete;
+  const isPaused   = draftInProgress && !isComplete && draftMeta?.draftPaused;
+  const isActive   = draftInProgress && !isComplete && !isPaused;
+  return (
+  <div className="topbar" style={isComplete ? {
+    background: 'linear-gradient(180deg, rgba(76,175,130,.14) 0%, rgba(76,175,130,.05) 100%)',
+  } : isActive ? {
+    background: 'linear-gradient(180deg, rgba(76,175,130,.18) 0%, rgba(76,175,130,.07) 100%)',
+    animation: 'blink 2.2s ease-in-out infinite',
+  } : {}}>
+    <div className="crumbs" style={{ display: 'flex', alignItems: 'center', gap: 0, flexWrap: 'nowrap' }}>
       {crumbs.map((c, i) => (
         <React.Fragment key={i}>
           {i > 0 && <span className="sep">/</span>}
           <span className={i === crumbs.length - 1 ? 'cur' : ''}>{c}</span>
         </React.Fragment>
       ))}
+      {isComplete && (
+        <span style={{ marginLeft: 10, display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(76,175,130,.15)', border: '1px solid rgba(76,175,130,.4)', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 800, color: '#4caf82', letterSpacing: '.05em', whiteSpace: 'nowrap' }}>
+          ✓ DRAFT COMPLETE
+        </span>
+      )}
+      {isPaused && (
+        <span style={{ marginLeft: 10, display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255,90,110,.2)', border: '1px solid rgba(255,90,110,.5)', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 800, color: '#ff5a6e', letterSpacing: '.05em', whiteSpace: 'nowrap', animation: 'blink 1s ease-in-out infinite' }}>
+          ⏸ DRAFT PAUSED
+        </span>
+      )}
+      {isActive && draftMeta?.onClockTeamName && (
+        <span style={{ marginLeft: 10, display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(76,175,130,.2)', border: '1px solid rgba(76,175,130,.4)', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 800, color: '#4caf82', letterSpacing: '.05em', whiteSpace: 'nowrap' }}>
+          {draftMeta.onClockTeamLogo} {draftMeta.onClockTeamName} ON CLOCK
+        </span>
+      )}
     </div>
     <div className="topbar-right">
       {right}
@@ -98,7 +123,42 @@ export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showCh
       )}
     </div>
   </div>
-);
+  );
+};
+
+function SidebarPushButton() {
+  const [state, setState] = React.useState('loading');
+  React.useEffect(() => { getSubscriptionState().then(setState); }, []);
+
+  async function enable() {
+    const perm = await requestNotificationPermission();
+    if (perm === 'granted') {
+      showLocalNotification('FantasAI Alerts Active', 'You\'ll be notified for lineup locks, waivers, and trades.');
+      setState('subscribed');
+    } else {
+      setState(perm);
+    }
+  }
+
+  if (state === 'loading' || state === 'unsupported') return null;
+  if (state === 'subscribed' || state === 'granted') {
+    return (
+      <div style={{ fontSize: 9, color: 'var(--good)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--good)', display: 'inline-block' }} />
+        Push Alerts On
+      </div>
+    );
+  }
+  if (state === 'denied') return null;
+  return (
+    <button
+      onClick={enable}
+      style={{ fontSize: 10, padding: '5px 10px', background: 'rgba(198,255,58,.08)', border: '1px solid rgba(198,255,58,.25)', borderRadius: 6, color: 'var(--accent)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 700, textAlign: 'left' }}
+    >
+      🔔 Enable Push Alerts
+    </button>
+  );
+}
 
 export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds }) => {
   const isAdmin = user?.isAdmin;
@@ -141,7 +201,7 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
       try {
         const settings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
         const slotFrame = buildRosterFrame(settings);
-        const liveRoster = assignRoster(slotFrame, myRosterIds, {});
+        const liveRoster = assignRoster(slotFrame, myRosterIds, {}, findPlayer);
         const starters = liveRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
         const base = starters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
         myProj = Math.max(0, base + h2hSeed(teamId, week));
@@ -162,20 +222,18 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     { id: 'dashboard', label: 'Dashboard',      icon: '🏈' },
     { id: 'roster',    label: 'Current Roster',  icon: '📋' },
     { id: 'h2h',       label: 'Head to Head',    icon: '⚔' },
+    { id: 'power',     label: 'Power Rankings',  icon: '⚡' },
     { id: 'players',   label: 'Players',          icon: '👥', badge: 'All' },
     { id: 'news',      label: 'News & Updates',   icon: '📰', badge: '9', live: true },
-    { id: 'waivers',       label: 'Waivers',           icon: '📑' },
     { id: 'transactions',  label: 'Transactions',      icon: '📒' },
-    { id: 'lineup',        label: 'Lineup Decisions',  icon: '⚡', badge: lineupAlertCount > 0 ? String(lineupAlertCount) : undefined, alert: lineupAlertCount > 0 },
     { group: 'Tools' },
     { id: 'account',   label: 'My Account / Team', icon: '⊙' },
     { id: 'compare',   label: 'Compare',           icon: '⚖' },
-    { id: 'watchlist', label: 'Watchlist',          icon: '★', badge: '8' },
     { id: 'trade',     label: 'Trade Analyzer',    icon: '↔' },
     { group: 'Draft' },
-    { id: 'draft',     label: 'Draft Room',        icon: '●', ...(() => { const ds = getDraftStatus(); return { badge: ds.badge, live: ds.live }; })() },
-    { id: 'owners',    label: 'Owner Intel',       icon: '◉', badge: '12' },
-    { id: 'cbs',       label: 'Player Draft Rankings',      icon: '▦', badge: '432' },
+    { id: 'draft',      label: 'Draft Room',        icon: '●', ...(() => { const ds = getDraftStatus(); return { badge: ds.badge, live: ds.live }; })() },
+    { id: 'owners',     label: 'Owner Intel',       icon: '◉', badge: '12' },
+    { id: 'cbs',        label: 'Player Draft Rankings',     icon: '▦', badge: '432' },
     { group: 'Setup' },
     { id: 'sources',  label: 'Sources',          icon: '⌁' },
     { id: 'settings', label: 'Rules & Settings',  icon: '📋' },
@@ -256,10 +314,10 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
           )}
         </div>
       ))}
-      <div style={{ padding: '20px 14px', borderTop: '1px solid var(--border)', marginTop: 20 }}>
-        <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.12em', marginBottom: 6, fontWeight: 700 }}>Week 11 · 2025</div>
+      <div style={{ padding: '16px 14px', borderTop: '1px solid var(--border)', marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <SidebarPushButton />
+        <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.12em', fontWeight: 700 }}>Week 11 · 2025</div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Lock: Sun 1:00pm ET</div>
-        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>3d 14h 22m</div>
       </div>
     </div>
   );
@@ -269,28 +327,26 @@ const BASE_SECTIONS = [
   {
     group: 'League',
     items: [
-      { id: 'dashboard', label: 'Dashboard',      icon: '🏈' },
-      { id: 'roster',    label: 'Current Roster', icon: '📋' },
-      { id: 'players',   label: 'Players',         icon: '👥', badge: 'All' },
-      { id: 'news',      label: 'News & Updates',  icon: '📰', badge: '9',  live: true },
-      { id: 'waivers',   label: 'Waivers',          icon: '📑' },
-      { id: 'lineup',    label: 'Lineup Decisions', icon: '⚡' },
+      { id: 'dashboard', label: 'Dashboard',       icon: '🏈' },
+      { id: 'roster',    label: 'Current Roster',  icon: '📋' },
+      { id: 'power',     label: 'Power Rankings',  icon: '⚡' },
+        { id: 'players',   label: 'Players',          icon: '👥', badge: 'All' },
+      { id: 'news',      label: 'News & Updates',   icon: '📰', badge: '9', live: true },
     ],
   },
   {
     group: 'Tools',
     items: [
       { id: 'compare',   label: 'Compare',         icon: '⚖' },
-      { id: 'watchlist', label: 'Watchlist',        icon: '★',  badge: '8' },
       { id: 'trade',     label: 'Trade Analyzer',  icon: '↔' },
     ],
   },
   {
     group: 'Draft',
     items: [
-      { id: 'draft',     label: 'Draft Room',      icon: '●',  badge: 'LIVE', live: true },
-      { id: 'owners',    label: 'Owner Intel',     icon: '◉',  badge: '12' },
-      { id: 'cbs',       label: 'Player Draft Rankings',    icon: '▦',  badge: '432' },
+      { id: 'draft',      label: 'Draft Room',      icon: '●',  badge: 'LIVE', live: true },
+      { id: 'owners',     label: 'Owner Intel',    icon: '◉',  badge: '12' },
+      { id: 'cbs',        label: 'Player Draft Rankings',   icon: '▦',  badge: '432' },
     ],
   },
   {

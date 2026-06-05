@@ -74,6 +74,40 @@ export async function fetchBulkWeekStats(season = 2025, week = 18) {
   );
 }
 
+// ── NFL State ────────────────────────────────────────────────────────────────
+let _nflState = null;
+let _nflStateAt = 0;
+export async function getNFLState() {
+  const now = Date.now();
+  if (_nflState && now - _nflStateAt < 5 * 60 * 1000) return _nflState;
+  _nflState = await fetch(`${SLEEPER}/state/nfl`).then(r => r.ok ? r.json() : null).catch(() => null);
+  _nflStateAt = now;
+  return _nflState;
+}
+
+// ── Trending adds/drops (last N hours across all Sleeper leagues) ─────────────
+export async function getTrending(type = 'add', hours = 24, limit = 25) {
+  return fetch(`${SLEEPER}/trending/nfl/${type}?lookback_hours=${hours}&limit=${limit}`)
+    .then(r => r.ok ? r.json() : [])
+    .catch(() => []);
+}
+
+// ── Live week scores (all players, one request) ───────────────────────────────
+export async function getLiveWeekScores(season, week) {
+  return fetchCached(
+    `${SLEEPER}/stats/nfl/regular/${season}/${week}`,
+    `live:${season}:${week}`
+  );
+}
+
+// ── Projections for a specific week ─────────────────────────────────────────
+export async function getWeekProjections(season, week) {
+  return fetchCached(
+    `${SLEEPER}/projections/nfl/regular/${season}/${week}`,
+    `proj:regular:${season}:${week}`
+  );
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**

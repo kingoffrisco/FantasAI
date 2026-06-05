@@ -239,12 +239,12 @@ function generateMatchupSchedule(div1Ids, div2Ids, numWeeks = 14) {
   return result;
 }
 
-export default function LeagueSettings({ user, onRosterReset, rosterResetState = 'idle' }) {
+export default function LeagueSettings({ user, onRosterReset, rosterResetState = 'idle', initialTab }) {
   const canEdit = user?.isAdmin || user?.isCommissioner;
   const editLabel = user?.isAdmin ? 'Admin Edit' : 'Commissioner Edit';
   const editColor = user?.isAdmin ? '#4ade80' : '#ffb547';
   const [data, setData]       = React.useState(load);
-  const [activeTab, setTab]   = React.useState('general');
+  const [activeTab, setTab]   = React.useState(initialTab || 'general');
   const [editingRule, setEditingRule] = React.useState(null);
   const [editingScore, setEditingScore] = React.useState(null);
   const [editingRoster, setEditingRoster] = React.useState(null);
@@ -1039,10 +1039,10 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
           </Card>
 
           {user?.isAdmin && (
-            <Card title="S3 Storage Test">
+            <Card title="R2 Storage Test">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-                  Verify that the Cloudflare Worker can read from and write to S3. Run this if league settings or roster resets are failing.
+                  Verify that the Cloudflare Worker can read from and write to Cloudflare R2. Run this if league settings or roster resets are failing.
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <button
@@ -1050,13 +1050,13 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                     disabled={s3TestState === 'loading'}
                     onClick={testS3}
                   >
-                    {s3TestState === 'loading' ? 'Testing…' : '⟳ Test S3 Connection'}
+                    {s3TestState === 'loading' ? 'Testing…' : '⟳ Test R2 Connection'}
                   </button>
                   {s3TestState === 'done' && (
-                    <span style={{ fontSize: 12, color: 'var(--good)', fontWeight: 700 }}>✓ S3 read + write OK</span>
+                    <span style={{ fontSize: 12, color: 'var(--good)', fontWeight: 700 }}>✓ R2 read + write OK</span>
                   )}
                   {s3TestState === 'error' && (
-                    <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>✕ S3 connection failed — see details below</span>
+                    <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>✕ R2 connection failed — see details below</span>
                   )}
                 </div>
                 {s3TestResult && (
@@ -1072,13 +1072,13 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                       <span style={{ color: 'var(--text-dim)' }}>{s3TestResult.bucket} ({s3TestResult.region})</span>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <span style={{ color: 'var(--text-faint)', minWidth: 120 }}>S3 read</span>
+                      <span style={{ color: 'var(--text-faint)', minWidth: 120 }}>R2 read</span>
                       <span style={{ color: s3TestResult.read?.ok ? 'var(--good)' : 'var(--danger)', fontWeight: 700 }}>
                         {s3TestResult.read?.ok ? `✓ HTTP ${s3TestResult.read.status}` : `✕ ${s3TestResult.read?.error || 'failed'}`}
                       </span>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <span style={{ color: 'var(--text-faint)', minWidth: 120 }}>S3 write</span>
+                      <span style={{ color: 'var(--text-faint)', minWidth: 120 }}>R2 write</span>
                       <span style={{ color: s3TestResult.write?.ok ? 'var(--good)' : 'var(--danger)', fontWeight: 700 }}>
                         {s3TestResult.write?.ok ? '✓ probe written + deleted' : `✕ ${s3TestResult.write?.error || 'failed'}`}
                       </span>
@@ -1110,7 +1110,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                 <div style={{ flex: 1, minWidth: 220 }}>
                   <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
                     Wipe all team rosters and return every player to the free-agent pool. Use this at the start of a new season before the draft.
-                    {' '}If the reset fails below, run the <strong>Test S3 Connection</strong> above to diagnose.
+                    {' '}If the reset fails below, run the <strong>Test R2 Connection</strong> above to diagnose.
                   </div>
                   {data.rostersResetSeason && (
                     <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
@@ -1121,17 +1121,17 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
                   {rosterResetState === 'done' && (
-                    <span style={{ fontSize: 12, color: 'var(--good)', fontWeight: 700 }}>✓ All rosters cleared on S3</span>
+                    <span style={{ fontSize: 12, color: 'var(--good)', fontWeight: 700 }}>✓ All rosters cleared on R2</span>
                   )}
                   {rosterResetState === 'error' && (
-                    <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>S3 reset failed — try again</span>
+                    <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>R2 reset failed — try again</span>
                   )}
                   {rosterResetState === 'loading' && (
                     <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Resetting…</span>
                   )}
                   {rosterResetState === 'idle' && (resetConfirm ? (
                     <>
-                      <span style={{ fontSize: 12, color: '#ff5a6e', fontWeight: 600 }}>This wipes all 12 rosters from S3. Sure?</span>
+                      <span style={{ fontSize: 12, color: '#ff5a6e', fontWeight: 600 }}>This wipes all 12 rosters from R2. Sure?</span>
                       <button className="btn sm" style={{ background: '#ff5a6e', color: '#fff', borderColor: '#ff5a6e' }} onClick={handleResetRosters}>Yes, Reset All</button>
                       <button className="btn ghost sm" onClick={() => setResetConfirm(false)}>Cancel</button>
                     </>
@@ -1330,7 +1330,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>Auto-Generate Schedule</div>
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>
-                  Randomly assigns all 12 owners to two divisions and generates a 14-week round-robin schedule (division games prioritized). Schedule is saved to S3 and loaded by all team views.
+                  Randomly assigns all 12 owners to two divisions and generates a 14-week round-robin schedule (division games prioritized). Schedule is saved to Cloudflare R2 and loaded by all team views.
                 </div>
                 {schedLoadedAt && (
                   <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
@@ -1339,11 +1339,11 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                 )}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
-                {schedSaveState === 'saving' && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Saving to S3…</span>}
-                {schedSaveState === 'saved'  && <span style={{ fontSize: 11, color: 'var(--good)', fontWeight: 700 }}>✓ Saved to S3</span>}
+                {schedSaveState === 'saving' && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Saving to R2…</span>}
+                {schedSaveState === 'saved'  && <span style={{ fontSize: 11, color: 'var(--good)', fontWeight: 700 }}>✓ Saved to R2</span>}
                 {schedSaveState === 'error'  && (
                   <span style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 700 }} title="Worker not yet deployed — run: cd worker-api && npx wrangler deploy (off VPN)">
-                    S3 save failed — schedule saved locally ✓
+                    R2 save failed — schedule saved locally ✓
                   </span>
                 )}
                 {canEdit ? (
