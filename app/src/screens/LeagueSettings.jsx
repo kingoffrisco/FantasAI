@@ -819,7 +819,6 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               { label: 'League URL',           key: 'leagueUrl',   value: data.leagueUrl },
               { label: 'League Email',         key: 'leagueEmail', value: data.leagueEmail },
               { label: 'Number of Teams',      key: 'numTeams',    value: data.numTeams },
-              { label: 'Entry Fee',            key: 'entryFee',    value: `$${data.entryFee}` },
               { label: 'Player Pool',          key: 'playerPool',  value: data.playerPool },
               ...(canEdit ? [{ label: 'Commissioner Key', key: 'fantasaiKey', value: data.fantasaiKey ? '••••••••' : '(not set)', editValue: '', password: true }] : []),
             ]}
@@ -958,8 +957,8 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                     <input className="input" style={{ width: 160 }} placeholder="@yourhandle" value={feesDraft.handle} onChange={e => setFeesDraft(d => ({ ...d, handle: e.target.value }))} />
                   </div>
                   <div>
-                    <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', display: 'block', marginBottom: 4 }}>Fee Amount</label>
-                    <input className="input" style={{ width: 90 }} placeholder="$50" value={feesDraft.amount} onChange={e => setFeesDraft(d => ({ ...d, amount: e.target.value }))} />
+                    <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', display: 'block', marginBottom: 4 }}>Entry Fee (per team)</label>
+                    <input className="input" style={{ width: 100 }} placeholder="$200" value={feesDraft.amount} onChange={e => setFeesDraft(d => ({ ...d, amount: e.target.value }))} />
                   </div>
                 </div>
                 <div>
@@ -968,7 +967,8 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn primary sm" onClick={() => {
-                    const next = { ...data, fees: feesDraft };
+                    const parsedFee = parseFloat((feesDraft.amount || '').replace(/[^0-9.]/g, '')) || data.entryFee || 0;
+                    const next = { ...data, fees: feesDraft, entryFee: parsedFee };
                     persist(next); setData(next); setEditingFees(false); flash();
                     logChange('fees', `League fees updated — ${feesDraft.method || 'no method'} ${feesDraft.handle || ''} ${feesDraft.amount || ''}`.trim());
                   }}>Save</button>
@@ -1009,14 +1009,32 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                 {(() => {
                   const payments = data.fees?.payments || {};
                   const paidCount = LEAGUE_TEAMS.filter(t => payments[t.id]?.paid).length;
+                  const feeNum = data.entryFee || parseFloat((data.fees?.amount || '').replace(/[^0-9.]/g, '')) || 0;
+                  const collected = paidCount * feeNum;
+                  const totalPot  = LEAGUE_TEAMS.length * feeNum;
+                  const allPaid   = paidCount === LEAGUE_TEAMS.length;
                   return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
                       {/* Summary bar */}
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', background: 'rgba(255,255,255,.03)', borderBottom: '1px solid var(--border)' }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Payment Status</span>
-                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: paidCount === LEAGUE_TEAMS.length ? 'var(--good)' : 'var(--warn)', fontWeight: 700 }}>
-                          {paidCount} / {LEAGUE_TEAMS.length} paid
-                        </span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', background: 'rgba(255,255,255,.03)', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Payment Status</span>
+                          {feeNum > 0 && (
+                            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                              Entry Fee: <strong style={{ color: 'var(--text)' }}>${feeNum.toLocaleString()}</strong>
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: allPaid ? 'var(--good)' : 'var(--warn)', fontWeight: 700 }}>
+                            {paidCount} / {LEAGUE_TEAMS.length} paid
+                          </span>
+                          {feeNum > 0 && (
+                            <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 800, color: allPaid ? 'var(--good)' : 'var(--accent)' }}>
+                              ${collected.toLocaleString()} <span style={{ fontWeight: 400, color: 'var(--text-faint)', fontSize: 10 }}>of ${totalPot.toLocaleString()}</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {/* Team rows */}
                       {LEAGUE_TEAMS.map((t, i) => {
@@ -1099,7 +1117,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                 {canEdit && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
-                    <button className="btn ghost sm" onClick={() => { setFeesDraft(data.fees || {}); setEditingFees(true); }}>Edit Payment Info</button>
+                    <button className="btn ghost sm" onClick={() => { setFeesDraft({ amount: data.entryFee ? `$${data.entryFee}` : '', ...(data.fees || {}) }); setEditingFees(true); }}>Edit Payment Info</button>
                   </div>
                 )}
               </div>
