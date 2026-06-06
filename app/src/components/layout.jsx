@@ -344,8 +344,6 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
       ))}
       <div style={{ padding: '16px 14px', borderTop: '1px solid var(--border)', marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <SidebarPushButton teamId={user?.teamId} />
-        <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.12em', fontWeight: 700 }}>Week 11 · 2025</div>
-        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Lock: Sun 1:00pm ET</div>
       </div>
     </div>
   );
