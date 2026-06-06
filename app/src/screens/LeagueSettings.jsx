@@ -852,6 +852,42 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                     />
                   </div>
                 </div>
+                {/* Draft Order */}
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>Draft Order</label>
+                    <button type="button" className="btn ghost sm" onClick={() => {
+                      const cur = draftSettingsDraft.order?.length === LEAGUE_TEAMS.length ? [...draftSettingsDraft.order] : LEAGUE_TEAMS.map(t => t.id);
+                      for (let i = cur.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cur[i], cur[j]] = [cur[j], cur[i]]; }
+                      setDraftSettingsDraft(d => ({ ...d, order: cur }));
+                    }}>⚄ Randomize</button>
+                    <button type="button" className="btn ghost sm" onClick={() => setDraftSettingsDraft(d => ({ ...d, order: LEAGUE_TEAMS.map(t => t.id) }))}>⟲ Reset</button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 5 }}>
+                    {(draftSettingsDraft.order?.length === LEAGUE_TEAMS.length ? draftSettingsDraft.order : LEAGUE_TEAMS.map(t => t.id)).map((teamId, idx) => {
+                      const team = LEAGUE_TEAMS.find(t => t.id === teamId);
+                      return (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px', borderRadius: 6, background: 'rgba(255,255,255,.03)', border: '1px solid var(--border)' }}>
+                          <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', width: 14, flexShrink: 0 }}>{idx + 1}</span>
+                          <select
+                            value={teamId}
+                            onChange={e => {
+                              const newId = parseInt(e.target.value);
+                              const next = draftSettingsDraft.order?.length === LEAGUE_TEAMS.length ? [...draftSettingsDraft.order] : LEAGUE_TEAMS.map(t => t.id);
+                              const fromIdx = next.indexOf(newId);
+                              [next[fromIdx], next[idx]] = [next[idx], next[fromIdx]];
+                              setDraftSettingsDraft(d => ({ ...d, order: next }));
+                            }}
+                            style={{ flex: 1, fontSize: 10, background: 'transparent', border: 'none', color: 'var(--text)', padding: 0, cursor: 'pointer', minWidth: 0, outline: 'none' }}
+                          >
+                            {LEAGUE_TEAMS.map(t => <option key={t.id} value={t.id}>{t.logo} {t.name}</option>)}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn primary sm" onClick={() => {
                     const next = { ...data, draft: { ...data.draft, ...draftSettingsDraft } };
@@ -863,20 +899,38 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <div style={{ flex: 1, display: 'flex', gap: 24 }}>
-                  <span style={{ fontSize: 13 }}>
-                    <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Format</span>
-                    <strong>{data.draft?.format || 'Not set'}</strong>
-                  </span>
-                  <span style={{ fontSize: 13 }}>
-                    <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Date</span>
-                    <strong>{data.draft?.date ? new Date(data.draft.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not scheduled'}</strong>
-                  </span>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 24 }}>
+                    <span style={{ fontSize: 13 }}>
+                      <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Format</span>
+                      <strong>{data.draft?.format || 'Not set'}</strong>
+                    </span>
+                    <span style={{ fontSize: 13 }}>
+                      <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Date</span>
+                      <strong>{data.draft?.date ? new Date(data.draft.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not scheduled'}</strong>
+                    </span>
+                  </div>
+                  {data.draft?.order?.length === LEAGUE_TEAMS.length && (
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--text-faint)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 6 }}>Draft Order</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {data.draft.order.map((teamId, idx) => {
+                          const team = LEAGUE_TEAMS.find(t => t.id === teamId);
+                          return (
+                            <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                              <span style={{ fontSize: 15 }}>{team?.logo}</span>
+                              <span style={{ fontSize: 8, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{idx + 1}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {canEdit && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
-                    <button className="btn ghost sm" onClick={() => { setDraftSettingsDraft({ format: data.draft?.format || 'Snake', date: data.draft?.date || '' }); setEditingDraft(true); }}>Edit</button>
+                    <button className="btn ghost sm" onClick={() => { setDraftSettingsDraft({ format: data.draft?.format || 'Snake', date: data.draft?.date || '', order: data.draft?.order?.length === LEAGUE_TEAMS.length ? [...data.draft.order] : LEAGUE_TEAMS.map(t => t.id) }); setEditingDraft(true); }}>Edit</button>
                   </div>
                 )}
               </div>

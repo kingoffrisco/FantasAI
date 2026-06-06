@@ -280,7 +280,6 @@ export default function OwnerIntelScreen({ onOpenPlayer, user, myRosterIds, slot
           </div>
         </div>
         <div className="flex gap-8">
-          <button className="btn ghost">⇣ Export Profiles</button>
           <button className="btn ai" onClick={() => setMockOpen(true)}><span>◆</span> Run Mock Draft</button>
         </div>
       </div>
@@ -615,23 +614,48 @@ function PosSpendChart({ posByRound }) {
 
 // ─── Mock Draft Modal ────────────────────────────────────────────────────────
 
+function readRealDraftOrder() {
+  try {
+    const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+    const ord = s?.draft?.order;
+    if (Array.isArray(ord) && ord.length === LEAGUE_TEAMS.length) return [...ord];
+  } catch {}
+  return TEAMS_ORDER.slice();
+}
+
 function MockDraftModal({ onClose, getTeam: getTeamProp }) {
   const getTeam = getTeamProp || findTeam;
-  const [yourSlot, setYourSlot] = React.useState(6);
+  const [draftOrder, setDraftOrder] = React.useState(readRealDraftOrder);
   const [speed, setSpeed] = React.useState('fast');
   const [picks, setPicks] = React.useState([]);
   const [running, setRunning] = React.useState(false);
   const [done, setDone] = React.useState(false);
-  const [order, setOrder] = React.useState(null);
 
   const speeds = { instant: 0, fast: 80, realistic: 700 };
 
-  const reset = () => { setPicks([]); setRunning(false); setDone(false); setOrder(null); };
+  const reset = () => { setPicks([]); setRunning(false); setDone(false); };
+
+  function randomize() {
+    const shuffled = [...draftOrder];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    setDraftOrder(shuffled);
+    reset();
+  }
+
+  function swapSlot(slotIdx, newTeamId) {
+    const next = [...draftOrder];
+    const fromIdx = next.indexOf(newTeamId);
+    [next[fromIdx], next[slotIdx]] = [next[slotIdx], next[fromIdx]];
+    setDraftOrder(next);
+    reset();
+  }
 
   const run = React.useCallback(() => {
     reset();
-    const result = runMockDraft(yourSlot, {});
-    setOrder(result.order);
+    const result = runMockDraft(null, { order: draftOrder });
     if (speeds[speed] === 0) {
       setPicks(result.picks);
       setDone(true);
@@ -646,11 +670,10 @@ function MockDraftModal({ onClose, getTeam: getTeamProp }) {
       if (speeds[speed] > 0) setTimeout(step, speeds[speed]);
     };
     step();
-  }, [yourSlot, speed]);
+  }, [draftOrder, speed]);
 
   React.useEffect(() => { setTimeout(run, 100); }, []);
 
-  const teamsOrder = order || TEAMS_ORDER;
   const myPicks = picks.filter(p => p.teamId === 1);
   const myAvg = myPicks.reduce((s, p) => s + (findPlayer(p.playerId)?.avg || 0), 0);
 
@@ -667,12 +690,6 @@ function MockDraftModal({ onClose, getTeam: getTeamProp }) {
 
         <div className="mock-controls">
           <div className="mock-control-group">
-            <span className="k">Your Draft Slot</span>
-            <select className="input" value={yourSlot} onChange={e => { setYourSlot(parseInt(e.target.value)); reset(); }} disabled={running}>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => <option key={n} value={n}>Pick {n}</option>)}
-            </select>
-          </div>
-          <div className="mock-control-group">
             <span className="k">Speed</span>
             <select className="input" value={speed} onChange={e => setSpeed(e.target.value)} disabled={running}>
               <option value="instant">Instant</option>
@@ -680,6 +697,8 @@ function MockDraftModal({ onClose, getTeam: getTeamProp }) {
               <option value="realistic">Realistic (0.7s)</option>
             </select>
           </div>
+          <button className="btn ghost" onClick={randomize} disabled={running} title="Shuffle all draft positions randomly">⚄ Randomize</button>
+          <button className="btn ghost" onClick={() => { setDraftOrder(readRealDraftOrder()); reset(); }} disabled={running} title="Reset to the real draft order from league settings">⟲ Real Order</button>
           <div className="grow"></div>
           <button className="btn primary" onClick={run} disabled={running}>
             {running ? 'Drafting…' : done ? '↻ Run Again' : '▶ Run Mock'}
@@ -687,9 +706,33 @@ function MockDraftModal({ onClose, getTeam: getTeamProp }) {
           <button className="btn ghost" onClick={reset} disabled={running || picks.length === 0}>Clear</button>
         </div>
 
+        {/* Draft order editor — swap teams between slots via dropdown */}
+        <div style={{ padding: '10px 20px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,.15)' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 8 }}>Draft Order</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 5 }}>
+            {draftOrder.map((teamId, idx) => {
+              const team = getTeam(teamId);
+              const isMe = teamId === 1;
+              return (
+                <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px', borderRadius: 6, background: isMe ? 'rgba(198,255,58,.08)' : 'rgba(255,255,255,.03)', border: `1px solid ${isMe ? 'rgba(198,255,58,.3)' : 'var(--border)'}` }}>
+                  <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', width: 14, flexShrink: 0 }}>{idx + 1}</span>
+                  <select
+                    value={teamId}
+                    onChange={e => swapSlot(idx, parseInt(e.target.value))}
+                    disabled={running}
+                    style={{ flex: 1, fontSize: 10, background: 'transparent', border: 'none', color: isMe ? 'var(--accent)' : 'var(--text)', padding: 0, cursor: running ? 'default' : 'pointer', minWidth: 0, outline: 'none' }}
+                  >
+                    {LEAGUE_TEAMS.map(t => <option key={t.id} value={t.id}>{t.logo} {t.name}</option>)}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="mock-body">
           <div className="mock-grid">
-            {teamsOrder.map((tid, colIdx) => {
+            {draftOrder.map((tid, colIdx) => {
               const team = getTeam(tid);
               if (!team) return null;
               const isMe = tid === 1;
@@ -730,10 +773,7 @@ function MockDraftModal({ onClose, getTeam: getTeamProp }) {
               </span>
             )}
           </div>
-          <div className="flex gap-8">
-            {done && <button className="btn ai">◆ Grade My Draft</button>}
-            {done && <button className="btn ghost">⇣ Export Picks</button>}
-          </div>
+          {done && <button className="btn ai">◆ Grade My Draft</button>}
         </div>
       </div>
     </div>

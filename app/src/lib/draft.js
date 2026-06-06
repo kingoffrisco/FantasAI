@@ -30,11 +30,16 @@ export function predictPicks(teamId, pickNum, draftedIdSet, n = 3) {
 }
 
 export function runMockDraft(yourSlot, opts = {}) {
-  const order = TEAMS_ORDER.slice();
-  if (yourSlot && yourSlot >= 1 && yourSlot <= 12) {
-    const cur = order.indexOf(1);
-    order.splice(cur, 1);
-    order.splice(yourSlot - 1, 0, 1);
+  let order;
+  if (opts.order && opts.order.length === TEAMS_ORDER.length) {
+    order = [...opts.order];
+  } else {
+    order = TEAMS_ORDER.slice();
+    if (yourSlot && yourSlot >= 1 && yourSlot <= 12) {
+      const cur = order.indexOf(1);
+      order.splice(cur, 1);
+      order.splice(yourSlot - 1, 0, 1);
+    }
   }
 
   const drafted = new Set();
