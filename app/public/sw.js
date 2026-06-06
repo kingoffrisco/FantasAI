@@ -18,10 +18,12 @@ self.addEventListener('push', event => {
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
-      // Always show the OS notification
       const notify = self.registration.showNotification(title, opts);
-      // Also post a message to any open app windows so they can show an in-app banner
-      clients.forEach(c => c.postMessage({ type: 'PUSH_RECEIVED', title, body: data.body ?? '' }));
+      const msg = { type: 'PUSH_RECEIVED', title, body: data.body ?? '' };
+      // BroadcastChannel: reliable in Firefox/Safari even when clients.matchAll returns empty
+      try { const bc = new BroadcastChannel('fantasai-push'); bc.postMessage(msg); bc.close(); } catch {}
+      // Fallback: direct postMessage for Chrome
+      clients.forEach(c => c.postMessage(msg));
       return notify;
     })
   );

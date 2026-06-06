@@ -179,6 +179,9 @@ export default {
         if (url.pathname === '/api/v1/push/unsubscribe')      return handlePushUnsubscribe(request, env);
         // Push send — commish only, requires X-FantasAI-Key
         if (url.pathname === '/api/v1/push/send')             return handlePushSend(request, env);
+        // League management
+        if (url.pathname === '/api/v1/leagues/create')        return handleLeagueCreate(request, env);
+        if (url.pathname === '/api/v1/leagues/import')        return handleLeagueImport(request, env);
         return json({ error: 'Not found' }, 404);
       }
 
@@ -1817,6 +1820,69 @@ function json(data, status = 200) {
     status,
     headers: { ...corsHeaders(), 'Content-Type': 'application/json; charset=utf-8' },
   });
+}
+
+// ── League Management ─────────────────────────────────────────────────────────
+
+async function handleLeagueCreate(request, env) {
+  const { name, teams, email, password } = await request.json();
+  if (!name || !email || !password) return json({ error: 'name, email, and password are required.' }, 400);
+
+  // Generate a short unique league ID (timestamp + random)
+  const leagueId = `league_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const configKey = `fantasai/leagues/${leagueId}/owners-config.json`;
+  const leagueKey = `fantasai/leagues/${leagueId}/league-config.json`;
+
+  const commissionerEntry = { email, password, isCommissioner: true, passwordSet: true, name: 'Commissioner' };
+  const ownersConfig = { '1': commissionerEntry };
+  const leagueConfig = { leagueId, name, teams: parseInt(teams) || 12, createdAt: new Date().toISOString(), platform: 'fantasai' };
+
+  try {
+    await env.BUCKET.put(configKey, JSON.stringify(ownersConfig), { httpMetadata: { contentType: 'application/json' } });
+    await env.BUCKET.put(leagueKey, JSON.stringify(leagueConfig), { httpMetadata: { contentType: 'application/json' } });
+  } catch (err) {
+    return json({ error: `Storage error: ${err.message}` }, 500);
+  }
+
+  return json({ ok: true, leagueId, name }, 200);
+}
+
+async function handleLeagueImport(request, env) {
+  const { platform, leagueId, email, password } = await request.json();
+  if (!platform || !leagueId || !email || !password) return json({ error: 'platform, leagueId, email, and password are required.' }, 400);
+
+  let leagueName = `${platform} League`;
+  let teams = 12;
+
+  // For Sleeper, validate the league exists via the public API
+  if (platform === 'sleeper') {
+    try {
+      const res = await fetch(`https://api.sleeper.app/v1/league/${leagueId}`, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) return json({ error: `Sleeper league "${leagueId}" not found. Check your league ID.` }, 404);
+      const data = await res.json();
+      leagueName  = data.name || leagueName;
+      teams       = data.total_rosters || teams;
+    } catch {
+      return json({ error: 'Could not reach Sleeper API — check your league ID and try again.' }, 502);
+    }
+  }
+
+  const internalLeagueId = `import_${platform}_${leagueId.slice(0, 12)}`;
+  const configKey  = `fantasai/leagues/${internalLeagueId}/owners-config.json`;
+  const leagueKey  = `fantasai/leagues/${internalLeagueId}/league-config.json`;
+
+  const commissionerEntry = { email, password, isCommissioner: true, passwordSet: true, name: 'Commissioner' };
+  const ownersConfig = { '1': commissionerEntry };
+  const leagueConfig = { leagueId: internalLeagueId, externalId: leagueId, name: leagueName, teams, platform, importedAt: new Date().toISOString() };
+
+  try {
+    await env.BUCKET.put(configKey, JSON.stringify(ownersConfig), { httpMetadata: { contentType: 'application/json' } });
+    await env.BUCKET.put(leagueKey, JSON.stringify(leagueConfig), { httpMetadata: { contentType: 'application/json' } });
+  } catch (err) {
+    return json({ error: `Storage error: ${err.message}` }, 500);
+  }
+
+  return json({ ok: true, leagueId: internalLeagueId, name: leagueName }, 200);
 }
 
 function resetEmailHtml(link, name) {

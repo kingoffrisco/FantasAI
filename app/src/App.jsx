@@ -496,18 +496,21 @@ export default function App() {
   // Register service worker for push notifications (once on mount)
   React.useEffect(() => { registerServiceWorker(); }, []);
 
-  // In-app push banner — catches PUSH_RECEIVED messages posted by the service worker
-  // so notifications appear even when the browser suppresses the OS popup (tab in focus).
+  // In-app push banner — catches PUSH_RECEIVED messages from the service worker.
+  // Uses BroadcastChannel (Firefox/Safari friendly) + postMessage fallback (Chrome).
   const [pushBanner, setPushBanner] = React.useState(null);
   React.useEffect(() => {
-    if (!navigator.serviceWorker) return;
-    function onSWMessage(e) {
-      if (e.data?.type === 'PUSH_RECEIVED') {
-        setPushBanner({ title: e.data.title || 'FantasAI', body: e.data.body || '' });
-      }
+    function showBanner(data) {
+      setPushBanner({ title: data.title || 'FantasAI', body: data.body || '' });
     }
-    navigator.serviceWorker.addEventListener('message', onSWMessage);
-    return () => navigator.serviceWorker.removeEventListener('message', onSWMessage);
+    let bc = null;
+    try { bc = new BroadcastChannel('fantasai-push'); bc.onmessage = e => { if (e.data?.type === 'PUSH_RECEIVED') showBanner(e.data); }; } catch {}
+    function onSWMessage(e) { if (e.data?.type === 'PUSH_RECEIVED') showBanner(e.data); }
+    if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', onSWMessage);
+    return () => {
+      bc?.close();
+      if (navigator.serviceWorker) navigator.serviceWorker.removeEventListener('message', onSWMessage);
+    };
   }, []);
 
   // On cold load (already logged in): restore league data from cache, then fetch fresh

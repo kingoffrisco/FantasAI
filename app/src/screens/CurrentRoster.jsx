@@ -362,6 +362,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   const [weatherRefreshing, setWeatherRefreshing]   = React.useState(false);
   const [weatherRefreshedAt, setWeatherRefreshedAt] = React.useState(null);
   const [weatherRateMsg, setWeatherRateMsg]         = React.useState(null);
+  const autoWeatherTriggered = React.useRef(false);
 
   const weatherTeams = liveWeatherTeams || r2WeatherData?.teams || {};
 
@@ -387,6 +388,14 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     } catch {}
     setWeatherRefreshing(false);
   }
+
+  // Auto-fetch weather once on mount if R2 has no cached data
+  React.useEffect(() => {
+    if (r2WeatherData === null && !autoWeatherTriggered.current && !weatherRefreshing) {
+      autoWeatherTriggered.current = true;
+      handleWeatherRefresh();
+    }
+  }, [r2WeatherData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Returns the best game-time forecast hour for a given team's forecast array.
   // Prefers the upcoming Sunday afternoon (1300h slot); falls back to first day.
@@ -523,7 +532,13 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
           if (liveStatus) noteParts.push(liveStatus);
           if (d.injuryBodyPart) noteParts.push(d.injuryBodyPart);
           const proj = d.projection?.pts_half_ppr ?? d.projection?.pts_std ?? null;
-          data[p.id] = { note: noteParts.join(' · ') || null, proj: proj != null ? Number(proj) : null, source: src.name, liveStatus };
+          let lastPts = null;
+          if (d.weeklyStats && Object.keys(d.weeklyStats).length > 0) {
+            const lastWk = Math.max(...Object.keys(d.weeklyStats).map(Number));
+            const ws = d.weeklyStats[lastWk];
+            lastPts = ws?.pts_half_ppr ?? ws?.pts_std ?? null;
+          }
+          data[p.id] = { note: noteParts.join(' · ') || null, proj: proj != null ? Number(proj) : null, lastPts, source: src.name, liveStatus };
         });
       }
 
@@ -1641,7 +1656,11 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                         );
                       })()}
                     </td>
-                    <td className="num">{p.last > 0 ? p.last.toFixed(1) : <span className="faint">—</span>}</td>
+                    <td className="num">{(() => {
+                      const slEntry = (liveData[p.id] || []).find(e => e.sourceId === 'sleeper-api' && e.lastPts != null);
+                      const val = slEntry?.lastPts ?? (p.last > 0 ? p.last : null);
+                      return val != null ? <span style={{ color: slEntry ? 'var(--accent-2)' : undefined }}>{val.toFixed(1)}</span> : <span className="faint">—</span>;
+                    })()}</td>
                     <td className="num">{(() => { const v = p.avg > 0 ? p.avg : p.proj; return v > 0 ? v.toFixed(1) : <span className="faint">—</span>; })()}</td>
                     <td className="num" style={{ paddingRight: 6 }}>
                       {(() => { const td = getTrendData(p); return td.length ? <Sparkline data={td} width={70} height={20} /> : <span className="faint">—</span>; })()}
