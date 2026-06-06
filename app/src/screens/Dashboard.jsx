@@ -447,6 +447,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
       const res = await sendLeaguePush(pushTitle.trim(), pushBody.trim(), key, '/', teamIds);
       if (res.ok) {
         setPushResult(`Sent to ${res.sent} device(s)`);
+        setTimeout(() => { setPushModal(false); setPushResult(null); setPushTitle(''); setPushBody(''); }, 2000);
       } else if (res.error === 'Unauthorized') {
         setPushResult('Key mismatch — go to Rules & Settings → General → Commissioner Key and enter the same value you set as FANTASAI_KEY in Cloudflare.');
       } else {
