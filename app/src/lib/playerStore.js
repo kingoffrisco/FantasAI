@@ -108,6 +108,18 @@ export function normalizePlayerList(rawArr) {
     if (!rawTeam || rawTeam === 'FA') continue;
     // Map source positions to canonical set; reject anything unexpected
     let pos = rawPos === 'DEF' ? 'DST' : (rawPos || '');
+
+    // Sleeper stores fantasy_positions as an authoritative array — use it to correct
+    // cases where the single `position` field is stale or wrong (e.g. a QB listed as WR
+    // from a bad ETL export).
+    const fantasyPositions = p.fantasy_positions;
+    if (Array.isArray(fantasyPositions) && fantasyPositions.length > 0) {
+      const fp = fantasyPositions[0] === 'DEF' ? 'DST' : fantasyPositions[0];
+      if (['QB', 'RB', 'WR', 'TE', 'K', 'DST'].includes(fp) && fp !== pos) {
+        pos = fp;
+      }
+    }
+
     if (!['QB', 'RB', 'WR', 'TE', 'K', 'DST'].includes(pos)) continue;
 
     let name;
