@@ -421,16 +421,28 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const [pushBody, setPushBody]       = React.useState('');
   const [pushSending, setPushSending] = React.useState(false);
   const [pushResult, setPushResult]   = React.useState(null);
+  const [pushTargets, setPushTargets] = React.useState(() => new Set(LEAGUE_TEAMS.map(t => t.id)));
   const commishKey = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || '{}')?.fantasaiKey || ''; } catch { return ''; }
   }, []);
+
+  function togglePushTarget(id) {
+    setPushTargets(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  const allSelected = pushTargets.size === LEAGUE_TEAMS.length;
 
   async function sendPushAlert() {
     if (!pushTitle.trim()) return;
     setPushSending(true);
     setPushResult(null);
+    const teamIds = allSelected ? null : [...pushTargets];
     try {
-      const res = await sendLeaguePush(pushTitle.trim(), pushBody.trim(), commishKey);
+      const res = await sendLeaguePush(pushTitle.trim(), pushBody.trim(), commishKey, '/', teamIds);
       setPushResult(res.ok ? `Sent to ${res.sent} device(s)` : `Error: ${res.error}`);
     } catch {
       setPushResult('Send failed — check your FANTASAI_KEY setting');
@@ -1613,9 +1625,8 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
       {pushModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9000 }}
           onClick={e => { if (e.target === e.currentTarget) setPushModal(false); }}>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, width: 380, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, width: 420, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>📣 Send Push Alert</div>
-            <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Sends a push notification to all league members who have enabled alerts.</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <input
                 className="input"
@@ -1629,15 +1640,43 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                 placeholder="Message body (optional)"
                 value={pushBody}
                 onChange={e => setPushBody(e.target.value)}
-                rows={3}
+                rows={2}
                 style={{ fontSize: 13, resize: 'vertical' }}
               />
-              {!commishKey && (
-                <div style={{ fontSize: 10, color: 'var(--danger)', padding: '4px 8px', background: 'rgba(224,94,94,.1)', borderRadius: 5 }}>
-                  FANTASAI_KEY not found — add it in Rules &amp; Settings → Commissioner Key.
-                </div>
-              )}
             </div>
+            {/* Owner picker */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Send To</span>
+                <button
+                  style={{ fontSize: 10, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 700 }}
+                  onClick={() => setPushTargets(allSelected ? new Set() : new Set(LEAGUE_TEAMS.map(t => t.id)))}
+                >{allSelected ? 'Deselect All' : 'Select All'}</button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 10px', maxHeight: 180, overflowY: 'auto', padding: '6px 8px', background: 'rgba(255,255,255,.03)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                {LEAGUE_TEAMS.map(t => (
+                  <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '3px 0' }}>
+                    <input
+                      type="checkbox"
+                      checked={pushTargets.has(t.id)}
+                      onChange={() => togglePushTarget(t.id)}
+                      style={{ accentColor: 'var(--accent)', width: 13, height: 13, flexShrink: 0 }}
+                    />
+                    <span style={{ fontSize: 11, color: pushTargets.has(t.id) ? 'var(--text)' : 'var(--text-dim)', lineHeight: 1.3, fontWeight: pushTargets.has(t.id) ? 600 : 400 }}>
+                      {t.owner.split(' ')[0]} <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>· {t.name}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+                {pushTargets.size === 0 ? 'No owners selected' : allSelected ? 'All owners with alerts enabled' : `${pushTargets.size} of ${LEAGUE_TEAMS.length} owners`}
+              </div>
+            </div>
+            {!commishKey && (
+              <div style={{ fontSize: 10, color: 'var(--danger)', padding: '4px 8px', background: 'rgba(224,94,94,.1)', borderRadius: 5 }}>
+                FANTASAI_KEY not found — add it in Rules &amp; Settings → Commissioner Key.
+              </div>
+            )}
             {pushResult && (
               <div style={{ fontSize: 12, color: pushResult.startsWith('Error') || pushResult.startsWith('Send') ? 'var(--danger)' : 'var(--good)', fontWeight: 600 }}>
                 {pushResult}
@@ -1648,9 +1687,9 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               <button
                 className="btn primary"
                 onClick={sendPushAlert}
-                disabled={pushSending || !pushTitle.trim()}
-                style={{ opacity: pushSending || !pushTitle.trim() ? 0.5 : 1 }}
-              >{pushSending ? 'Sending…' : 'Send to All'}</button>
+                disabled={pushSending || !pushTitle.trim() || pushTargets.size === 0}
+                style={{ opacity: pushSending || !pushTitle.trim() || pushTargets.size === 0 ? 0.5 : 1 }}
+              >{pushSending ? 'Sending…' : allSelected ? 'Send to All' : `Send to ${pushTargets.size}`}</button>
             </div>
           </div>
         </div>

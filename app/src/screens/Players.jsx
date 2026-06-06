@@ -649,6 +649,25 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       {/* ── Players tab content ── */}
       {playersTab === 'players' && <>
 
+      {/* ── Waiver position banner ── */}
+      {draftDone && (
+        <div style={{ margin: '10px 18px 0', padding: '10px 16px', borderRadius: 10, background: 'rgba(198,255,58,.07)', border: '2px solid rgba(198,255,58,.35)', display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: 48, height: 48, borderRadius: 10, background: 'rgba(198,255,58,.15)', border: '1px solid rgba(198,255,58,.4)', flexShrink: 0 }}>
+            <span style={{ fontSize: 22, fontWeight: 900, color: 'var(--accent)', lineHeight: 1, fontFamily: 'var(--font-mono)' }}>{myWaiverPriority}</span>
+            <span style={{ fontSize: 8, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>of {waiverOrder.length}</span>
+          </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
+              Your Waiver Priority: #{myWaiverPriority}
+              {myWaiverPriority === 1 && <span style={{ marginLeft: 8, fontSize: 10, background: 'rgba(198,255,58,.2)', color: 'var(--accent)', borderRadius: 4, padding: '2px 6px', fontWeight: 700 }}>FIRST PICK</span>}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+              Next waiver run: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{fmtWaiverDate(nextWaiverDate(processDay))}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Success toast (pre-draft pickups) ── */}
       {addSuccess && (
         <div style={{ margin: '0 18px 8px', padding: '10px 14px', background: 'rgba(76,175,130,.15)', border: '1px solid #4caf82', borderRadius: 8, fontSize: 13, color: '#4caf82', fontWeight: 600 }}>

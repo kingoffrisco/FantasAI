@@ -35,8 +35,9 @@ export async function getSubscriptionState() {
 }
 
 // Request permission, subscribe to push, and save subscription to worker.
+// teamId ties this subscription to the owner so commish can target individuals.
 // Returns the subscription object or null on failure.
-export async function subscribeToPush() {
+export async function subscribeToPush(teamId = null) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') return null;
@@ -50,11 +51,12 @@ export async function subscribeToPush() {
     });
   }
 
-  // Save subscription to worker KV
+  // Save subscription to worker KV, tagging with teamId for targeted sends
+  const subJson = sub.toJSON ? sub.toJSON() : { endpoint: sub.endpoint, keys: sub.keys };
   await fetch(`${WORKER_BASE}/api/v1/push/subscribe`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(sub),
+    body: JSON.stringify({ ...subJson, _teamId: teamId }),
   }).catch(e => console.warn('Push subscribe save failed:', e));
 
   return sub;
@@ -75,16 +77,17 @@ export async function unsubscribeFromPush() {
   }).catch(() => {});
 }
 
-// Commish-only: send a push notification to all subscribed league members.
+// Commish-only: send a push notification to subscribed league members.
 // commishKey must match the FANTASAI_KEY worker secret.
-export async function sendLeaguePush(title, body, commishKey, url = '/') {
+// teamIds: array of team IDs to target — null/omitted sends to all subscribers.
+export async function sendLeaguePush(title, body, commishKey, url = '/', teamIds = null) {
   const resp = await fetch(`${WORKER_BASE}/api/v1/push/send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-FantasAI-Key': commishKey,
     },
-    body: JSON.stringify({ title, body, url, tag: 'fantasai-league' }),
+    body: JSON.stringify({ title, body, url, tag: 'fantasai-league', teamIds }),
   });
   return resp.json();
 }

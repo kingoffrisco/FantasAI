@@ -126,7 +126,7 @@ export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showCh
   );
 };
 
-function SidebarPushButton() {
+function SidebarPushButton({ teamId }) {
   const [state, setState]   = React.useState('init'); // init|unsupported|unsubscribed|subscribed|denied
   const [busy, setBusy]     = React.useState(false);
 
@@ -139,7 +139,7 @@ function SidebarPushButton() {
       await unsubscribeFromPush();
       setState('unsubscribed');
     } else {
-      const sub = await subscribeToPush();
+      const sub = await subscribeToPush(teamId ?? null);
       if (sub) {
         showLocalNotification('FantasAI Alerts Active', 'Push notifications are now enabled.');
         setState('subscribed');
@@ -343,7 +343,7 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
         </div>
       ))}
       <div style={{ padding: '16px 14px', borderTop: '1px solid var(--border)', marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <SidebarPushButton />
+        <SidebarPushButton teamId={user?.teamId} />
         <div style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.12em', fontWeight: 700 }}>Week 11 · 2025</div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Lock: Sun 1:00pm ET</div>
       </div>

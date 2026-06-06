@@ -1771,13 +1771,19 @@ async function handlePushSend(request, env) {
   if (!env.PUSH_SUBS)
     return json({ error: 'PUSH_SUBS KV not bound — see wrangler.toml' }, 500);
 
-  let notification;
-  try { notification = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  let payload;
+  try { payload = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  const { teamIds, ...notification } = payload;
 
   const list = await env.PUSH_SUBS.list({ prefix: 'sub:' });
-  const subs = (await Promise.all(
+  let subs = (await Promise.all(
     list.keys.map(k => env.PUSH_SUBS.get(k.name).then(v => v ? JSON.parse(v) : null))
   )).filter(Boolean);
+
+  // If specific team IDs requested, filter to only their subscriptions
+  if (Array.isArray(teamIds) && teamIds.length > 0) {
+    subs = subs.filter(s => teamIds.includes(s._teamId));
+  }
 
   const results = await Promise.allSettled(
     subs.map(async sub => {
