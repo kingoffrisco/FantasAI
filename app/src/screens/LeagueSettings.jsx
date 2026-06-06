@@ -1020,9 +1020,10 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Payment Status</span>
                           {feeNum > 0 && (
-                            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                              Entry Fee: <strong style={{ color: 'var(--text)' }}>${feeNum.toLocaleString()}</strong>
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1 }}>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em' }}>Entry Fee</span>
+                              <span style={{ fontSize: 22, fontWeight: 900, color: 'var(--accent)', fontFamily: 'var(--font-mono)', letterSpacing: '-.02em' }}>${feeNum.toLocaleString()}</span>
+                            </div>
                           )}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
