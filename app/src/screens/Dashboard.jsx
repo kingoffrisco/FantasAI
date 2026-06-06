@@ -1680,19 +1680,11 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                 {pushTargets.size === 0 ? 'No owners selected' : allSelected ? 'All owners with alerts enabled' : `${pushTargets.size} of ${LEAGUE_TEAMS.length} owners`}
               </div>
             </div>
-            {(() => {
-              const k = getCommishKey();
-              if (!k) return (
-                <div style={{ fontSize: 10, color: 'var(--danger)', padding: '4px 8px', background: 'rgba(224,94,94,.1)', borderRadius: 5 }}>
-                  Commissioner Key not set — go to Rules &amp; Settings → General → Commissioner Key.
-                </div>
-              );
-              return (
-                <div style={{ fontSize: 10, color: 'var(--text-faint)', padding: '4px 8px', background: 'rgba(255,255,255,.04)', borderRadius: 5, fontFamily: 'var(--font-mono)' }}>
-                  Key stored: {k.slice(0, 3)}{'•'.repeat(Math.max(0, k.length - 3))} ({k.length} chars) — must match FANTASAI_KEY in Cloudflare exactly
-                </div>
-              );
-            })()}
+            {!getCommishKey() && (
+              <div style={{ fontSize: 10, color: 'var(--danger)', padding: '4px 8px', background: 'rgba(224,94,94,.1)', borderRadius: 5 }}>
+                Commissioner Key not set — go to Rules &amp; Settings → General → Commissioner Key.
+              </div>
+            )}
             {pushResult && (
               <div style={{ fontSize: 12, color: pushResult.startsWith('Error') || pushResult.startsWith('Send') || pushResult.startsWith('Key') ? 'var(--danger)' : 'var(--good)', fontWeight: 600, lineHeight: 1.5 }}>
                 {pushResult}
