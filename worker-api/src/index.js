@@ -174,6 +174,11 @@ export default {
         if (url.pathname === '/api/v1/weather/refresh')       return handleWeatherRefresh(request, env);
         if (url.pathname === '/api/v1/transactions')          return handleTransactionsPost(request, env);
         if (url.pathname === '/api/v1/scrape')                return handleScrape(request);
+        // Push notifications (open — anyone with the app can subscribe/unsubscribe)
+        if (url.pathname === '/api/v1/push/subscribe')        return handlePushSubscribe(request, env);
+        if (url.pathname === '/api/v1/push/unsubscribe')      return handlePushUnsubscribe(request, env);
+        // Push send — commish only, requires X-FantasAI-Key
+        if (url.pathname === '/api/v1/push/send')             return handlePushSend(request, env);
         return json({ error: 'Not found' }, 404);
       }
 
@@ -1612,6 +1617,185 @@ async function handleDbOpportunity(env) {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ============================================================
+// Web Push — VAPID JWT + RFC 8291 payload encryption
+// ============================================================
+
+function wpB64url(input) {
+  let bytes;
+  if (typeof input === 'string') bytes = new TextEncoder().encode(input);
+  else if (input instanceof ArrayBuffer) bytes = new Uint8Array(input);
+  else bytes = input;
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function wpFromB64url(str) {
+  const p = str.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = p + '='.repeat((4 - p.length % 4) % 4);
+  const raw = atob(padded);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function wpJoin(...parts) {
+  const u8s = parts.map(p =>
+    typeof p === 'string' ? new TextEncoder().encode(p) :
+    p instanceof ArrayBuffer ? new Uint8Array(p) :
+    Array.isArray(p) ? new Uint8Array(p) : p
+  );
+  const out = new Uint8Array(u8s.reduce((n, a) => n + a.length, 0));
+  let off = 0;
+  for (const a of u8s) { out.set(a, off); off += a.length; }
+  return out;
+}
+
+async function wpHmac(keyBytes, data) {
+  const key = await crypto.subtle.importKey(
+    'raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, data));
+}
+
+async function wpHkdf(salt, ikm, info, len) {
+  const prk = await wpHmac(salt, ikm);
+  const infoBytes = typeof info === 'string' ? new TextEncoder().encode(info) : info;
+  const blocks = [];
+  let prev = new Uint8Array(0);
+  while (blocks.reduce((n, b) => n + b.length, 0) < len) {
+    prev = await wpHmac(prk, wpJoin(prev, infoBytes, new Uint8Array([blocks.length + 1])));
+    blocks.push(prev);
+  }
+  return wpJoin(...blocks).slice(0, len);
+}
+
+async function wpVapidJWT(endpoint, privJwk) {
+  const origin = new URL(endpoint).origin;
+  const now    = Math.floor(Date.now() / 1000);
+  const header  = wpB64url(JSON.stringify({ typ: 'JWT', alg: 'ES256' }));
+  const payload = wpB64url(JSON.stringify({ aud: origin, exp: now + 43200, sub: 'mailto:kingoffrisco@yahoo.com' }));
+  const sigInput = `${header}.${payload}`;
+  const privKey = await crypto.subtle.importKey(
+    'jwk', privJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' }, privKey, new TextEncoder().encode(sigInput)
+  );
+  return `${sigInput}.${wpB64url(sig)}`;
+}
+
+async function wpEncrypt(sub, payloadStr) {
+  const p256dh = wpFromB64url(sub.keys.p256dh);
+  const auth   = wpFromB64url(sub.keys.auth);
+  const recipientKey = await crypto.subtle.importKey(
+    'raw', p256dh, { name: 'ECDH', namedCurve: 'P-256' }, true, []
+  );
+  const ephemeral = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']
+  );
+  const senderPubRaw = new Uint8Array(await crypto.subtle.exportKey('raw', ephemeral.publicKey));
+  const sharedSecret = new Uint8Array(
+    await crypto.subtle.deriveBits({ name: 'ECDH', public: recipientKey }, ephemeral.privateKey, 256)
+  );
+  const salt  = crypto.getRandomValues(new Uint8Array(16));
+  const ikm   = await wpHkdf(auth, sharedSecret, wpJoin('WebPush: info\x00', p256dh, senderPubRaw), 32);
+  const cek   = await wpHkdf(salt, ikm, 'Content-Encoding: aes128gcm\x00', 16);
+  const nonce = await wpHkdf(salt, ikm, 'Content-Encoding: nonce\x00', 12);
+  const cekKey = await crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['encrypt']);
+  const record = wpJoin(new TextEncoder().encode(payloadStr), [2]);
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, cekKey, record)
+  );
+  const hdr = new Uint8Array(21 + senderPubRaw.length);
+  hdr.set(salt, 0);
+  new DataView(hdr.buffer).setUint32(16, 4096, false);
+  hdr[20] = senderPubRaw.length;
+  hdr.set(senderPubRaw, 21);
+  return wpJoin(hdr, ciphertext);
+}
+
+async function wpSendOne(sub, notification, env) {
+  const privJwk = JSON.parse(env.VAPID_PRIVATE_KEY);
+  const jwt  = await wpVapidJWT(sub.endpoint, privJwk);
+  const body = await wpEncrypt(sub, JSON.stringify(notification));
+  const resp = await fetch(sub.endpoint, {
+    method: 'POST',
+    headers: {
+      'Authorization': `vapid t=${jwt}, k=${env.VAPID_PUBLIC_KEY}`,
+      'Content-Type': 'application/octet-stream',
+      'Content-Encoding': 'aes128gcm',
+      'TTL': '86400',
+    },
+    body,
+  });
+  return resp.status;
+}
+
+async function wpSubKey(endpoint) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(endpoint));
+  return 'sub:' + Array.from(new Uint8Array(hash)).slice(0, 12)
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function handlePushSubscribe(request, env) {
+  let sub;
+  try { sub = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth)
+    return json({ error: 'Invalid subscription' }, 400);
+  if (env.PUSH_SUBS) {
+    const key = await wpSubKey(sub.endpoint);
+    await env.PUSH_SUBS.put(key, JSON.stringify(sub));
+  }
+  return json({ ok: true });
+}
+
+async function handlePushUnsubscribe(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  if (env.PUSH_SUBS && body?.endpoint) {
+    const key = await wpSubKey(body.endpoint);
+    await env.PUSH_SUBS.delete(key);
+  }
+  return json({ ok: true });
+}
+
+async function handlePushSend(request, env) {
+  // Require commish key
+  const k = request.headers.get('X-FantasAI-Key');
+  if (!env.FANTASAI_KEY || k !== env.FANTASAI_KEY) return json({ error: 'Unauthorized' }, 401);
+  if (!env.VAPID_PRIVATE_KEY || !env.VAPID_PUBLIC_KEY)
+    return json({ error: 'VAPID secrets not configured — add VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY in Worker settings' }, 500);
+  if (!env.PUSH_SUBS)
+    return json({ error: 'PUSH_SUBS KV not bound — see wrangler.toml' }, 500);
+
+  let notification;
+  try { notification = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+
+  const list = await env.PUSH_SUBS.list({ prefix: 'sub:' });
+  const subs = (await Promise.all(
+    list.keys.map(k => env.PUSH_SUBS.get(k.name).then(v => v ? JSON.parse(v) : null))
+  )).filter(Boolean);
+
+  const results = await Promise.allSettled(
+    subs.map(async sub => {
+      const status = await wpSendOne(sub, notification, env);
+      if (status === 410 || status === 404) {
+        const key = await wpSubKey(sub.endpoint);
+        await env.PUSH_SUBS.delete(key);
+      }
+      return status;
+    })
+  );
+
+  return json({
+    ok: true,
+    sent: subs.length,
+    statuses: results.map(r => r.status === 'fulfilled' ? r.value : `err:${r.reason?.message}`),
+  });
+}
 
 function corsHeaders() {
   return {

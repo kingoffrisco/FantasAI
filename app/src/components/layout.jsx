@@ -1,7 +1,7 @@
 import React from 'react';
 import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster } from '../lib/data.js';
 import { findPlayer } from '../lib/playerStore.js';
-import { getSubscriptionState, requestNotificationPermission, showLocalNotification } from '../lib/pushNotifications.js';
+import { getSubscriptionState, subscribeToPush, unsubscribeFromPush, showLocalNotification } from '../lib/pushNotifications.js';
 
 function getDraftStatus() {
   try {
@@ -127,35 +127,63 @@ export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showCh
 };
 
 function SidebarPushButton() {
-  const [state, setState] = React.useState('loading');
+  const [state, setState]   = React.useState('init'); // init|unsupported|unsubscribed|subscribed|denied
+  const [busy, setBusy]     = React.useState(false);
+
   React.useEffect(() => { getSubscriptionState().then(setState); }, []);
 
-  async function enable() {
-    const perm = await requestNotificationPermission();
-    if (perm === 'granted') {
-      showLocalNotification('FantasAI Alerts Active', 'You\'ll be notified for lineup locks, waivers, and trades.');
-      setState('subscribed');
+  async function toggle() {
+    if (busy || state === 'denied' || state === 'unsupported') return;
+    setBusy(true);
+    if (state === 'subscribed') {
+      await unsubscribeFromPush();
+      setState('unsubscribed');
     } else {
-      setState(perm);
+      const sub = await subscribeToPush();
+      if (sub) {
+        showLocalNotification('FantasAI Alerts Active', 'Push notifications are now enabled.');
+        setState('subscribed');
+      } else {
+        setState(Notification.permission === 'denied' ? 'denied' : 'unsubscribed');
+      }
     }
+    setBusy(false);
   }
 
-  if (state === 'loading' || state === 'unsupported') return null;
-  if (state === 'subscribed' || state === 'granted') {
-    return (
-      <div style={{ fontSize: 9, color: 'var(--good)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--good)', display: 'inline-block' }} />
-        Push Alerts On
-      </div>
-    );
-  }
-  if (state === 'denied') return null;
+  if (state === 'init' || state === 'unsupported') return null;
+
+  const on = state === 'subscribed';
+  const denied = state === 'denied';
+
   return (
     <button
-      onClick={enable}
-      style={{ fontSize: 10, padding: '5px 10px', background: 'rgba(198,255,58,.08)', border: '1px solid rgba(198,255,58,.25)', borderRadius: 6, color: 'var(--accent)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 700, textAlign: 'left' }}
+      onClick={toggle}
+      disabled={busy || denied}
+      title={denied ? 'Notifications blocked — enable in browser settings' : on ? 'Click to turn off push alerts' : 'Click to enable push alerts'}
+      style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', padding: '2px 0', cursor: denied ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1 }}
     >
-      🔔 Enable Push Alerts
+      {/* Toggle track */}
+      <span style={{
+        position: 'relative', display: 'inline-block',
+        width: 32, height: 18, borderRadius: 9, flexShrink: 0,
+        background: on ? 'var(--accent)' : denied ? 'rgba(255,255,255,.1)' : 'rgba(255,255,255,.15)',
+        transition: 'background .2s',
+        border: `1px solid ${on ? 'var(--accent)' : 'rgba(255,255,255,.2)'}`,
+      }}>
+        <span style={{
+          position: 'absolute', top: 2, left: on ? 14 : 2,
+          width: 12, height: 12, borderRadius: '50%',
+          background: on ? '#0a1300' : denied ? 'rgba(255,255,255,.3)' : '#fff',
+          transition: 'left .2s',
+        }} />
+      </span>
+      <span style={{
+        fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+        color: on ? 'var(--accent)' : denied ? 'var(--text-faint)' : 'var(--text-dim)',
+        letterSpacing: '.04em',
+      }}>
+        {denied ? 'Alerts Blocked' : on ? 'Push Alerts On' : 'Push Alerts Off'}
+      </span>
     </button>
   );
 }

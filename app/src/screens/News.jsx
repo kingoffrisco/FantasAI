@@ -3,7 +3,7 @@ import { NEWS, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, SOURCE_META, TEAM_ROSTER
 import { getPlayers, findPlayer, findPlayerByName } from '../lib/playerStore.js';
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
-import { useR2PlayerNotes, useR2AiSummaries } from '../hooks.js';
+import { useR2PlayerNotes, useR2AiSummaries, useR2PlayerNewsLinks } from '../hooks.js';
 
 // Players currently on any roster
 const ROSTERED_IDS = new Set(
@@ -107,6 +107,39 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
 
   const { data: r2PlayerNotes, fetchedAt: r2NotesFetchedAt } = useR2PlayerNotes();
   const { data: r2AiSummaries } = useR2AiSummaries();
+  const { data: r2PlayerNewsLinks } = useR2PlayerNewsLinks();
+
+  // Parse raw R2 articles — handles { data:[...] }, { articles:[...] }, or a direct array
+  const r2Articles = React.useMemo(() => {
+    if (Array.isArray(r2PlayerNewsLinks)) return r2PlayerNewsLinks;
+    if (Array.isArray(r2PlayerNewsLinks?.data)) return r2PlayerNewsLinks.data;
+    if (Array.isArray(r2PlayerNewsLinks?.articles)) return r2PlayerNewsLinks.articles;
+    return [];
+  }, [r2PlayerNewsLinks]);
+
+  // All articles sorted newest-first for the Articles tab
+  const allArticles = React.useMemo(() => {
+    return r2Articles
+      .filter(a => a.headline && a.article_url)
+      .sort((a, b) => {
+        const ta = a.published_at ? new Date(a.published_at).getTime() : 0;
+        const tb = b.published_at ? new Date(b.published_at).getTime() : 0;
+        return tb - ta;
+      });
+  }, [r2Articles]);
+
+  // Map: normalized player_name → sorted article array (for inline article strips in FeedView)
+  const playerNewsMap = React.useMemo(() => {
+    const m = new Map();
+    for (const a of r2Articles) {
+      const key = (a.player_name || '').toLowerCase().trim();
+      if (!key || !a.article_url) continue;
+      if (!m.has(key)) m.set(key, []);
+      m.get(key).push(a);
+    }
+    m.forEach(arr => arr.sort((a, b) => (a.article_rank ?? 9) - (b.article_rank ?? 9)));
+    return m;
+  }, [r2Articles]);
 
   // liveItems: { [sourceId]: newsItem[] }
   const [liveItems,         setLiveItems]         = React.useState({});
@@ -533,6 +566,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     { id: 'trades',     label: 'Trades',       count: 0 },
     { id: 'waivers',    label: 'Waivers',      count: faCount },
     { id: 'notstarted', label: 'Not Started',  count: null },
+    { id: 'articles',   label: '📰 Articles',  count: allArticles.length || null },
   ];
 
   return (
@@ -647,7 +681,9 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
 
       {/* ── Feed ── */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {mainTab === 'trades' ? (
+        {mainTab === 'articles' ? (
+          <ArticlesFeedTab articles={allArticles} rosteredIds={ROSTERED_IDS} />
+        ) : mainTab === 'trades' ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 8, color: 'var(--text-faint)' }}>
             <div style={{ fontSize: 28 }}>🔄</div>
             <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Trade news coming soon</div>
@@ -663,15 +699,230 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
             <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>No stories yet — click ↻ Refresh above</div>
           </div>
         ) : (
-          <FeedView news={news} onOpenPlayer={onOpenPlayer} rosteredIds={ROSTERED_IDS} />
+          <FeedView news={news} onOpenPlayer={onOpenPlayer} rosteredIds={ROSTERED_IDS} playerNewsMap={playerNewsMap} />
         )}
       </div>
     </div>
   );
 }
 
+/* ── Articles tab — full Google News feed from R2 ────────────────────────── */
+function ArticlesFeedTab({ articles, rosteredIds }) {
+  const [posFilter,    setPosFilter]    = React.useState('ALL');
+  const [search,       setSearch]       = React.useState('');
+  const [rosterOnly,   setRosterOnly]   = React.useState(false);
+
+  const filtered = React.useMemo(() => {
+    let list = articles;
+    if (rosterOnly) {
+      const players = getPlayers();
+      list = list.filter(a => {
+        const p = players.find(pl => pl.name.toLowerCase() === (a.player_name || '').toLowerCase().trim());
+        return p && rosteredIds.has(p.id);
+      });
+    }
+    if (posFilter !== 'ALL') list = list.filter(a => (a.position || '').toUpperCase() === posFilter);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(a =>
+        (a.player_name || '').toLowerCase().includes(q) ||
+        (a.headline    || '').toLowerCase().includes(q) ||
+        (a.publisher   || '').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [articles, posFilter, search, rosterOnly, rosteredIds]);
+
+  if (!articles.length) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
+        <div style={{ fontSize: 28 }}>📰</div>
+        <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>No articles yet — Databricks pipeline hasn't run</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Filter bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', flexShrink: 0 }}>
+        {/* Roster toggle */}
+        <div style={{ display: 'flex', gap: 2, background: 'var(--panel-3)', borderRadius: 6, padding: 2 }}>
+          {[['All NFL', false], ['My Roster', true]].map(([label, val]) => (
+            <button key={label} onClick={() => setRosterOnly(val)} style={{
+              background: rosterOnly === val ? 'var(--accent)' : 'transparent',
+              color: rosterOnly === val ? '#0a1300' : 'var(--text-dim)',
+              border: 'none', borderRadius: 4, padding: '3px 10px', fontSize: 11,
+              fontWeight: rosterOnly === val ? 700 : 500, cursor: 'pointer', whiteSpace: 'nowrap',
+            }}>{label}</button>
+          ))}
+        </div>
+        <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+        {/* Position pills */}
+        {['ALL', 'QB', 'RB', 'WR', 'TE', 'K'].map(p => (
+          <button key={p} onClick={() => setPosFilter(p)} style={{
+            background: posFilter === p ? 'var(--accent)' : 'var(--panel-3)',
+            color: posFilter === p ? '#0a1300' : 'var(--text-dim)',
+            border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 11,
+            fontWeight: posFilter === p ? 700 : 400, cursor: 'pointer',
+          }}>{p}</button>
+        ))}
+        <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search player or headline…"
+          style={{ fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', width: 180 }}
+        />
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+          {filtered.length} of {articles.length}
+        </span>
+      </div>
+
+      {/* Articles list */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>No articles match the current filter.</div>
+        ) : (
+          <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
+            {filtered.map((a, i) => {
+              const ago = fmtRelative(a.published_at);
+              return (
+                <div key={i} style={{ display: 'flex', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--border)', alignItems: 'flex-start' }}>
+                  {/* Position badge */}
+                  <div style={{ flexShrink: 0, marginTop: 2 }}>
+                    {a.position ? (
+                      <PosBadge pos={a.position} />
+                    ) : (
+                      <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>—</span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* Player row */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{a.player_name}</span>
+                      {a.team && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{a.team}</span>}
+                    </div>
+                    {/* Headline */}
+                    <a
+                      href={a.article_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--text)', textDecoration: 'none', lineHeight: 1.5, marginBottom: 6 }}
+                      onMouseEnter={e => e.currentTarget.style.color = '#4ea8ff'}
+                      onMouseLeave={e => e.currentTarget.style.color = 'var(--text)'}
+                    >
+                      {a.headline}
+                    </a>
+                    {/* Attribution + link */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>{a.publisher}</span>
+                      {ago && (
+                        <>
+                          <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>·</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{ago}</span>
+                        </>
+                      )}
+                      <a
+                        href={a.article_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ marginLeft: 4, fontSize: 11, fontWeight: 700, color: '#4ea8ff', textDecoration: 'none', padding: '2px 8px', background: 'rgba(78,168,255,.1)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 4 }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(78,168,255,.22)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(78,168,255,.1)'}
+                      >
+                        Read Article →
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Relative-time helper for Google News timestamps ────────────────────────── */
+function fmtRelative(ts) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  const diff = Date.now() - d.getTime();
+  const mins = Math.round(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return days === 1 ? 'yesterday' : `${days}d ago`;
+}
+
+/* ── Google News article links strip ────────────────────────────────────────── */
+function ArticleLinks({ articles }) {
+  const [expanded, setExpanded] = React.useState(false);
+  if (!articles?.length) return null;
+  const shown = expanded ? articles : articles.slice(0, 2);
+  return (
+    <div
+      style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(78,168,255,.06)', border: '1px solid rgba(78,168,255,.15)', borderRadius: 6 }}
+      onClick={e => e.stopPropagation()}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span style={{ fontSize: 9, fontWeight: 800, color: '#4ea8ff', fontFamily: 'var(--font-mono)', letterSpacing: '.08em', textTransform: 'uppercase' }}>📰 Headlines</span>
+        <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{articles.length} articles</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {shown.map((a, i) => {
+          const ago = fmtRelative(a.published_at);
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <a
+                  href={a.article_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', textDecoration: 'none', lineHeight: 1.4, display: 'block' }}
+                  onMouseEnter={e => e.currentTarget.style.color = '#4ea8ff'}
+                  onMouseLeave={e => e.currentTarget.style.color = 'var(--text)'}
+                >
+                  {a.headline}
+                </a>
+                <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-dim)' }}>{a.publisher}</span>
+                  {ago && <><span>·</span><span>{ago}</span></>}
+                </div>
+              </div>
+              <a
+                href={a.article_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: '#4ea8ff', background: 'rgba(78,168,255,.12)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 4, padding: '3px 8px', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(78,168,255,.22)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(78,168,255,.12)'; }}
+              >
+                Read →
+              </a>
+            </div>
+          );
+        })}
+      </div>
+      {articles.length > 2 && (
+        <button
+          onClick={() => setExpanded(x => !x)}
+          style={{ marginTop: 8, background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: '#4ea8ff', padding: 0, fontWeight: 600 }}
+        >
+          {expanded ? '▲ Show less' : `▼ +${articles.length - 2} more articles`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ── Feed — full RotoWire-style article cards ───────────────────────────────── */
-function FeedView({ news, onOpenPlayer, rosteredIds }) {
+function FeedView({ news, onOpenPlayer, rosteredIds, playerNewsMap }) {
   const IMPACT_COLOR = { high: 'var(--danger)', med: 'var(--warn)', good: 'var(--good)', low: 'var(--text-faint)' };
   return (
     <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
@@ -679,14 +930,15 @@ function FeedView({ news, onOpenPlayer, rosteredIds }) {
         const player = findPlayer(n.playerId);
         if (!player) return null;
 
-        const sources  = n.sources || [n];
-        const best     = sources.find(s => s.sourceId === 'fantasai-notes') || sources.find(s => s.sourceId === 'fantasai-ai') || sources[0];
-        const title    = best?.title || n.title || '';
-        const body     = best?.body  || n.body  || '';
-        const srcLabel = best?.source || best?.sourceId || '';
-        const dateStr  = fmtNewsDate(best?.publishedAt || best?.fetchedAt);
-        const isFA     = !rosteredIds?.has(n.playerId);
-        const impColor = IMPACT_COLOR[n.impact] || 'var(--text-faint)';
+        const sources   = n.sources || [n];
+        const best      = sources.find(s => s.sourceId === 'fantasai-notes') || sources.find(s => s.sourceId === 'fantasai-ai') || sources[0];
+        const title     = best?.title || n.title || '';
+        const body      = best?.body  || n.body  || '';
+        const srcLabel  = best?.source || best?.sourceId || '';
+        const dateStr   = fmtNewsDate(best?.publishedAt || best?.fetchedAt);
+        const isFA      = !rosteredIds?.has(n.playerId);
+        const impColor  = IMPACT_COLOR[n.impact] || 'var(--text-faint)';
+        const articles  = playerNewsMap?.get(player.name.toLowerCase().trim()) || [];
 
         return (
           <article
@@ -717,6 +969,11 @@ function FeedView({ news, onOpenPlayer, rosteredIds }) {
                       borderRadius: 3, padding: '1px 6px', textTransform: 'uppercase', letterSpacing: '.06em',
                     }}>
                       {n.impact === 'good' ? 'BOOST' : n.impact}
+                    </span>
+                  )}
+                  {articles.length > 0 && (
+                    <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#4ea8ff', background: 'rgba(78,168,255,.12)', border: '1px solid rgba(78,168,255,.2)', borderRadius: 3, padding: '1px 5px' }}>
+                      📰 {articles.length}
                     </span>
                   )}
                 </div>
@@ -766,6 +1023,9 @@ function FeedView({ news, onOpenPlayer, rosteredIds }) {
                 ))}
               </div>
             )}
+
+            {/* Google News article links */}
+            <ArticleLinks articles={articles} />
           </article>
         );
       })}

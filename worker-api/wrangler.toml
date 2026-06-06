@@ -13,6 +13,12 @@ routes = [
 binding     = "BUCKET"
 bucket_name = "fantasai-r2"
 
+# Web Push subscription storage — create with: wrangler kv namespace create PUSH_SUBS
+# Then paste the id below and uncomment. Also create via dash.cloudflare.com → Storage & Databases → KV
+# [[kv_namespaces]]
+# binding = "PUSH_SUBS"
+# id = "<paste namespace id here>"
+
 [vars]
 SLEEPER_BASE             = "https://api.sleeper.app/v1"
 CBS_WORKER_URL           = "https://fantasai-cbs.fantasai.workers.dev"

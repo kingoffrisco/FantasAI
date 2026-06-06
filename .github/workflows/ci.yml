@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,3 +36,13 @@ jobs:
         if: steps.app_check.outputs.exists == 'true'
         run: npm run build
         working-directory: app
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.app_check.outputs.exists == 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: fantasai-app
+          directory: app/dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}

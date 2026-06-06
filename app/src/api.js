@@ -35,6 +35,7 @@ export const api = {
     drops:    () => r2Get('fantasai/analysis/drop_candidates.json'),
     list:          (prefix = '') => fetch(`${API_BASE}/api/v1/r2/list?prefix=${encodeURIComponent(prefix)}`).then(r => r.json()),
     playerNotes:    () => r2Get('fantasai/news/player_notes.json'),
+    playerNewsLinks: () => r2Get('fantasai/analysis/player_news.json'),
     criticalAlerts: () => r2Get('fantasai/news/critical_alerts.json'),
     enrichedNews:        () => r2Get('fantasai/news/enriched_news.json'),
     aiSummaries:         () => r2Get('fantasai/news/ai_summaries.json'),

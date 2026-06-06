@@ -148,11 +148,12 @@ export function normalizePlayerList(rawArr) {
     // Used when Databricks R2 export isn't available yet — Sleeper/Databricks news fallback.
     // ECR is positional rank when available (players_2026_draft), else overall search_rank.
     let proj = projRaw;
-    if (proj === 0 && ecr < 500) {
+    if (proj === 0) {
       if (pos === 'DST') {
-        // Top DST (rank 1) ≈ 14.5 pts, bottom (rank 32) ≈ 5 pts in half-PPR.
-        proj = parseFloat(Math.max(5, 15 - ecr * 0.6).toFixed(1));
-      } else {
+        // Always synthesize a DST proj — cap ECR at 32 so unranked DSTs get a mid-tier value (~8).
+        const dstRank = ecr < 500 ? ecr : 16;
+        proj = parseFloat(Math.max(4, 15 - dstRank * 0.6).toFixed(1));
+      } else if (ecr < 500) {
         // Skill positions: base ± ECR-scaled drop-off, floored at a minimum.
         const base  = { QB: 26, RB: 22, WR: 20, TE: 16, K: 10 }[pos] ?? 18;
         const slope = { QB: 0.5, RB: 0.5, WR: 0.5, TE: 0.65, K: 0.4 }[pos] ?? 0.5;

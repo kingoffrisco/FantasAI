@@ -154,6 +154,7 @@ export async function fetchSleeperPlayerStats(name, pos, season = 2025) {
     if (s && Object.keys(s).length > 0) weeklyStats[weeksWanted[i]] = s;
   });
 
+  const rawProj = projData?.[sleeperId] ?? null;
   return {
     found: true,
     sleeperId,
@@ -166,6 +167,48 @@ export async function fetchSleeperPlayerStats(name, pos, season = 2025) {
     gamesPlayed:   Object.keys(weeklyStats).length,
     weeklyStats,
     seasonTotals:  aggregate(Object.values(weeklyStats)),
-    projection:    projData?.[sleeperId] ?? null,
+    projection:    rawProj,
+    // Convenience scalar so callers don't need to know the internal field name
+    proj:          rawProj?.pts_half_ppr ?? rawProj?.pts_std ?? rawProj?.pts_ppr ?? null,
   };
+}
+
+/**
+ * Bulk-fetch Sleeper projections for all players in one pass (2 HTTP calls).
+ * Returns an array of [ourNumericId, projValue] pairs.
+ * Pass the full player list from playerStore; cross-reference is done by sleeperId,
+ * with a name-match fallback for players whose sleeperId isn't in the Sleeper map.
+ */
+export async function fetchBulkProjections(players) {
+  const state = await getNFLState().catch(() => null);
+  const isOff = !state || state.season_type === 'off' || state.season_type === 'pre';
+  const season = isOff ? 2025 : (Number(state.season) || 2025);
+  const week   = isOff ? 1    : Math.max(1, Math.min(Number(state.week) || 1, 18));
+  const type   = isOff ? 'regular' : (state.season_type || 'regular');
+
+  const [map, projMap] = await Promise.all([
+    getPlayerMap(),
+    fetchCached(
+      `${SLEEPER}/projections/nfl/${type}/${season}/${week}`,
+      `proj:${type}:${season}:${week}`
+    ),
+  ]);
+  if (!map || !projMap) return [];
+
+  const updates = [];
+  for (const p of players) {
+    // Primary lookup: sleeperId stored in the player record
+    let sid = p.sleeperId ? String(p.sleeperId) : null;
+    // Fallback: search by name if sleeperId not in map
+    if (!sid || !map[sid]) {
+      const found = findInMap(map, p.name, p.pos);
+      sid = found ? found[0] : null;
+    }
+    if (!sid) continue;
+    const stats = projMap[sid];
+    if (!stats) continue;
+    const proj = stats.pts_half_ppr ?? stats.pts_std ?? stats.pts_ppr ?? null;
+    if (proj != null) updates.push([p.id, Number(proj)]);
+  }
+  return updates;
 }

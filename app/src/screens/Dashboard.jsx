@@ -1,10 +1,12 @@
 import React from 'react';
 import { TEAM_ROSTERS, findTeam, NEWS, LEAGUE_TEAMS, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { buildPowerData } from '../lib/powerUtils.js';
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { PlayerCell, StatusDot, Sparkline, PosBadge, SourceBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
 import { useApi, useR2CriticalAlerts, useR2BreakoutCandidates } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
+import { sendLeaguePush } from '../lib/pushNotifications.js';
 const SLOT_ELIGIBLE = {
   QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
   K: ['K'], DST: ['DST'], FLEX: ['RB', 'WR'],
@@ -171,7 +173,7 @@ function buildStandings(cbsRaw) {
   const teams = Array.isArray(cbsRaw) ? cbsRaw
     : cbsRaw.teams || cbsRaw.body?.teams || cbsRaw.data || [];
   if (!Array.isArray(teams) || !teams.length) return null;
-  return teams.map(ct => {
+  const rows = teams.map(ct => {
     const cbsId = String(ct.id || ct.team_id || '');
     const mock = LEAGUE_TEAMS.find(t => t.cbsId === cbsId) || LEAGUE_TEAMS.find(t => t.name === ct.name);
     const w = ct.w ?? ct.wins ?? 0;
@@ -180,7 +182,9 @@ function buildStandings(cbsRaw) {
     const pa = ct.pa ?? ct.points_against ?? 0;
     const liveTeam = mock?.id ? findTeam(mock.id) : null;
     return { id: mock?.id, name: ct.name || mock?.name || '—', logo: mock?.logo || '??', logoImg: liveTeam?.logoImg || null, color: mock?.color || '#555', w, l, pf, pa, me: mock?.me };
-  }).sort((a, b) => b.w - a.w || b.pf - a.pf);
+  });
+
+  return rows.sort((a, b) => b.w - a.w || b.pf - a.pf);
 }
 
 function getScoringRules() {
@@ -387,6 +391,17 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const isOffseason = currentWeek.key === 'offseason';
   const isPre       = currentWeek.pre;
 
+  const allPlayersList = usePlayers();
+
+  // Power rank from the same buildPowerData used on the Power Rankings screen
+  const powerRankMap = React.useMemo(() => {
+    const weekNum = isOffseason ? 0 : (currentWeek.num || 0);
+    const rOv  = user?.teamId && myRosterIds?.size ? { [user.teamId]: myRosterIds } : {};
+    const slOv = user?.teamId && Object.keys(slotOverrides).length ? { [user.teamId]: slotOverrides } : {};
+    const data = buildPowerData(weekNum, rOv, slOv);
+    return new Map(data.map((d, i) => [d.team.id, i + 1]));
+  }, [isOffseason, currentWeek, allPlayersList, myRosterIds, slotOverrides]);
+
   // Load commissioner message + media + league name from league settings
   const [commishData, setCommishData] = React.useState(() => {
     try {
@@ -399,6 +414,31 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   });
 
   const canEditCommish = user?.isAdmin || user?.isCommissioner;
+
+  // ── Push notifications (commish send) ───────────────────────────────────────
+  const [pushModal, setPushModal]     = React.useState(false);
+  const [pushTitle, setPushTitle]     = React.useState('');
+  const [pushBody, setPushBody]       = React.useState('');
+  const [pushSending, setPushSending] = React.useState(false);
+  const [pushResult, setPushResult]   = React.useState(null);
+  const commishKey = React.useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || '{}')?.fantasaiKey || ''; } catch { return ''; }
+  }, []);
+
+  async function sendPushAlert() {
+    if (!pushTitle.trim()) return;
+    setPushSending(true);
+    setPushResult(null);
+    try {
+      const res = await sendLeaguePush(pushTitle.trim(), pushBody.trim(), commishKey);
+      setPushResult(res.ok ? `Sent to ${res.sent} device(s)` : `Error: ${res.error}`);
+    } catch {
+      setPushResult('Send failed — check your FANTASAI_KEY setting');
+    }
+    setPushSending(false);
+  }
+  // ── End push ────────────────────────────────────────────────────────────────
+
   const [editingCommish, setEditingCommish] = React.useState(false);
   const [commishTextDraft, setCommishTextDraft] = React.useState('');
   const [commishMediaDraft, setCommishMediaDraft] = React.useState(null);
@@ -469,8 +509,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const totalTeams = LEAGUE_TEAMS.length;
   const myStandingsRank = standings ? standings.findIndex(s => s.me) + 1 : null;
   const waiverPosition  = myStandingsRank ? (totalTeams - myStandingsRank + 1) : null;
-
-  const allPlayersList = usePlayers();
 
   // Build starting lineup from league settings frame (stays in sync with CurrentRoster)
   const rosterSettings = React.useMemo(() => {
@@ -797,6 +835,14 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           </div>
         </div>
         <div className="flex gap-8" style={{ alignItems: 'center' }}>
+          {/* Commish: send push alert to all subscribers */}
+          {canEditCommish && (
+            <button
+              className="btn"
+              style={{ background: 'rgba(255,180,0,.12)', border: '1px solid rgba(255,180,0,.35)', color: 'rgba(255,180,0,.9)', fontWeight: 700 }}
+              onClick={() => { setPushTitle(''); setPushBody(''); setPushResult(null); setPushModal(true); }}
+            >📣 Push Alert</button>
+          )}
           <button
             className="btn"
             style={{ background: '#22c55e', border: 'none', color: '#fff', fontWeight: 700 }}
@@ -973,7 +1019,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           <div style={{ flex: 1, overflowY: 'auto' }}>
           <table className="data-table">
             <thead>
-              <tr><th style={{ width: 32 }}>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">PF</th><th className="num">PA</th></tr>
+              <tr><th style={{ width: 32 }}>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">PF</th><th className="num">PA</th><th className="num" title="Power Ranking — weighted by points scored (60%) and win % (40%)">PR</th></tr>
             </thead>
             <tbody>
               {(standings || LEAGUE_TEAMS.map(t => { const lt = findTeam(t.id); return { ...t, ...lt, w: 0, l: 0, pf: 0, pa: 0 }; })).map((row, i) => (
@@ -993,6 +1039,20 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                   <td className="num mono dim">{row.l}</td>
                   <td className="num mono">{typeof row.pf === 'number' && row.pf > 0 ? row.pf.toFixed(1) : '—'}</td>
                   <td className="num mono dim">{typeof row.pa === 'number' && row.pa > 0 ? row.pa.toFixed(1) : '—'}</td>
+                  {(() => {
+                    const pr = powerRankMap.get(row.id);
+                    return (
+                      <td className="num" style={{ fontWeight: 700, fontSize: 12, fontFamily: 'var(--font-mono)',
+                        color: !pr ? 'var(--text-faint)'
+                          : pr <= 3 ? '#4ed87b'
+                          : pr <= 6 ? 'var(--text)'
+                          : pr <= 8 ? '#f5a623'
+                          : '#ff5a6e',
+                      }}>
+                        {pr === 1 ? '💪' : pr === totalTeams ? '💩' : (pr ?? '—')}
+                      </td>
+                    );
+                  })()}
                 </tr>
               ))}
             </tbody>
@@ -1549,6 +1609,53 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         </div>
       )}
 
+      {/* ── Push alert modal (commish only) ─────────────────────────────────── */}
+      {pushModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9000 }}
+          onClick={e => { if (e.target === e.currentTarget) setPushModal(false); }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, width: 380, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>📣 Send Push Alert</div>
+            <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Sends a push notification to all league members who have enabled alerts.</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input
+                className="input"
+                placeholder="Title (e.g. Happy Hour Reminder!)"
+                value={pushTitle}
+                onChange={e => setPushTitle(e.target.value)}
+                style={{ fontSize: 13 }}
+              />
+              <textarea
+                className="input"
+                placeholder="Message body (optional)"
+                value={pushBody}
+                onChange={e => setPushBody(e.target.value)}
+                rows={3}
+                style={{ fontSize: 13, resize: 'vertical' }}
+              />
+              {!commishKey && (
+                <div style={{ fontSize: 10, color: 'var(--danger)', padding: '4px 8px', background: 'rgba(224,94,94,.1)', borderRadius: 5 }}>
+                  FANTASAI_KEY not found — add it in Rules &amp; Settings → Commissioner Key.
+                </div>
+              )}
+            </div>
+            {pushResult && (
+              <div style={{ fontSize: 12, color: pushResult.startsWith('Error') || pushResult.startsWith('Send') ? 'var(--danger)' : 'var(--good)', fontWeight: 600 }}>
+                {pushResult}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn" onClick={() => setPushModal(false)}>Cancel</button>
+              <button
+                className="btn primary"
+                onClick={sendPushAlert}
+                disabled={pushSending || !pushTitle.trim()}
+                style={{ opacity: pushSending || !pushTitle.trim() ? 0.5 : 1 }}
+              >{pushSending ? 'Sending…' : 'Send to All'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -1926,8 +2033,9 @@ function PlayoffOptimizer({ teamId, currentWeek, inline = false }) {
 }
 
 function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWeek, onNav }) {
-  const lockTarget   = React.useMemo(() => nextSundayLock().getTime(), []);
-  const waiverTarget = React.useMemo(() => nextWaiverRun().getTime(),  []);
+  const lockTarget      = React.useMemo(() => nextSundayLock().getTime(), []);
+  const waiverTarget    = React.useMemo(() => nextWaiverRun().getTime(),  []);
+  const canEditCommish  = user?.isAdmin || user?.isCommissioner;
 
   // Fantasy matchup — who am I playing this week?
   const myTeamId  = user?.teamId ?? LEAGUE_TEAMS.find(t => t.me)?.id;
@@ -2011,6 +2119,8 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
   });
   const [showHHModal, setShowHHModal] = React.useState(false);
   const [hhDraft, setHhDraft]         = React.useState(null);
+  const [hhCollapsed, setHhCollapsed]       = React.useState(new Set());
+  const [hhCommentDrafts, setHhCommentDrafts] = React.useState({});
 
   // Draft location (set by admin/commissioner in DraftCountdown)
   const draftSettings = React.useMemo(() => {
@@ -2031,6 +2141,11 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
 
   function openHHModal() {
     setHhDraft({ id: Date.now().toString(), title: 'Happy Hour', date: new Date().toISOString().slice(0, 10), time: '17:00', address: '', teamIds: LEAGUE_TEAMS.map(t => t.id) });
+    setShowHHModal(true);
+  }
+
+  function editHH(hh) {
+    setHhDraft({ ...hh });
     setShowHHModal(true);
   }
 
@@ -2057,6 +2172,28 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
       if (response === null) delete rsvps[String(teamId)];
       else rsvps[String(teamId)] = response;
       return { ...h, rsvps };
+    });
+    setHappyHours(updated);
+    localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
+  }
+
+  function addCommentHH(id, teamId, text) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const updated = happyHours.map(h => {
+      if (h.id !== id) return h;
+      const comments = [...(h.comments || []), { teamId: String(teamId), text: trimmed, at: Date.now() }];
+      return { ...h, comments };
+    });
+    setHappyHours(updated);
+    localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
+  }
+
+  function deleteCommentHH(id, idx) {
+    const updated = happyHours.map(h => {
+      if (h.id !== id) return h;
+      const comments = (h.comments || []).filter((_, i) => i !== idx);
+      return { ...h, comments };
     });
     setHappyHours(updated);
     localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
@@ -2115,7 +2252,7 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
 
   return (
     <>
-    <div className="card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div className="card" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div className="card-head" style={{ flexShrink: 0 }}>
         <div className="card-title">Weekly Events</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2124,7 +2261,7 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
         </div>
       </div>
       {/* ── Deadline strip ── */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         {deadlineItems.map((it, idx) => (
           <button key={it.label} onClick={it.action} style={{
             flex: 1, padding: '9px 0 8px', cursor: 'pointer', background: it.urgent ? `${it.color}09` : 'none',
@@ -2144,7 +2281,7 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
         ))}
       </div>
       {/* ── Week Calendar + Events ── */}
-      <div style={{ padding: '12px 12px 0' }}>
+      <div style={{ padding: '12px 12px 8px', flex: 1, overflow: 'auto', minHeight: 0 }}>
         {/* ── 7-column calendar grid ── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
           {calWeekDates.map(({ name, abbr, num }, colIdx) => {
@@ -2228,21 +2365,31 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
                 // ── Happy Hour event ──
                 if (evt._isHH) {
                   const dateLabel = (() => { try { return new Date(evt.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return evt.date; } })();
-                  const allTeams = (evt.teamIds || []).length === LEAGUE_TEAMS.length;
+                  const allTeams  = (evt.teamIds || []).length === LEAGUE_TEAMS.length;
+                  const collapsed = hhCollapsed.has(evt.id);
+                  const toggleCollapse = () => setHhCollapsed(s => {
+                    const n = new Set(s);
+                    n.has(evt.id) ? n.delete(evt.id) : n.add(evt.id);
+                    return n;
+                  });
                   return (
                     <div key={evt.id} style={{ margin: '4px 10px 6px', borderRadius: 7, border: '1px solid rgba(255,180,0,.28)', background: 'rgba(255,180,0,.05)', overflow: 'hidden' }}>
-                      {/* Event details */}
                       <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px 6px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px 6px', borderBottom: collapsed ? 'none' : '1px solid rgba(255,255,255,.06)', cursor: 'pointer' }} onClick={toggleCollapse}>
                           <span style={{ fontSize: 15 }}>🍺</span>
                           <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{evt.title || 'Happy Hour'}</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{evt.title || 'Happy Hour'}</div>
                             <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,180,0,.8)', marginTop: 1 }}>
                               {dateLabel}{evt.time ? ` · ${fmt12(evt.time)}` : ''}
                             </div>
                           </div>
-                          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 12, padding: '2px 4px', lineHeight: 1 }} onClick={() => deleteHH(evt.id)} title="Remove">✕</button>
+                          <span style={{ fontSize: 10, color: 'var(--text-faint)', marginRight: 2 }}>{collapsed ? '▶' : '▼'}</span>
+                          {canEditCommish && (
+                            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 12, padding: '2px 4px', lineHeight: 1 }} onClick={e => { e.stopPropagation(); editHH(evt); }} title="Edit">✏️</button>
+                          )}
+                          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 12, padding: '2px 4px', lineHeight: 1 }} onClick={e => { e.stopPropagation(); deleteHH(evt.id); }} title="Remove">✕</button>
                         </div>
+                        {!collapsed && <>
                         <div style={{ padding: '5px 10px 4px' }}>
                           {allTeams ? (
                             <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,180,0,.7)' }}>All {LEAGUE_TEAMS.length} teams invited</span>
@@ -2261,11 +2408,12 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
                             <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(evt.address)}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-2)', textDecoration: 'none', fontWeight: 600 }}>{evt.address}</a>
                           </div>
                         )}
-                        {/* RSVP section */}
+                        {/* RSVP + Share section */}
                         {(() => {
-                          const invitedIds = evt.teamIds || [];
-                          const myIsInvited = myTeamId && invitedIds.map(String).includes(myTeamId);
-                          const myRsvp = evt.rsvps?.[myTeamId];
+                          const invitedIds  = evt.teamIds || [];
+                          const myIdStr     = String(myTeamId || '');
+                          const myIsInvited = !!myTeamId && invitedIds.map(String).includes(myIdStr);
+                          const myRsvp      = evt.rsvps?.[myIdStr];
                           const going = [], notGoing = [];
                           for (const tid of invitedIds) {
                             const r = evt.rsvps?.[String(tid)];
@@ -2274,45 +2422,104 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
                             if (r === 'yes') going.push(t);
                             else if (r === 'no') notGoing.push(t);
                           }
+                          function shareEvent() {
+                            const dateLabel = (() => { try { return new Date(evt.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }); } catch { return evt.date; } })();
+                            const text = [
+                              `🍺 ${evt.title || 'Happy Hour'}`,
+                              `📅 ${dateLabel}${evt.time ? ' at ' + fmt12(evt.time) : ''}`,
+                              evt.address ? `📍 ${evt.address}` : '',
+                            ].filter(Boolean).join('\n');
+                            const fallback = () => {
+                              // Try SMS deep link (works on mobile even without native share)
+                              try { window.open(`sms:?body=${encodeURIComponent(text)}`, '_blank'); return; } catch {}
+                              navigator.clipboard?.writeText(text)
+                                .then(() => alert('Copied to clipboard!'))
+                                .catch(() => {});
+                            };
+                            if (navigator.share) {
+                              navigator.share({ title: evt.title || 'Happy Hour', text }).catch(fallback);
+                            } else {
+                              fallback();
+                            }
+                          }
                           return (
-                            <div style={{ padding: '4px 10px 8px', borderTop: '1px solid rgba(255,180,0,.12)', marginTop: 2 }}>
-                              {myIsInvited && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
-                                  <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>RSVP:</span>
-                                  <button onClick={() => rsvpHH(evt.id, myTeamId, myRsvp === 'yes' ? null : 'yes')}
-                                    style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, border: `1px solid ${myRsvp === 'yes' ? 'rgba(76,175,130,.6)' : 'rgba(255,255,255,.15)'}`, cursor: 'pointer', background: myRsvp === 'yes' ? 'rgba(76,175,130,.25)' : 'transparent', color: myRsvp === 'yes' ? '#4caf82' : 'var(--text-dim)', fontWeight: myRsvp === 'yes' ? 700 : 400 }}>
-                                    ✓ Going
+                            <div style={{ padding: '6px 10px 8px', borderTop: '1px solid rgba(255,180,0,.12)', marginTop: 2 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: going.length > 0 ? 8 : 0 }}>
+                                {myIsInvited && (
+                                  <button onClick={() => rsvpHH(evt.id, myIdStr, myRsvp === 'yes' ? null : 'yes')}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, padding: '4px 12px', borderRadius: 6, border: `1px solid ${myRsvp === 'yes' ? 'rgba(76,175,130,.7)' : 'rgba(255,180,0,.35)'}`, cursor: 'pointer', background: myRsvp === 'yes' ? 'rgba(76,175,130,.2)' : 'rgba(255,180,0,.08)', color: myRsvp === 'yes' ? '#4caf82' : 'rgba(255,180,0,.9)', fontWeight: 700, transition: 'all .15s' }}>
+                                    {myRsvp === 'yes' ? '✓ I\'m Going!' : '🍺 I\'m Coming'}
                                   </button>
-                                  <button onClick={() => rsvpHH(evt.id, myTeamId, myRsvp === 'no' ? null : 'no')}
-                                    style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, border: `1px solid ${myRsvp === 'no' ? 'rgba(224,94,94,.5)' : 'rgba(255,255,255,.15)'}`, cursor: 'pointer', background: myRsvp === 'no' ? 'rgba(224,94,94,.2)' : 'transparent', color: myRsvp === 'no' ? '#e05e5e' : 'var(--text-dim)', fontWeight: myRsvp === 'no' ? 700 : 400 }}>
-                                    ✗ Not Going
+                                )}
+                                {myIsInvited && myRsvp === 'yes' && (
+                                  <button onClick={() => rsvpHH(evt.id, myIdStr, null)}
+                                    style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, border: '1px solid rgba(255,255,255,.12)', cursor: 'pointer', background: 'transparent', color: 'var(--text-faint)' }}>
+                                    Can't make it
                                   </button>
-                                </div>
-                              )}
-                              {(going.length > 0 || notGoing.length > 0) && (
-                                <div style={{ display: 'flex', gap: 14 }}>
-                                  {going.length > 0 && (
-                                    <div>
-                                      <div style={{ fontSize: 8, color: '#4caf82', fontWeight: 700, letterSpacing: '.08em', marginBottom: 3 }}>GOING ({going.length})</div>
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                                        {going.map(t => <span key={t.id} title={t.name} style={{ fontSize: 11 }}>{t.logo}</span>)}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {notGoing.length > 0 && (
-                                    <div>
-                                      <div style={{ fontSize: 8, color: '#e05e5e', fontWeight: 700, letterSpacing: '.08em', marginBottom: 3 }}>NOT GOING ({notGoing.length})</div>
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, opacity: 0.6 }}>
-                                        {notGoing.map(t => <span key={t.id} title={t.name} style={{ fontSize: 11 }}>{t.logo}</span>)}
-                                      </div>
-                                    </div>
-                                  )}
+                                )}
+                                <button onClick={shareEvent}
+                                  style={{ marginLeft: 'auto', fontSize: 10, padding: '3px 10px', borderRadius: 5, border: '1px solid rgba(255,255,255,.15)', cursor: 'pointer', background: 'transparent', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  📲 Send to Phone
+                                </button>
+                              </div>
+                              {going.length > 0 && (
+                                <div>
+                                  <div style={{ fontSize: 8, color: '#4caf82', fontWeight: 700, letterSpacing: '.08em', marginBottom: 4 }}>GOING ({going.length})</div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                                    {going.map(t => (
+                                      <span key={t.id} style={{ fontSize: 10, background: 'rgba(76,175,130,.1)', border: '1px solid rgba(76,175,130,.3)', borderRadius: 4, padding: '2px 7px', color: '#4caf82', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{t.logo} {t.name}</span>
+                                    ))}
+                                  </div>
                                 </div>
                               )}
                             </div>
                           );
                         })()}
-                      </div>
+                      {/* Comments section */}
+                      {(() => {
+                        const comments = evt.comments || [];
+                        const myIdStr  = String(myTeamId || '');
+                        const draft    = hhCommentDrafts[evt.id] || '';
+                        const setDraft = v => setHhCommentDrafts(d => ({ ...d, [evt.id]: v }));
+                        const submit   = () => { if (!draft.trim()) return; addCommentHH(evt.id, myIdStr, draft); setDraft(''); };
+                        return (
+                          <div style={{ padding: '6px 10px 8px', borderTop: '1px solid rgba(255,180,0,.10)' }}>
+                            {comments.length > 0 && (
+                              <div style={{ marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                {comments.map((c, ci) => {
+                                  const t = LEAGUE_TEAMS.find(x => String(x.id) === String(c.teamId));
+                                  const isMine = c.teamId === myIdStr;
+                                  return (
+                                    <div key={ci} style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                                      <span style={{ fontSize: 13, flexShrink: 0 }}>{t?.logo || '👤'}</span>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,180,0,.7)', fontFamily: 'var(--font-mono)', marginRight: 5 }}>{t?.name || 'Owner'}</span>
+                                        <span style={{ fontSize: 11, color: 'var(--text-dim)', wordBreak: 'break-word' }}>{c.text}</span>
+                                      </div>
+                                      {(isMine || canEditCommish) && (
+                                        <button onClick={() => deleteCommentHH(evt.id, ci)} style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 10, cursor: 'pointer', padding: '0 2px', flexShrink: 0 }}>✕</button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {myTeamId && (
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <input className="input" value={draft}
+                                  onChange={e => setDraft(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+                                  placeholder="Add a comment..."
+                                  style={{ flex: 1, fontSize: 11, padding: '4px 8px', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,180,0,.2)', borderRadius: 5 }}
+                                />
+                                <button className="btn sm" onClick={submit}
+                                  style={{ fontSize: 11, background: 'rgba(255,180,0,.15)', border: '1px solid rgba(255,180,0,.3)', color: 'rgba(255,180,0,.9)' }}
+                                >Send</button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                       {/* Map — below details, constrained width */}
                       {evt.address && (
                         <div style={{ padding: '0 10px 10px' }}>
@@ -2323,7 +2530,9 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
                           />
                         </div>
                       )}
+                      </>}
                     </div>
+                  </div>
                   );
                 }
 
@@ -2532,7 +2741,7 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
         onClick={e => { if (e.target === e.currentTarget) { setShowHHModal(false); setHhDraft(null); } }}>
         <div style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 14, padding: 24, width: 420, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-            <div style={{ fontSize: 15, fontWeight: 800 }}>🍺 Schedule Happy Hour</div>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>{happyHours.some(h => h.id === hhDraft?.id) ? '🍺 Edit Happy Hour' : '🍺 Schedule Happy Hour'}</div>
             <button style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 18, cursor: 'pointer', lineHeight: 1 }} onClick={() => { setShowHHModal(false); setHhDraft(null); }}>✕</button>
           </div>
 

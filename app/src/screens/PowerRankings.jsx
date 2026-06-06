@@ -1,16 +1,12 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam } from '../lib/data.js';
-import { findPlayer } from '../lib/playerStore.js';
+import { LEAGUE_TEAMS, findTeam } from '../lib/data.js';
+import { usePlayers } from '../lib/playerStore.js';
 import { TeamLogoBadge } from '../components/ui.jsx';
+import { buildPowerData, buildPowerSchedule, simScore, getPowerWeek } from '../lib/powerUtils.js';
 
-const SEASON_START = new Date('2026-09-09');
 const PLAYOFF_START = 13;
 
-function getCurrentWeek() {
-  const today = new Date();
-  if (today < SEASON_START) return 0;
-  return Math.min(Math.floor((today - SEASON_START) / (7 * 86400000)) + 1, 14);
-}
+function getCurrentWeek() { return getPowerWeek(); }
 
 function MiniSparkline({ values, width = 60, height = 20 }) {
   if (!values || values.length < 2) return <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>—</span>;
@@ -40,86 +36,6 @@ function StatCell({ label, value, color }) {
   );
 }
 
-function simScore(teamId, week) {
-  const roster   = TEAM_ROSTERS[teamId] || [];
-  const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
-  const base = starters.reduce((s, e) => {
-    const p = findPlayer(e.playerId);
-    return s + (p ? (p.avg || p.proj || 0) : 0);
-  }, 0);
-  const noise = (Math.sin(teamId * 11.3 + week * 7.1) * 12) + (Math.cos(teamId * 3.7 + week * 2.9) * 6);
-  return Math.max(0, Math.round((base + noise) * 10) / 10);
-}
-
-function buildSchedule(ids, weeks) {
-  const n = ids.length;
-  return Array.from({ length: weeks }, (_, w) => {
-    const rest   = ids.slice(1);
-    const rot    = w % (n - 1);
-    const circle = [ids[0], ...[...rest.slice(rot), ...rest.slice(0, rot)]];
-    return Array.from({ length: n / 2 }, (_, i) => [circle[i], circle[n - 1 - i]]);
-  });
-}
-
-function buildPowerData(currentWeek) {
-  const ids      = LEAGUE_TEAMS.map(t => t.id);
-  const schedule = buildSchedule(ids, 14);
-  const weeksPlayed = Math.max(0, currentWeek - 1);
-
-  return LEAGUE_TEAMS.map(team => {
-    const rosterFrame   = buildRosterFrame(null);
-    const rosterEntries = assignRoster(rosterFrame, new Set((TEAM_ROSTERS[team.id] || []).filter(r => r.playerId).map(r => r.playerId)), {}, findPlayer);
-    const starters = rosterEntries.filter(e => e.slot !== 'BENCH');
-    const projPts  = starters.reduce((s, e) => { const p = findPlayer(e.playerId); return s + (p ? (p.proj || 0) : 0); }, 0);
-
-    let wins = 0, losses = 0, totalPts = 0, weeklyPts = [];
-    for (let w = 0; w < weeksPlayed; w++) {
-      const matchup = schedule[w]?.find(([a, b]) => a === team.id || b === team.id);
-      if (!matchup) continue;
-      const oppId  = matchup[0] === team.id ? matchup[1] : matchup[0];
-      const myPts  = simScore(team.id, w + 1);
-      const oppPts = simScore(oppId, w + 1);
-      weeklyPts.push(myPts);
-      totalPts += myPts;
-      if (myPts > oppPts) wins++; else losses++;
-    }
-
-    const avgActual = weeklyPts.length ? totalPts / weeklyPts.length : 0;
-    const best      = weeklyPts.length ? Math.max(...weeklyPts) : 0;
-    const worst     = weeklyPts.length ? Math.min(...weeklyPts) : 0;
-
-    const weekResults = weeklyPts.map((pts, wi) => {
-      const matchup = schedule[wi]?.find(([a, b]) => a === team.id || b === team.id);
-      if (!matchup) return null;
-      const oppId = matchup[0] === team.id ? matchup[1] : matchup[0];
-      return pts > simScore(oppId, wi + 1);
-    }).filter(r => r !== null);
-
-    const streak = (() => {
-      if (!weekResults.length) return { type: '—', count: 0 };
-      const won = weekResults[weekResults.length - 1];
-      let count = 1;
-      for (let i = weekResults.length - 2; i >= 0; i--) {
-        if (weekResults[i] === won) count++; else break;
-      }
-      return { type: won ? 'W' : 'L', count };
-    })();
-
-    const winPct = (wins + losses) > 0 ? wins / (wins + losses) : 0;
-    const power  = Math.round((projPts * 0.4 + avgActual * 0.35 + winPct * 60) * 10) / 10;
-
-    return {
-      team,
-      wins, losses,
-      totalPts:  Math.round(totalPts  * 10) / 10,
-      avgActual: Math.round(avgActual * 10) / 10,
-      projPts:   Math.round(projPts   * 10) / 10,
-      best:      Math.round(best      * 10) / 10,
-      worst:     Math.round(worst     * 10) / 10,
-      streak, power, weeklyPts,
-    };
-  }).sort((a, b) => b.power - a.power);
-}
 
 const TABS = [
   { id: 'power',    icon: '⚡', label: 'Power'    },
@@ -127,12 +43,17 @@ const TABS = [
   { id: 'schedule', icon: '📅', label: 'Schedule' },
 ];
 
-export default function PowerRankingsScreen({ user }) {
+export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides = {} }) {
   const currentWeek = getCurrentWeek();
   const isOffseason = currentWeek === 0;
   const [viewMode, setViewMode] = React.useState('power');
-  const data      = React.useMemo(() => buildPowerData(currentWeek), [currentWeek]);
-  const schedule  = React.useMemo(() => buildSchedule(LEAGUE_TEAMS.map(t => t.id), 14), []);
+  const allPlayers = usePlayers(); // re-run buildPowerData whenever patchPlayers fires
+  const data      = React.useMemo(() => {
+    const rOv  = user?.teamId && myRosterIds?.size ? { [user.teamId]: myRosterIds } : {};
+    const slOv = user?.teamId && Object.keys(slotOverrides).length ? { [user.teamId]: slotOverrides } : {};
+    return buildPowerData(currentWeek, rOv, slOv);
+  }, [currentWeek, allPlayers, myRosterIds, slotOverrides]);
+  const schedule  = React.useMemo(() => buildPowerSchedule(LEAGUE_TEAMS.map(t => t.id), 14), []);
   const myTeamId  = user?.teamId;
   const maxPower  = data[0]?.power || 1;
 
@@ -207,6 +128,7 @@ export default function PowerRankingsScreen({ user }) {
                       {/* Stats */}
                       <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', flex: 1 }}>
                         <StatCell label="Record"    value={`${d.wins}–${d.losses}`} />
+                        <StatCell label="Roster"    value={d.playerCount > 0 ? `${d.playerCount}` : '—'} color="var(--text-dim)" />
                         <StatCell label="Total Pts" value={d.totalPts || '—'} color="var(--accent)" />
                         <StatCell label="Avg/Wk"   value={d.avgActual || '—'} color="var(--accent)" />
                         <StatCell label="Best"      value={d.best  || '—'} color="var(--good)" />
@@ -241,6 +163,7 @@ export default function PowerRankingsScreen({ user }) {
                 <tr>
                   <th style={{ width: 32 }}>#</th>
                   <th>Team</th>
+                  <th className="num">Roster</th>
                   <th className="num">Total Pts</th>
                   <th className="num">Avg/Wk</th>
                   <th className="num">Best</th>
@@ -261,6 +184,7 @@ export default function PowerRankingsScreen({ user }) {
                         </div>
                       </div>
                     </td>
+                    <td className="num" style={{ color: 'var(--text-dim)' }}>{d.playerCount > 0 ? d.playerCount : '—'}</td>
                     <td className="num" style={{ fontWeight: 700, color: 'var(--accent)' }}>{d.totalPts || '—'}</td>
                     <td className="num">{d.avgActual || '—'}</td>
                     <td className="num" style={{ color: 'var(--good)' }}>{d.best || '—'}</td>

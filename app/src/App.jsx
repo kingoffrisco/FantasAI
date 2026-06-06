@@ -2,7 +2,7 @@ import React from 'react';
 import { findTeam, MY_ROSTER, TEAM_ROSTERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, refreshTeamRosters, clearAllRosters } from './lib/data.js';
 import { findPlayer, getPlayers, setPlayers, patchPlayers, normalizePlayerList, BYE_WEEKS_2026 } from './lib/playerStore.js';
 import { api } from './api.js';
-import { getPlayerMap } from './lib/sleeper.js';
+import { getPlayerMap, fetchBulkProjections } from './lib/sleeper.js';
 import { registerServiceWorker, getSubscriptionState, requestNotificationPermission, showLocalNotification } from './lib/pushNotifications.js';
 import { applyLeagueData, clearLeagueData } from './lib/leagueStore.js';
 import { Sidebar, TopBar, MobileNav } from './components/layout.jsx';
@@ -550,7 +550,34 @@ export default function App() {
             return bye ? { ...player, bye } : player;
           });
         }).catch(() => {})
-      );
+      )
+      // After bye weeks, warm all player projections from Sleeper via a single bulk fetch
+      // (2 HTTP calls total). Also applies a localStorage cache so subsequent page loads
+      // get correct PROJ values instantly — before any async work completes.
+      .then(() => {
+        const CACHE_KEY = 'fantasai_sleeper_proj_v1';
+        const CACHE_TTL = 30 * 60 * 1000; // 30 min
+
+        // Synchronous path: apply cached projections immediately so H2H/Dashboard
+        // are correct even before the async refresh completes.
+        try {
+          const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+          if (cached?.updates?.length && Date.now() - cached.at < CACHE_TTL) {
+            const m = new Map(cached.updates);
+            patchPlayers(p => m.has(p.id) ? { ...p, proj: m.get(p.id) } : p);
+          }
+        } catch {}
+
+        // Async path: bulk Sleeper projection fetch for all players (2 API calls).
+        fetchBulkProjections(getPlayers()).then(updates => {
+          if (!updates.length) return;
+          const m = new Map(updates);
+          patchPlayers(p => m.has(p.id) ? { ...p, proj: m.get(p.id) } : p);
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), updates }));
+          } catch {}
+        }).catch(() => {});
+      });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handlePasswordChanged() {
@@ -967,7 +994,7 @@ export default function App() {
           {active === 'admin-owners'  && <AdminOwners />}
           {active === 'admin-scoring'  && <ScoringTestScreen user={user} />}
           {active === 'transactions'  && <TransactionsScreen />}
-          {active === 'power'         && <PowerRankingsScreen user={user} />}
+          {active === 'power'         && <PowerRankingsScreen user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'account'       && <AccountEditScreen user={user} />}
           {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} initialTab={settingsInitialTab} />}
         </div>

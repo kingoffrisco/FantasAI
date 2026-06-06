@@ -34,7 +34,7 @@ function computeScore(roster, teamId, week) {
   const starters = roster.filter(r => r.slot !== 'BENCH');
   const base = starters.reduce((sum, entry) => {
     const p = entry.playerId ? findPlayer(entry.playerId) : null;
-    return sum + (p ? (p.avg || 0) : 0);
+    return sum + (p ? (p.proj || p.avg || 0) : 0);
   }, 0);
   return Math.max(0, Math.round((base + weekSeed(teamId, week)) * 10) / 10);
 }
@@ -64,6 +64,18 @@ function getActualPtsFromLocked(locked, roster) {
   return matched > 0 ? Math.round(total * 10) / 10 : null;
 }
 
+// Per-player projection: prefer p.proj (same source as Current Roster), fall back to p.avg
+function playerProjPts(p) {
+  if (!p) return 0;
+  return Math.max(0, p.proj || p.avg || 0);
+}
+
+function rosterGroupPts(roster, slot) {
+  return roster
+    .filter(r => (slot === 'BENCH' ? r.slot === 'BENCH' : r.slot !== 'BENCH') && r.playerId)
+    .reduce((s, e) => s + playerProjPts(findPlayer(e.playerId)), 0);
+}
+
 function isRosterValid(roster) {
   const starterSlots = roster.filter(r => r.slot !== 'BENCH');
   return starterSlots.length > 0 && starterSlots.every(r => r.playerId != null);
@@ -88,6 +100,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     refreshTeamRosters();
     setRosterVersion(v => v + 1);
   }, []);
+
 
   React.useEffect(() => {
     const mq = window.matchMedia('(max-width: 900px)');
@@ -265,6 +278,11 @@ function MatchupCard({ homeId, awayId, week, season, isLive, isFinal, expanded, 
   const homeActual = locked ? getActualPtsFromLocked(locked, homeRoster) : null;
   const awayActual = locked ? getActualPtsFromLocked(locked, awayRoster) : null;
 
+  const homeStarterProj = rosterGroupPts(homeRoster, 'STARTERS');
+  const homeBenchProj   = rosterGroupPts(homeRoster, 'BENCH');
+  const awayStarterProj = rosterGroupPts(awayRoster, 'STARTERS');
+  const awayBenchProj   = rosterGroupPts(awayRoster, 'BENCH');
+
   const homePts = homeActual ?? homeProj;
   const awayPts = awayActual ?? awayProj;
   const homeWin      = homePts > awayPts;
@@ -279,16 +297,24 @@ function MatchupCard({ homeId, awayId, week, season, isLive, isFinal, expanded, 
   return (
     <div className="card" style={{ overflow: 'hidden', borderLeft: isMyMatchup ? '3px solid #4caf82' : undefined, background: isMyMatchup ? 'rgba(76,175,130,.06)' : undefined }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, cursor: 'pointer' }} onClick={onToggle}>
-        <TeamScore team={home} pts={homePts} projPts={homeActual !== null ? homeProj : null} win={homeWin} side="home" showPts={isLive || isFinal} isMe={homeId === myTeamId} rosterOk={homeRosterOk} record={homeRecord} hasActual={homeActual !== null} />
+        <TeamScore team={home} pts={homePts} projPts={homeActual !== null ? homeProj : null} win={homeWin} side="home" showPts={isLive || isFinal} isMe={homeId === myTeamId} rosterOk={homeRosterOk} record={homeRecord} hasActual={homeActual !== null} starterProj={homeStarterProj} benchProj={homeBenchProj} />
         <div style={{ flexShrink: 0, textAlign: 'center', padding: '0 14px', minWidth: 80 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: labelColor, letterSpacing: '.08em', marginBottom: 4 }}>{label}</div>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-faint)' }}>vs</div>
         </div>
-        <TeamScore team={away} pts={awayPts} projPts={awayActual !== null ? awayProj : null} win={awayWin} side="away" showPts={isLive || isFinal} isMe={awayId === myTeamId} rosterOk={awayRosterOk} record={awayRecord} hasActual={awayActual !== null} />
+        <TeamScore team={away} pts={awayPts} projPts={awayActual !== null ? awayProj : null} win={awayWin} side="away" showPts={isLive || isFinal} isMe={awayId === myTeamId} rosterOk={awayRosterOk} record={awayRecord} hasActual={awayActual !== null} starterProj={awayStarterProj} benchProj={awayBenchProj} />
         <div style={{ marginLeft: 'auto', paddingRight: 14, color: 'var(--text-faint)', fontSize: 12 }}>
           {expanded ? '▲' : '▼'}
         </div>
       </div>
+
+      {/* Racing bar — always visible */}
+      <WinProbabilityBar
+        homeTeam={home}
+        awayTeam={away}
+        homeExpected={homeStarterProj}
+        awayExpected={awayStarterProj}
+      />
 
       {expanded && (
         <>
@@ -424,10 +450,55 @@ function SmackTalkWall({ matchupKey, homeTeam, awayTeam }) {
   );
 }
 
-function TeamScore({ team, pts, projPts, win, side, showPts, isMe, rosterOk, record, hasActual }) {
+/* ── Win Probability Racing Bar ─────────────────────────────────────────── */
+function WinProbabilityBar({ homeTeam, awayTeam, homeExpected, awayExpected }) {
+  const total    = (homeExpected + awayExpected) || 1;
+  const homeProb = homeExpected / total;
+  const homePct  = Math.round(homeProb * 100);
+  const awayPct  = 100 - homePct;
+  const isClose  = Math.abs(homePct - awayPct) <= 6;
+
+  const GREEN = '#4ed87b';
+  const RED   = '#ff5a6e';
+  const TIE   = '#e0c84b';
+
+  const homeC = isClose ? TIE : homePct > 50 ? GREEN : RED;
+  const awayC = isClose ? TIE : awayPct > 50 ? GREEN : RED;
+
+  return (
+    <div style={{ padding: '10px 22px 14px', borderTop: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+        <span style={{ fontSize: 13, fontWeight: 800, fontFamily: 'var(--font-mono)', color: homeC }}>{homePct}%</span>
+        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+          {isClose ? '⚖️ Toss-Up' : 'Win Probability'}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 800, fontFamily: 'var(--font-mono)', color: awayC }}>{awayPct}%</span>
+      </div>
+
+      {/* Racing bar */}
+      <div style={{ height: 12, borderRadius: 6, overflow: 'hidden', display: 'flex', background: 'var(--panel-3)' }}>
+        <div style={{ width: `${homePct}%`, background: homeC, transition: 'width 1s cubic-bezier(.4,0,.2,1)', borderRadius: '6px 0 0 6px', opacity: 0.9 }} />
+        <div style={{ width: `${awayPct}%`, background: awayC, transition: 'width 1s cubic-bezier(.4,0,.2,1)', borderRadius: '0 6px 6px 0', opacity: 0.9 }} />
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5 }}>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
+          {homeTeam?.name} · <span style={{ color: homeC, fontWeight: 700 }}>{homeExpected.toFixed(1)}</span> proj
+        </span>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textAlign: 'right' }}>
+          {awayTeam?.name} · <span style={{ color: awayC, fontWeight: 700 }}>{awayExpected.toFixed(1)}</span> proj
+        </span>
+      </div>
+    </div>
+  );
+}
+
+
+function TeamScore({ team, pts, projPts, win, side, showPts, isMe, rosterOk, record, hasActual, starterProj, benchProj }) {
   if (!team) return null;
   const isRight = side === 'away';
   const logoSize = team.logoImg ? 64 : 56;
+  const subColor = 'var(--text-dim)';
   return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 14, padding: '20px 22px', flexDirection: isRight ? 'row-reverse' : 'row', background: isMe ? 'rgba(76,175,130,.08)' : 'transparent' }}>
       {team.logoImg
@@ -457,19 +528,29 @@ function TeamScore({ team, pts, projPts, win, side, showPts, isMe, rosterOk, rec
       </div>
       {showPts && (
         <div style={{ flexShrink: 0, textAlign: isRight ? 'left' : 'right' }}>
-          {/* Actual score (large) */}
-          <div style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', color: rosterOk ? (win ? 'var(--accent)' : 'var(--text)') : 'var(--danger)' }}>
-            <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>{rosterOk ? pts.toFixed(1) : '—'}</div>
-            {win && rosterOk && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', letterSpacing: '.06em', marginTop: 2 }}>WIN</div>}
+          {/* ACT total — always green */}
+          <div style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', color: rosterOk ? 'var(--good)' : 'var(--danger)' }}>
+            <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>{rosterOk && hasActual ? pts.toFixed(1) : '—'}</div>
+            {win && rosterOk && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--good)', letterSpacing: '.06em', marginTop: 2 }}>WIN</div>}
           </div>
-          {/* Projected score (small, shown when actual differs) */}
+          {/* Starters proj + bench proj */}
+          {rosterOk && (
+            <div style={{ marginTop: 5, display: 'flex', flexDirection: 'column', gap: 2, alignItems: isRight ? 'flex-start' : 'flex-end' }}>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: subColor, display: 'flex', alignItems: 'center', gap: 4, flexDirection: isRight ? 'row' : 'row-reverse' }}>
+                <span style={{ fontWeight: 700 }}>{(starterProj ?? 0).toFixed(1)}</span>
+                <span style={{ fontSize: 8, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>starters proj</span>
+              </div>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: subColor, display: 'flex', alignItems: 'center', gap: 4, flexDirection: isRight ? 'row' : 'row-reverse' }}>
+                <span style={{ fontWeight: 700 }}>{(benchProj ?? 0).toFixed(1)}</span>
+                <span style={{ fontSize: 8, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>bench</span>
+              </div>
+            </div>
+          )}
+          {/* Fallback: show original proj label when no actual */}
           {hasActual && projPts != null && rosterOk && (
             <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginTop: 3 }}>
               {projPts.toFixed(1)} proj
             </div>
-          )}
-          {!hasActual && (
-            <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>proj</div>
           )}
         </div>
       )}
@@ -628,18 +709,12 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
   const bench    = roster.filter(r => r.slot === 'BENCH');
   const isRight  = side === 'away';
 
-  function projPts(p) {
-    if (!p) return 0;
-    const v = p.avg + Math.sin(p.id * 3.7 + week * 2.3) * 4;
-    return Math.max(0, Math.round(v * 10) / 10);
-  }
-
   function getLockedEntry(p) {
     if (!p || !locked?.players) return null;
     return locked.players.find(x => x.name?.toLowerCase().trim() === p.name?.toLowerCase().trim()) || null;
   }
 
-  const totalProj = starters.reduce((s, e) => s + projPts(e.playerId ? findPlayer(e.playerId) : null), 0);
+  const totalProj = starters.reduce((s, e) => s + playerProjPts(e.playerId ? findPlayer(e.playerId) : null), 0);
   const lockedEntries = starters.map(e => getLockedEntry(e.playerId ? findPlayer(e.playerId) : null));
   const hasActual = locked && lockedEntries.some(v => v !== null);
   const totalActual = hasActual ? lockedEntries.reduce((s, v) => s + (v?.pts ?? 0), 0) : null;
@@ -663,24 +738,27 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
       </div>
 
       {/* Column labels */}
-      <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 44px 48px', padding: '2px 16px 4px', borderBottom: '1px solid rgba(255,255,255,.06)', fontSize: 8, fontWeight: 700, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 22px 44px 48px', padding: '2px 16px 4px', borderBottom: '1px solid rgba(255,255,255,.06)', fontSize: 8, fontWeight: 700, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
         <span />
         <span />
+        <span style={{ textAlign: 'center' }}>MVR</span>
         <span style={{ textAlign: 'right' }}>PROJ</span>
         <span style={{ textAlign: 'right', color: hasActual ? '#4ea8ff' : 'var(--text-faint)' }}>ACT</span>
       </div>
 
       {starters.map((entry, i) => {
         const p = entry.playerId ? findPlayer(entry.playerId) : null;
-        const proj = projPts(p);
+        const proj = playerProjPts(p);
         const lockedEntry = p ? getLockedEntry(p) : null;
         const actual = lockedEntry ? lockedEntry.pts : null;
         const statLine = formatStatLine(p, lockedEntry?.stats || null);
         const dispScore = actual ?? proj;
         const actColor = actual != null ? (dispScore >= 20 ? 'var(--accent)' : dispScore >= 10 ? '#4ea8ff' : 'var(--text)') : 'var(--text-faint)';
+        const delta = p ? proj - (p.avg || 0) : 0;
+        const mover = delta >= 3 ? '🔥' : delta <= -3 ? '❄️' : '';
         return (
           <div key={i}
-            style={{ padding: '5px 16px', display: 'grid', gridTemplateColumns: '32px 1fr 44px 48px', alignItems: 'center', gap: 6, fontSize: 11, cursor: p && onOpenPlayer ? 'pointer' : 'default' }}
+            style={{ padding: '5px 16px', display: 'grid', gridTemplateColumns: '32px 1fr 22px 44px 48px', alignItems: 'center', gap: 6, fontSize: 11, cursor: p && onOpenPlayer ? 'pointer' : 'default' }}
             onClick={p && onOpenPlayer ? () => onOpenPlayer(p.id) : undefined}
           >
             <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{entry.slot}</span>
@@ -695,6 +773,7 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
                     <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginTop: 2, paddingLeft: 22, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{statLine}</div>
                   )}
                 </div>
+                <span style={{ textAlign: 'center', fontSize: 13, lineHeight: 1 }}>{mover}</span>
                 <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-dim)' }}>{proj.toFixed(1)}</span>
                 <span style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: actColor }}>
                   {actual != null ? actual.toFixed(1) : '—'}
@@ -703,6 +782,7 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
             ) : (
               <>
                 <span style={{ color: 'var(--text-faint)', fontSize: 10, fontStyle: 'italic' }}>Empty slot</span>
+                <span />
                 <span />
                 <span />
               </>
@@ -715,7 +795,9 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
       )}
       {bench.map((entry, i) => {
         const p = entry.playerId ? findPlayer(entry.playerId) : null;
-        const pts = projPts(p);
+        const pts = playerProjPts(p);
+        const delta = p ? pts - (p.avg || 0) : 0;
+        const mover = delta >= 3 ? '🔥' : delta <= -3 ? '❄️' : '';
         return (
           <div key={i} style={{ padding: '4px 16px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, opacity: 0.55 }}>
             <span style={{ fontSize: 9, color: 'var(--text-faint)', width: 32, fontFamily: 'var(--font-mono)' }}>BN</span>
@@ -723,6 +805,7 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
               <>
                 <PosBadge pos={p.pos} />
                 <span style={{ flex: 1 }}>{p.name}</span>
+                {mover && <span style={{ fontSize: 13 }}>{mover}</span>}
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)' }}>{pts.toFixed(1)} proj</span>
               </>
             ) : (
