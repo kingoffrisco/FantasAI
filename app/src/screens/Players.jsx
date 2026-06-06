@@ -1152,7 +1152,6 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       </div>
       </>}
     </div>
-    {user && <RosterPanel teamId={user.teamId} myRosterIds={myRosterIds} onOpenPlayer={onOpenPlayer} />}
 
     {/* ── Column Picker Modal ────────────────────────────────────────────── */}
     {showColPicker && (
