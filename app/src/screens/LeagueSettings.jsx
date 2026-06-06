@@ -3,6 +3,7 @@ import { LEAGUE_TEAMS } from '../lib/data.js';
 import { TeamLogoBadge } from '../components/ui.jsx';
 import { getLiveTeams, getLiveSettings, getLeagueId } from '../lib/leagueStore.js';
 import { api } from '../api.js';
+import { sendLeaguePush } from '../lib/pushNotifications.js';
 
 const STORAGE_KEY = 'fantasai_league_settings';
 const MEDIA_KEY   = 'fantasai_commish_media';
@@ -151,6 +152,7 @@ const DEFAULTS = {
     amount: '',
     link: '',
     note: '',
+    payments: {},  // teamId → { paid: bool, paidAt: string|null }
   },
 
   // Playoff Rules
@@ -261,8 +263,11 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
   const mediaInputRef = React.useRef(null);
 
   // League Fees state
-  const [editingFees, setEditingFees] = React.useState(false);
-  const [feesDraft, setFeesDraft]     = React.useState({});
+  const [editingFees, setEditingFees]     = React.useState(false);
+  const [feesDraft, setFeesDraft]         = React.useState({});
+  const [feeNotifyMsg, setFeeNotifyMsg]   = React.useState('');
+  const [feeNotifySend, setFeeNotifySend] = React.useState(false);
+  const [feeNotifyResult, setFeeNotifyResult] = React.useState(null);
 
   // Weekly-events editor state (used in Schedule tab)
   const [evtDraft,     setEvtDraft]     = React.useState({ day: 'Sunday', time: '', label: '', type: 'game' });
@@ -396,6 +401,53 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     setEditField(null);
     flash();
     logChange('general', `Updated ${key.replace(/([A-Z])/g, ' $1').toLowerCase()} → "${String(fieldDraft).slice(0, 80)}"`);
+  }
+
+  function togglePayment(teamId) {
+    if (!canEdit) return;
+    const payments = { ...(data.fees?.payments || {}) };
+    const cur = payments[teamId];
+    payments[teamId] = cur?.paid
+      ? { paid: false, paidAt: null }
+      : { paid: true, paidAt: new Date().toISOString().slice(0, 10) };
+    const next = { ...data, fees: { ...data.fees, payments } };
+    persist(next);
+    setData(next);
+  }
+
+  function setPaymentDate(teamId, date) {
+    const payments = { ...(data.fees?.payments || {}) };
+    payments[teamId] = { ...(payments[teamId] || {}), paidAt: date };
+    const next = { ...data, fees: { ...data.fees, payments } };
+    persist(next);
+    setData(next);
+  }
+
+  async function notifyUnpaid() {
+    const msg = feeNotifyMsg.trim();
+    if (!msg) return;
+    const commishKey = (() => {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')?.fantasaiKey || ''; } catch { return ''; }
+    })();
+    if (!commishKey) { setFeeNotifyResult('error:Commissioner Key not set — add it in General settings.'); return; }
+    const payments = data.fees?.payments || {};
+    const unpaidTeams = LEAGUE_TEAMS.filter(t => !payments[t.id]?.paid);
+    if (unpaidTeams.length === 0) { setFeeNotifyResult('ok:All teams have paid!'); return; }
+    setFeeNotifySend(true);
+    setFeeNotifyResult(null);
+    try {
+      const teamIds = unpaidTeams.map(t => t.id);
+      const feeLabel = data.fees?.amount ? ` (${data.fees.amount})` : '';
+      const res = await sendLeaguePush(
+        'League Fee Reminder',
+        msg + feeLabel,
+        commishKey,
+        '/',
+        teamIds
+      );
+      setFeeNotifyResult(res.ok ? `ok:Sent to ${res.sent} device(s) — ${unpaidTeams.length} unpaid team(s)` : `error:${res.error}`);
+    } catch { setFeeNotifyResult('error:Send failed — check Commissioner Key'); }
+    setFeeNotifySend(false);
   }
 
   function saveRule(key, text) {
@@ -871,6 +923,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                {/* Payment method header */}
                 {data.fees?.method ? (() => {
                   const f = data.fees;
                   const METHOD_ICONS = { venmo: '💳', paypal: '🅿', cashapp: '💵', zelle: '⚡', other: '💰' };
@@ -878,7 +931,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                                  f.method === 'paypal'  ? `https://paypal.me/${f.handle.replace('@','')}/${f.amount.replace(/[^0-9.]/g,'')}` :
                                  f.method === 'cashapp' ? `https://cash.app/$${f.handle.replace(/[@$]/g,'')}` : null;
                   return (
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 4 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 14 }}>{METHOD_ICONS[f.method]}</span>
                         <span style={{ fontWeight: 700, fontSize: 13 }}>{f.method.charAt(0).toUpperCase() + f.method.slice(1)}</span>
@@ -895,12 +948,104 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                     </div>
                   );
                 })() : (
-                  <span style={{ fontSize: 13, color: 'var(--text-faint)' }}>No payment info configured.</span>
+                  <span style={{ fontSize: 13, color: 'var(--text-faint)', display: 'block', marginBottom: 8 }}>No payment info configured.</span>
                 )}
+
+                {/* ── Per-team payment tracker ── */}
+                {(() => {
+                  const payments = data.fees?.payments || {};
+                  const paidCount = LEAGUE_TEAMS.filter(t => payments[t.id]?.paid).length;
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                      {/* Summary bar */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', background: 'rgba(255,255,255,.03)', borderBottom: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Payment Status</span>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: paidCount === LEAGUE_TEAMS.length ? 'var(--good)' : 'var(--warn)', fontWeight: 700 }}>
+                          {paidCount} / {LEAGUE_TEAMS.length} paid
+                        </span>
+                      </div>
+                      {/* Team rows */}
+                      {LEAGUE_TEAMS.map((t, i) => {
+                        const p = payments[t.id] || {};
+                        return (
+                          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 14px', borderBottom: i < LEAGUE_TEAMS.length - 1 ? '1px solid var(--border)' : 'none', background: p.paid ? 'rgba(76,175,130,.05)' : 'transparent' }}>
+                            {/* Paid checkbox */}
+                            <input
+                              type="checkbox"
+                              checked={!!p.paid}
+                              disabled={!canEdit}
+                              onChange={() => togglePayment(t.id)}
+                              style={{ accentColor: 'var(--good)', width: 15, height: 15, flexShrink: 0, cursor: canEdit ? 'pointer' : 'default' }}
+                            />
+                            {/* Owner info */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: p.paid ? 'var(--text)' : 'var(--text-dim)' }}>{t.owner}</span>
+                              <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 6 }}>· {t.name}</span>
+                            </div>
+                            {/* Paid date */}
+                            {p.paid && canEdit ? (
+                              <input
+                                type="date"
+                                value={p.paidAt || ''}
+                                onChange={e => setPaymentDate(t.id, e.target.value)}
+                                style={{ fontSize: 11, padding: '2px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontFamily: 'var(--font-mono)' }}
+                              />
+                            ) : p.paid ? (
+                              <span style={{ fontSize: 11, color: 'var(--good)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                                ✓ {p.paidAt || 'Paid'}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Unpaid</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* ── Notify unpaid section (commish only) ── */}
+                {canEdit && (() => {
+                  const payments = data.fees?.payments || {};
+                  const unpaid = LEAGUE_TEAMS.filter(t => !payments[t.id]?.paid);
+                  return unpaid.length > 0 ? (
+                    <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(255,184,0,.05)', border: '1px solid rgba(255,184,0,.2)', borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--warn)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                        Notify {unpaid.length} Unpaid {unpaid.length === 1 ? 'Owner' : 'Owners'}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+                        {unpaid.map(t => t.owner.split(' ')[0]).join(', ')}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                        <input
+                          className="input"
+                          placeholder={`Pay your league fee of ${data.fees?.amount || '$200'} to ${data.fees?.handle || 'the commissioner'}!`}
+                          value={feeNotifyMsg}
+                          onChange={e => setFeeNotifyMsg(e.target.value)}
+                          style={{ flex: 1, fontSize: 12 }}
+                        />
+                        <button
+                          className="btn primary sm"
+                          onClick={notifyUnpaid}
+                          disabled={feeNotifySend || !feeNotifyMsg.trim()}
+                          style={{ opacity: feeNotifySend || !feeNotifyMsg.trim() ? 0.5 : 1, whiteSpace: 'nowrap' }}
+                        >{feeNotifySend ? 'Sending…' : `Send Alert`}</button>
+                      </div>
+                      {feeNotifyResult && (
+                        <div style={{ fontSize: 11, fontWeight: 600, color: feeNotifyResult.startsWith('ok:') ? 'var(--good)' : 'var(--danger)' }}>
+                          {feeNotifyResult.replace(/^(ok:|error:)/, '')}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--good)', fontWeight: 600 }}>✓ All teams have paid</div>
+                  );
+                })()}
+
                 {canEdit && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
-                    <button className="btn ghost sm" onClick={() => { setFeesDraft(data.fees || {}); setEditingFees(true); }}>Edit</button>
+                    <button className="btn ghost sm" onClick={() => { setFeesDraft(data.fees || {}); setEditingFees(true); }}>Edit Payment Info</button>
                   </div>
                 )}
               </div>
