@@ -165,6 +165,38 @@ function PushNotificationButton() {
   );
 }
 
+// In-app push notification banner — shown when a push arrives and the tab is already in focus.
+// The service worker posts { type: 'PUSH_RECEIVED', title, body } to open clients; this component
+// displays that payload as a transient overlay that auto-dismisses after 5 s.
+function PushBanner({ title, body, onDismiss }) {
+  React.useEffect(() => {
+    const t = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div style={{
+      position: 'fixed', top: 16, right: 16, zIndex: 10000,
+      background: 'rgba(8,14,4,.97)', backdropFilter: 'blur(14px)',
+      border: '1px solid rgba(198,255,58,.35)', borderRadius: 12,
+      padding: '12px 16px', minWidth: 260, maxWidth: 340,
+      boxShadow: '0 8px 32px rgba(0,0,0,.55), 0 0 20px rgba(198,255,58,.1)',
+      display: 'flex', flexDirection: 'column', gap: 4,
+      animation: 'push-banner-in .25s ease',
+    }}>
+      <style>{`@keyframes push-banner-in { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }`}</style>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, boxShadow: '0 0 6px var(--accent)', animation: 'pulse 2s infinite' }} />
+          <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)', fontFamily: 'var(--font-display)', letterSpacing: '.01em' }}>{title}</span>
+        </div>
+        <button onClick={onDismiss} style={{ background: 'none', border: 'none', color: 'var(--text-faint)', cursor: 'pointer', fontSize: 14, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}>✕</button>
+      </div>
+      {body && <div style={{ fontSize: 11, color: 'var(--text-dim)', paddingLeft: 14, lineHeight: 1.5 }}>{body}</div>}
+    </div>
+  );
+}
+
 function loadLeagueSettings() {
   try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
 }
@@ -463,6 +495,20 @@ export default function App() {
 
   // Register service worker for push notifications (once on mount)
   React.useEffect(() => { registerServiceWorker(); }, []);
+
+  // In-app push banner — catches PUSH_RECEIVED messages posted by the service worker
+  // so notifications appear even when the browser suppresses the OS popup (tab in focus).
+  const [pushBanner, setPushBanner] = React.useState(null);
+  React.useEffect(() => {
+    if (!navigator.serviceWorker) return;
+    function onSWMessage(e) {
+      if (e.data?.type === 'PUSH_RECEIVED') {
+        setPushBanner({ title: e.data.title || 'FantasAI', body: e.data.body || '' });
+      }
+    }
+    navigator.serviceWorker.addEventListener('message', onSWMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onSWMessage);
+  }, []);
 
   // On cold load (already logged in): restore league data from cache, then fetch fresh
   React.useEffect(() => {
@@ -1150,6 +1196,8 @@ export default function App() {
           {rosterSyncBadge === 'error'  && 'Roster save failed'}
         </div>
       )}
+
+      {pushBanner && <PushBanner title={pushBanner.title} body={pushBanner.body} onDismiss={() => setPushBanner(null)} />}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Brand Accent">
