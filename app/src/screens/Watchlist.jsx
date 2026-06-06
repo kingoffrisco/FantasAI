@@ -290,7 +290,10 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
                 })
             }
             {!useBreakoutsR2 && localBreakouts.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-faint)', fontSize: 12 }}>Waiting for live player data…</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: 'center', padding: '24px 20px', fontSize: 12 }}>
+                <div style={{ color: 'var(--text-dim)', fontWeight: 600, marginBottom: 4 }}>No 2026 player data yet</div>
+                <div style={{ color: 'var(--text-faint)' }}>Breakout tracking requires in-season game data. Check back when the NFL season kicks off in September.</div>
+              </td></tr>
             )}
           </tbody>
         </table>

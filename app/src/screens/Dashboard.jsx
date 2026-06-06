@@ -443,9 +443,15 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     const teamIds = allSelected ? null : [...pushTargets];
     try {
       const res = await sendLeaguePush(pushTitle.trim(), pushBody.trim(), commishKey, '/', teamIds);
-      setPushResult(res.ok ? `Sent to ${res.sent} device(s)` : `Error: ${res.error}`);
+      if (res.ok) {
+        setPushResult(`Sent to ${res.sent} device(s)`);
+      } else if (res.error === 'Unauthorized') {
+        setPushResult('Key mismatch — go to Rules & Settings → General → Commissioner Key and enter the same value you set as FANTASAI_KEY in Cloudflare.');
+      } else {
+        setPushResult(`Error: ${res.error}`);
+      }
     } catch {
-      setPushResult('Send failed — check your FANTASAI_KEY setting');
+      setPushResult('Send failed — check your network connection.');
     }
     setPushSending(false);
   }
@@ -1623,9 +1629,9 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
       {/* ── Push alert modal (commish only) ─────────────────────────────────── */}
       {pushModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9000 }}
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(5,10,0,.88)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9000 }}
           onClick={e => { if (e.target === e.currentTarget) setPushModal(false); }}>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, width: 420, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: 'var(--panel, #141a0d)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, width: 420, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14, boxShadow: '0 24px 60px rgba(0,0,0,.7)' }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>📣 Send Push Alert</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <input
@@ -1678,7 +1684,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               </div>
             )}
             {pushResult && (
-              <div style={{ fontSize: 12, color: pushResult.startsWith('Error') || pushResult.startsWith('Send') ? 'var(--danger)' : 'var(--good)', fontWeight: 600 }}>
+              <div style={{ fontSize: 12, color: pushResult.startsWith('Error') || pushResult.startsWith('Send') || pushResult.startsWith('Key') ? 'var(--danger)' : 'var(--good)', fontWeight: 600, lineHeight: 1.5 }}>
                 {pushResult}
               </div>
             )}
