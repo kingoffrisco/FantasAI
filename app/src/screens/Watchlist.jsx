@@ -128,82 +128,7 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
         </div>
       )}
 
-      {/* ── 2. Sleepers ── */}
-      <div className="wl-group" style={{ marginTop: 8 }}>
-        <div className="head">
-          <div className="name" style={{ color: 'var(--accent-2)' }}>
-            Sleepers
-            {useSleepersR2 && AI_BADGE}
-          </div>
-          <div className="ct">{useSleepersR2 ? Math.min(r2Sleepers.length, 10) : localSleepers.length} players</div>
-          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 10 }}>
-            {useSleepersR2 ? 'FantasAI ML · low-ownership value targets' : 'Low ownership · high projected value'}
-          </div>
-          <div className="grow"></div>
-        </div>
-        <table className="data-table">
-          <thead>
-            <tr>
-              {useSleepersR2 && <th>#</th>}
-              <th>Player</th>
-              <th>Opp</th>
-              <th className="num">Proj</th>
-              <th className="num">%Own</th>
-              <th className="num">Value</th>
-              <th className="num">Trend</th>
-              <th>Note</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {useSleepersR2
-              ? r2Sleepers.slice(0, 10).map((s, i) => {
-                  const p    = playerByName.get((s.player_name || '').toLowerCase().trim());
-                  const owned = s.ownership_pct ?? p?.owned;
-                  const proj  = s.projected_pts  ?? p?.proj;
-                  const value = s.value_score != null
-                    ? Number(s.value_score).toFixed(1)
-                    : (proj != null && owned != null)
-                      ? (Number(proj) / Math.max(Number(owned), 1) * 10).toFixed(1)
-                      : '—';
-                  return (
-                    <tr key={i} onClick={() => p && onOpenPlayer?.(p.id)} style={{ cursor: p ? 'pointer' : 'default' }}>
-                      <td className="rank" style={{ color: 'var(--text-faint)' }}>{i + 1}</td>
-                      <td>{p ? <PlayerCell player={p} /> : <span style={{ fontWeight: 600 }}>{s.player_name || '—'}</span>}</td>
-                      <td className="mono dim" style={{ fontSize: 11 }}>{p ? `vs ${p.opp}` : (s.team ? `(${s.team})` : '—')}</td>
-                      <td className="num"><strong>{proj != null ? Number(proj).toFixed(1) : '—'}</strong></td>
-                      <td className="num" style={{ color: 'var(--good)' }}>{owned != null ? `${Number(owned).toFixed(1)}%` : '—'}</td>
-                      <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-2)' }}>{value}</td>
-                      <td className="num">{p ? <Sparkline data={p.trend} /> : '—'}</td>
-                      <td className="dim" style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.reason || p?.news || ''}</td>
-                      <td><button className="btn sm primary" onClick={e => e.stopPropagation()}>+ Add</button></td>
-                    </tr>
-                  );
-                })
-              : localSleepers.map(p => {
-                  const value = (p.proj / Math.max(p.owned, 1) * 10).toFixed(1);
-                  return (
-                    <tr key={p.id} onClick={() => onOpenPlayer?.(p.id)} style={{ cursor: 'pointer' }}>
-                      <td><PlayerCell player={p} /></td>
-                      <td className="mono dim" style={{ fontSize: 11 }}>vs {p.opp}</td>
-                      <td className="num"><strong>{p.proj.toFixed(1)}</strong></td>
-                      <td className="num" style={{ color: 'var(--good)' }}>{p.owned.toFixed(1)}%</td>
-                      <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-2)' }}>{value}</td>
-                      <td className="num"><Sparkline data={p.trend} /></td>
-                      <td className="dim" style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.news}</td>
-                      <td><button className="btn sm primary" onClick={e => e.stopPropagation()}>+ Add</button></td>
-                    </tr>
-                  );
-                })
-            }
-            {!useSleepersR2 && localSleepers.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-faint)', fontSize: 12 }}>Waiting for live player data…</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ── 3. Breakouts ── */}
+      {/* ── 2. Breakouts ── */}
       <div className="wl-group" style={{ marginTop: 8 }}>
         <div className="head">
           <div className="name" style={{ color: 'var(--accent)' }}>
@@ -299,11 +224,86 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
         </table>
       </div>
 
-      {/* ── 4. Buy Low ── */}
+      {/* ── 3. Buy Low ── */}
       <WatchGroup name="Buy Low" ids={WATCHLIST['Buy Low']} onOpenPlayer={onOpenPlayer ?? (() => {})} />
 
-      {/* ── 5. Sell High ── */}
+      {/* ── 4. Sell High ── */}
       <WatchGroup name="Sell High" ids={WATCHLIST['Sell High']} onOpenPlayer={onOpenPlayer ?? (() => {})} />
+
+      {/* ── 5. Sleepers ── */}
+      <div className="wl-group" style={{ marginTop: 8 }}>
+        <div className="head">
+          <div className="name" style={{ color: 'var(--accent-2)' }}>
+            Sleepers
+            {useSleepersR2 && AI_BADGE}
+          </div>
+          <div className="ct">{useSleepersR2 ? Math.min(r2Sleepers.length, 10) : localSleepers.length} players</div>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 10 }}>
+            {useSleepersR2 ? 'FantasAI ML · low-ownership value targets' : 'Low ownership · high projected value'}
+          </div>
+          <div className="grow"></div>
+        </div>
+        <table className="data-table">
+          <thead>
+            <tr>
+              {useSleepersR2 && <th>#</th>}
+              <th>Player</th>
+              <th>Opp</th>
+              <th className="num">Proj</th>
+              <th className="num">%Own</th>
+              <th className="num">Value</th>
+              <th className="num">Trend</th>
+              <th>Note</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {useSleepersR2
+              ? r2Sleepers.slice(0, 10).map((s, i) => {
+                  const p    = playerByName.get((s.player_name || '').toLowerCase().trim());
+                  const owned = s.ownership_pct ?? p?.owned;
+                  const proj  = s.projected_pts  ?? p?.proj;
+                  const value = s.value_score != null
+                    ? Number(s.value_score).toFixed(1)
+                    : (proj != null && owned != null)
+                      ? (Number(proj) / Math.max(Number(owned), 1) * 10).toFixed(1)
+                      : '—';
+                  return (
+                    <tr key={i} onClick={() => p && onOpenPlayer?.(p.id)} style={{ cursor: p ? 'pointer' : 'default' }}>
+                      <td className="rank" style={{ color: 'var(--text-faint)' }}>{i + 1}</td>
+                      <td>{p ? <PlayerCell player={p} /> : <span style={{ fontWeight: 600 }}>{s.player_name || '—'}</span>}</td>
+                      <td className="mono dim" style={{ fontSize: 11 }}>{p ? `vs ${p.opp}` : (s.team ? `(${s.team})` : '—')}</td>
+                      <td className="num"><strong>{proj != null ? Number(proj).toFixed(1) : '—'}</strong></td>
+                      <td className="num" style={{ color: 'var(--good)' }}>{owned != null ? `${Number(owned).toFixed(1)}%` : '—'}</td>
+                      <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-2)' }}>{value}</td>
+                      <td className="num">{p ? <Sparkline data={p.trend} /> : '—'}</td>
+                      <td className="dim" style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.reason || p?.news || ''}</td>
+                      <td><button className="btn sm primary" onClick={e => e.stopPropagation()}>+ Add</button></td>
+                    </tr>
+                  );
+                })
+              : localSleepers.map(p => {
+                  const value = (p.proj / Math.max(p.owned, 1) * 10).toFixed(1);
+                  return (
+                    <tr key={p.id} onClick={() => onOpenPlayer?.(p.id)} style={{ cursor: 'pointer' }}>
+                      <td><PlayerCell player={p} /></td>
+                      <td className="mono dim" style={{ fontSize: 11 }}>vs {p.opp}</td>
+                      <td className="num"><strong>{p.proj.toFixed(1)}</strong></td>
+                      <td className="num" style={{ color: 'var(--good)' }}>{p.owned.toFixed(1)}%</td>
+                      <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-2)' }}>{value}</td>
+                      <td className="num"><Sparkline data={p.trend} /></td>
+                      <td className="dim" style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.news}</td>
+                      <td><button className="btn sm primary" onClick={e => e.stopPropagation()}>+ Add</button></td>
+                    </tr>
+                  );
+                })
+            }
+            {!useSleepersR2 && localSleepers.length === 0 && (
+              <tr><td colSpan={8} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-faint)', fontSize: 12 }}>Waiting for live player data…</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
     </div>
   );
@@ -315,7 +315,7 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
       <div className="page-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <TeamLogoBadge team={null} size={40} />
-          <div><h1>Watchlist</h1><div className="sub">My Watchlist · Sleepers · Breakouts · Buy Low · Sell High</div></div>
+          <div><h1>Watchlist</h1><div className="sub">My Watchlist · Breakouts · Buy Low · Sell High · Sleepers</div></div>
         </div>
         <div className="flex gap-8">
           <button className="btn ghost">+ New Group</button>
