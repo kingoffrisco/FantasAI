@@ -422,9 +422,10 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const [pushSending, setPushSending] = React.useState(false);
   const [pushResult, setPushResult]   = React.useState(null);
   const [pushTargets, setPushTargets] = React.useState(() => new Set(LEAGUE_TEAMS.map(t => t.id)));
-  const commishKey = React.useMemo(() => {
+  function getCommishKey() {
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || '{}')?.fantasaiKey || ''; } catch { return ''; }
-  }, []);
+  }
+  const commishKey = getCommishKey();
 
   function togglePushTarget(id) {
     setPushTargets(prev => {
@@ -441,8 +442,9 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     setPushSending(true);
     setPushResult(null);
     const teamIds = allSelected ? null : [...pushTargets];
+    const key = getCommishKey();
     try {
-      const res = await sendLeaguePush(pushTitle.trim(), pushBody.trim(), commishKey, '/', teamIds);
+      const res = await sendLeaguePush(pushTitle.trim(), pushBody.trim(), key, '/', teamIds);
       if (res.ok) {
         setPushResult(`Sent to ${res.sent} device(s)`);
       } else if (res.error === 'Unauthorized') {
@@ -1678,7 +1680,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                 {pushTargets.size === 0 ? 'No owners selected' : allSelected ? 'All owners with alerts enabled' : `${pushTargets.size} of ${LEAGUE_TEAMS.length} owners`}
               </div>
             </div>
-            {!commishKey && (
+            {!getCommishKey() && (
               <div style={{ fontSize: 10, color: 'var(--danger)', padding: '4px 8px', background: 'rgba(224,94,94,.1)', borderRadius: 5 }}>
                 FANTASAI_KEY not found — add it in Rules &amp; Settings → Commissioner Key.
               </div>
