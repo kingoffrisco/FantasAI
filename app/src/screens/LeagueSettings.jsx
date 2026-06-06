@@ -821,7 +821,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               { label: 'Number of Teams',      key: 'numTeams',    value: data.numTeams },
               { label: 'Entry Fee',            key: 'entryFee',    value: `$${data.entryFee}` },
               { label: 'Player Pool',          key: 'playerPool',  value: data.playerPool },
-              ...(canEdit ? [{ label: 'Commissioner Key', key: 'fantasaiKey', value: data.fantasaiKey ? '••••••••' : '(not set)' }] : []),
+              ...(canEdit ? [{ label: 'Commissioner Key', key: 'fantasaiKey', value: data.fantasaiKey ? '••••••••' : '(not set)', editValue: '', password: true }] : []),
             ]}
           />
           <Card title="Draft Settings">
@@ -2131,13 +2131,21 @@ function SettingsTable({ rows, canEdit, editLabel, editColor, editField, fieldDr
       <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
         League Info
       </div>
-      {rows.map(({ label, key, value }) => (
+      {rows.map(({ label, key, value, editValue, password }) => (
         <div key={key} style={{ display: 'flex', gap: 16, padding: '10px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, alignItems: 'center' }}>
           <div style={{ minWidth: 180, color: 'var(--text-dim)', flexShrink: 0 }}>{label}</div>
           <div style={{ flex: 1 }}>
             {editField === key ? (
               <div style={{ display: 'flex', gap: 8 }}>
-                <input className="input" value={fieldDraft} onChange={e => setFieldDraft(e.target.value)} style={{ flex: 1 }} autoFocus />
+                <input
+                  className="input"
+                  type={password ? 'password' : 'text'}
+                  value={fieldDraft}
+                  onChange={e => setFieldDraft(e.target.value)}
+                  placeholder={password ? 'Enter key…' : ''}
+                  style={{ flex: 1 }}
+                  autoFocus
+                />
                 <button className="btn primary sm" onClick={() => onSave(key)}>Save</button>
                 <button className="btn ghost sm" onClick={() => onEdit(null, '')}>✕</button>
               </div>
@@ -2147,7 +2155,7 @@ function SettingsTable({ rows, canEdit, editLabel, editColor, editField, fieldDr
                 {canEdit && (
                   <>
                     <span style={{ fontSize: 10, fontWeight: 700, color: editColor, marginLeft: 'auto', whiteSpace: 'nowrap' }}>{editLabel}</span>
-                    <button className="btn ghost sm" onClick={() => onEdit(key, value)}>Edit</button>
+                    <button className="btn ghost sm" onClick={() => onEdit(key, editValue !== undefined ? editValue : value)}>Edit</button>
                   </>
                 )}
               </div>
