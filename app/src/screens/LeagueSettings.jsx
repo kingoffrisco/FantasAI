@@ -10,6 +10,7 @@ const API_BASE    = 'https://api.fantasai.net';
 
 const DEFAULTS = {
   // General
+  fantasaiKey:  '',
   leagueName:   'ATO Tau League',
   leagueUrl:    'https://atotauleague.football.cbssports.com',
   leagueEmail:  'atotauleague@football.cbssports.com',
@@ -768,6 +769,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               { label: 'Number of Teams',      key: 'numTeams',    value: data.numTeams },
               { label: 'Entry Fee',            key: 'entryFee',    value: `$${data.entryFee}` },
               { label: 'Player Pool',          key: 'playerPool',  value: data.playerPool },
+              ...(canEdit ? [{ label: 'Commissioner Key', key: 'fantasaiKey', value: data.fantasaiKey ? '••••••••' : '(not set)' }] : []),
             ]}
           />
           <Card title="Draft Settings">
