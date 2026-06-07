@@ -538,38 +538,28 @@ export default function App() {
   React.useEffect(() => {
     // Primary: ML-ranked 2026 draft table from Databricks via R2
     api.r2.players2026()
-      .then(data => {
-        const rows = Array.isArray(data) ? data.filter(p => (p.isDraftable ?? p.is_draftable) !== false) : [];
-        if (rows.length > 0) { setPlayers(normalizePlayerList(rows)); return; }
-        throw new Error('empty');
+      .then(rows => {
+        // players2026() always returns a plain array (handles {data:[...]}, {players:[...]}, root-array shapes)
+        const filtered = Array.isArray(rows) ? rows.filter(p => (p.isDraftable ?? p.is_draftable) !== false) : [];
+        // Require at least 200 players — a partial/test export falls through to Sleeper
+        if (filtered.length >= 200) { setPlayers(normalizePlayerList(filtered)); return; }
+        throw new Error(`R2 export too small (${filtered.length} records) — falling back`);
       })
-      // Secondary: legacy dbPlayers endpoint (news table). Deduplicate by name+team,
-      // then only accept the result if it includes K and DST entries — news articles
-      // rarely mention kickers/defenses, so a result missing them means we should
-      // fall through to Sleeper which has the full player pool.
+      // Secondary: CBS Worker Sleeper proxy (~1500 active players, no CORS, 1 h edge cache)
       .catch(() =>
-        api.dbPlayers()
-          .then(data => {
-            const raw = data?.players || [];
-            const seenRaw = new Map();
-            const rows = raw.filter(p => {
-              const key = `${(p.full_name || p.name || '').toLowerCase().trim()}|${(p.team || '').toLowerCase()}`;
-              if (seenRaw.has(key)) return false;
-              seenRaw.set(key, true);
-              return true;
-            });
-            const hasK   = rows.some(p => (p.position || p.pos) === 'K');
-            const hasDST = rows.some(p => ['DEF', 'DST'].includes(p.position || p.pos));
-            if (rows.length > 0 && hasK && hasDST) { setPlayers(normalizePlayerList(rows)); return; }
-            throw new Error('missing K/DST');
-          })
+        api.sleeperPlayers().then(raw => {
+          const arr = raw?.players || [];
+          const normalized = normalizePlayerList(arr);
+          if (normalized.length > 100) { setPlayers(normalized); return; }
+          throw new Error('empty');
+        })
       )
-      // Tertiary: Sleeper
+      // Worker Sleeper: api.fantasai.net/api/v1/players (up to 2000 records, 1 h CF cache)
       .catch(() =>
         api.allPlayers(2000).then(raw => {
           const arr = raw?.players || (Array.isArray(raw) ? raw : []);
-          const normalized = normalizePlayerList(arr.filter(p => p.team && p.status !== 'Inactive'));
-          if (normalized.length > 0) { setPlayers(normalized); return; }
+          const normalized = normalizePlayerList(arr);
+          if (normalized.length > 100) { setPlayers(normalized); return; }
           throw new Error('empty');
         })
       )
@@ -627,6 +617,44 @@ export default function App() {
           } catch {}
         }).catch(() => {});
       });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Background cookie health check — fires 8 s after mount, sets alert if CBS cookie is missing or returns 401.
+  const [cookieAlert, setCookieAlert] = React.useState(false);
+  React.useEffect(() => {
+    const t = setTimeout(async () => {
+      const cookie = (() => { try { return localStorage.getItem('fantasai_cbs_cookie') || ''; } catch { return ''; } })();
+      if (!cookie) { setCookieAlert(true); return; }
+      try {
+        const headers = { 'X-CBS-Cookie': cookie };
+        const key = import.meta.env.VITE_FANTASAI_KEY ?? '';
+        if (key) headers['X-FantasAI-Key'] = key;
+        const res = await fetch('https://api.fantasai.net/api/v1/league', { headers, signal: AbortSignal.timeout(8000) });
+        if (!res.ok) setCookieAlert(true);
+      } catch { /* network error — don't alert, may be offline */ }
+    }, 8000);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Background DB Players refresh — fires 5 s after mount so fast sources (R2 → Sleeper)
+  // always paint first. Silently enriches the player pool if Databricks returns a valid set.
+  React.useEffect(() => {
+    const t = setTimeout(() => {
+      api.dbPlayers().then(data => {
+        const raw = data?.players || [];
+        const seenRaw = new Map();
+        const rows = raw.filter(p => {
+          const key = `${(p.full_name || p.name || '').toLowerCase().trim()}|${(p.team || '').toLowerCase()}`;
+          if (seenRaw.has(key)) return false;
+          seenRaw.set(key, true);
+          return true;
+        });
+        const hasK   = rows.some(p => (p.position || p.pos) === 'K');
+        const hasDST = rows.some(p => ['DEF', 'DST'].includes(p.position || p.pos));
+        if (rows.length >= 200 && hasK && hasDST) setPlayers(normalizePlayerList(rows));
+      }).catch(() => {});
+    }, 5000);
+    return () => clearTimeout(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handlePasswordChanged() {
@@ -996,7 +1024,7 @@ export default function App() {
           draftInProgress={active !== 'draft' ? draftInProgress : null}
           draftMeta={draftMeta}
         />
-        <Sidebar active={active} onNav={setActive} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} />
+        <Sidebar active={active} onNav={id => { if (id === 'sources') setCookieAlert(false); setActive(id); }} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} cookieAlert={cookieAlert} />
 
         <div className="main">
           {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} tradeOffers={tradeOffers} />}
