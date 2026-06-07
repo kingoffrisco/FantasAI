@@ -1685,44 +1685,46 @@ async function handleDbArticles(url, env) {
   let articles = [];
   let source = 'none';
 
-  // Try enriched_news first (articles tagged with player mentions) — gold layer
+  // Primary: export_player_news — combined gold table, player context already resolved
   try {
     const rows = await queryDatabricks(
-      `SELECT * FROM main.fantasai_news.enriched_news ORDER BY published_at DESC LIMIT ${limit}`, env
+      `SELECT news_id, headline, source_url, full_text, player_name, position, team, summary_text, fantasy_insight, impact_score, published_at FROM main.fantasai.export_player_news ORDER BY published_at DESC LIMIT ${limit}`, env
     );
     if (rows.length > 0) {
-      articles = rows.map(normalizeArticleRow).filter(Boolean);
-      source = 'enriched_news';
+      articles = rows.map(r => {
+        if (!r.headline || !r.source_url) return null;
+        return {
+          headline:        r.headline,
+          article_url:     r.source_url,
+          player_name:     r.player_name     || '',
+          position:        (r.position || '').toUpperCase(),
+          team:            r.team             || '',
+          published_at:    r.published_at     || null,
+          publisher:       'FantasAI',
+          description:     r.full_text        || r.summary_text || '',
+          summary_text:    r.summary_text     || '',
+          fantasy_insight: r.fantasy_insight  || '',
+          article_rank:    r.impact_score     ?? null,
+        };
+      }).filter(Boolean);
+      source = 'export_player_news';
     }
   } catch (_) {}
 
-  // Fall back to raw_rss_articles if enriched_news is empty or unavailable
+  // Fallback: gold_enriched_news (full articles with entity extraction)
   if (articles.length === 0) {
     try {
       const rows = await queryDatabricks(
-        `SELECT * FROM main.fantasai_news.raw_rss_articles ORDER BY published_at DESC LIMIT ${limit}`, env
+        `SELECT headline, source_url, full_text, source_name, published_at FROM main.fantasai.gold_enriched_news ORDER BY published_at DESC LIMIT ${limit}`, env
       );
       if (rows.length > 0) {
-        articles = rows.map(normalizeArticleRow).filter(Boolean);
-        source = 'raw_rss_articles';
+        articles = rows.map(r => normalizeArticleRow({ ...r, article_url: r.source_url, publisher: r.source_name })).filter(Boolean);
+        source = 'gold_enriched_news';
       }
     } catch (_) {}
   }
 
-  // Fallback: api_news_feed view (always available, fewer rows)
-  if (articles.length === 0) {
-    try {
-      const rows = await queryDatabricks(
-        `SELECT * FROM main.fantasai_news.api_news_feed ORDER BY published_at DESC LIMIT 100`, env
-      );
-      if (rows.length > 0) {
-        articles = rows.map(normalizeArticleRow).filter(Boolean);
-        source = 'api_news_feed';
-      }
-    } catch (_) {}
-  }
-
-  // Final fallback: silver_news in main.fantasai (populated by r2_export pipeline)
+  // Final fallback: silver_news
   if (articles.length === 0) {
     try {
       const rows = await queryDatabricks(

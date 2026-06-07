@@ -621,13 +621,20 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
   const faCount        = allNews.filter(n => !ROSTERED_IDS.has(n.playerId)).length;
   const uniqueSrcCount = new Set(news.flatMap(n => n.sources?.map(s => s.sourceId || s.source) || [])).size;
 
+  const r2AiSummariesArr  = React.useMemo(() => Array.isArray(r2AiSummaries) ? r2AiSummaries : (Array.isArray(r2AiSummaries?.data) ? r2AiSummaries.data : []), [r2AiSummaries]);
+  const r2EnrichedArr     = React.useMemo(() => Array.isArray(r2EnrichedRaw)  ? r2EnrichedRaw  : (Array.isArray(r2EnrichedRaw?.data)  ? r2EnrichedRaw.data  : []), [r2EnrichedRaw]);
+  const r2PlayerNotesArr  = React.useMemo(() => Array.isArray(r2PlayerNotes)  ? r2PlayerNotes  : (Array.isArray(r2PlayerNotes?.data)  ? r2PlayerNotes.data  : []), [r2PlayerNotes]);
+
   const TABS = [
-    { id: 'news',       label: 'Player News',  count: allNews.length },
-    { id: 'addrop',     label: 'Add/Drop',     count: addropCount },
-    { id: 'trades',     label: 'Trades',       count: 0 },
-    { id: 'waivers',    label: 'Waivers',      count: faCount },
-    { id: 'notstarted', label: 'Not Started',  count: null },
-    { id: 'articles',   label: '📰 Articles',  count: allArticles.length || null },
+    { id: 'news',         label: 'Player News',    count: allNews.length },
+    { id: 'addrop',       label: 'Add/Drop',       count: addropCount },
+    { id: 'articles',     label: '📰 Articles',    count: allArticles.length || null },
+    { id: 'ai_summaries', label: '🤖 AI Summaries',count: r2AiSummariesArr.length || null },
+    { id: 'enriched',     label: '🔎 Enriched',    count: r2EnrichedArr.length || null },
+    { id: 'player_notes', label: '📋 Player Notes',count: r2PlayerNotesArr.length || null },
+    { id: 'waivers',      label: 'Waivers',        count: faCount },
+    { id: 'trades',       label: 'Trades',         count: 0 },
+    { id: 'notstarted',   label: 'Not Started',    count: null },
   ];
 
   return (
@@ -744,6 +751,12 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
       <div style={{ flex: 1, overflow: 'auto' }}>
         {mainTab === 'articles' ? (
           <ArticlesFeedTab articles={allArticles} rosteredIds={ROSTERED_IDS} loading={dbArticlesLoading} dbSource={dbArticlesSrc} />
+        ) : mainTab === 'ai_summaries' ? (
+          <AiSummariesTab data={r2AiSummariesArr} />
+        ) : mainTab === 'enriched' ? (
+          <EnrichedNewsTab data={r2EnrichedArr} />
+        ) : mainTab === 'player_notes' ? (
+          <PlayerNotesTab data={r2PlayerNotesArr} />
         ) : mainTab === 'trades' ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 8, color: 'var(--text-faint)' }}>
             <div style={{ fontSize: 28 }}>🔄</div>
@@ -888,6 +901,12 @@ function ArticlesFeedTab({ articles, rosteredIds, loading, dbSource }) {
                     >
                       {a.headline}
                     </a>
+                    {/* Fantasy insight from export_player_news */}
+                    {(a.fantasy_insight || a.summary_text) && (
+                      <div style={{ marginTop: 5, marginBottom: 4, fontSize: 11, color: 'var(--accent)', lineHeight: 1.5, fontStyle: 'italic' }}>
+                        {a.fantasy_insight || a.summary_text}
+                      </div>
+                    )}
                     {/* Attribution + link */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>{a.publisher}</span>
@@ -914,6 +933,205 @@ function ArticlesFeedTab({ articles, rosteredIds, loading, dbSource }) {
             })}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ── AI Summaries tab — gold_news_ai_summaries via R2 ───────────────────────── */
+function AiSummariesTab({ data }) {
+  const [search, setSearch] = React.useState('');
+  const items = React.useMemo(() => {
+    if (!data.length) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return data;
+    return data.filter(s =>
+      (s.headline     || '').toLowerCase().includes(q) ||
+      (s.summary_text || '').toLowerCase().includes(q) ||
+      (s.fantasy_insight || '').toLowerCase().includes(q)
+    );
+  }, [data, search]);
+
+  const PRIORITY_COLOR = { critical: '#ff4d4d', high: '#ff9800', medium: '#4ea8ff', low: 'var(--text-faint)' };
+
+  if (!data.length) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
+      <div style={{ fontSize: 28 }}>🤖</div>
+      <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>AI Summaries not yet available — run Databricks pipeline</div>
+      <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>fantasai/news/ai_summaries.json</div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search summaries…"
+          style={{ fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', width: 200 }} />
+        <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{items.length} of {data.length}</span>
+        <span style={{ fontSize: 9, color: '#c6ff3a', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' }}>gold_news_ai_summaries</span>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
+          {items.map((s, i) => {
+            const pColor = PRIORITY_COLOR[s.priority_level] || 'var(--text-faint)';
+            const players = (() => { try { return Array.isArray(s.impacted_players) ? s.impacted_players : (s.impacted_players ? JSON.parse(s.impacted_players) : []); } catch { return []; } })();
+            return (
+              <div key={i} style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+                  {s.priority_level && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: pColor, border: `1px solid ${pColor}44`, borderRadius: 4, padding: '1px 6px' }}>{s.priority_level}</span>}
+                  {s.impact_category && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{s.impact_category}</span>}
+                  {s.is_time_sensitive && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#ff9800' }}>⚡ TIME SENSITIVE</span>}
+                  {s.fantasy_relevance_score != null && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', marginLeft: 'auto' }}>relevance {Number(s.fantasy_relevance_score).toFixed(2)}</span>}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 6, lineHeight: 1.5 }}>{s.headline}</div>
+                {s.summary_text && <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6, marginBottom: 6 }}>{s.summary_text}</div>}
+                {s.fantasy_insight && <div style={{ fontSize: 12, color: 'var(--accent)', lineHeight: 1.5, fontStyle: 'italic', marginBottom: 6 }}>{s.fantasy_insight}</div>}
+                {players.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                    {players.map((p, j) => {
+                      const name = typeof p === 'string' ? p : (p?.player_name || p?.name || JSON.stringify(p));
+                      return <span key={j} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', background: 'rgba(78,168,255,.1)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 4, padding: '1px 7px', color: '#4ea8ff' }}>{name}</span>;
+                    })}
+                  </div>
+                )}
+                {s.published_at && <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 6 }}>{fmtRelative(s.published_at)}</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Enriched News tab — gold_enriched_news via R2 ──────────────────────────── */
+function EnrichedNewsTab({ data }) {
+  const [search, setSearch] = React.useState('');
+  const items = React.useMemo(() => {
+    if (!data.length) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return data;
+    return data.filter(a =>
+      (a.headline || '').toLowerCase().includes(q) ||
+      (a.full_text || '').toLowerCase().includes(q)
+    );
+  }, [data, search]);
+
+  if (!data.length) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
+      <div style={{ fontSize: 28 }}>🔎</div>
+      <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Enriched articles not yet available — run Databricks pipeline</div>
+      <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>fantasai/news/enriched_news.json</div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search articles…"
+          style={{ fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', width: 200 }} />
+        <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{items.length} of {data.length}</span>
+        <span style={{ fontSize: 9, color: '#4ea8ff', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' }}>gold_enriched_news</span>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
+          {items.map((a, i) => {
+            const players = (() => { try { return Array.isArray(a.mentioned_players) ? a.mentioned_players : (a.mentioned_players ? JSON.parse(a.mentioned_players) : []); } catch { return []; } })();
+            const teams   = (() => { try { return Array.isArray(a.mentioned_teams)   ? a.mentioned_teams   : (a.mentioned_teams   ? JSON.parse(a.mentioned_teams)   : []); } catch { return []; } })();
+            return (
+              <div key={i} style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5, flexWrap: 'wrap' }}>
+                  {a.publisher && <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>{a.publisher}</span>}
+                  {a.extraction_confidence != null && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>conf {Number(a.extraction_confidence).toFixed(2)}</span>}
+                  {a.published_at && <span style={{ fontSize: 10, color: 'var(--text-faint)', marginLeft: 'auto' }}>{fmtRelative(a.published_at)}</span>}
+                </div>
+                {a.article_url ? (
+                  <a href={a.article_url} target="_blank" rel="noopener noreferrer"
+                    style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text)', textDecoration: 'none', lineHeight: 1.5, marginBottom: 6 }}
+                    onMouseEnter={e => e.currentTarget.style.color = '#4ea8ff'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--text)'}
+                  >{a.headline}</a>
+                ) : (
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', lineHeight: 1.5, marginBottom: 6 }}>{a.headline}</div>
+                )}
+                {a.full_text && <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6, marginBottom: 8 }}>{a.full_text.slice(0, 400)}{a.full_text.length > 400 ? '…' : ''}</div>}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {players.map((p, j) => <span key={j} style={{ fontSize: 10, background: 'rgba(198,255,58,.08)', border: '1px solid rgba(198,255,58,.2)', borderRadius: 4, padding: '1px 7px', color: 'var(--accent)' }}>{typeof p === 'string' ? p : (p?.name || JSON.stringify(p))}</span>)}
+                  {teams.map((t, j) => <span key={`t${j}`} style={{ fontSize: 10, background: 'var(--panel-3)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 7px', color: 'var(--text-faint)' }}>{typeof t === 'string' ? t : (t?.name || JSON.stringify(t))}</span>)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Player Notes tab — gold_player_notes via R2 ────────────────────────────── */
+function PlayerNotesTab({ data }) {
+  const [search, setSearch] = React.useState('');
+  const [onlyInjury, setOnlyInjury] = React.useState(false);
+  const items = React.useMemo(() => {
+    let list = data;
+    if (onlyInjury) list = list.filter(p => p.has_injury_concern || p.has_critical_news);
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter(p => (p.player_name || '').toLowerCase().includes(q));
+    return list;
+  }, [data, search, onlyInjury]);
+
+  if (!data.length) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
+      <div style={{ fontSize: 28 }}>📋</div>
+      <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Player notes not yet available — run Databricks pipeline</div>
+      <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>fantasai/news/player_notes.json</div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search player…"
+          style={{ fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', width: 160 }} />
+        <button onClick={() => setOnlyInjury(f => !f)} style={{
+          fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer',
+          background: onlyInjury ? 'rgba(255,152,0,.18)' : 'var(--panel-3)',
+          color: onlyInjury ? '#ff9800' : 'var(--text-faint)',
+          border: `1px solid ${onlyInjury ? '#ff980044' : 'transparent'}`,
+        }}>⚠ Injury Concern</button>
+        <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{items.length} of {data.length}</span>
+        <span style={{ fontSize: 9, color: '#c6ff3a', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' }}>gold_player_notes</span>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
+          {items.map((pn, i) => {
+            const notes = Array.isArray(pn.notes) ? pn.notes : [];
+            const isCrit = pn.has_critical_news;
+            const isInj  = pn.has_injury_concern;
+            return (
+              <div key={i} style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: isCrit ? '#ff4d4d' : isInj ? '#ff9800' : 'var(--text)' }}>{pn.player_name}</span>
+                  {isCrit && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#ff4d4d', border: '1px solid #ff4d4d44', borderRadius: 4, padding: '1px 6px' }}>CRITICAL</span>}
+                  {isInj  && !isCrit && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#ff9800', border: '1px solid #ff980044', borderRadius: 4, padding: '1px 6px' }}>INJURY</span>}
+                  {pn.overall_impact_score != null && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', marginLeft: 'auto' }}>impact {Number(pn.overall_impact_score).toFixed(2)}</span>}
+                </div>
+                {notes.map((n, j) => {
+                  const dirColor = n.impact_direction === 'positive' ? 'var(--good)' : n.impact_direction === 'negative' ? 'var(--danger)' : 'var(--text-faint)';
+                  return (
+                    <div key={j} style={{ display: 'flex', gap: 10, marginBottom: 8, paddingLeft: 8, borderLeft: `2px solid ${dirColor}` }}>
+                      <div style={{ flex: 1 }}>
+                        {n.priority && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: dirColor, textTransform: 'uppercase', marginRight: 8 }}>{n.priority}</span>}
+                        <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>{n.note_text}</span>
+                        {n.published_at && <span style={{ display: 'block', fontSize: 10, color: 'var(--text-faint)', marginTop: 2 }}>{fmtRelative(n.published_at)}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

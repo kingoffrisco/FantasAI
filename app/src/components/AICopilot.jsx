@@ -11,6 +11,31 @@ export function setCompareContext(players) { _compareCtx = Array.isArray(players
 let _dynamicNames   = null; // string[] sorted longest-first, or null while loading
 let _dynamicNamesSet = new Set();
 
+// Module-level cache for AI summaries (loaded once, injected into every chat context)
+let _aiSummaries = null; // null = not loaded yet, [] = loaded but empty
+async function loadAiSummaries() {
+  if (_aiSummaries !== null) return;
+  _aiSummaries = [];
+  try {
+    const data = await api.r2.aiSummaries();
+    const arr  = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+    _aiSummaries = arr.slice(0, 15); // top 15 most recent summaries
+  } catch { /* R2 file may not exist yet — silently skip */ }
+}
+
+function buildAiSummariesContext() {
+  if (!_aiSummaries?.length) return '';
+  const lines = _aiSummaries.map(s => {
+    const priority = s.priority_level ? `[${s.priority_level.toUpperCase()}]` : '';
+    const players  = (() => {
+      try { return Array.isArray(s.impacted_players) ? s.impacted_players.map(p => typeof p === 'string' ? p : (p?.player_name || p?.name || '')).filter(Boolean).join(', ') : ''; }
+      catch { return ''; }
+    })();
+    return `${priority} ${s.headline}${players ? ` (${players})` : ''}${s.fantasy_insight ? ' — ' + s.fantasy_insight : ''}`;
+  }).join('\n');
+  return `\n\nRECENT AI FANTASY INSIGHTS (from Databricks gold_news_ai_summaries):\n${lines}`;
+}
+
 async function loadDynamicPlayers() {
   if (_dynamicNames !== null) return; // already loaded or loading
   _dynamicNames = []; // mark loading
@@ -462,9 +487,10 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
     [myRosterIds],
   );
 
-  // Load full NFL player list from worker-api and pre-warm Databricks on panel open
+  // Load full NFL player list, AI summaries, and pre-warm Databricks on panel open
   React.useEffect(() => {
     loadDynamicPlayers();
+    loadAiSummaries();
     callChat('ping', '', []).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -520,6 +546,7 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
       if (nonRosterPlayers.length > 0) {
         context += buildNonRosterContext(nonRosterPlayers, myRosterIds);
       }
+      context += buildAiSummariesContext();
       const rosterPlayers = [...(myRosterIds || [])].map(id => findPlayer(id)).filter(Boolean)
         .map(p => ({ name: p.name, pos: p.pos, team: p.team, id: p.id }));
       const answer = await callChat(q, context, rosterPlayers);

@@ -109,28 +109,91 @@ except Exception as e:
     errors.append(f"player_notes: {e}")
 
 # ── 2. enriched_news ──────────────────────────────────────────────────────────
-# Source: main.fantasai.silver_news
-# Shape: [{headline, full_text, source_url, mentioned_players,
-#           primary_player_id, published_at}]
+# Source: main.fantasai.gold_enriched_news (full enriched articles with entity extraction)
+# Fields: news_id, headline, source_name, source_url, full_text,
+#         mentioned_players, mentioned_teams, extraction_confidence, published_at
 print("2. enriched_news")
 try:
     df = (
-        spark.table("main.fantasai.silver_news")  # noqa: F821
+        spark.table("main.fantasai.gold_enriched_news")  # noqa: F821
         .orderBy(F.col("published_at").desc())
         .limit(200)
         .select(
-            F.col("title").alias("headline"),
-            F.col("summary").alias("full_text"),
-            F.col("source").alias("source_url"),
-            F.col("player_id").alias("primary_player_id"),
+            F.col("news_id"),
+            F.col("headline"),
+            F.col("source_name").alias("publisher"),
+            F.col("source_url").alias("article_url"),
+            F.col("full_text"),
+            F.col("mentioned_players"),
+            F.col("mentioned_teams"),
+            F.coalesce(F.col("extraction_confidence"), F.lit(None)).alias("extraction_confidence"),
             "published_at",
         )
-        .withColumn("mentioned_players", F.array())
     )
     r2_put("fantasai/news/enriched_news.json", to_records(df))
 except Exception as e:
     print(f"  ✗ {e}")
     errors.append(f"enriched_news: {e}")
+
+# ── 2b. player_news ───────────────────────────────────────────────────────────
+# Source: main.fantasai.export_player_news (combined player news — recommended for UI)
+# Fields: news_id, headline, source_url, full_text, player_name, position, team,
+#         summary_text, fantasy_insight, impact_score, published_at
+# Records: ~1,075 articles (last 60 days)
+print("2b. player_news")
+try:
+    df = (
+        spark.table("main.fantasai.export_player_news")  # noqa: F821
+        .orderBy(F.col("published_at").desc())
+        .limit(1500)
+        .select(
+            F.col("news_id"),
+            F.col("headline"),
+            F.col("source_url").alias("article_url"),
+            F.col("full_text"),
+            F.col("player_name"),
+            F.col("position"),
+            F.col("team"),
+            F.col("summary_text"),
+            F.col("fantasy_insight"),
+            F.coalesce(F.col("impact_score"), F.lit(None)).alias("impact_score"),
+            "published_at",
+        )
+    )
+    r2_put("fantasai/analysis/player_news.json", to_records(df))
+except Exception as e:
+    print(f"  ✗ {e}")
+    errors.append(f"player_news: {e}")
+
+# ── 2c. ai_summaries ──────────────────────────────────────────────────────────
+# Source: main.fantasai.gold_news_ai_summaries (100 most recent AI-enriched summaries)
+# Fields: summary_id, news_id, headline, summary_text, fantasy_insight,
+#         fantasy_relevance_score, impact_category, priority_level,
+#         impacted_players, is_time_sensitive, published_at
+print("2c. ai_summaries")
+try:
+    df = (
+        spark.table("main.fantasai.gold_news_ai_summaries")  # noqa: F821
+        .orderBy(F.col("published_at").desc())
+        .limit(100)
+        .select(
+            F.col("summary_id"),
+            F.col("news_id"),
+            F.col("headline"),
+            F.col("summary_text"),
+            F.col("fantasy_insight"),
+            F.coalesce(F.col("fantasy_relevance_score"), F.lit(None)).alias("fantasy_relevance_score"),
+            F.col("impact_category"),
+            F.col("priority_level"),
+            F.col("impacted_players"),
+            F.coalesce(F.col("is_time_sensitive"), F.lit(False)).alias("is_time_sensitive"),
+            "published_at",
+        )
+    )
+    r2_put("fantasai/news/ai_summaries.json", to_records(df))
+except Exception as e:
+    print(f"  ✗ {e}")
+    errors.append(f"ai_summaries: {e}")
 
 # ── 3. critical_alerts ────────────────────────────────────────────────────────
 # Source: main.fantasai.silver_player_injuries filtered to critical/high
