@@ -1582,15 +1582,36 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                             {isWatched && <span style={{ color: '#ffd700', fontSize: 11 }}>★</span>}
                             <span style={{ color: isWatched ? '#ffd700' : isOnBye ? 'var(--danger)' : effectiveStatus === 'Q' ? '#ff8c00' : isInjured ? 'var(--danger)' : undefined }}>{p.name}</span>
                             {(() => {
-                              const articles = playerNewsMap.get(p.name.toLowerCase().trim());
-                              if (!articles?.length) return null;
-                              const open = expandedNews.has(p.id);
+                              const allArticles = playerNewsMap.get(p.name.toLowerCase().trim()) || [];
+                              const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+                              const recent = allArticles.filter(a => !a.published_at || new Date(a.published_at).getTime() >= cutoff);
+                              if (!recent.length) return null;
+                              function artAge(ts) {
+                                if (!ts) return '';
+                                const d = Date.now() - new Date(ts).getTime();
+                                if (d < 3600000) return `${Math.round(d / 60000)}m`;
+                                if (d < 86400000) return `${Math.round(d / 3600000)}h`;
+                                return `${Math.round(d / 86400000)}d`;
+                              }
                               return (
-                                <button
-                                  onClick={e => { e.stopPropagation(); setExpandedNews(s => { const n = new Set(s); open ? n.delete(p.id) : n.add(p.id); return n; }); }}
-                                  style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, border: '1px solid rgba(78,168,255,.35)', background: open ? 'rgba(78,168,255,.25)' : 'rgba(78,168,255,.12)', color: 'var(--accent-2)', fontFamily: 'var(--font-mono)', fontWeight: 700, cursor: 'pointer', flexShrink: 0, lineHeight: 1.4 }}
-                                  title="Toggle news headlines"
-                                >📰 {articles.length}</button>
+                                <select
+                                  value=""
+                                  onClick={e => e.stopPropagation()}
+                                  onChange={e => {
+                                    e.stopPropagation();
+                                    const url = e.target.value;
+                                    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+                                    e.target.value = '';
+                                  }}
+                                  style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '1px 4px', borderRadius: 3, border: '1px solid rgba(78,168,255,.35)', background: 'rgba(78,168,255,.12)', color: 'var(--accent-2)', cursor: 'pointer', maxWidth: 130, flexShrink: 0 }}
+                                >
+                                  <option value="">📰 {recent.length} article{recent.length !== 1 ? 's' : ''}</option>
+                                  {recent.map((a, i) => {
+                                    const age = artAge(a.published_at);
+                                    const label = (a.headline || a.publisher || '').slice(0, 65);
+                                    return <option key={i} value={a.article_url}>{age ? `[${age}] ` : ''}{label}</option>;
+                                  })}
+                                </select>
                               );
                             })()}
                           </div>
@@ -1616,33 +1637,6 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                               );
                             })()}
                           </div>
-                          {expandedNews.has(p.id) && (() => {
-                            const articles = playerNewsMap.get(p.name.toLowerCase().trim()) || [];
-                            if (!articles.length) return null;
-                            return (
-                              <div style={{ marginTop: 5, display: 'flex', flexDirection: 'column', gap: 5 }} onClick={e => e.stopPropagation()}>
-                                {articles.slice(0, 3).map((a, i) => {
-                                  const ago = (() => {
-                                    try {
-                                      const diff = Date.now() - new Date(a.published_at).getTime();
-                                      if (diff < 3600000) return `${Math.round(diff / 60000)}m ago`;
-                                      if (diff < 86400000) return `${Math.round(diff / 3600000)}h ago`;
-                                      return `${Math.round(diff / 86400000)}d ago`;
-                                    } catch { return ''; }
-                                  })();
-                                  return (
-                                    <a key={i} href={a.article_url} target="_blank" rel="noopener noreferrer"
-                                      style={{ display: 'block', fontSize: 10, color: 'var(--accent-2)', textDecoration: 'none', lineHeight: 1.4 }}
-                                      title={`${a.headline} — ${a.publisher}`}
-                                    >
-                                      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>{a.headline}</span>
-                                      <span style={{ color: 'var(--text-faint)', fontSize: 9, fontFamily: 'var(--font-mono)' }}>{a.publisher} · {ago}</span>
-                                    </a>
-                                  );
-                                })}
-                              </div>
-                            );
-                          })()}
                         </div>
                       </div>
                     </td>
