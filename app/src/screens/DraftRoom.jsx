@@ -1,9 +1,10 @@
 import React from 'react';
 import { LEAGUE_TEAMS, DRAFT_PICKS, TEAMS_ORDER, DRAFT_ROUNDS, QUEUE as INIT_QUEUE, CHAT_MESSAGES } from '../lib/data.js';
-import { getPlayers, findPlayer } from '../lib/playerStore.js';
+import { getPlayers, usePlayers, findPlayer } from '../lib/playerStore.js';
 import { predictPicks } from '../lib/draft.js';
 import { PosBadge, PlayerAvatar, PlayerCell, TeamLogoBadge } from '../components/ui.jsx';
 import { useR2BreakoutCandidates } from '../hooks.js';
+import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 
 // ── Next Gen stat definitions per position ────────────────────────────────
 const NG_STATS = {
@@ -99,6 +100,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   function startMockDraft() {
     setMockPicks([]);
     setMockPickNum(1);
+    setQueue([]);
     try { localStorage.removeItem('fantasai_mock_picks_wip'); } catch {}
     setMockUserTeamId(null);
     setMockSlotIndex(null);
@@ -119,6 +121,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     setMockActive(false);
     setMockPicks([]);
     setMockPickNum(1);
+    setQueue([]);
     try { localStorage.removeItem('fantasai_mock_picks_wip'); } catch {}
     try { localStorage.removeItem('fantasai_mock_session'); } catch {}
     setMockUserTeamId(null);
@@ -225,6 +228,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   const [hideDrafted, setHideDrafted] = React.useState(false); // false = show greyed, true = remove drafted
   const [showRecap, setShowRecap] = React.useState(false);
   const [hidden, setHidden] = React.useState({ ghosts: false, queue: true, picklog: false, teams: false });
+  const [detailPlayer, setDetailPlayer] = React.useState(null); // player clicked for detail panel
   const [chatMessages, setChatMessages] = React.useState(CHAT_MESSAGES);
   const [chatInput, setChatInput] = React.useState('');
   const [rosterPanelView, setRosterPanelView] = React.useState('roster'); // 'roster' | 'grid' | 'chat'
@@ -264,9 +268,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   }
   const [commishPickSearch, setCommishPickSearch] = React.useState('');
   const [commishPickTeamId, setCommishPickTeamId] = React.useState(null); // null = use onClockTeamId
-  const [apiPlayers, setApiPlayers]   = React.useState(null);
-  const [apiLoading, setApiLoading]   = React.useState(false);
-  const [apiError, setApiError]       = React.useState(null);
+  const storePlayerList = usePlayers(); // reactive — updates when R2/Sleeper data loads in App.jsx
 
   // Persist live draft state so navigation away and back doesn't reset picks
   React.useEffect(() => {
@@ -359,17 +361,8 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     setMockSchedule(prev => prev.map(d => d.id === draft.id ? { ...d, status: 'in_progress' } : d));
   }
 
-  // Fetch live player pool from worker (Sleeper-backed, 1h cached)
-  function fetchApiPlayers() {
-    setApiLoading(true);
-    setApiError(null);
-    fetch('https://api.fantasai.net/api/v1/players?limit=300')
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
-      .then(data => { if (data?.players?.length) setApiPlayers(data.players); })
-      .catch(err => setApiError(String(err)))
-      .finally(() => setApiLoading(false));
-  }
-  React.useEffect(() => { fetchApiPlayers(); }, []);
+  // Player pool comes from the global store (loaded from R2 players_2026_draft in App.jsx).
+  // No separate fetch needed — store already has filtered, deduped, 2026-accurate data.
 
   // Next gen stats from R2 breakout candidates (opp score, snap%, etc.)
   const { data: r2BreakoutsNg } = useR2BreakoutCandidates();
@@ -458,7 +451,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
   function logCommish(type, message) {
     const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setCommishLog(prev => [...prev, { type, message, ts, id: Date.now() + Math.random() }]);
+    setCommishLog(prev => [...prev, { type, message, ts, id: Date.now() + Math.random(), pickNum: currentPickNum }]);
   }
 
   React.useEffect(() => {
@@ -560,9 +553,11 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     const msg = mockActive
       ? 'MOCK DRAFT RESET — All picks cleared, starting from pick 1'
       : 'DRAFT RESET — All players returned to the player pool';
-    // Clear mock picks
+    // Clear mock picks (state + localStorage)
     setMockPicks([]);
     setMockPickNum(1);
+    try { localStorage.removeItem('fantasai_mock_picks_wip'); } catch {}
+    try { localStorage.removeItem('fantasai_mock_session'); } catch {}
     // Clear live picks
     const clearedPicks = DRAFT_PICKS.map(p => ({ ...p, playerId: null }));
     setLivePicks(clearedPicks);
@@ -643,15 +638,9 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
   // Normalize API player IDs to store IDs (matched by name+pos) so findPlayer
   // works in the pick log, teams grid, and drafted-set filtering throughout the draft.
-  const playerPool = React.useMemo(() => {
-    const store = getPlayers();
-    if (!apiPlayers) return store;
-    return apiPlayers.map(ap => {
-      const local = store.find(lp => lp.name === ap.name && lp.pos === ap.pos);
-      return local ? { ...ap, id: local.id } : ap;
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiPlayers]);
+  // playerPool is the store list (R2 players_2026_draft, or Sleeper fallback).
+  // Reactive via storePlayerList — re-renders when live data arrives.
+  const playerPool = storePlayerList.length > 0 ? storePlayerList : getPlayers();
 
   // Searches playerPool first (includes API players not in local PLAYERS), then local PLAYERS.
   // Use this instead of findPlayer() anywhere a pick's playerId might be an API-only player.
@@ -1535,24 +1524,6 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             );
           })()}
 
-          {/* Draft Date */}
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, paddingLeft: 8, borderLeft: '1px solid rgba(255,180,0,.15)' }}>
-            {editingDraftDate ? (
-              <>
-                <input type="datetime-local" className="input" style={{ fontSize: 12, padding: '2px 4px' }} value={draftDateDraft} onChange={e => setDraftDateDraft(e.target.value)} />
-                <button className="btn primary sm" style={{ fontSize: 12 }} onClick={saveDraftDate}>Save</button>
-                <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={() => setEditingDraftDate(false)}>✕</button>
-              </>
-            ) : (
-              <>
-                <span style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-                  {draftSettings.date ? new Date(draftSettings.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Date not set'}
-                </span>
-                <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={() => { setDraftDateDraft(draftSettings.date || ''); setEditingDraftDate(true); }}>Edit</button>
-              </>
-            )}
-          </div>
-
           {/* Mock Draft */}
           <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, paddingLeft: 8, borderLeft: '1px solid rgba(255,180,0,.15)' }}>
             {mockActive ? (
@@ -1626,22 +1597,10 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             {userDraftMode === 'ai' ? '⏸ AI-Draft ON' : '🤖 AI-Draft (Ghost)'}
           </button>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {apiLoading && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>loading…</span>}
-            {!apiLoading && apiPlayers && (
-              <span style={{ fontSize: 10, color: '#4caf82', fontFamily: 'var(--font-mono)' }}>● live ({apiPlayers.length})</span>
-            )}
-            {!apiLoading && !apiPlayers && (
-              <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{apiError ? '⚠ static' : '○ static'}</span>
-            )}
-            <button
-              className="btn ghost sm"
-              style={{ fontSize: 10, padding: '2px 8px' }}
-              onClick={fetchApiPlayers}
-              disabled={apiLoading}
-              title="Refresh player list from API"
-            >
-              ↻ Refresh
-            </button>
+            {storePlayerList.length > 0
+              ? <span style={{ fontSize: 10, color: '#4caf82', fontFamily: 'var(--font-mono)' }}>● live ({storePlayerList.length})</span>
+              : <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>loading…</span>
+            }
           </div>
         </div>
 
@@ -1712,6 +1671,22 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
         <div style={{ padding: '8px 12px' }}>
           <input className="input search" placeholder="Find player" value={boardSearch} onChange={e => setBoardSearch(e.target.value)} style={{ width: '100%' }} />
         </div>
+
+        {/* Inline player detail — replaces fixed right-side overlay */}
+        {detailPlayer && (
+          <InlinePlayerDetail
+            player={detailPlayer}
+            onClose={() => setDetailPlayer(null)}
+            canDraft={isMyTurn || (isCommissioner && !mockActive)}
+            isCommissioner={isCommissioner}
+            isMyTurn={isMyTurn}
+            onClockTeam={onClockTeam}
+            onDraft={id => { mockActive ? draftPlayer(id) : commishPick(id); setDetailPlayer(null); }}
+            inQueue={queue.includes(detailPlayer.id)}
+            onToggleQueue={() => setQueue(q => q.includes(detailPlayer.id) ? q.filter(x => x !== detailPlayer.id) : [...q, detailPlayer.id])}
+            breakoutByName={breakoutByName}
+          />
+        )}
 
         {/* Next Gen stat column selector — shown when a position is filtered */}
         {NG_STATS[boardPos] && (
@@ -1902,7 +1877,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                   }>
                     <td className="rank" style={{ color: rank < 9999 ? undefined : 'var(--text-faint)' }}>{displayRank}</td>
                     <td>
-                      <div className="player-cell">
+                      <div className="player-cell" style={{ cursor: 'pointer' }} onClick={() => setDetailPlayer(p)}>
                         <PlayerAvatar player={p} />
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -2023,48 +1998,6 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             <div className="empty">Queue empty<br /><span className="faint" style={{ fontSize: 11 }}>Add players from the Big Board.</span></div>
           )}
         </div>
-        {/* TEAMS GRID — below Queue */}
-        <div className="draft-teams" style={hidden.teams ? { display: 'none' } : {}}>
-          <div className="teams-grid">
-            {teamsForCols.map((t, colIdx) => {
-              if (!t) return null;
-              const teamPicks = allPicks.filter(pk => pk.teamId === t.id);
-              return (
-                <div key={t.id} className={`team-col ${t.me ? 'me' : ''} ${t.id === onClockTeamId ? 'active' : ''}`}>
-                  <div className="hdr">
-                    <span>#{colIdx + 1}</span>
-                    <span className="pts">{Math.round(teamPicks.filter(p => p.playerId).reduce((s, p) => s + (findP(p.playerId)?.avg || 0), 0))}</span>
-                  </div>
-                  <div className="team-name">{t.logo} {t.name}</div>
-                  {isCommissioner && (
-                    <select
-                      value={teamModes[t.id] || 'manual'}
-                      onChange={e => setTeamModes(prev => ({ ...prev, [t.id]: e.target.value }))}
-                      style={{ fontSize: 9, padding: '2px 3px', width: '100%', background: 'var(--panel)', color: teamModes[t.id] === 'ai' ? 'var(--accent)' : teamModes[t.id] === 'auto' ? '#ffb547' : 'var(--text-faint)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer', marginBottom: 2, fontWeight: 700 }}
-                    >
-                      <option value="manual">Manual</option>
-                      <option value="auto">Auto Draft</option>
-                      <option value="ai">AI Draft</option>
-                    </select>
-                  )}
-                  {teamPicks.slice(0, 8).map(pk => {
-                    if (!pk.playerId) return (
-                      <div key={pk.pickNum} className="pick-cell empty"><span>R{pk.round}.{pk.slot}</span></div>
-                    );
-                    const p = findP(pk.playerId);
-                    if (!p) return null;
-                    return (
-                      <div key={pk.pickNum} className="pick-cell" style={{ borderLeftWidth: 2, borderLeftStyle: 'solid', borderLeftColor: `var(--pos-${p.pos.toLowerCase() === 'dst' ? 'dst' : p.pos.toLowerCase()})` }}>
-                        <PosBadge pos={p.pos} />
-                        <span className="nm">{p.name.split(' ').slice(-1)[0]}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </div>
       </div>
 
       {/* PICK LOG */}
@@ -2085,41 +2018,52 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
           <span className="mono faint" style={{ fontSize: 10 }}>{currentPickNum - 1}/{TOTAL_PICKS}</span>
         </div>
         <div style={{ flex: 1, overflow: 'auto', display: hidden.picklog ? 'none' : undefined }}>
-          {/* Commissioner event entries — most recent first */}
-          {commishLog.slice().reverse().map(entry => {
-            const entryColor = entry.type === 'reset' ? '#ff5a6e' : entry.type === 'pause' ? '#ff5a6e' : entry.type === 'resume' ? '#4caf82' : '#5b9cf6';
-            const entryBg    = entry.type === 'reset' ? 'rgba(255,90,110,.08)' : entry.type === 'pause' ? 'rgba(255,90,110,.07)' : entry.type === 'resume' ? 'rgba(76,175,130,.07)' : 'rgba(91,156,246,.06)';
-            return (
-              <div key={`cl-${entry.id}`} style={{ padding: '6px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, background: entryBg, borderLeft: `3px solid ${entryColor}` }}>
-                <span style={{ fontSize: 14, flexShrink: 0 }}>{entry.type === 'reset' ? '⚠' : entry.type === 'pause' ? '⏸' : entry.type === 'resume' ? '▶' : '⚙'}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: entryColor, fontWeight: 700, fontSize: 11 }}>{entry.message}</div>
-                  <div style={{ color: 'var(--text-faint)', fontSize: 10 }}>{entry.ts}</div>
-                </div>
-              </div>
-            );
-          })}
-          {/* Reversal audit entries — most recent first */}
-          {reversalLog.slice().reverse().map((entry, i) => {
-            const rp = findPlayer(entry.playerId);
-            const rt = LEAGUE_TEAMS.find(x => x.id === entry.teamId);
-            if (!rp || !rt) return null;
-            return (
-              <div key={`rev-${i}`} style={{ padding: '6px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,152,0,.07)', borderLeft: '3px solid #ff9800' }}>
-                <span style={{ fontSize: 16, flexShrink: 0 }}>↩</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: '#ff9800', fontWeight: 700, fontSize: 11 }}>
-                    Commissioner reversed {entry.round}.{entry.slot.toString().padStart(2, '0')}
-                  </div>
-                  <div style={{ color: 'var(--text-faint)', fontSize: 10 }}>
-                    {rp.name} removed from {rt.logo} {rt.name} · {entry.reversedAt}
+          {/* Merge picks, commish events, and reversals into one chronological stream (most recent first) */}
+          {(() => {
+            const rows = [];
+            // Deduplicate by pickNum — if somehow a slot has multiple entries, keep the last one
+            const pickMap = new Map();
+            allPicks.filter(pk => pk.playerId).forEach(pk => pickMap.set(pk.pickNum, pk));
+            pickMap.forEach(pk => rows.push({ kind: 'pick', pickNum: pk.pickNum, pk }));
+            commishLog.forEach(entry => rows.push({ kind: 'event', pickNum: entry.pickNum ?? 0, entry }));
+            reversalLog.forEach((entry, i) => rows.push({ kind: 'reversal', pickNum: entry.pickNum ?? 0, i, entry }));
+            rows.sort((a, b) => b.pickNum - a.pickNum || (b.entry?.id ?? 0) - (a.entry?.id ?? 0));
+            return rows.map(row => {
+            if (row.kind === 'event') {
+              const entry = row.entry;
+              const entryColor = entry.type === 'reset' ? '#ff5a6e' : entry.type === 'pause' ? '#ff9800' : entry.type === 'resume' ? '#4caf82' : '#5b9cf6';
+              const entryBg    = entry.type === 'reset' ? 'rgba(255,90,110,.08)' : entry.type === 'pause' ? 'rgba(255,152,0,.07)' : entry.type === 'resume' ? 'rgba(76,175,130,.07)' : 'rgba(91,156,246,.06)';
+              return (
+                <div key={`cl-${entry.id}`} style={{ padding: '6px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, background: entryBg, borderLeft: `3px solid ${entryColor}` }}>
+                  <span style={{ fontSize: 14, flexShrink: 0 }}>{entry.type === 'reset' ? '⚠' : entry.type === 'pause' ? '⏸' : entry.type === 'resume' ? '▶' : '⚙'}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: entryColor, fontWeight: 700, fontSize: 11 }}>{entry.message}</div>
+                    <div style={{ color: 'var(--text-faint)', fontSize: 10 }}>Pick #{entry.pickNum} · {entry.ts}</div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-          {/* Normal pick entries */}
-          {allPicks.filter(pk => pk.playerId).slice().reverse().map(pk => {
+              );
+            }
+            if (row.kind === 'reversal') {
+              const entry = row.entry;
+              const rp = findPlayer(entry.playerId);
+              const rt = LEAGUE_TEAMS.find(x => x.id === entry.teamId);
+              if (!rp || !rt) return null;
+              return (
+                <div key={`rev-${row.i}`} style={{ padding: '6px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,152,0,.07)', borderLeft: '3px solid #ff9800' }}>
+                  <span style={{ fontSize: 16, flexShrink: 0 }}>↩</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: '#ff9800', fontWeight: 700, fontSize: 11 }}>
+                      Commissioner reversed {entry.round}.{entry.slot?.toString().padStart(2, '0')}
+                    </div>
+                    <div style={{ color: 'var(--text-faint)', fontSize: 10 }}>
+                      {rp.name} removed from {rt.logo} {rt.name} · {entry.reversedAt}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            // Normal pick
+            const pk = row.pk;
             const p = findP(pk.playerId);
             const t = LEAGUE_TEAMS.find(x => x.id === pk.teamId);
             if (!p || !t) return null;
@@ -2128,11 +2072,12 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             const ghostMatch = ghost?.player?.id === pk.playerId;
             const deltaColor = adpDelta >= 3 ? '#4caf82' : adpDelta <= -3 ? '#ff5a6e' : 'var(--text-dim)';
             const isSelected = selectedPicks.has(pk.pickNum);
-            const gradeVal = Math.round(((p.adp ?? p.ecr ?? pk.pickNum) - pk.pickNum + 20) / 6);
-            const grade = gradeVal > 4 ? 'A+' : gradeVal > 3 ? 'A' : gradeVal > 2 ? 'B+' : gradeVal > 1 ? 'B' : gradeVal > 0 ? 'C' : 'D';
-            const gradeColor = gradeVal > 3 ? 'var(--accent)' : gradeVal > 1 ? 'var(--warn)' : 'var(--danger)';
+            // Bell-curve grading: average pick (ADP ≈ pickNum) → C; steals → A/B; reaches → D/F
+            const safeAdpDelta = (p.adp ?? p.ecr ?? 999) < 500 ? adpDelta : 0;
+            const grade = safeAdpDelta > 18 ? 'A+' : safeAdpDelta > 10 ? 'A' : safeAdpDelta > 3 ? 'B' : safeAdpDelta >= -3 ? 'C' : safeAdpDelta >= -10 ? 'D' : 'F';
+            const gradeColor = safeAdpDelta > 10 ? '#4caf82' : safeAdpDelta > 3 ? '#4ea8ff' : safeAdpDelta >= -3 ? 'var(--text-dim)' : safeAdpDelta >= -10 ? 'var(--warn)' : 'var(--danger)';
             return (
-              <div key={pk.pickNum} style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, background: isSelected ? 'rgba(255,152,0,.1)' : t.me ? 'rgba(198,255,58,.03)' : '' }}>
+              <div key={pk.pickNum} style={{ padding: '7px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, background: isSelected ? 'rgba(255,152,0,.13)' : t.me ? 'rgba(198,255,58,.10)' : '', borderLeft: t.me && !isSelected ? '3px solid var(--accent)' : isSelected ? '3px solid #ff9800' : '3px solid transparent' }}>
                 {isCommissioner && (
                   <input
                     type="checkbox"
@@ -2181,7 +2126,8 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                 })()}
               </div>
             );
-          })}
+          }); // closes rows.map
+          })()}
         </div>
       </div>
       </div>{/* /draft-middle */}
@@ -2248,15 +2194,15 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             {teamsForCols.map((t) => {
               if (!t) return null;
               const teamPicks = allPicks.filter(pk => pk.teamId === t.id && pk.playerId);
-              // Team draft grade: average of all pick grades
+              // Team draft grade: average adpDelta (positive = steals, negative = reaches)
               const teamGradeSum = teamPicks.reduce((s, pk) => {
                 const p = findP(pk.playerId);
-                const adp = p?.adp ?? pk.pickNum;
-                return s + Math.round(((adp - pk.pickNum + 20) / 6));
+                const rawAdp = p?.adp ?? p?.ecr ?? 999;
+                return s + (rawAdp < 500 ? pk.pickNum - rawAdp : 0);
               }, 0);
               const teamGradeAvg = teamPicks.length ? teamGradeSum / teamPicks.length : 0;
-              const teamGradeLabel = teamGradeAvg > 4 ? 'A+' : teamGradeAvg > 3 ? 'A' : teamGradeAvg > 2 ? 'B+' : teamGradeAvg > 1 ? 'B' : teamGradeAvg > 0 ? 'C' : 'D';
-              const teamGradeColor = teamGradeAvg > 3 ? 'var(--accent)' : teamGradeAvg > 1 ? 'var(--warn)' : 'var(--danger)';
+              const teamGradeLabel = teamGradeAvg > 18 ? 'A+' : teamGradeAvg > 10 ? 'A' : teamGradeAvg > 3 ? 'B' : teamGradeAvg >= -3 ? 'C' : teamGradeAvg >= -10 ? 'D' : 'F';
+              const teamGradeColor = teamGradeAvg > 10 ? '#4caf82' : teamGradeAvg > 3 ? '#4ea8ff' : teamGradeAvg >= -3 ? 'var(--text-dim)' : teamGradeAvg >= -10 ? 'var(--warn)' : 'var(--danger)';
               return (
                 <div key={t.id} style={{ borderBottom: '1px solid var(--border)', background: t.id === onClockTeamId ? 'rgba(76,175,130,.06)' : t.me ? 'rgba(198,255,58,.04)' : 'transparent' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', background: t.id === onClockTeamId ? 'rgba(76,175,130,.12)' : 'var(--bg-2)' }}>
@@ -2273,9 +2219,9 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                       {teamPicks.map(pk => {
                         const p = findP(pk.playerId);
                         if (!p) return null;
-                        const gradeVal = Math.round(((p.adp ?? pk.pickNum) - pk.pickNum + 20) / 6);
-                        const grade = gradeVal > 4 ? 'A+' : gradeVal > 3 ? 'A' : gradeVal > 2 ? 'B+' : gradeVal > 1 ? 'B' : gradeVal > 0 ? 'C' : 'D';
-                        const gradeColor = gradeVal > 3 ? 'var(--accent)' : gradeVal > 1 ? 'var(--warn)' : 'var(--danger)';
+                        const pickDelta = (p.adp ?? p.ecr ?? 999) < 500 ? pk.pickNum - (p.adp ?? p.ecr) : 0;
+                        const grade = pickDelta > 18 ? 'A+' : pickDelta > 10 ? 'A' : pickDelta > 3 ? 'B' : pickDelta >= -3 ? 'C' : pickDelta >= -10 ? 'D' : 'F';
+                        const gradeColor = pickDelta > 10 ? '#4caf82' : pickDelta > 3 ? '#4ea8ff' : pickDelta >= -3 ? 'var(--text-dim)' : pickDelta >= -10 ? 'var(--warn)' : 'var(--danger)';
                         const round = Math.ceil(pk.pickNum / 12);
                         return (
                           <div key={pk.pickNum} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2339,6 +2285,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
       </div>
 
       {showRecap && <DraftRecap round={currentRound - 1} onClose={() => setShowRecap(false)} />}
+
     </div>
   );
 }
@@ -2402,5 +2349,404 @@ function GhostTarget({ g, rank, compact, isMe }) {
       <span className="ghost-name">{compact ? p.name.split(' ').slice(-1)[0] : p.name}</span>
       <span className="ghost-pct mono">{g.likelihood}%</span>
     </div>
+  );
+}
+
+// ── Draft Player Detail Panel ─────────────────────────────────────────────────
+function statRow(label, val) {
+  if (val == null || val === '—') return null;
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+      <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{label}</span>
+      <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{val}</span>
+    </div>
+  );
+}
+
+function SeasonStatBlock({ label, tot, pos }) {
+  if (!tot) return <div style={{ fontSize: 11, color: 'var(--text-faint)', padding: '8px 0' }}>No data</div>;
+  const fp = tot.pts_half_ppr != null ? tot.pts_half_ppr.toFixed(1) : '—';
+  const gp = tot._gp || '?';
+  const avg = tot.pts_half_ppr != null && tot._gp ? (tot.pts_half_ppr / tot._gp).toFixed(1) : '—';
+  return (
+    <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 12px' }}>
+      {pos === 'QB' && <>
+        {statRow('Pass Yds', Math.round(tot.pass_yd || 0))}
+        {statRow('Pass TDs', Math.round(tot.pass_td || 0))}
+        {statRow('INTs', Math.round(tot.pass_int || 0))}
+        {statRow('Rush Yds', Math.round(tot.rush_yd || 0))}
+      </>}
+      {pos === 'RB' && <>
+        {statRow('Rush Att', Math.round(tot.rush_att || 0))}
+        {statRow('Rush Yds', Math.round(tot.rush_yd || 0))}
+        {statRow('Rush TDs', Math.round(tot.rush_td || 0))}
+        {statRow('Rec', Math.round(tot.rec || 0))}
+        {statRow('Rec Yds', Math.round(tot.rec_yd || 0))}
+      </>}
+      {(pos === 'WR' || pos === 'TE') && <>
+        {statRow('Targets', Math.round(tot.rec_tgt || 0))}
+        {statRow('Rec', Math.round(tot.rec || 0))}
+        {statRow('Rec Yds', Math.round(tot.rec_yd || 0))}
+        {statRow('Rec TDs', Math.round(tot.rec_td || 0))}
+        {statRow('Catch%', tot.rec_tgt > 0 ? ((tot.rec / tot.rec_tgt) * 100).toFixed(0) + '%' : '—')}
+      </>}
+      {pos === 'K' && <>
+        {statRow('FG Made', Math.round(tot.fgm || 0))}
+        {statRow('FG Att', Math.round(tot.fga || 0))}
+        {statRow('XP Made', Math.round(tot.xpm || 0))}
+      </>}
+      {statRow('Games', gp)}
+      {statRow('Avg Pts', avg)}
+      {statRow('Total Pts', fp)}
+    </div>
+  );
+}
+
+// ── Compact season stats for inline panel ────────────────────────────────────
+function CompactSeasonStats({ tot, pos }) {
+  if (!tot) return <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>no data</div>;
+  const fmt = (v, dec = 0) => v != null && !isNaN(v) ? (dec ? Number(v).toFixed(dec) : Math.round(v)) : '—';
+  const fp  = tot.pts_half_ppr != null ? Number(tot.pts_half_ppr).toFixed(1) : '—';
+  const avg = tot.pts_half_ppr != null && tot._gp ? (tot.pts_half_ppr / tot._gp).toFixed(1) : '—';
+  const rows = pos === 'QB'
+    ? [['Pass Yds', fmt(tot.pass_yd)], ['TDs/INT', `${fmt(tot.pass_td)}/${fmt(tot.pass_int)}`], ['Rush Yds', fmt(tot.rush_yd)]]
+    : pos === 'RB'
+    ? [['Att/Yds', `${fmt(tot.rush_att)}/${fmt(tot.rush_yd)}`], ['Rush TDs', fmt(tot.rush_td)], ['Rec/Yds', `${fmt(tot.rec)}/${fmt(tot.rec_yd)}`]]
+    : pos === 'WR' || pos === 'TE'
+    ? [['Tgt/Rec', `${fmt(tot.rec_tgt)}/${fmt(tot.rec)}`], ['Rec Yds', fmt(tot.rec_yd)], ['TDs', fmt(tot.rec_td)]]
+    : pos === 'K'
+    ? [['FGM/FGA', `${fmt(tot.fgm)}/${fmt(tot.fga)}`], ['XPM', fmt(tot.xpm)]]
+    : [];
+  rows.push(['Pts/G', avg], ['Total', fp]);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      {rows.map(([k, v]) => (
+        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 6, fontSize: 9, fontFamily: 'var(--font-mono)' }}>
+          <span style={{ color: 'var(--text-faint)' }}>{k}</span>
+          <span style={{ color: 'var(--text)', fontWeight: 600 }}>{v}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Inline player detail strip — shows inside Big Board on player click ───────
+function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissioner, onClockTeam, onDraft, inQueue, onToggleQueue, breakoutByName }) {
+  const [seasons, setSeasons] = React.useState({});
+  const [loading, setLoading] = React.useState(true);
+  const [news, setNews]       = React.useState([]);
+
+  const avatarUrl = p.photoUrl || (p.sleeperId ? `https://sleepercdn.com/content/nfl/players/thumb/${p.sleeperId}.jpg` : null);
+  const pos = p.pos;
+  const oppScore = breakoutByName?.get(p.name.toLowerCase())?.opportunity_score ?? null;
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true); setSeasons({}); setNews([]);
+    async function load() {
+      const [s25, s24, s23] = await Promise.allSettled([
+        fetchSleeperPlayerStats(p.name, pos, 2025),
+        fetchSleeperPlayerStats(p.name, pos, 2024),
+        fetchSleeperPlayerStats(p.name, pos, 2023),
+      ]);
+      if (cancelled) return;
+      function toTot(r) {
+        if (r.status !== 'fulfilled' || !r.value?.found) return null;
+        const tot = r.value.seasonTotals || {}; tot._gp = r.value.gamesPlayed || 0; return tot;
+      }
+      setSeasons({ 2025: toTot(s25), 2024: toTot(s24), 2023: toTot(s23) });
+      setLoading(false);
+      const parts = p.name.trim().split(' ');
+      const fl = parts[0].toLowerCase(); const ll = parts.slice(1).join(' ').toLowerCase();
+      try {
+        const res  = await fetch('https://api.fantasai.net/api/v1/nfl/news?limit=50');
+        const json = res.ok ? await res.json() : null;
+        if (!cancelled && json?.articles) {
+          setNews(json.articles.filter(a => { const t = `${a.headline||''} ${a.description||''}`.toLowerCase(); return t.includes(fl) && t.includes(ll); }).slice(0, 2));
+        }
+      } catch {}
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [p.id]);
+
+  const pill = (k, v, hi) => (
+    <div key={k} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 34 }}>
+      <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', lineHeight: 1 }}>{k}</span>
+      <span style={{ fontSize: 13, fontWeight: 800, fontFamily: 'var(--font-mono)', color: hi ? 'var(--accent-2)' : 'var(--text)', lineHeight: 1.3 }}>{v}</span>
+    </div>
+  );
+
+  return (
+    <div style={{ borderBottom: '2px solid var(--border-strong)', background: 'linear-gradient(180deg,rgba(78,168,255,.08) 0%,rgba(78,168,255,.02) 100%)', borderLeft: '3px solid var(--accent-2)' }}>
+
+      {/* Row 1 — identity + actions */}
+      <div style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        {avatarUrl && (
+          <img src={avatarUrl} alt={p.name} style={{ width: 42, height: 42, borderRadius: 6, objectFit: 'cover', background: 'var(--panel-2)', flexShrink: 0 }}
+            onError={e => { e.target.style.display = 'none'; }} />
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 1, minWidth: 0, flexWrap: 'nowrap' }}>
+          <span className={`pos-badge pos-${pos}`}>{pos}</span>
+          {p.status && p.status !== 'OK' && (
+            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 3, flexShrink: 0,
+              background: p.status === 'Q' ? 'rgba(255,140,0,.15)' : 'rgba(255,60,60,.15)',
+              color: p.status === 'Q' ? '#ffb547' : '#ff5a6e',
+              border: `1px solid ${p.status === 'Q' ? 'rgba(255,140,0,.4)' : 'rgba(255,60,60,.4)'}`,
+              fontFamily: 'var(--font-mono)', letterSpacing: '.06em' }}>{p.status}</span>
+          )}
+          <span style={{ fontWeight: 900, fontSize: 15, letterSpacing: '-.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+            {p.team}{p.num ? ` #${p.num}` : ''}{p.age ? ` · ${p.age}yr` : ''}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexShrink: 0 }}>
+          {canDraft && (
+            <button className="btn primary sm" style={{ fontWeight: 900, letterSpacing: '.04em' }} onClick={() => onDraft(p.id)}>
+              {isCommissioner && !isMyTurn ? '→ DRAFT' : '★ DRAFT'}
+            </button>
+          )}
+          <button
+            className={`btn sm ${inQueue ? 'primary' : 'ghost'}`}
+            style={inQueue ? { background: 'var(--accent)', color: 'var(--accent-ink)', borderColor: 'var(--accent)' } : {}}
+            onClick={onToggleQueue}
+          >{inQueue ? '✓ Queued' : '+ Queue'}</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 14, cursor: 'pointer', padding: '2px 6px', lineHeight: 1 }}>✕</button>
+        </div>
+      </div>
+
+      {/* Row 2 — stat pills */}
+      <div style={{ padding: '2px 12px 7px', display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        {pill('ECR', p.ecr < 999 ? `#${p.ecr}` : '—')}
+        {pill('ADP', p.adp < 999 ? p.adp.toFixed(1) : '—')}
+        {pill('Tier', p.tier || '—')}
+        {pill('%Own', p.owned > 0 ? `${p.owned.toFixed(0)}%` : '—')}
+        {pill('Bye', p.bye > 0 ? p.bye : '—')}
+        <div style={{ width: 1, height: 28, background: 'var(--border)', alignSelf: 'center' }} />
+        {pill('Proj', p.proj > 0 ? p.proj.toFixed(1) : '—')}
+        {pill('Last', p.last > 0 ? p.last.toFixed(1) : '—')}
+        {pill('Avg', p.avg > 0 ? p.avg.toFixed(1) : '—')}
+        {oppScore != null && <>{pill('Opp', oppScore.toFixed(1), true)}</>}
+      </div>
+
+      {/* Row 3 — 3-year stats side by side */}
+      {loading
+        ? <div style={{ padding: '5px 12px 7px', color: 'var(--text-faint)', fontSize: 10, display: 'flex', alignItems: 'center', gap: 6 }}><div className="ai-orb" style={{ width: 10, height: 10 }} /> Loading stats…</div>
+        : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: '1px solid var(--border)' }}>
+            {[2025, 2024, 2023].map((yr, i) => {
+              const s = seasons[yr];
+              const injured = s !== null && s !== undefined && (s._gp === 0);
+              return (
+              <div key={yr} style={{ padding: '6px 10px 8px', borderRight: i < 2 ? '1px solid var(--border)' : 'none', background: i === 0 ? 'rgba(78,168,255,.03)' : 'transparent' }}>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.06em', color: s ? (injured ? '#ff9800' : 'var(--accent-2)') : 'var(--text-faint)', marginBottom: 3 }}>
+                  {yr}{s ? (injured ? ' · 0G' : ` · ${s._gp}G`) : ' · —'}
+                </div>
+                {injured
+                  ? <div style={{ fontSize: 10, fontWeight: 800, color: '#ff9800', fontFamily: 'var(--font-mono)', letterSpacing: '.06em', textTransform: 'uppercase', marginTop: 2 }}>Injured</div>
+                  : <CompactSeasonStats tot={s} pos={pos} />
+                }
+              </div>
+              );
+            })}
+          </div>
+        )
+      }
+
+      {/* News blurb — first item, 2 lines max */}
+      {(news.length > 0 || (!loading && p.news)) && (
+        <div style={{ padding: '5px 12px 7px', borderTop: '1px solid var(--border)', background: 'rgba(0,0,0,.12)' }}>
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.45, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            {news.length > 0
+              ? <>{news[0].headline && <strong style={{ marginRight: 4 }}>{news[0].headline}</strong>}{news[0].description}</>
+              : p.news
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DraftPlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissioner, onClockTeam, onDraft, inQueue, onToggleQueue, breakoutByName }) {
+  const [seasons, setSeasons] = React.useState({});   // { 2023: data, 2024: data, 2025: data }
+  const [loading, setLoading] = React.useState(true);
+  const [news, setNews] = React.useState([]);
+
+  const avatarUrl = p.photoUrl ||
+    (p.sleeperId ? `https://sleepercdn.com/content/nfl/players/thumb/${p.sleeperId}.jpg` : null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setSeasons({});
+    setNews([]);
+
+    async function load() {
+      // Fetch 3 seasons in parallel
+      const [s25, s24, s23] = await Promise.allSettled([
+        fetchSleeperPlayerStats(p.name, p.pos, 2025),
+        fetchSleeperPlayerStats(p.name, p.pos, 2024),
+        fetchSleeperPlayerStats(p.name, p.pos, 2023),
+      ]);
+      if (cancelled) return;
+
+      function toTot(result) {
+        if (result.status !== 'fulfilled' || !result.value?.found) return null;
+        const d = result.value;
+        const tot = d.seasonTotals || {};
+        tot._gp = d.gamesPlayed || 0;
+        return tot;
+      }
+
+      setSeasons({ 2025: toTot(s25), 2024: toTot(s24), 2023: toTot(s23) });
+      setLoading(false);
+
+      // News: fetch ESPN articles mentioning this player
+      const parts = p.name.trim().split(' ');
+      const fl = parts[0].toLowerCase();
+      const ll = parts.slice(1).join(' ').toLowerCase();
+      try {
+        const res = await fetch('https://api.fantasai.net/api/v1/nfl/news?limit=50');
+        const json = res.ok ? await res.json() : null;
+        if (!cancelled && json?.articles) {
+          const matched = json.articles.filter(a => {
+            const t = `${a.headline||''} ${a.description||''}`.toLowerCase();
+            return t.includes(fl) && t.includes(ll);
+          }).slice(0, 4);
+          setNews(matched);
+        }
+      } catch {}
+    }
+
+    load();
+    return () => { cancelled = true; };
+  }, [p.id]);
+
+  const oppScore = breakoutByName?.get(p.name.toLowerCase())?.opportunity_score ?? null;
+  const pos = p.pos;
+
+  const panelStyle = {
+    position: 'fixed', top: 0, right: 0, bottom: 0,
+    width: 420, maxWidth: '100vw',
+    background: 'var(--panel)', borderLeft: '1px solid var(--border-strong)',
+    zIndex: 600, overflowY: 'auto', display: 'flex', flexDirection: 'column',
+    boxShadow: '-8px 0 32px rgba(0,0,0,.5)',
+  };
+
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 599, background: 'rgba(0,0,0,.45)' }} onClick={onClose} />
+      <div style={panelStyle}>
+
+        {/* Hero */}
+        <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 14, alignItems: 'flex-start', background: 'linear-gradient(135deg, rgba(78,168,255,.08), rgba(78,168,255,.02))' }}>
+          {avatarUrl && (
+            <img src={avatarUrl} alt={p.name} style={{ width: 72, height: 72, borderRadius: 10, objectFit: 'cover', background: 'var(--panel-2)', flexShrink: 0 }}
+              onError={e => { e.target.style.display = 'none'; }} />
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+              <span className={`pos-badge pos-${pos}`}>{pos}</span>
+              {p.status && p.status !== 'OK' && (
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                  background: p.status === 'Q' ? 'rgba(255,140,0,.15)' : 'rgba(255,60,60,.15)',
+                  color: p.status === 'Q' ? '#ffb547' : '#ff5a6e',
+                  border: `1px solid ${p.status === 'Q' ? 'rgba(255,140,0,.4)' : 'rgba(255,60,60,.4)'}`,
+                  fontFamily: 'var(--font-mono)', letterSpacing: '.06em' }}>
+                  {p.status}
+                </span>
+              )}
+              <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.team}{p.num ? ` · #${p.num}` : ''}{p.age ? ` · Age ${p.age}` : ''}</span>
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: '-.01em', marginBottom: 6 }}>{p.name}</div>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <span>ECR #{p.ecr < 999 ? p.ecr : '—'}</span>
+              <span>ADP {p.adp < 999 ? p.adp.toFixed(1) : '—'}</span>
+              <span>T{p.tier || '—'}</span>
+              <span>{p.owned > 0 ? p.owned.toFixed(0) + '% own' : ''}</span>
+              {p.bye > 0 && <span>Bye {p.bye}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 18, cursor: 'pointer', padding: '2px 4px', flexShrink: 0, lineHeight: 1 }}>✕</button>
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8 }}>
+          {canDraft && (
+            <button
+              className="btn primary"
+              style={{ flex: 1, fontWeight: 900, letterSpacing: '.04em' }}
+              onClick={() => onDraft(p.id)}
+            >
+              {isCommissioner && !isMyTurn ? `→ ${onClockTeam?.logo} DRAFT` : '★ DRAFT'}
+            </button>
+          )}
+          <button
+            className={`btn ${inQueue ? 'primary' : 'ghost'} sm`}
+            style={inQueue ? { background: 'var(--accent)', color: 'var(--accent-ink)', borderColor: 'var(--accent)' } : {}}
+            onClick={onToggleQueue}
+          >
+            {inQueue ? '✓ In Queue' : '+ Queue'}
+          </button>
+        </div>
+
+        {/* Key stats bar */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 1, background: 'var(--border)', borderBottom: '1px solid var(--border)' }}>
+          {[
+            ['Proj', p.proj > 0 ? p.proj.toFixed(1) : '—'],
+            ['Last', p.last > 0 ? p.last.toFixed(1) : '—'],
+            ['Avg', p.avg > 0 ? p.avg.toFixed(1) : '—'],
+            ['ADP', p.adp < 999 ? p.adp.toFixed(1) : '—'],
+            ['%Own', p.owned > 0 ? p.owned.toFixed(0) + '%' : '—'],
+            oppScore != null ? ['Opp Sc', oppScore.toFixed(1)] : ['Bye Wk', p.bye > 0 ? p.bye : '—'],
+          ].map(([k, v]) => (
+            <div key={k} style={{ background: 'var(--panel)', padding: '8px 10px', textAlign: 'center' }}>
+              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 2 }}>{k}</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: k === 'Opp Sc' ? 'var(--accent-2)' : 'var(--text)', fontFamily: 'var(--font-mono)' }}>{v}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* 3-year stats */}
+        <div style={{ padding: 16, flex: 1 }}>
+          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 12 }}>Season History</div>
+
+          {loading && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', color: 'var(--text-faint)', fontSize: 12 }}>
+              <div className="ai-orb" style={{ width: 14, height: 14 }} /> Loading stats…
+            </div>
+          )}
+
+          {!loading && [2025, 2024, 2023].map(yr => (
+            <div key={yr} style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', color: seasons[yr] ? 'var(--accent-2)' : 'var(--text-faint)', marginBottom: 6, letterSpacing: '.06em' }}>
+                {yr} Season {seasons[yr] ? `· ${seasons[yr]._gp}G` : '· no data'}
+              </div>
+              <SeasonStatBlock label={yr} tot={seasons[yr]} pos={pos} />
+            </div>
+          ))}
+
+          {/* News */}
+          {news.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 10 }}>Recent News</div>
+              {news.map((a, i) => (
+                <div key={i} style={{ marginBottom: 10, padding: '10px 12px', background: 'var(--panel-2)', borderRadius: 6, borderLeft: '3px solid var(--border-strong)' }}>
+                  {a.headline && <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 3 }}>{a.headline}</div>}
+                  {a.description && <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>{a.description}</div>}
+                  <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>ESPN</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!loading && news.length === 0 && p.news && (
+            <div style={{ marginTop: 8, padding: '10px 12px', background: 'var(--panel-2)', borderRadius: 6, borderLeft: '3px solid var(--border-strong)' }}>
+              <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>{p.news}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
