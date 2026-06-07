@@ -109,6 +109,27 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
   const { data: r2AiSummaries } = useR2AiSummaries();
   const { data: r2PlayerNewsLinks } = useR2PlayerNewsLinks();
 
+  // Live fetch from Databricks gold tables via worker
+  const [dbArticles,    setDbArticles]    = React.useState([]);
+  const [dbArticlesSrc, setDbArticlesSrc] = React.useState(null); // which DB table served the data
+  const [dbArticlesLoading, setDbArticlesLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setDbArticlesLoading(true);
+    fetch(`${API_BASE}/api/v1/news/articles?limit=500`, { signal: AbortSignal.timeout(15000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data) return;
+        const arr = Array.isArray(data.articles) ? data.articles : [];
+        setDbArticles(arr);
+        setDbArticlesSrc(data.source || null);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setDbArticlesLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   // Parse raw R2 articles — handles { data:[...] }, { articles:[...] }, or a direct array
   const r2Articles = React.useMemo(() => {
     if (Array.isArray(r2PlayerNewsLinks)) return r2PlayerNewsLinks;
@@ -117,21 +138,32 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     return [];
   }, [r2PlayerNewsLinks]);
 
+  // Merge Databricks articles (primary) with R2 articles (fallback/supplement).
+  // Deduplicate by article_url — Databricks wins on conflict.
+  const mergedArticles = React.useMemo(() => {
+    const byUrl = new Map();
+    // R2 first (lower priority)
+    for (const a of r2Articles) {
+      if (a.headline && a.article_url) byUrl.set(a.article_url, a);
+    }
+    // Databricks overwrites (higher priority — live gold table data)
+    for (const a of dbArticles) {
+      if (a.headline && a.article_url) byUrl.set(a.article_url, a);
+    }
+    return [...byUrl.values()].sort((a, b) => {
+      const ta = a.published_at ? new Date(a.published_at).getTime() : 0;
+      const tb = b.published_at ? new Date(b.published_at).getTime() : 0;
+      return tb - ta;
+    });
+  }, [r2Articles, dbArticles]);
+
   // All articles sorted newest-first for the Articles tab
-  const allArticles = React.useMemo(() => {
-    return r2Articles
-      .filter(a => a.headline && a.article_url)
-      .sort((a, b) => {
-        const ta = a.published_at ? new Date(a.published_at).getTime() : 0;
-        const tb = b.published_at ? new Date(b.published_at).getTime() : 0;
-        return tb - ta;
-      });
-  }, [r2Articles]);
+  const allArticles = mergedArticles;
 
   // Map: normalized player_name → sorted article array (for inline article strips in FeedView)
   const playerNewsMap = React.useMemo(() => {
     const m = new Map();
-    for (const a of r2Articles) {
+    for (const a of mergedArticles) {
       const key = (a.player_name || '').toLowerCase().trim();
       if (!key || !a.article_url) continue;
       if (!m.has(key)) m.set(key, []);
@@ -139,7 +171,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     }
     m.forEach(arr => arr.sort((a, b) => (a.article_rank ?? 9) - (b.article_rank ?? 9)));
     return m;
-  }, [r2Articles]);
+  }, [mergedArticles]);
 
   // liveItems: { [sourceId]: newsItem[] }
   const [liveItems,         setLiveItems]         = React.useState({});
@@ -682,7 +714,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
       {/* ── Feed ── */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         {mainTab === 'articles' ? (
-          <ArticlesFeedTab articles={allArticles} rosteredIds={ROSTERED_IDS} />
+          <ArticlesFeedTab articles={allArticles} rosteredIds={ROSTERED_IDS} loading={dbArticlesLoading} dbSource={dbArticlesSrc} />
         ) : mainTab === 'trades' ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 8, color: 'var(--text-faint)' }}>
             <div style={{ fontSize: 28 }}>🔄</div>
@@ -706,8 +738,8 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
   );
 }
 
-/* ── Articles tab — full Google News feed from R2 ────────────────────────── */
-function ArticlesFeedTab({ articles, rosteredIds }) {
+/* ── Articles tab — Databricks gold tables + R2 fallback ────────────────── */
+function ArticlesFeedTab({ articles, rosteredIds, loading, dbSource }) {
   const [posFilter,    setPosFilter]    = React.useState('ALL');
   const [search,       setSearch]       = React.useState('');
   const [rosterOnly,   setRosterOnly]   = React.useState(false);
@@ -733,6 +765,15 @@ function ArticlesFeedTab({ articles, rosteredIds }) {
     return list;
   }, [articles, posFilter, search, rosterOnly, rosteredIds]);
 
+  if (loading && !articles.length) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
+        <div className="ai-orb" style={{ width: 18, height: 18 }} />
+        <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Loading articles from Databricks…</div>
+      </div>
+    );
+  }
+
   if (!articles.length) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
@@ -741,6 +782,8 @@ function ArticlesFeedTab({ articles, rosteredIds }) {
       </div>
     );
   }
+
+  const srcLabel = dbSource === 'enriched_news' ? 'Databricks · enriched_news' : dbSource === 'raw_rss_articles' ? 'Databricks · raw_rss_articles' : dbSource === 'api_news_feed' ? 'Databricks · api_news_feed' : 'R2 cache';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -774,8 +817,10 @@ function ArticlesFeedTab({ articles, rosteredIds }) {
           placeholder="Search player or headline…"
           style={{ fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', width: 180 }}
         />
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {loading && <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#c6ff3a', animation: 'pulse 1.2s ease-in-out infinite' }} />}
           {filtered.length} of {articles.length}
+          {dbSource && <span style={{ fontSize: 9, color: '#4ea8ff', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>{srcLabel}</span>}
         </span>
       </div>
 

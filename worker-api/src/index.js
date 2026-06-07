@@ -131,6 +131,7 @@ const S3_ROSTERS_KEY      = 'fantasai/rosters.json';
 const S3_SCHEDULE_KEY     = 'fantasai/schedule.json';
 const S3_SETTINGS_KEY     = 'fantasai/league-settings.json';
 const S3_WEATHER_KEY      = 'fantasai/analysis/weather_forecast.json';
+const S3_COMMUNITY_KEY    = 'fantasai/community.json';
 
 // Weather refresh cooldown: 30 minutes (prevents burning WWO quota on rapid clicks)
 const WEATHER_COOLDOWN_MS = 30 * 60 * 1000;
@@ -171,6 +172,8 @@ export default {
         if (url.pathname === '/api/v1/rosters/reset')         return handleRosterReset(request, env);
         if (url.pathname === '/api/v1/schedule')              return handleScheduleSave(request, env);
         if (url.pathname === '/api/v1/league-settings')       return handleLeagueSettingsSave(request, env);
+        if (url.pathname === '/api/v1/community')             return handleCommunitySave(request, env);
+        if (url.pathname === '/api/v1/community/media')       return handleCommunityMediaUpload(url, request, env);
         if (url.pathname === '/api/v1/weather/refresh')       return handleWeatherRefresh(request, env);
         if (url.pathname === '/api/v1/transactions')          return handleTransactionsPost(request, env);
         if (url.pathname === '/api/v1/scrape')                return handleScrape(request);
@@ -197,6 +200,7 @@ export default {
       if (url.pathname === '/api/v1/rosters/load')         return handleRosterLoad(url, env);
       if (url.pathname === '/api/v1/schedule')             return handleScheduleLoad(env);
       if (url.pathname === '/api/v1/league-settings')     return handleLeagueSettingsLoad(url, env);
+      if (url.pathname === '/api/v1/community')           return handleCommunityLoad(env);
       if (url.pathname === '/api/v1/proxy')               return handleProxy(url);
       if (url.pathname === '/api/v1/nfl/scoreboard')      return handleNflScoreboard(url);
       if (url.pathname === '/api/v1/nfl/player-stats')   return handleNflPlayerStats(url);
@@ -210,8 +214,10 @@ export default {
       if (url.pathname === '/api/v1/twitter/beat')        return await handleBeatWriterNews();
       if (url.pathname.startsWith('/api/v1/player/'))   return await handlePlayerProfile(url, env);
       if (url.pathname === '/api/v1/db/players')          return await handleDbPlayers(env);
+      if (url.pathname === '/api/v1/db/tables')           return await handleDbTables(env);
       if (url.pathname === '/api/v1/news/latest')        return await handleDbNews(env);
       if (url.pathname === '/api/v1/news/critical')      return await handleDbCritical(env);
+      if (url.pathname === '/api/v1/news/articles')      return await handleDbArticles(url, env);
       if (url.pathname === '/api/v1/leaderboard/live')   return await handleDbLeaderboard(env);
       if (url.pathname === '/api/v1/games/active')       return await handleDbActiveGames(env);
       if (url.pathname === '/api/v1/opportunity/rankings') return await handleDbOpportunity(env);
@@ -224,7 +230,7 @@ export default {
       }
       const handler = PROTECTED_GET[url.pathname];
       if (!handler) return json({ error: 'Not found', path: url.pathname }, 404);
-      return json(await handler(url, env), 200);
+      return json(await handler(url, env, request), 200);
 
     } catch (err) {
       console.error(err.stack || err);
@@ -476,11 +482,11 @@ async function handleProjections(url, env) {
   return { source: 'sleeper', fetchedAt: new Date().toISOString(), season, week, type, projections: data };
 }
 
-async function handleLeague(url, env) { return cbsFetch(env, '/api/cbs/league'); }
-async function handleRosters(url, env) { return cbsFetch(env, '/api/cbs/rosters'); }
-async function handleDraft(url, env) {
+async function handleLeague(url, env, req) { return cbsFetch(env, '/api/cbs/league', req?.headers?.get('X-CBS-Cookie')); }
+async function handleRosters(url, env, req) { return cbsFetch(env, '/api/cbs/rosters', req?.headers?.get('X-CBS-Cookie')); }
+async function handleDraft(url, env, req) {
   const year = url.searchParams.get('year') || new Date().getFullYear();
-  return cbsFetch(env, `/api/cbs/draft?year=${year}`);
+  return cbsFetch(env, `/api/cbs/draft?year=${year}`, req?.headers?.get('X-CBS-Cookie'));
 }
 
 async function handleCbsRankings(url, env) {
@@ -553,14 +559,14 @@ async function sleeperFetch(env, path) {
 
 // ── CBS Worker proxy ──────────────────────────────────────────────────────────
 
-async function cbsFetch(env, path) {
+async function cbsFetch(env, path, cbsCookie = null) {
   if (!env.CBS_WORKER_URL) throw new Error('CBS_WORKER_URL not configured');
-  const res = await fetch(`${env.CBS_WORKER_URL}${path}`, {
-    headers: {
-      Accept: 'application/json',
-      ...(env.FANTASAI_KEY ? { 'X-FantasAI-Key': env.FANTASAI_KEY } : {}),
-    },
-  });
+  const headers = {
+    Accept: 'application/json',
+    ...(env.FANTASAI_KEY ? { 'X-FantasAI-Key': env.FANTASAI_KEY } : {}),
+  };
+  if (cbsCookie) headers['X-CBS-Cookie'] = cbsCookie;
+  const res = await fetch(`${env.CBS_WORKER_URL}${path}`, { headers });
   if (!res.ok) throw new Error(`CBS Worker ${path} → ${res.status}`);
   return res.json();
 }
@@ -924,6 +930,7 @@ const PROXY_WHITELIST = [
   'sports.core.api.espn.com',
   'v1.american-football.api-sports.io',
   'tank01-fantasy-stats.p.rapidapi.com',
+  'tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com',
   'www.thesportsdb.com',
   'api.github.com',
   'github.com',
@@ -1046,6 +1053,36 @@ async function handleLeagueSettingsSave(request, env) {
   const put = await s3Fetch(env, 'PUT', s3key, payload);
   if (!put.ok) throw new Error(`S3 PUT ${put.status}`);
   return json({ ok: true, savedAt: payload.savedAt }, 200);
+}
+
+// ── Community data (Champions Corner, Commish media, Happy Hours) ─────────────
+
+async function handleCommunityLoad(env) {
+  try {
+    const res = await s3Fetch(env, 'GET', S3_COMMUNITY_KEY, null);
+    if (res.status === 404) return json({ champions: [], commishMedia: null, happyHours: [] }, 200);
+    if (!res.ok) return json({ champions: [], commishMedia: null, happyHours: [] }, 200);
+    return json(await res.json(), 200);
+  } catch {
+    return json({ champions: [], commishMedia: null, happyHours: [] }, 200);
+  }
+}
+
+async function handleCommunitySave(request, env) {
+  const body = await request.json().catch(() => null);
+  if (!body) return json({ error: 'JSON body required' }, 400);
+  await s3Fetch(env, 'PUT', S3_COMMUNITY_KEY, body);
+  return json({ ok: true, savedAt: new Date().toISOString() }, 200);
+}
+
+async function handleCommunityMediaUpload(url, request, env) {
+  const filename = (url.searchParams.get('filename') || 'media').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const contentType = request.headers.get('Content-Type') || 'application/octet-stream';
+  const key = `fantasai/media/${Date.now()}_${filename}`;
+  const body = await request.arrayBuffer();
+  if (!body.byteLength) return json({ error: 'Empty body' }, 400);
+  await env.BUCKET.put(key, body, { httpMetadata: { contentType } });
+  return json({ ok: true, key, path: `/api/v1/r2/${key}` }, 200);
 }
 
 // ── R2 Proxy (raw object access for Databricks) ───────────────────────────────
@@ -1541,10 +1578,18 @@ async function handleBeatWriterNews() {
 // ── Databricks SQL Warehouse ──────────────────────────────────────────────────
 
 async function queryDatabricks(sql, env) {
-  const host = (env.DATABRICKS_HOST || env.DATABRICKS_URL || '').replace(/\/$/, '');
+  let host = (env.DATABRICKS_HOST || env.DATABRICKS_URL || '').replace(/\/$/, '');
+  if (host && !host.startsWith('http')) host = `https://${host}`;
   const token = env.DATABRICKS_TOKEN;
-  const warehouseId = env.DATABRICKS_WAREHOUSE_ID;
-  if (!host || !token || !warehouseId) throw new Error('DATABRICKS_HOST, DATABRICKS_TOKEN, and DATABRICKS_WAREHOUSE_ID must be set');
+  // DATABRICKS_HTTP_PATH (from Databricks "Connection Details") takes precedence over
+  // DATABRICKS_WAREHOUSE_ID because the HTTP path contains the real short warehouse ID.
+  // Format: /sql/1.0/warehouses/<hex-id>
+  let warehouseId = env.DATABRICKS_WAREHOUSE_ID;
+  if (env.DATABRICKS_HTTP_PATH) {
+    const m = env.DATABRICKS_HTTP_PATH.match(/\/warehouses\/([a-f0-9]+)/i);
+    if (m) warehouseId = m[1];
+  }
+  if (!host || !token || !warehouseId) throw new Error('DATABRICKS_HOST, DATABRICKS_TOKEN, and DATABRICKS_WAREHOUSE_ID (or DATABRICKS_HTTP_PATH) must be set');
 
   const res = await fetch(`${host}/api/2.0/sql/statements`, {
     method: 'POST',
@@ -1553,8 +1598,16 @@ async function queryDatabricks(sql, env) {
     signal: AbortSignal.timeout(35000),
   });
   const data = await res.json();
-  if (data.status?.state !== 'SUCCEEDED') {
-    throw new Error(`Query failed: ${data.status?.error?.message || JSON.stringify(data.status)}`);
+  if (!res.ok) {
+    throw new Error(`Databricks HTTP ${res.status}: ${data.message || data.error_code || JSON.stringify(data).slice(0, 300)}`);
+  }
+  if (!data.status) {
+    throw new Error(`Databricks unexpected response: ${JSON.stringify(data).slice(0, 300)}`);
+  }
+  if (data.status.state !== 'SUCCEEDED') {
+    const errMsg = data.status.error?.message
+      || (data.status.state === 'PENDING' ? `warehouse is starting — state: PENDING (statement_id: ${data.statement_id})` : JSON.stringify(data.status));
+    throw new Error(`Query failed [${data.status.state}]: ${errMsg}`);
   }
   const columns = data.manifest?.schema?.columns || [];
   const rows    = data.result?.data_array || [];
@@ -1574,25 +1627,105 @@ async function handlePlayerProfile(url, env) {
   return json({ status: 'success', data: rows[0] || null, metadata: { timestamp: new Date().toISOString() } }, 200);
 }
 
+// Preferred player tables in priority order (gold > silver > bronze dim > fallback)
+const PLAYER_TABLE_CANDIDATES = [
+  'gold_player_dim', 'silver_player_dim', 'dim_players', 'players',
+  'player_dim', 'silver_players', 'gold_players', 'bronze_player_dim',
+];
+
 async function handleDbPlayers(env) {
-  const rows = await queryDatabricks(`
-    SELECT
-      player_id, full_name, first_name, last_name,
-      position, team, injury_status, search_rank,
-      number, age, status
-    FROM main.fantasai.bronze_player_news_raw
-    WHERE position IN ('QB','RB','WR','TE','K','DEF')
-      AND team IS NOT NULL
-      AND (status IS NULL OR status != 'Inactive')
-    ORDER BY CAST(search_rank AS INT) ASC NULLS LAST
-    LIMIT 2000
-  `, env);
-  return json({ source: 'databricks', fetchedAt: new Date().toISOString(), count: rows.length, players: rows }, 200);
+  // Discover which player table exists in main.fantasai
+  const tables = await queryDatabricks(`SHOW TABLES IN main.fantasai`, env);
+  const tableNames = tables.map(t => t.tableName || t.table_name || '').filter(Boolean);
+
+  let chosenTable = PLAYER_TABLE_CANDIDATES.find(c => tableNames.includes(c));
+  if (!chosenTable) {
+    // Fall back to any table whose name contains 'player'
+    chosenTable = tableNames.find(n => n.includes('player'));
+  }
+  if (!chosenTable) {
+    return json({
+      source: 'databricks', error: 'No player table found',
+      availableTables: tableNames,
+      fetchedAt: new Date().toISOString(), count: 0, players: [],
+    }, 200);
+  }
+
+  const rows = await queryDatabricks(`SELECT * FROM main.fantasai.${chosenTable} LIMIT 2000`, env);
+  return json({ source: 'databricks', table: chosenTable, fetchedAt: new Date().toISOString(), count: rows.length, players: rows }, 200);
+}
+
+async function handleDbTables(env) {
+  const rows = await queryDatabricks(`SHOW TABLES IN main.fantasai`, env);
+  return json({ source: 'databricks', fetchedAt: new Date().toISOString(), tables: rows }, 200);
 }
 
 async function handleDbNews(env) {
   const rows = await queryDatabricks(`SELECT * FROM main.fantasai_news.api_news_feed LIMIT 20`, env);
   return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
+}
+
+// Normalize a Databricks row to the frontend article shape regardless of column naming conventions
+function normalizeArticleRow(r) {
+  const headline    = r.headline    || r.title       || r.article_title || '';
+  const article_url = r.article_url || r.url         || r.source_url    || r.link || '';
+  const player_name = r.player_name || r.primary_player_name || r.mentioned_player || '';
+  const position    = r.position    || r.player_position     || r.pos  || '';
+  const team        = r.team        || r.player_team         || '';
+  const published_at= r.published_at|| r.published_date      || r.created_at || null;
+  const publisher   = r.publisher   || r.source      || r.feed_source   || r.domain || '';
+  const description = r.description || r.summary     || r.full_text     || r.snippet || '';
+  const article_rank= r.article_rank ?? r.rank ?? r.relevance_score ?? null;
+  if (!headline || !article_url) return null;
+  return { headline, article_url, player_name, position: (position || '').toUpperCase(), team, published_at, publisher, description, article_rank };
+}
+
+async function handleDbArticles(url, env) {
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '500'), 1000);
+  let articles = [];
+  let source = 'none';
+
+  // Try enriched_news first (articles tagged with player mentions) — gold layer
+  try {
+    const rows = await queryDatabricks(
+      `SELECT * FROM main.fantasai_news.enriched_news ORDER BY published_at DESC LIMIT ${limit}`, env
+    );
+    if (rows.length > 0) {
+      articles = rows.map(normalizeArticleRow).filter(Boolean);
+      source = 'enriched_news';
+    }
+  } catch (_) {}
+
+  // Fall back to raw_rss_articles if enriched_news is empty or unavailable
+  if (articles.length === 0) {
+    try {
+      const rows = await queryDatabricks(
+        `SELECT * FROM main.fantasai_news.raw_rss_articles ORDER BY published_at DESC LIMIT ${limit}`, env
+      );
+      if (rows.length > 0) {
+        articles = rows.map(normalizeArticleRow).filter(Boolean);
+        source = 'raw_rss_articles';
+      }
+    } catch (_) {}
+  }
+
+  // Final fallback: api_news_feed view (always available, fewer rows)
+  if (articles.length === 0) {
+    try {
+      const rows = await queryDatabricks(
+        `SELECT * FROM main.fantasai_news.api_news_feed ORDER BY published_at DESC LIMIT 100`, env
+      );
+      articles = rows.map(normalizeArticleRow).filter(Boolean);
+      source = 'api_news_feed';
+    } catch (_) {}
+  }
+
+  return json({
+    status: 'success',
+    source,
+    articles,
+    metadata: { timestamp: new Date().toISOString(), count: articles.length },
+  }, 200);
 }
 
 async function handleDbCritical(env) {
@@ -1810,7 +1943,7 @@ function corsHeaders() {
   return {
     'Access-Control-Allow-Origin':  '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-FantasAI-Key',
+    'Access-Control-Allow-Headers': 'Content-Type, X-FantasAI-Key, X-CBS-Cookie',
     'Access-Control-Max-Age':       '86400',
   };
 }
