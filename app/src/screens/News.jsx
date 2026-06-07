@@ -625,6 +625,13 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
   const r2EnrichedArr     = React.useMemo(() => Array.isArray(r2EnrichedRaw)  ? r2EnrichedRaw  : (Array.isArray(r2EnrichedRaw?.data)  ? r2EnrichedRaw.data  : []), [r2EnrichedRaw]);
   const r2PlayerNotesArr  = React.useMemo(() => Array.isArray(r2PlayerNotes)  ? r2PlayerNotes  : (Array.isArray(r2PlayerNotes?.data)  ? r2PlayerNotes.data  : []), [r2PlayerNotes]);
 
+  // My own roster IDs for the three-column Articles view
+  const myRosterIds = React.useMemo(() => {
+    if (!user?.teamId) return new Set();
+    const entries = TEAM_ROSTERS[user.teamId] || [];
+    return new Set(entries.map(e => e.playerId).filter(Boolean));
+  }, [user]);
+
   const TABS = [
     { id: 'news',         label: 'Player News',    count: allNews.length },
     { id: 'addrop',       label: 'Add/Drop',       count: addropCount },
@@ -750,7 +757,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
       {/* ── Feed ── */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         {mainTab === 'articles' ? (
-          <ArticlesFeedTab articles={allArticles} rosteredIds={ROSTERED_IDS} loading={dbArticlesLoading} dbSource={dbArticlesSrc} />
+          <ArticlesFeedTab articles={allArticles} rosteredIds={ROSTERED_IDS} loading={dbArticlesLoading} dbSource={dbArticlesSrc} myRosterIds={myRosterIds} />
         ) : mainTab === 'ai_summaries' ? (
           <AiSummariesTab data={r2AiSummariesArr} />
         ) : mainTab === 'enriched' ? (
@@ -780,157 +787,179 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
   );
 }
 
-/* ── Articles tab — Databricks gold tables + R2 fallback ────────────────── */
-function ArticlesFeedTab({ articles, rosteredIds, loading, dbSource }) {
-  const [posFilter,    setPosFilter]    = React.useState('ALL');
-  const [search,       setSearch]       = React.useState('');
-  const [rosterOnly,   setRosterOnly]   = React.useState(false);
+/* ── Shared article card ─────────────────────────────────────────────────────── */
+function ArticleCard({ a }) {
+  const ago = fmtRelative(a.published_at);
+  return (
+    <div style={{ display: 'flex', gap: 10, padding: '12px 14px', borderBottom: '1px solid var(--border)', alignItems: 'flex-start' }}>
+      <div style={{ flexShrink: 0, marginTop: 2 }}>
+        {a.position ? <PosBadge pos={a.position} /> : <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>—</span>}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--text)' }}>{a.player_name}</span>
+          {a.team && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{a.team}</span>}
+        </div>
+        <a href={a.article_url} target="_blank" rel="noopener noreferrer"
+          style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text)', textDecoration: 'none', lineHeight: 1.5, marginBottom: 4 }}
+          onMouseEnter={e => e.currentTarget.style.color = '#4ea8ff'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--text)'}
+        >{a.headline}</a>
+        {(a.fantasy_insight || a.summary_text) && (
+          <div style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1.5, fontStyle: 'italic', marginBottom: 4 }}>
+            {a.fantasy_insight || a.summary_text}
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {a.publisher && <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-dim)' }}>{a.publisher}</span>}
+          {ago && <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>· {ago}</span>}
+          {a.article_url && (
+            <a href={a.article_url} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 10, fontWeight: 700, color: '#4ea8ff', textDecoration: 'none', padding: '1px 7px', background: 'rgba(78,168,255,.1)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 4 }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(78,168,255,.22)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'rgba(78,168,255,.1)'}
+            >Read →</a>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  const filtered = React.useMemo(() => {
-    let list = articles;
-    if (rosterOnly) {
-      const players = getPlayers();
-      list = list.filter(a => {
-        const p = players.find(pl => pl.name.toLowerCase() === (a.player_name || '').toLowerCase().trim());
-        return p && rosteredIds.has(p.id);
-      });
-    }
-    if (posFilter !== 'ALL') list = list.filter(a => (a.position || '').toUpperCase() === posFilter);
+/* ── Articles column ─────────────────────────────────────────────────────────── */
+function ArticleColumn({ title, accentColor, articles }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid var(--border)' }}>
+      <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, background: 'var(--panel-2)' }}>
+        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: accentColor }}>{title}</span>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{articles.length}</span>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        {articles.length === 0
+          ? <div style={{ padding: '24px 14px', textAlign: 'center', color: 'var(--text-faint)', fontSize: 12 }}>No articles</div>
+          : articles.map((a, i) => <ArticleCard key={i} a={a} />)
+        }
+      </div>
+    </div>
+  );
+}
+
+/* ── Articles tab — three-column: My Team / Opposition / Free Agents ─────────── */
+function ArticlesFeedTab({ articles, rosteredIds, loading, dbSource, myRosterIds = new Set() }) {
+  const [posFilter, setPosFilter] = React.useState('ALL');
+  const [search,    setSearch]    = React.useState('');
+  const [view,      setView]      = React.useState('all'); // 'all' | 'available' | 'rostered'
+
+  // Build player-name → player lookup once
+  const playersByName = React.useMemo(() => {
+    const m = new Map();
+    getPlayers().forEach(p => m.set(p.name.toLowerCase().trim(), p));
+    return m;
+  }, []);
+
+  // Apply pos + search filters
+  const applyFilters = React.useCallback((list) => {
+    let r = list;
+    if (posFilter !== 'ALL') r = r.filter(a => (a.position || '').toUpperCase() === posFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
-      list = list.filter(a =>
+      r = r.filter(a =>
         (a.player_name || '').toLowerCase().includes(q) ||
-        (a.headline    || '').toLowerCase().includes(q) ||
-        (a.publisher   || '').toLowerCase().includes(q)
+        (a.headline    || '').toLowerCase().includes(q)
       );
     }
-    return list;
-  }, [articles, posFilter, search, rosterOnly, rosteredIds]);
+    return r;
+  }, [posFilter, search]);
 
-  if (loading && !articles.length) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
-        <div className="ai-orb" style={{ width: 18, height: 18 }} />
-        <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Loading articles from Databricks…</div>
-      </div>
-    );
-  }
+  // Split articles into three buckets
+  const { myTeam, opposition, freeAgents } = React.useMemo(() => {
+    const myTeam = [], opposition = [], freeAgents = [];
+    for (const a of articles) {
+      const pName = (a.player_name || '').toLowerCase().trim();
+      const p = pName ? playersByName.get(pName) : null;
+      if (!p) { freeAgents.push(a); continue; }
+      if (myRosterIds.has(p.id))    myTeam.push(a);
+      else if (rosteredIds.has(p.id)) opposition.push(a);
+      else                             freeAgents.push(a);
+    }
+    return { myTeam, opposition, freeAgents };
+  }, [articles, playersByName, myRosterIds, rosteredIds]);
 
-  if (!articles.length) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
-        <div style={{ fontSize: 28 }}>📰</div>
-        <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>No articles yet — Databricks pipeline hasn't run</div>
-      </div>
-    );
-  }
+  const filtMyTeam    = React.useMemo(() => applyFilters(myTeam),    [myTeam,    applyFilters]);
+  const filtOpp       = React.useMemo(() => applyFilters(opposition), [opposition, applyFilters]);
+  const filtFA        = React.useMemo(() => applyFilters(freeAgents), [freeAgents, applyFilters]);
 
-  const srcLabel = dbSource === 'enriched_news' ? 'Databricks · enriched_news' : dbSource === 'raw_rss_articles' ? 'Databricks · raw_rss_articles' : dbSource === 'api_news_feed' ? 'Databricks · api_news_feed' : 'R2 cache';
+  const showMyTeam = view === 'all' || view === 'rostered';
+  const showOpp    = view === 'all' || view === 'rostered';
+  const showFA     = view === 'all' || view === 'available';
+
+  const srcLabel = { export_player_news: 'Databricks · export_player_news', gold_enriched_news: 'Databricks · enriched_news', silver_news: 'Databricks · silver_news' }[dbSource] || (dbSource ? `Databricks · ${dbSource}` : 'R2 cache');
+
+  if (loading && !articles.length) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10 }}>
+      <div className="ai-orb" style={{ width: 18, height: 18 }} />
+      <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Loading articles from Databricks…</div>
+    </div>
+  );
+
+  if (!articles.length) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10 }}>
+      <div style={{ fontSize: 28 }}>📰</div>
+      <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>No articles yet — Databricks pipeline hasn't run</div>
+    </div>
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Filter bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', flexShrink: 0 }}>
-        {/* Roster toggle */}
+      {/* ── Filter bar ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 16px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', flexShrink: 0 }}>
+        {/* View toggle */}
         <div style={{ display: 'flex', gap: 2, background: 'var(--panel-3)', borderRadius: 6, padding: 2 }}>
-          {[['All NFL', false], ['My Roster', true]].map(([label, val]) => (
-            <button key={label} onClick={() => setRosterOnly(val)} style={{
-              background: rosterOnly === val ? 'var(--accent)' : 'transparent',
-              color: rosterOnly === val ? '#0a1300' : 'var(--text-dim)',
+          {[['All', 'all'], ['Available', 'available'], ['Rostered', 'rostered']].map(([label, val]) => (
+            <button key={val} onClick={() => setView(val)} style={{
+              background: view === val ? 'var(--accent)' : 'transparent',
+              color: view === val ? '#0a1300' : 'var(--text-dim)',
               border: 'none', borderRadius: 4, padding: '3px 10px', fontSize: 11,
-              fontWeight: rosterOnly === val ? 700 : 500, cursor: 'pointer', whiteSpace: 'nowrap',
+              fontWeight: view === val ? 700 : 500, cursor: 'pointer', whiteSpace: 'nowrap',
             }}>{label}</button>
           ))}
         </div>
         <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
         {/* Position pills */}
-        {['ALL', 'QB', 'RB', 'WR', 'TE', 'K'].map(p => (
+        {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => (
           <button key={p} onClick={() => setPosFilter(p)} style={{
             background: posFilter === p ? 'var(--accent)' : 'var(--panel-3)',
             color: posFilter === p ? '#0a1300' : 'var(--text-dim)',
-            border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 11,
+            border: 'none', borderRadius: 4, padding: '3px 7px', fontSize: 11,
             fontWeight: posFilter === p ? 700 : 400, cursor: 'pointer',
           }}>{p}</button>
         ))}
         <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search player or headline…"
-          style={{ fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', width: 180 }}
-        />
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 8 }}>
-          {loading && <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#c6ff3a', animation: 'pulse 1.2s ease-in-out infinite' }} />}
-          {filtered.length} of {articles.length}
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search player or headline…"
+          style={{ fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', width: 180 }} />
+        <span style={{ marginLeft: 'auto', fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+          {loading && <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#c6ff3a', animation: 'pulse 1.2s ease-in-out infinite' }} />}
+          {articles.length} articles
           {dbSource && <span style={{ fontSize: 9, color: '#4ea8ff', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase' }}>{srcLabel}</span>}
         </span>
       </div>
 
-      {/* Articles list */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
-        {filtered.length === 0 ? (
-          <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>No articles match the current filter.</div>
-        ) : (
-          <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
-            {filtered.map((a, i) => {
-              const ago = fmtRelative(a.published_at);
-              return (
-                <div key={i} style={{ display: 'flex', gap: 14, padding: '14px 20px', borderBottom: '1px solid var(--border)', alignItems: 'flex-start' }}>
-                  {/* Position badge */}
-                  <div style={{ flexShrink: 0, marginTop: 2 }}>
-                    {a.position ? (
-                      <PosBadge pos={a.position} />
-                    ) : (
-                      <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>—</span>
-                    )}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Player row */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{a.player_name}</span>
-                      {a.team && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{a.team}</span>}
-                    </div>
-                    {/* Headline */}
-                    <a
-                      href={a.article_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--text)', textDecoration: 'none', lineHeight: 1.5, marginBottom: 6 }}
-                      onMouseEnter={e => e.currentTarget.style.color = '#4ea8ff'}
-                      onMouseLeave={e => e.currentTarget.style.color = 'var(--text)'}
-                    >
-                      {a.headline}
-                    </a>
-                    {/* Fantasy insight from export_player_news */}
-                    {(a.fantasy_insight || a.summary_text) && (
-                      <div style={{ marginTop: 5, marginBottom: 4, fontSize: 11, color: 'var(--accent)', lineHeight: 1.5, fontStyle: 'italic' }}>
-                        {a.fantasy_insight || a.summary_text}
-                      </div>
-                    )}
-                    {/* Attribution + link */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>{a.publisher}</span>
-                      {ago && (
-                        <>
-                          <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>·</span>
-                          <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{ago}</span>
-                        </>
-                      )}
-                      <a
-                        href={a.article_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ marginLeft: 4, fontSize: 11, fontWeight: 700, color: '#4ea8ff', textDecoration: 'none', padding: '2px 8px', background: 'rgba(78,168,255,.1)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 4 }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(78,168,255,.22)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(78,168,255,.1)'}
-                      >
-                        Read Article →
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+      {/* ── Three columns ── */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {showMyTeam && <ArticleColumn title="My Team" accentColor="var(--accent)" articles={filtMyTeam} />}
+        {showOpp    && <ArticleColumn title="Opposition" accentColor="#4ea8ff" articles={filtOpp} />}
+        {showFA     && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, background: 'var(--panel-2)' }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-dim)' }}>Free Agents</span>
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{filtFA.length}</span>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              {filtFA.length === 0
+                ? <div style={{ padding: '24px 14px', textAlign: 'center', color: 'var(--text-faint)', fontSize: 12 }}>No articles</div>
+                : filtFA.map((a, i) => <ArticleCard key={i} a={a} />)
+              }
+            </div>
           </div>
         )}
       </div>
