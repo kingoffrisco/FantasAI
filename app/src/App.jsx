@@ -1084,32 +1084,37 @@ export default function App() {
           {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'compare'   && <CompareScreen />}
           {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} onSendTradeOffer={handleSendTradeOffer} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} onDeleteTradeOffer={handleDeleteTradeOffer} />}
-          {(active === 'draft' || active === 'draftrecap') && (() => {
+          {/* Draft — always mounted so timer and AI auto-picks continue when user navigates to another screen */}
+          {(() => {
+            const isDraftPage = active === 'draft' || active === 'draftrecap';
             const tab = active === 'draftrecap' ? 'recap' : draftTab;
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+              <div style={{ display: isDraftPage ? 'flex' : 'none', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                 <div className="tabs" style={{ padding: '0 18px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
                   <div className={`tab ${tab === 'room' ? 'active' : ''}`} onClick={() => { setActive('draft'); setDraftTab('room'); }}>● Draft Room</div>
                   <div className={`tab ${tab === 'recap' ? 'active' : ''}`} onClick={() => { setActive('draft'); setDraftTab('recap'); }}>🏆 Draft Recap</div>
                 </div>
                 <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-                  {tab === 'room' && <DraftRoom aiMode={aiMode} user={user} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onDraftPick={id => {
-                    let nextIds = null;
-                    setMyRosterIds(prev => {
-                      const next = new Set([...prev, id]);
-                      nextIds = next;
-                      return next;
-                    });
-                    if (nextIds && userRef.current?.teamId) doSync(userRef.current.teamId, nextIds);
-                  }} onDraftComplete={() => {
-                    // Rebuild TEAM_ROSTERS and myRosterIds from the just-saved draft picks
-                    refreshTeamRosters();
-                    if (userRef.current?.teamId) {
-                      const merged = buildMergedRoster(userRef.current.teamId, null);
-                      setMyRosterIds(merged);
-                      doSync(userRef.current.teamId, merged);
-                    }
-                  }} />}
+                  {/* DraftRoom kept mounted at all times — display:none hides it without unmounting */}
+                  <div style={{ display: tab === 'room' ? 'flex' : 'none', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                    <DraftRoom aiMode={aiMode} user={user} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onDraftPick={id => {
+                      let nextIds = null;
+                      setMyRosterIds(prev => {
+                        const next = new Set([...prev, id]);
+                        nextIds = next;
+                        return next;
+                      });
+                      if (nextIds && userRef.current?.teamId) doSync(userRef.current.teamId, nextIds);
+                    }} onDraftComplete={() => {
+                      // Rebuild TEAM_ROSTERS and myRosterIds from the just-saved draft picks
+                      refreshTeamRosters();
+                      if (userRef.current?.teamId) {
+                        const merged = buildMergedRoster(userRef.current.teamId, null);
+                        setMyRosterIds(merged);
+                        doSync(userRef.current.teamId, merged);
+                      }
+                    }} />
+                  </div>
                   {tab === 'recap' && <DraftRecapScreen user={user} />}
                 </div>
               </div>
