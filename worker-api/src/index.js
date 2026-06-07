@@ -218,6 +218,7 @@ export default {
       if (url.pathname === '/api/v1/news/latest')        return await handleDbNews(env);
       if (url.pathname === '/api/v1/news/critical')      return await handleDbCritical(env);
       if (url.pathname === '/api/v1/news/articles')      return await handleDbArticles(url, env);
+      if (url.pathname === '/api/v1/news/ai-summaries') return await handleDbAiSummaries(env);
       if (url.pathname === '/api/v1/leaderboard/live')   return await handleDbLeaderboard(env);
       if (url.pathname === '/api/v1/games/active')       return await handleDbActiveGames(env);
       if (url.pathname === '/api/v1/opportunity/rankings') return await handleDbOpportunity(env);
@@ -1743,6 +1744,31 @@ async function handleDbArticles(url, env) {
     articles,
     metadata: { timestamp: new Date().toISOString(), count: articles.length },
   }, 200);
+}
+
+async function handleDbAiSummaries(env) {
+  let summaries = [];
+  let source = 'none';
+
+  // Primary: gold_news_ai_summaries
+  try {
+    const rows = await queryDatabricks(
+      `SELECT summary_id, news_id, headline, summary_text, fantasy_insight, fantasy_relevance_score, impact_category, priority_level, impacted_players, is_time_sensitive, published_at FROM main.fantasai.gold_news_ai_summaries ORDER BY published_at DESC LIMIT 100`, env
+    );
+    if (rows.length > 0) { summaries = rows; source = 'gold_news_ai_summaries'; }
+  } catch (_) {}
+
+  // Fallback: export_player_news (has summary_text + fantasy_insight fields)
+  if (summaries.length === 0) {
+    try {
+      const rows = await queryDatabricks(
+        `SELECT news_id, headline, summary_text, fantasy_insight, impact_score AS fantasy_relevance_score, NULL AS impact_category, NULL AS priority_level, player_name, published_at FROM main.fantasai.export_player_news WHERE fantasy_insight IS NOT NULL AND fantasy_insight != '' ORDER BY published_at DESC LIMIT 100`, env
+      );
+      if (rows.length > 0) { summaries = rows; source = 'export_player_news'; }
+    } catch (_) {}
+  }
+
+  return json({ status: 'success', source, summaries, metadata: { timestamp: new Date().toISOString(), count: summaries.length } }, 200);
 }
 
 async function handleDbCritical(env) {

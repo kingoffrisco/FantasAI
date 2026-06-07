@@ -938,27 +938,55 @@ function ArticlesFeedTab({ articles, rosteredIds, loading, dbSource }) {
   );
 }
 
-/* ── AI Summaries tab — gold_news_ai_summaries via R2 ───────────────────────── */
+/* ── AI Summaries tab — gold_news_ai_summaries via R2 + live DB fallback ──────── */
 function AiSummariesTab({ data }) {
   const [search, setSearch] = React.useState('');
+  const [liveData, setLiveData] = React.useState(null);  // null = loading, [] = done
+  const [liveSource, setLiveSource] = React.useState(null);
+
+  // Fetch live from worker if R2 cache is empty
+  React.useEffect(() => {
+    if (data.length) return; // R2 already has data — skip live fetch
+    let cancelled = false;
+    fetch(`${API_BASE}/api/v1/news/ai-summaries`, { signal: AbortSignal.timeout(20000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (cancelled || !d) return;
+        setLiveData(Array.isArray(d.summaries) ? d.summaries : []);
+        setLiveSource(d.source || null);
+      })
+      .catch(() => { if (!cancelled) setLiveData([]); });
+    return () => { cancelled = true; };
+  }, [data.length]);
+
+  const allData = data.length ? data : (liveData || []);
+  const loading = !data.length && liveData === null;
+
   const items = React.useMemo(() => {
-    if (!data.length) return [];
+    if (!allData.length) return [];
     const q = search.trim().toLowerCase();
-    if (!q) return data;
-    return data.filter(s =>
+    if (!q) return allData;
+    return allData.filter(s =>
       (s.headline     || '').toLowerCase().includes(q) ||
       (s.summary_text || '').toLowerCase().includes(q) ||
       (s.fantasy_insight || '').toLowerCase().includes(q)
     );
-  }, [data, search]);
+  }, [allData, search]);
 
   const PRIORITY_COLOR = { critical: '#ff4d4d', high: '#ff9800', medium: '#4ea8ff', low: 'var(--text-faint)' };
 
-  if (!data.length) return (
+  if (loading) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
+      <div className="ai-orb" style={{ width: 18, height: 18 }} />
+      <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>Loading AI summaries from Databricks…</div>
+    </div>
+  );
+
+  if (!allData.length) return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50%', gap: 10, color: 'var(--text-faint)' }}>
       <div style={{ fontSize: 28 }}>🤖</div>
       <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>AI Summaries not yet available — run Databricks pipeline</div>
-      <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>fantasai/news/ai_summaries.json</div>
+      <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>main.fantasai.gold_news_ai_summaries</div>
     </div>
   );
 
@@ -967,8 +995,8 @@ function AiSummariesTab({ data }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search summaries…"
           style={{ fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', width: 200 }} />
-        <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{items.length} of {data.length}</span>
-        <span style={{ fontSize: 9, color: '#c6ff3a', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' }}>gold_news_ai_summaries</span>
+        <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{items.length} of {allData.length}</span>
+        <span style={{ fontSize: 9, color: '#c6ff3a', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase' }}>{liveSource || 'gold_news_ai_summaries'}</span>
       </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
         <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
