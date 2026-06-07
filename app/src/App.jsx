@@ -201,7 +201,39 @@ function loadLeagueSettings() {
   try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; } catch { return null; }
 }
 
-const API_BASE = 'https://api.fantasai.net';
+const API_BASE      = 'https://api.fantasai.net';
+const ADMIN_EMAIL   = 'admin@fantasai.net';
+const OWNERS_KEY    = 'fantasai_owners_config';
+
+// Re-derive the authoritative user profile from R2 owner config.
+// Returns a patched user object, or null if the session can't be validated.
+async function refreshUserSession(cachedUser) {
+  if (!cachedUser?.email) return null;
+  // Admin identity is server-independent — just confirm the flag
+  if (cachedUser.email === ADMIN_EMAIL) return { ...cachedUser, isAdmin: true };
+  try {
+    const res = await Promise.race([
+      fetch(`${API_BASE}/api/v1/owners/config`),
+      new Promise((_, rej) => setTimeout(() => rej(), 5000)),
+    ]);
+    if (!res.ok) return null;
+    const config = await res.json();
+    localStorage.setItem(OWNERS_KEY, JSON.stringify(config));
+    // Find the entry that matches the cached user's email
+    for (const [, entry] of Object.entries(config)) {
+      if (typeof entry !== 'object' || !entry.email) continue;
+      if (entry.email.toLowerCase() === cachedUser.email.toLowerCase()) {
+        return {
+          ...cachedUser,
+          isAdmin:        false,
+          isCommissioner: !!entry.isCommissioner,
+          teamName:       entry.name || cachedUser.teamName,
+        };
+      }
+    }
+  } catch {}
+  return null;
+}
 
 async function fetchS3Roster(teamId) {
   try {
@@ -513,7 +545,9 @@ export default function App() {
     };
   }, []);
 
-  // On cold load (already logged in): restore league data from cache, then fetch fresh
+  // On cold load (already logged in): restore league data from cache, then fetch fresh.
+  // Also silently re-validates the cached user against R2 so isAdmin/isCommissioner
+  // are always current — regardless of which browser or device you're on.
   React.useEffect(() => {
     const leagueId = user?.leagueId || 'tau';
     try {
@@ -521,6 +555,22 @@ export default function App() {
       if (cached) applyLeagueData(cached);
     } catch {}
     loadLeagueData(leagueId);
+
+    // Refresh permissions from R2 (fire-and-forget — UI renders from cache first)
+    if (user) {
+      refreshUserSession(user).then(fresh => {
+        if (!fresh) return;
+        const changed =
+          fresh.isAdmin        !== user.isAdmin ||
+          fresh.isCommissioner !== user.isCommissioner ||
+          fresh.teamName       !== user.teamName;
+        if (changed) {
+          setUser(fresh);
+          userRef.current = fresh;
+          localStorage.setItem('fantasai_user', JSON.stringify(fresh));
+        }
+      });
+    }
 
     if (!user?.teamId) { setRosterLoading(false); return; }
     setRosterLoading(true);
