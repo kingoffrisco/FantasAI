@@ -3,7 +3,7 @@ import { NEWS, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, SOURCE_META, TEAM_ROSTER
 import { getPlayers, findPlayer, findPlayerByName } from '../lib/playerStore.js';
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
-import { useR2PlayerNotes, useR2AiSummaries, useR2PlayerNewsLinks } from '../hooks.js';
+import { useR2PlayerNotes, useR2AiSummaries, useR2PlayerNewsLinks, useR2EnrichedNews } from '../hooks.js';
 
 // Players currently on any roster
 const ROSTERED_IDS = new Set(
@@ -107,17 +107,18 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
 
   const { data: r2PlayerNotes, fetchedAt: r2NotesFetchedAt } = useR2PlayerNotes();
   const { data: r2AiSummaries } = useR2AiSummaries();
-  const { data: r2PlayerNewsLinks } = useR2PlayerNewsLinks();
+  const { data: r2PlayerNewsLinks } = useR2PlayerNewsLinks(); // legacy — may be empty
+  const { data: r2EnrichedRaw }     = useR2EnrichedNews();   // enriched_news.json — written by r2_export
 
   // Live fetch from Databricks gold tables via worker
   const [dbArticles,    setDbArticles]    = React.useState([]);
-  const [dbArticlesSrc, setDbArticlesSrc] = React.useState(null); // which DB table served the data
+  const [dbArticlesSrc, setDbArticlesSrc] = React.useState(null);
   const [dbArticlesLoading, setDbArticlesLoading] = React.useState(true);
 
   React.useEffect(() => {
     let cancelled = false;
     setDbArticlesLoading(true);
-    fetch(`${API_BASE}/api/v1/news/articles?limit=500`, { signal: AbortSignal.timeout(15000) })
+    fetch(`${API_BASE}/api/v1/news/articles?limit=500`, { signal: AbortSignal.timeout(20000) })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (cancelled || !data) return;
@@ -130,7 +131,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     return () => { cancelled = true; };
   }, []);
 
-  // Parse raw R2 articles — handles { data:[...] }, { articles:[...] }, or a direct array
+  // Parse legacy R2 player_news.json (may not exist)
   const r2Articles = React.useMemo(() => {
     if (Array.isArray(r2PlayerNewsLinks)) return r2PlayerNewsLinks;
     if (Array.isArray(r2PlayerNewsLinks?.data)) return r2PlayerNewsLinks.data;
@@ -138,24 +139,52 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     return [];
   }, [r2PlayerNewsLinks]);
 
-  // Merge Databricks articles (primary) with R2 articles (fallback/supplement).
-  // Deduplicate by article_url — Databricks wins on conflict.
+  // Normalize enriched_news.json from R2 (written by r2_export from main.fantasai.silver_news).
+  // Fields: headline, full_text, source_url, primary_player_id, published_at, mentioned_players
+  const r2EnrichedArticles = React.useMemo(() => {
+    const raw = Array.isArray(r2EnrichedRaw) ? r2EnrichedRaw
+              : Array.isArray(r2EnrichedRaw?.data) ? r2EnrichedRaw.data : [];
+    if (!raw.length) return [];
+    const players = getPlayers();
+    // Build sleeperId → player lookup once
+    const bySleeperMap = new Map();
+    players.forEach(p => { if (p.sleeperId) bySleeperMap.set(String(p.sleeperId), p); });
+    return raw.map(a => {
+      const headline    = a.headline || a.title || '';
+      const article_url = a.source_url || a.article_url || a.url || '';
+      const published_at= a.published_at || null;
+      const description = a.full_text || a.description || a.summary || '';
+      if (!headline || !article_url) return null;
+      // Resolve player from primary_player_id (Sleeper ID)
+      const pl = a.primary_player_id ? bySleeperMap.get(String(a.primary_player_id)) : null;
+      return {
+        headline,
+        article_url,
+        player_name: pl?.name || a.player_name || '',
+        position:    (pl?.pos || a.position || '').toUpperCase(),
+        team:        pl?.team || a.team || '',
+        published_at,
+        publisher:   a.publisher || a.source || 'FantasAI',
+        description,
+      };
+    }).filter(Boolean);
+  }, [r2EnrichedRaw]);
+
+  // Merge all article sources: Databricks live (highest priority) > R2 enriched > R2 legacy
+  // Deduplicate by article_url.
   const mergedArticles = React.useMemo(() => {
     const byUrl = new Map();
-    // R2 first (lower priority)
-    for (const a of r2Articles) {
-      if (a.headline && a.article_url) byUrl.set(a.article_url, a);
-    }
-    // Databricks overwrites (higher priority — live gold table data)
-    for (const a of dbArticles) {
-      if (a.headline && a.article_url) byUrl.set(a.article_url, a);
-    }
+    // Lowest priority first
+    for (const a of r2Articles)         { if (a.headline && a.article_url) byUrl.set(a.article_url, a); }
+    for (const a of r2EnrichedArticles) { if (a.headline && a.article_url) byUrl.set(a.article_url, a); }
+    // Databricks live wins on conflict
+    for (const a of dbArticles)         { if (a.headline && a.article_url) byUrl.set(a.article_url, a); }
     return [...byUrl.values()].sort((a, b) => {
       const ta = a.published_at ? new Date(a.published_at).getTime() : 0;
       const tb = b.published_at ? new Date(b.published_at).getTime() : 0;
       return tb - ta;
     });
-  }, [r2Articles, dbArticles]);
+  }, [r2Articles, r2EnrichedArticles, dbArticles]);
 
   // All articles sorted newest-first for the Articles tab
   const allArticles = mergedArticles;

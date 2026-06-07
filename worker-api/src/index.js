@@ -1709,14 +1709,29 @@ async function handleDbArticles(url, env) {
     } catch (_) {}
   }
 
-  // Final fallback: api_news_feed view (always available, fewer rows)
+  // Fallback: api_news_feed view (always available, fewer rows)
   if (articles.length === 0) {
     try {
       const rows = await queryDatabricks(
         `SELECT * FROM main.fantasai_news.api_news_feed ORDER BY published_at DESC LIMIT 100`, env
       );
-      articles = rows.map(normalizeArticleRow).filter(Boolean);
-      source = 'api_news_feed';
+      if (rows.length > 0) {
+        articles = rows.map(normalizeArticleRow).filter(Boolean);
+        source = 'api_news_feed';
+      }
+    } catch (_) {}
+  }
+
+  // Final fallback: silver_news in main.fantasai (populated by r2_export pipeline)
+  if (articles.length === 0) {
+    try {
+      const rows = await queryDatabricks(
+        `SELECT title AS headline, source AS article_url, player_id AS primary_player_id, published_at, summary AS description FROM main.fantasai.silver_news ORDER BY published_at DESC LIMIT ${limit}`, env
+      );
+      if (rows.length > 0) {
+        articles = rows.map(normalizeArticleRow).filter(Boolean);
+        source = 'silver_news';
+      }
     } catch (_) {}
   }
 
