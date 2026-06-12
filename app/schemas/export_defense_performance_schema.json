@@ -1,0 +1,236 @@
+{
+  "table_name": "main.fantasai.export_defense_performance",
+  "description": "Defense/Special Teams historical fantasy performance (weeks 10-18 of 2025 season). Includes rolling averages and week-over-week trends. ML projections coming in Phase 2.",
+  "refresh_schedule": "Daily (after weekly stats update)",
+  "record_count": "288 (32 teams \u00d7 9 weeks)",
+  "last_updated": "2026-06-06",
+  "source_tables": [
+    "main.fantasai.gold_weekly_stats"
+  ],
+  "r2_location": "analysis/defense_performance.json",
+  "columns": [
+    {
+      "name": "team_name",
+      "type": "string",
+      "description": "Full team name (e.g., 'Denver Broncos', 'Baltimore Ravens')",
+      "nullable": false,
+      "example": "Denver Broncos"
+    },
+    {
+      "name": "team",
+      "type": "string",
+      "description": "3-letter NFL team abbreviation",
+      "nullable": false,
+      "example": "DEN",
+      "allowed_values": "32 NFL teams (ARI, ATL, BAL, BUF, CAR, CHI, CIN, CLE, DAL, DEN, DET, GB, HOU, IND, JAX, KC, LV, LAC, LAR, MIA, MIN, NE, NO, NYG, NYJ, PHI, PIT, SF, SEA, TB, TEN, WAS)"
+    },
+    {
+      "name": "week",
+      "type": "integer",
+      "description": "NFL week number (10-18 for this dataset)",
+      "nullable": false,
+      "range": "10-18",
+      "example": 18
+    },
+    {
+      "name": "fantasy_points",
+      "type": "double",
+      "description": "Fantasy points scored by defense/ST in this week",
+      "nullable": false,
+      "range": "0 to 22",
+      "notes": "Higher points = better performance (sacks, INTs, fumbles, TDs, low points allowed)"
+    },
+    {
+      "name": "source",
+      "type": "string",
+      "description": "Data source (always 'sleeper' for defense data)",
+      "nullable": false,
+      "example": "sleeper"
+    },
+    {
+      "name": "week_rank",
+      "type": "integer",
+      "description": "Ranking within that week (1 = best defense that week)",
+      "nullable": false,
+      "range": "1-32",
+      "notes": "Use this to identify top streaming options for a specific week"
+    },
+    {
+      "name": "avg_last_4_weeks",
+      "type": "double",
+      "description": "Rolling 4-week average of fantasy points (including current week)",
+      "nullable": false,
+      "range": "0 to 19",
+      "notes": "PRIMARY SORTING METRIC - Shows consistent performance, not one-week flukes"
+    },
+    {
+      "name": "pts_change_from_last_week",
+      "type": "double",
+      "description": "Point differential from previous week (positive = improvement, negative = decline)",
+      "nullable": true,
+      "range": "-12 to 12",
+      "notes": "NULL for week 10 (first week in dataset). Use for trend analysis."
+    }
+  ],
+  "data_quality": {
+    "completeness": "100% (all 32 teams \u00d7 9 weeks = 288 records expected)",
+    "time_range": "Weeks 10-18 of 2025 season (9 weeks)",
+    "validation_rules": [
+      "fantasy_points must be >= 0",
+      "week must be between 10 and 18",
+      "team must be valid NFL abbreviation",
+      "avg_last_4_weeks calculated as trailing 4-week rolling average"
+    ],
+    "known_limitations": [
+      "No ML projections yet (Phase 2)",
+      "Historical data only (no future predictions)",
+      "Sleeper scoring only (may differ from other platforms)"
+    ]
+  },
+  "ui_integration": {
+    "r2_access": {
+      "method": "Authenticated S3 API (boto3) or Backend Proxy",
+      "endpoint": "Use R2_ENDPOINT_URL from Databricks secrets",
+      "bucket": "R2_BUCKET_NAME from secrets",
+      "key": "analysis/defense_performance.json",
+      "authentication": "Required - use R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY"
+    },
+    "response_format": {
+      "structure": "JSON with metadata wrapper",
+      "example": {
+        "data": [
+          {
+            "team_name": "Denver Broncos",
+            "team": "DEN",
+            "week": 18,
+            "fantasy_points": 22.0,
+            "source": "sleeper",
+            "week_rank": 1,
+            "avg_last_4_weeks": 19.0,
+            "pts_change_from_last_week": 6.0
+          }
+        ],
+        "metadata": {
+          "generated_at": "2026-06-06T02:45:00.000000",
+          "record_count": 288,
+          "unique_teams": 32,
+          "latest_week": 18,
+          "weeks_included": [
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18
+          ],
+          "source_table": "main.fantasai.export_defense_performance",
+          "note": "Historical performance only. ML projections coming soon."
+        }
+      }
+    },
+    "sorting": {
+      "primary": "avg_last_4_weeks DESC (most consistent defenses first)",
+      "secondary": "fantasy_points DESC (highest single-week scores)",
+      "for_streaming": "Filter to latest week, sort by week_rank ASC"
+    },
+    "filtering": {
+      "by_week": "Filter to specific week for historical analysis",
+      "by_team": "Filter to specific team (e.g., 'DEN', 'BAL')",
+      "by_performance_threshold": "Show only defenses with avg_last_4_weeks >= 10",
+      "trending_up": "Filter to pts_change_from_last_week > 0"
+    },
+    "display_recommendations": [
+      "Show avg_last_4_weeks as primary metric (e.g., '15.8 avg pts')",
+      "Display pts_change_from_last_week with trend icons: '\u21916 pts' or '\u21932 pts'",
+      "Show week_rank as badge for latest week (e.g., '#1 DEF Week 18')",
+      "Color-code by avg_last_4_weeks: Green (>=12), Yellow (8-12), Gray (<8)",
+      "Add 'Top Streamer' badge for week_rank <= 5 in latest week",
+      "Show sparkline chart of last 4 weeks' fantasy_points for visual trend"
+    ],
+    "use_cases": {
+      "defense_streaming": "Filter to latest week, sort by week_rank, show top 10",
+      "season_long_value": "Sort by avg_last_4_weeks DESC, show consistent performers",
+      "matchup_analysis": "Group by week, compare defenses playing each other",
+      "trend_spotting": "Sort by pts_change_from_last_week DESC, find hot defenses"
+    }
+  },
+  "sample_data": [
+    {
+      "team_name": "Denver Broncos",
+      "team": "DEN",
+      "week": 18,
+      "fantasy_points": 22.0,
+      "source": "sleeper",
+      "week_rank": 1,
+      "avg_last_4_weeks": 19.0,
+      "pts_change_from_last_week": 6.0,
+      "interpretation": "ELITE - Top-ranked defense in Week 18 with elite 4-week average (19 pts). Trending up strongly (+6 from Week 17)."
+    },
+    {
+      "team_name": "Baltimore Ravens",
+      "team": "BAL",
+      "week": 18,
+      "fantasy_points": 16.0,
+      "source": "sleeper",
+      "week_rank": 7,
+      "avg_last_4_weeks": 13.75,
+      "pts_change_from_last_week": -2.0,
+      "interpretation": "STRONG - Consistent performer with 13.8 avg. Slight dip this week but still top 10."
+    },
+    {
+      "team_name": "Minnesota Vikings",
+      "team": "MIN",
+      "week": 18,
+      "fantasy_points": 12.0,
+      "source": "sleeper",
+      "week_rank": 23,
+      "avg_last_4_weeks": 13.0,
+      "pts_change_from_last_week": 6.0,
+      "interpretation": "SOLID - Good 4-week average (13 pts) with strong Week 18 bounce-back (+6)."
+    }
+  ],
+  "roadmap": {
+    "phase_1_complete": {
+      "status": "\u2705 DONE",
+      "date": "2026-06-06",
+      "features": [
+        "Historical defense data export to R2",
+        "Rolling 4-week averages",
+        "Week-over-week trends",
+        "Weekly rankings"
+      ]
+    },
+    "phase_2_planned": {
+      "status": "\ud83d\udccb PLANNED",
+      "estimated": "Q3 2026",
+      "features": [
+        "Defense-specific ML model (team-level features)",
+        "Projected fantasy points for upcoming week",
+        "Matchup difficulty ratings",
+        "Strength of schedule analysis",
+        "Integration with opponent offense stats"
+      ],
+      "required_work": [
+        "Build defense feature engineering (team stats, opponent stats, home/away)",
+        "Train defense-specific XGBoost model",
+        "Create ml_defense_predictions table",
+        "Add projections to R2 export"
+      ]
+    }
+  },
+  "changelog": [
+    {
+      "date": "2026-06-06",
+      "changes": [
+        "Initial defense export created (Phase 1)",
+        "Added to R2 export job",
+        "Schema documentation created",
+        "288 records exported (32 teams \u00d7 9 weeks)",
+        "Historical data only (no projections yet)"
+      ]
+    }
+  ]
+}

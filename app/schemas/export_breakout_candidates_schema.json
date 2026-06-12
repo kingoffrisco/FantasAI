@@ -1,0 +1,182 @@
+{
+  "table_name": "main.fantasai.export_breakout_candidates",
+  "description": "Weekly breakout candidate predictions based on snap share trends and ML opportunity scoring. Players showing significant usage increases with high breakout probability.",
+  "refresh_schedule": "Weekly (Tuesday 10:00 AM ET after ML training)",
+  "record_count": 7,
+  "last_updated": "2026-06-06",
+  "source_tables": [
+    "main.fantasai.gold_weekly_stats",
+    "main.fantasai.ml_predictions"
+  ],
+  "r2_location": "analysis/breakout_candidates.json",
+  "columns": [
+    {
+      "name": "player_name",
+      "type": "string",
+      "description": "Player full name",
+      "nullable": false,
+      "example": "Gunner Olszewski"
+    },
+    {
+      "name": "position",
+      "type": "string",
+      "description": "Fantasy position (QB, RB, WR, TE)",
+      "nullable": false,
+      "allowed_values": [
+        "QB",
+        "RB",
+        "WR",
+        "TE"
+      ]
+    },
+    {
+      "name": "team",
+      "type": "string",
+      "description": "3-letter NFL team abbreviation",
+      "nullable": true,
+      "example": "NYG",
+      "notes": "May show 'UNK' for free agents or recent trades"
+    },
+    {
+      "name": "opportunity_score",
+      "type": "double",
+      "description": "ML-generated breakout probability score (0-100). Higher score = higher likelihood of fantasy breakout. Combines snap share trends, usage patterns, and predictive modeling.",
+      "nullable": false,
+      "range": "0.72 - 14.28",
+      "notes": "THIS IS THE PRIMARY SORTING METRIC. Scores above 10 = strong breakout candidates, 5-10 = moderate upside, <5 = watch list."
+    },
+    {
+      "name": "snap_share_delta",
+      "type": "double",
+      "description": "Change in snap share percentage from previous weeks (as decimal, e.g., 0.68 = 68% increase)",
+      "nullable": false,
+      "range": "-0.42 to 0.68",
+      "notes": "Positive values indicate increasing usage, negative indicates declining usage"
+    },
+    {
+      "name": "avg_snap_share",
+      "type": "double",
+      "description": "Average snap share over recent weeks (as decimal, e.g., 0.52 = 52% of team snaps)",
+      "nullable": false,
+      "range": "0.09 to 0.885",
+      "notes": "Higher values indicate established role. Low avg with high delta = emerging player."
+    },
+    {
+      "name": "week",
+      "type": "integer",
+      "description": "NFL week number when this prediction was generated",
+      "nullable": false,
+      "range": "1-18 (regular season)",
+      "example": 18
+    }
+  ],
+  "data_quality": {
+    "opportunity_score_validation": "100% (7/7 candidates have valid non-zero scores)",
+    "score_range": "0.72 to 14.28 (healthy distribution)",
+    "zero_scores": "0 (excellent data quality)",
+    "validation_rules": [
+      "opportunity_score must be > 0",
+      "snap_share_delta must be between -1.0 and 1.0",
+      "avg_snap_share must be between 0 and 1.0",
+      "position must be QB, RB, WR, or TE"
+    ]
+  },
+  "ui_integration": {
+    "r2_access": {
+      "method": "Authenticated S3 API (boto3) or Backend Proxy",
+      "endpoint": "Use R2_ENDPOINT_URL from Databricks secrets",
+      "bucket": "R2_BUCKET_NAME from secrets",
+      "key": "analysis/breakout_candidates.json",
+      "authentication": "Required - use R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY"
+    },
+    "response_format": {
+      "structure": "JSON with metadata wrapper",
+      "example": {
+        "data": [
+          {
+            "player_name": "Gunner Olszewski",
+            "position": "WR",
+            "team": "NYG",
+            "opportunity_score": 14.28,
+            "snap_share_delta": 0.68,
+            "avg_snap_share": 0.09,
+            "week": 18
+          }
+        ],
+        "metadata": {
+          "generated_at": "2026-06-06T02:26:54.072014",
+          "record_count": 7,
+          "source_table": "main.fantasai.export_breakout_candidates"
+        }
+      }
+    },
+    "sorting": {
+      "primary": "opportunity_score DESC (show highest breakout probability first)",
+      "secondary": "snap_share_delta DESC (show biggest usage increases)"
+    },
+    "filtering": {
+      "by_position": "Filter to specific positions (QB, RB, WR, TE)",
+      "by_score_threshold": "Show only candidates with opportunity_score >= 10 for top-tier breakouts",
+      "by_snap_trend": "Filter to snap_share_delta > 0 to exclude declining usage players"
+    },
+    "display_recommendations": [
+      "Show opportunity_score as primary metric (e.g., '14.28 Breakout Score')",
+      "Display snap_share_delta as trend indicator: '\u219168%' for positive, '\u219342%' for negative",
+      "Show avg_snap_share as usage context (e.g., '52% snap share')",
+      "Color-code by score: Green (>=10), Yellow (5-10), Gray (<5)",
+      "Add 'Emerging Player' badge for high delta + low avg (e.g., Olszewski: 68% delta, 9% avg)",
+      "Add 'Established Role' badge for high avg (>70% snaps)"
+    ],
+    "backend_proxy_example": {
+      "language": "Python (FastAPI/Flask)",
+      "code": "import boto3\n\ns3 = boto3.client(\n    's3',\n    endpoint_url=os.getenv('R2_ENDPOINT_URL'),\n    aws_access_key_id=os.getenv('R2_ACCESS_KEY_ID'),\n    aws_secret_access_key=os.getenv('R2_SECRET_ACCESS_KEY'),\n    region_name='auto'\n)\n\nresponse = s3.get_object(\n    Bucket=os.getenv('R2_BUCKET_NAME'),\n    Key='analysis/breakout_candidates.json'\n)\n\ndata = json.loads(response['Body'].read())\nreturn data"
+    },
+    "frontend_fetch_example": {
+      "language": "JavaScript (React/Next.js)",
+      "code": "// Via backend proxy API\nconst response = await fetch('/api/v1/breakout-candidates');\nconst { data, metadata } = await response.json();\n\n// Sort by opportunity score (highest first)\nconst sorted = data.sort((a, b) => b.opportunity_score - a.opportunity_score);\n\n// Display\nsorted.forEach(candidate => {\n  console.log(`${candidate.player_name}: ${candidate.opportunity_score.toFixed(2)} score`);\n});"
+    }
+  },
+  "sample_data": [
+    {
+      "player_name": "Gunner Olszewski",
+      "position": "WR",
+      "team": "NYG",
+      "opportunity_score": 14.28,
+      "snap_share_delta": 0.68,
+      "avg_snap_share": 0.09,
+      "week": 18,
+      "interpretation": "STRONG BREAKOUT - Massive 68% snap share increase from low baseline (9%). Highest opportunity score in dataset."
+    },
+    {
+      "player_name": "Keenan Allen",
+      "position": "WR",
+      "team": "UNK",
+      "opportunity_score": 10.8,
+      "snap_share_delta": -0.03,
+      "avg_snap_share": 0.52,
+      "week": 18,
+      "interpretation": "HIGH UPSIDE - Established role (52% snaps) with slight decline. Score driven by opportunity, not usage trend."
+    },
+    {
+      "player_name": "Ryan Flournoy",
+      "position": "WR",
+      "team": "DAL",
+      "opportunity_score": 10.44,
+      "snap_share_delta": 0.47,
+      "avg_snap_share": 0.52,
+      "week": 18,
+      "interpretation": "HIGH UPSIDE - Strong snap share increase (47%) with established role (52%). Emerging WR2 candidate."
+    }
+  ],
+  "changelog": [
+    {
+      "date": "2026-06-06",
+      "changes": [
+        "Schema documentation created",
+        "Validated 7 breakout candidates in R2 export",
+        "All opportunity scores valid (0.72 to 14.28)",
+        "UI integration guidance added with code examples"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "table_name": "main.fantasai.gold_player_mapping_corrections",
+  "layer": "Gold",
+  "description": "High-quality training examples where human corrected pipeline player extraction",
+  "version": "1.0",
+  "last_updated": "2026-06-08",
+  "refresh_schedule": "Hourly (after bronze ingestion)",
+  "source": "main.fantasai.bronze_article_labels (filtered)",
+  "filters_applied": [
+    "is_relevant = true",
+    "relevance_score >= 3",
+    "original_player_name != labeled_player_name OR original_position != labeled_position"
+  ],
+  "columns": [
+    {
+      "name": "label_id",
+      "type": "string",
+      "description": "Unique label ID",
+      "primary_key": true,
+      "nullable": false
+    },
+    {
+      "name": "article_url",
+      "type": "string",
+      "description": "Article URL",
+      "nullable": false
+    },
+    {
+      "name": "headline",
+      "type": "string",
+      "description": "Article headline (input text for model)",
+      "nullable": true
+    },
+    {
+      "name": "original_player_name",
+      "type": "string",
+      "description": "Pipeline's prediction (model input)",
+      "nullable": true
+    },
+    {
+      "name": "labeled_player_name",
+      "type": "string",
+      "description": "Human correction (ground truth / target)",
+      "nullable": false
+    },
+    {
+      "name": "original_position",
+      "type": "string",
+      "description": "Pipeline's position prediction",
+      "nullable": true
+    },
+    {
+      "name": "labeled_position",
+      "type": "string",
+      "description": "Human-corrected position",
+      "nullable": false
+    },
+    {
+      "name": "player_sleeper_id",
+      "type": "string",
+      "description": "Matched Sleeper player ID",
+      "nullable": true
+    },
+    {
+      "name": "impact_category",
+      "type": "string",
+      "description": "Type of news",
+      "nullable": true
+    },
+    {
+      "name": "relevance_score",
+      "type": "integer",
+      "description": "Fantasy relevance (3-5 for this table)",
+      "nullable": true
+    },
+    {
+      "name": "processed_at",
+      "type": "timestamp",
+      "description": "When correction was processed to gold",
+      "nullable": false
+    }
+  ],
+  "use_cases": [
+    "Training data for player name extraction ML model",
+    "Evaluating model performance on real corrections",
+    "Identifying common pipeline mistakes"
+  ],
+  "ml_usage": {
+    "model": "player_name_extractor",
+    "features": ["headline", "publisher", "original_player_name"],
+    "target": "labeled_player_name",
+    "training_split": "80/20 train/test"
+  }
+}

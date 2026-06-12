@@ -1,0 +1,162 @@
+{
+  "table_name": "main.fantasai.bronze_article_labels",
+  "layer": "Bronze",
+  "description": "Human-labeled article feedback for player name extraction model training",
+  "version": "1.0",
+  "last_updated": "2026-06-08",
+  "refresh_schedule": "Hourly (when new labels are added)",
+  "source": "R2 bucket: fantasai-r2/fantasai/labeling/article_labels.json",
+  "columns": [
+    {
+      "name": "label_id",
+      "type": "string",
+      "description": "Unique label ID in format {timestamp}-{random}",
+      "primary_key": true,
+      "nullable": false,
+      "sample_values": ["1738890123456-abc123"]
+    },
+    {
+      "name": "article_url",
+      "type": "string",
+      "description": "URL of the labeled article (deduplication key)",
+      "nullable": false,
+      "sample_values": ["https://espn.com/nfl/story/..."]
+    },
+    {
+      "name": "headline",
+      "type": "string",
+      "description": "Article headline",
+      "nullable": true
+    },
+    {
+      "name": "publisher",
+      "type": "string",
+      "description": "News source",
+      "nullable": true,
+      "sample_values": ["ESPN", "NFL.com", "Yahoo Sports"]
+    },
+    {
+      "name": "published_at",
+      "type": "string",
+      "description": "Original publication timestamp (ISO 8601)",
+      "nullable": true
+    },
+    {
+      "name": "original_player_name",
+      "type": "string",
+      "description": "Player name extracted by pipeline (may be incorrect)",
+      "nullable": true,
+      "sample_values": ["J. Allen", "Patrick Mahomes II"]
+    },
+    {
+      "name": "original_position",
+      "type": "string",
+      "description": "Position extracted by pipeline (may be incorrect)",
+      "nullable": true,
+      "sample_values": ["QB", "RB", "WR"]
+    },
+    {
+      "name": "original_team",
+      "type": "string",
+      "description": "Team extracted by pipeline (may be incorrect)",
+      "nullable": true,
+      "sample_values": ["BUF", "KC", "MIN"]
+    },
+    {
+      "name": "labeled_player_name",
+      "type": "string",
+      "description": "Corrected player name (ground truth)",
+      "nullable": false,
+      "sample_values": ["Josh Allen", "Patrick Mahomes"]
+    },
+    {
+      "name": "labeled_position",
+      "type": "string",
+      "description": "Corrected position",
+      "nullable": false,
+      "sample_values": ["QB", "RB", "WR", "TE", "K", "DST"]
+    },
+    {
+      "name": "labeled_team",
+      "type": "string",
+      "description": "Corrected team abbreviation",
+      "nullable": false,
+      "sample_values": ["BUF", "KC", "MIN"]
+    },
+    {
+      "name": "player_sleeper_id",
+      "type": "string",
+      "description": "Sleeper API player ID if matched",
+      "nullable": true
+    },
+    {
+      "name": "impact_category",
+      "type": "string",
+      "description": "Type of fantasy impact",
+      "nullable": true,
+      "sample_values": ["injury", "trade", "depth_chart", "suspension", "performance", "analysis", "other"]
+    },
+    {
+      "name": "impact_direction",
+      "type": "string",
+      "description": "Fantasy impact direction",
+      "nullable": true,
+      "sample_values": ["positive", "negative", "neutral"]
+    },
+    {
+      "name": "relevance_score",
+      "type": "integer",
+      "description": "Commissioner's relevance rating (1-5)",
+      "nullable": true,
+      "sample_values": [1, 3, 5]
+    },
+    {
+      "name": "is_relevant",
+      "type": "boolean",
+      "description": "Whether article is fantasy-relevant",
+      "nullable": true
+    },
+    {
+      "name": "notes",
+      "type": "string",
+      "description": "Free-text notes from commissioner",
+      "nullable": true
+    },
+    {
+      "name": "labeled_by",
+      "type": "string",
+      "description": "Always 'commissioner'",
+      "nullable": true
+    },
+    {
+      "name": "labeled_at",
+      "type": "string",
+      "description": "When label was saved (ISO 8601)",
+      "nullable": true
+    },
+    {
+      "name": "label_source",
+      "type": "string",
+      "description": "Always 'ui_labeler'",
+      "nullable": true
+    },
+    {
+      "name": "ingested_at",
+      "type": "timestamp",
+      "description": "When record was ingested to Databricks",
+      "nullable": false
+    }
+  ],
+  "use_cases": [
+    "Training data for player name extraction model",
+    "Identifying systematic pipeline errors",
+    "Measuring model accuracy improvements over time"
+  ],
+  "relationships": [
+    {
+      "table": "gold_player_mapping_corrections",
+      "type": "one-to-one",
+      "description": "Filtered and enriched corrections for ML training"
+    }
+  ]
+}

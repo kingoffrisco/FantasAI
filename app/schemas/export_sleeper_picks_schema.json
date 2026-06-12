@@ -1,0 +1,163 @@
+{
+  "table_name": "main.fantasai.export_sleeper_picks",
+  "description": "Low-ownership fantasy football players with high upside potential. Updated weekly with ownership data from Sleeper API and historical performance projections.",
+  "refresh_schedule": "Weekly (Tuesday 10:00 AM ET)",
+  "record_count": 24,
+  "last_updated": "2026-06-05",
+  "source_tables": [
+    "main.fantasai.bronze_sleeper_ownership",
+    "main.fantasai.gold_weekly_stats"
+  ],
+  "columns": [
+    {
+      "name": "player_name",
+      "type": "string",
+      "description": "Player full name",
+      "nullable": false,
+      "example": "Deshaun Watson"
+    },
+    {
+      "name": "position",
+      "type": "string",
+      "description": "Fantasy position (QB, RB, WR, TE)",
+      "nullable": false,
+      "allowed_values": [
+        "QB",
+        "RB",
+        "WR",
+        "TE"
+      ]
+    },
+    {
+      "name": "team",
+      "type": "string",
+      "description": "3-letter NFL team abbreviation. Sourced directly from bronze_sleeper_ownership (fixed June 5, 2026)",
+      "nullable": true,
+      "example": "CLE",
+      "notes": "Previously showed 'UNK' for 71% of records due to wrong data source. Now 100% accurate."
+    },
+    {
+      "name": "ownership_pct",
+      "type": "double",
+      "description": "Percentage of Sleeper leagues rostering this player (0-100)",
+      "nullable": false,
+      "range": "20.34 - 99.0",
+      "notes": "Lower ownership = higher sleeper value"
+    },
+    {
+      "name": "projected_pts",
+      "type": "double",
+      "description": "Average fantasy points per game from last 8 weeks of 2025 season (weeks 10-18). Zero for players without recent stats.",
+      "nullable": false,
+      "range": "0 - 10.97",
+      "notes": "71% of sleepers have 0 projected pts (deep bench players with no recent game time). Use has_projection field to distinguish."
+    },
+    {
+      "name": "has_projection",
+      "type": "boolean",
+      "description": "True if player has historical stats from 2025 season (weeks 10+). False for deep sleepers without recent game data.",
+      "nullable": false,
+      "added": "2026-06-05",
+      "notes": "NEW FIELD. Helps frontend distinguish between 'no data' vs 'low scoring' players."
+    },
+    {
+      "name": "value_score",
+      "type": "double",
+      "description": "Calculated as (100 - ownership_pct). Higher score = better sleeper candidate.",
+      "nullable": false,
+      "range": "1.0 - 79.66",
+      "formula": "100 - ownership_pct"
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "description": "Categorized reason for sleeper status based on projected points",
+      "nullable": false,
+      "allowed_values": [
+        "High upside sleeper (>=10 pts)",
+        "Solid floor, undervalued (5-10 pts)",
+        "Deep sleeper with upside (<5 pts)"
+      ]
+    }
+  ],
+  "data_quality": {
+    "team_accuracy": "100% (0% UNK values)",
+    "has_projections": "29% (7/24 players)",
+    "zero_projections": "71% (17/24 players - expected for deep sleepers)",
+    "validation_rules": [
+      "ownership_pct must be < 100",
+      "position must be QB, RB, WR, or TE (no defensive players)",
+      "team field must not be 'UNK' (alert if >10% UNK)"
+    ]
+  },
+  "frontend_usage": {
+    "primary_use": "Waiver wire recommendations and deep sleeper discovery",
+    "sort_by": "value_score DESC (show highest upside first)",
+    "filtering": {
+      "by_position": "Filter to specific positions (QB, RB, WR, TE)",
+      "by_projection": "Use has_projection=true to show only players with stats",
+      "by_ownership": "Show only players below certain ownership threshold"
+    },
+    "display_recommendations": [
+      "Show 'No recent stats' badge if has_projection=false",
+      "Highlight players with projected_pts >= 10 as 'High upside'",
+      "Display ownership_pct as badge (e.g., '26% owned')",
+      "Link to player profile for deeper analysis"
+    ]
+  },
+  "sample_data": [
+    {
+      "player_name": "Deshaun Watson",
+      "position": "QB",
+      "team": "CLE",
+      "ownership_pct": 26.56,
+      "projected_pts": 10.97,
+      "has_projection": true,
+      "value_score": 73.44,
+      "reason": "High upside sleeper"
+    },
+    {
+      "player_name": "Cade Klubnik",
+      "position": "QB",
+      "team": "NYJ",
+      "ownership_pct": 20.34,
+      "projected_pts": 0.0,
+      "has_projection": false,
+      "value_score": 79.66,
+      "reason": "Deep sleeper with upside"
+    }
+  ],
+  "known_issues": [
+    {
+      "issue": "71% of players have zero projected_pts",
+      "status": "Expected behavior (not a bug)",
+      "explanation": "Deep sleepers often lack recent stats. Use has_projection field to handle this.",
+      "fixed_date": "2026-06-05"
+    },
+    {
+      "issue": "Team field showing 'UNK' for 71% of records",
+      "status": "FIXED",
+      "explanation": "Was pulling team from gold_player_dim instead of bronze_sleeper_ownership. Now using bronze source directly.",
+      "fixed_date": "2026-06-05"
+    }
+  ],
+  "changelog": [
+    {
+      "date": "2026-06-05",
+      "changes": [
+        "Fixed team data source (bronze_sleeper_ownership.team)",
+        "Added has_projection boolean field",
+        "Improved reason categorization based on projected points",
+        "Reduced UNK teams from 71% to 0%"
+      ]
+    },
+    {
+      "date": "2026-06-03",
+      "changes": [
+        "Initial table creation",
+        "Integrated Sleeper ownership data",
+        "Added value score calculation"
+      ]
+    }
+  ]
+}

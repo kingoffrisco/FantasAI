@@ -1,0 +1,121 @@
+{
+  "table_name": "main.fantasai.user_settings",
+  "layer": "Production",
+  "description": "User preferences and settings for cross-browser/device consistency",
+  "version": "1.0",
+  "last_updated": "2026-06-08",
+  "refresh_schedule": "Real-time (updated on every user change)",
+  "columns": [
+    {
+      "name": "user_id",
+      "type": "string",
+      "description": "Unique user identifier (email or auth ID)",
+      "primary_key": true,
+      "nullable": false,
+      "sample_values": ["user@example.com", "auth0|12345"]
+    },
+    {
+      "name": "setting_category",
+      "type": "string",
+      "description": "Setting category grouping",
+      "primary_key": true,
+      "nullable": false,
+      "sample_values": ["draft_preferences", "ui_layout", "notifications", "league_settings"]
+    },
+    {
+      "name": "setting_key",
+      "type": "string",
+      "description": "Specific setting name within category",
+      "primary_key": true,
+      "nullable": false,
+      "sample_values": ["scoring_format", "view_mode", "waiver_alerts", "default_league_id"]
+    },
+    {
+      "name": "setting_value",
+      "type": "string",
+      "description": "JSON-encoded setting value",
+      "nullable": false,
+      "sample_values": [
+        "\"PPR\"",
+        "{\"mode\":\"grid\",\"columns\":[\"name\",\"position\",\"team\"]}",
+        "true",
+        "\"12345\""
+      ]
+    },
+    {
+      "name": "setting_type",
+      "type": "string",
+      "description": "Data type hint for frontend parsing",
+      "nullable": true,
+      "sample_values": ["string", "number", "boolean", "json"]
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp",
+      "description": "When setting was first created",
+      "nullable": false
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp",
+      "description": "Last modification timestamp",
+      "nullable": false
+    },
+    {
+      "name": "device_info",
+      "type": "string",
+      "description": "Optional: Browser/device that last updated this setting",
+      "nullable": true,
+      "sample_values": ["Chrome/120.0 (Windows)", "Safari/17.0 (macOS)"]
+    }
+  ],
+  "setting_categories": {
+    "draft_preferences": {
+      "description": "Draft room preferences",
+      "example_keys": [
+        "scoring_format (PPR/Half-PPR/Standard)",
+        "roster_size (number)",
+        "flex_positions (array)",
+        "draft_timer (seconds)"
+      ]
+    },
+    "ui_layout": {
+      "description": "UI display preferences",
+      "example_keys": [
+        "view_mode (grid/list)",
+        "column_order (array)",
+        "active_filters (object)",
+        "theme (dark/light)",
+        "sidebar_collapsed (boolean)"
+      ]
+    },
+    "notifications": {
+      "description": "Alert preferences",
+      "example_keys": [
+        "waiver_alerts (boolean)",
+        "injury_alerts (boolean)",
+        "start_sit_reminders (boolean)",
+        "email_frequency (daily/weekly/never)"
+      ]
+    },
+    "league_settings": {
+      "description": "League-specific preferences",
+      "example_keys": [
+        "default_league_id (string)",
+        "favorite_players (array)",
+        "watch_list (array)"
+      ]
+    }
+  },
+  "api_endpoints": {
+    "GET": "/api/v1/user/{user_id}/settings?category={category}",
+    "PUT": "/api/v1/user/{user_id}/settings",
+    "DELETE": "/api/v1/user/{user_id}/settings/{category}/{key}"
+  },
+  "use_cases": [
+    "Restore user preferences across browsers/devices",
+    "Persist draft room settings",
+    "Sync UI layout preferences",
+    "Manage notification preferences"
+  ]
+}
