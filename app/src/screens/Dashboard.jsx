@@ -402,6 +402,16 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     return new Map(data.map((d, i) => [d.team.id, i + 1]));
   }, [isOffseason, currentWeek, allPlayersList, myRosterIds, slotOverrides]);
 
+  // Standings sorted: wins → PF → PR (power ranking, lower number = better)
+  const sortedStandings = React.useMemo(() => {
+    if (!standings) return null;
+    return [...standings].sort((a, b) => {
+      if (b.w !== a.w) return b.w - a.w;
+      if (b.pf !== a.pf) return b.pf - a.pf;
+      return (powerRankMap.get(a.id) ?? Infinity) - (powerRankMap.get(b.id) ?? Infinity);
+    });
+  }, [standings, powerRankMap]);
+
   // Load commissioner message + media + league name from league settings
   const [commishData, setCommishData] = React.useState(() => {
     try {
@@ -470,11 +480,11 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     try {
       const u = new URL(raw);
       if (u.hostname.includes('youtube.com') && u.searchParams.get('v'))
-        return `https://www.youtube.com/embed/${u.searchParams.get('v')}`;
+        return `https://www.youtube.com/embed/${u.searchParams.get('v')}?autoplay=0`;
       if (u.hostname === 'youtu.be')
-        return `https://www.youtube.com/embed${u.pathname}`;
+        return `https://www.youtube.com/embed${u.pathname}?autoplay=0`;
       if (u.hostname.includes('vimeo.com'))
-        return `https://player.vimeo.com/video/${u.pathname.split('/').filter(Boolean).pop()}`;
+        return `https://player.vimeo.com/video/${u.pathname.split('/').filter(Boolean).pop()}?autoplay=0`;
     } catch {}
     return raw;
   }
@@ -500,6 +510,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     } catch {}
     setCommishData(d => ({ ...d, text: commishTextDraft, media: finalMedia }));
     setEditingCommish(false);
+    pushCommunity(undefined, finalMedia, undefined);
   }
 
   function handleCommishMediaUpload(e) {
@@ -528,7 +539,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
   // Waiver priority = inverse of standings rank (last place picks first = priority #1)
   const totalTeams = LEAGUE_TEAMS.length;
-  const myStandingsRank = standings ? standings.findIndex(s => s.me) + 1 : null;
+  const myStandingsRank = sortedStandings ? sortedStandings.findIndex(s => s.me) + 1 : null;
   const waiverPosition  = myStandingsRank ? (totalTeams - myStandingsRank + 1) : null;
 
   // Build starting lineup from league settings frame (stays in sync with CurrentRoster)
@@ -715,6 +726,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     setChampions(champDraft);
     localStorage.setItem(CHAMP_KEY, JSON.stringify(champDraft));
     setEditingChampions(false);
+    pushCommunity(champDraft, undefined, undefined);
   }
   function updateDraft(i, patch) {
     setChampDraft(prev => prev.map((c, idx) => idx === i ? { ...c, ...patch } : c));
@@ -1043,7 +1055,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               <tr><th style={{ width: 32 }}>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">PF</th><th className="num">PA</th><th className="num" title="Power Ranking — weighted by points scored (60%) and win % (40%)">PR</th></tr>
             </thead>
             <tbody>
-              {(standings || LEAGUE_TEAMS.map(t => { const lt = findTeam(t.id); return { ...t, ...lt, w: 0, l: 0, pf: 0, pa: 0 }; })).map((row, i) => (
+              {(sortedStandings || LEAGUE_TEAMS.map(t => { const lt = findTeam(t.id); return { ...t, ...lt, w: 0, l: 0, pf: 0, pa: 0 }; })).map((row, i) => (
                 <tr key={row.id || i} style={row.me ? { background: 'rgba(198,255,58,.04)' } : {}}>
                   <td className="mono dim" style={{ fontSize: 12 }}>{i + 1}</td>
                   <td>
@@ -2205,12 +2217,14 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
     localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
     setShowHHModal(false);
     setHhDraft(null);
+    pushCommunity(undefined, undefined, updated);
   }
 
   function deleteHH(id) {
     const updated = happyHours.filter(h => h.id !== id);
     setHappyHours(updated);
     localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
+    pushCommunity(undefined, undefined, updated);
   }
 
   function rsvpHH(id, teamId, response) {
@@ -2223,6 +2237,7 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
     });
     setHappyHours(updated);
     localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
+    pushCommunity(undefined, undefined, updated);
   }
 
   function addCommentHH(id, teamId, text) {
@@ -2235,6 +2250,7 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
     });
     setHappyHours(updated);
     localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
+    pushCommunity(undefined, undefined, updated);
   }
 
   function deleteCommentHH(id, idx) {
@@ -2245,7 +2261,48 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
     });
     setHappyHours(updated);
     localStorage.setItem('fantasai_happy_hours', JSON.stringify(updated));
+    pushCommunity(undefined, undefined, updated);
   }
+
+  // ── R2 community sync (Champions, Commish media, Happy Hours) ────────────────
+  function pushCommunity(overChampions, overCommishMedia, overHappyHours) {
+    const payload = {
+      champions:    overChampions   ?? champions,
+      commishMedia: overCommishMedia !== undefined ? overCommishMedia : (commishData?.media ?? null),
+      happyHours:   overHappyHours  ?? happyHours,
+    };
+    const headers = { 'Content-Type': 'application/json' };
+    const key = localStorage.getItem('fantasai.workerKey');
+    if (key) headers['X-FantasAI-Key'] = key;
+    fetch(`${API_BASE}/api/v1/community`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  }
+
+  React.useEffect(() => {
+    fetch(`${API_BASE}/api/v1/community`, { signal: AbortSignal.timeout(8000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        if (Array.isArray(data.champions) && data.champions.length > 0) {
+          setChampions(data.champions);
+          localStorage.setItem('fantasai_champions', JSON.stringify(data.champions));
+        }
+        if (data.commishMedia !== undefined) {
+          const m = data.commishMedia;
+          if (m) localStorage.setItem('fantasai_commish_media', JSON.stringify(m));
+          else localStorage.removeItem('fantasai_commish_media');
+          setCommishData(d => ({ ...d, media: m }));
+        }
+        if (Array.isArray(data.happyHours) && data.happyHours.length > 0) {
+          setHappyHours(data.happyHours);
+          localStorage.setItem('fantasai_happy_hours', JSON.stringify(data.happyHours));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const [draftRsvp, setDraftRsvp] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_draft_rsvp') || '{}'); } catch { return {}; }

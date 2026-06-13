@@ -188,7 +188,7 @@ function SidebarPushButton({ teamId }) {
   );
 }
 
-export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds }) => {
+export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds, cookieAlert = false }) => {
   const isAdmin = user?.isAdmin;
 
   const h2hInfo = React.useMemo(() => {
@@ -263,7 +263,7 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     { id: 'owners',     label: 'Owner Intel',       icon: '◉', badge: '12' },
     { id: 'cbs',        label: 'Player Draft Rankings',     icon: '▦', badge: '432' },
     { group: 'Setup' },
-    { id: 'sources',  label: 'Sources',          icon: '⌁' },
+    { id: 'sources',  label: 'Sources',          icon: '⌁', ...(cookieAlert ? { badge: '!', alert: true } : {}) },
     { id: 'settings', label: 'Rules & Settings',  icon: '📋' },
     ...(isAdmin ? [
       { group: 'Admin' },

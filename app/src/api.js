@@ -1,17 +1,40 @@
-const BASE     = import.meta.env.VITE_WORKER_URL ?? 'https://fantasai-cbs.fantasai.workers.dev'
-const API_BASE = 'https://api.fantasai.net'
+const BASE        = import.meta.env.VITE_WORKER_URL ?? 'https://fantasai-cbs.fantasai.workers.dev'
+const API_BASE    = 'https://api.fantasai.net'
+// X-FantasAI-Key is required by the main API Worker for all R2 and db endpoints.
+// Set VITE_FANTASAI_KEY in Cloudflare Pages env vars (or local .env for dev).
+const FANTASAI_KEY = import.meta.env.VITE_FANTASAI_KEY ?? ''
+
+function apiHeaders() {
+  return FANTASAI_KEY ? { 'X-FantasAI-Key': FANTASAI_KEY } : {}
+}
+
+function cbsHeaders() {
+  const h = { ...apiHeaders() }
+  try { const c = localStorage.getItem('fantasai_cbs_cookie'); if (c) h['X-CBS-Cookie'] = c; } catch {}
+  return h
+}
 
 async function get(path) {
-  const res = await fetch(BASE + path)
+  const res = await fetch(BASE + path, { headers: cbsHeaders() })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
 }
 
 async function r2Get(key) {
-  const res = await fetch(`${API_BASE}/api/v1/r2/${key}`)
+  const res = await fetch(`${API_BASE}/api/v1/r2/${key}`, { headers: apiHeaders() })
   if (res.status === 404) return null   // file not written by Databricks yet
   if (!res.ok) throw new Error(`R2 ${res.status}`)
   return res.json()
+}
+
+// Normalise any Databricks R2 player export shape into a plain array.
+// Supports: root array, { data: [...] }, { players: [...] }
+function extractPlayerArray(raw) {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw
+  if (Array.isArray(raw.data)) return raw.data
+  if (Array.isArray(raw.players)) return raw.players
+  return []
 }
 
 export const api = {
@@ -20,29 +43,50 @@ export const api = {
   rankings: (pos = 'ALL') => get(`/api/cbs/rankings?pos=${pos}`),
   draft:    (year)        => get(`/api/cbs/draft?year=${year}`),
   rosters:  ()            => get('/api/cbs/rosters'),
-  // Full active NFL player pool from Databricks bronze_player_news_raw table
-  dbPlayers: () => fetch(`${API_BASE}/api/v1/db/players`).then(r => r.json()),
+  // Full active NFL player pool from Databricks export_players_2026_draft (via worker-api)
+  dbPlayers: () => fetch(`${API_BASE}/api/v1/db/players`, { headers: apiHeaders() }).then(r => r.json()),
+  // Sleeper full player list proxied through CBS Worker (no CORS, 1 h edge cache, ~1500 active players)
+  sleeperPlayers: () => fetch(`${BASE}/api/cbs/sleeper-players`, { headers: apiHeaders() }).then(r => r.json()),
   // Sleeper fallback (1 h CF cache) — used only if Databricks is unavailable
-  allPlayers: (limit = 2000) => fetch(`${API_BASE}/api/v1/players?limit=${limit}`).then(r => r.json()),
+  allPlayers: (limit = 2000) => fetch(`${API_BASE}/api/v1/players?limit=${limit}`, { headers: apiHeaders() }).then(r => r.json()),
 
   r2: {
-    players2026:  () => r2Get('fantasai/players/export_players_2026_draft.json'),
+    // Try .json first, then .js, then no extension.
+    // Always returns a plain array (handles root-array, {data:[...]}, {players:[...]} shapes).
+    players2026: async () => {
+      const paths = [
+        'fantasai/players/players_2026_draft.json',
+        'fantasai/players/export_players_2026_draft.json',
+        'fantasai/players/export_players_2026_draft.js',
+        'fantasai/players/export_players_2026_draft',
+      ];
+      for (const p of paths) {
+        const raw = await r2Get(p);
+        const arr = extractPlayerArray(raw);
+        if (arr.length > 0) return arr;
+      }
+      return null;
+    },
     lineup:   () => r2Get('fantasai/analysis/lineup_recommendations.json'),
-    injuries: () => r2Get('fantasai/injuries/silver_player_news.json'),
+    injuries: () => r2Get('fantasai/players/injury_overlay.json'),
     trends:   () => r2Get('fantasai/analysis/performance_trends.json'),
+    playerScores: () => r2Get('fantasai/analysis/player_scores.json'),
     trade:    () => r2Get('fantasai/analysis/trade_values.json'),
     waivers:  () => r2Get('fantasai/analysis/waiver_wire_recommendations.json'),
     drops:    () => r2Get('fantasai/analysis/drop_candidates.json'),
-    list:          (prefix = '') => fetch(`${API_BASE}/api/v1/r2/list?prefix=${encodeURIComponent(prefix)}`).then(r => r.json()),
+    list:     (prefix = '') => fetch(`${API_BASE}/api/v1/r2/list?prefix=${encodeURIComponent(prefix)}`, { headers: apiHeaders() }).then(r => r.json()),
     playerNotes:    () => r2Get('fantasai/news/player_notes.json'),
     playerNewsLinks: () => r2Get('fantasai/analysis/player_news.json'),
     criticalAlerts: () => r2Get('fantasai/news/critical_alerts.json'),
     enrichedNews:        () => r2Get('fantasai/news/enriched_news.json'),
     aiSummaries:         () => r2Get('fantasai/news/ai_summaries.json'),
     breakoutCandidates:  async () => {
-      // Try R2 first (Databricks export), then fall back to live Databricks SQL endpoint.
-      const r2 = await r2Get('fantasai/analysis/breakout_candidates.json');
-      if (r2) return r2;
+      // Backend exports to analysis/ (no fantasai/ prefix) — try both paths.
+      for (const p of ['analysis/breakout_candidates.json', 'fantasai/analysis/breakout_candidates.json']) {
+        const r2 = await r2Get(p);
+        if (r2) return r2;
+      }
+      // Fall back to live Databricks SQL endpoint.
       try {
         const res = await fetch(`${API_BASE}/api/v1/opportunity/rankings`);
         if (!res.ok) return null;
@@ -58,8 +102,31 @@ export const api = {
         }));
       } catch { return null; }
     },
-    sleeperPicks:        () => r2Get('fantasai/analysis/sleeper_picks.json'),
-    weatherForecast:     () => r2Get('fantasai/analysis/weather_forecast.json'),
+    sleeperPicks: async () => {
+      // Backend exports to analysis/ (no fantasai/ prefix) — try both paths.
+      for (const p of ['analysis/sleeper_picks.json', 'fantasai/analysis/sleeper_picks.json']) {
+        const r2 = await r2Get(p);
+        if (r2) return r2;
+      }
+      return null;
+    },
+    weatherForecast:      () => r2Get('fantasai/analysis/weather_forecast.json'),
+    defensePerformance: async () => {
+      for (const p of ['analysis/defense_performance.json', 'fantasai/analysis/defense_performance.json']) {
+        const r2 = await r2Get(p);
+        if (r2) return r2;
+      }
+      return null;
+    },
+    defensePredictions: async () => {
+      for (const p of ['predictions/defense_predictions.json', 'fantasai/predictions/defense_predictions.json']) {
+        const r2 = await r2Get(p);
+        if (r2) return r2;
+      }
+      return null;
+    },
+    // 583K records — only use on demand, not on page load
+    weeklyStats: () => r2Get('fantasai/stats/gold_weekly_stats.json'),
   },
 
   transactions: {

@@ -5,6 +5,8 @@ import { api } from './api.js';
 import { getPlayerMap, fetchBulkProjections } from './lib/sleeper.js';
 import { registerServiceWorker, getSubscriptionState, requestNotificationPermission, showLocalNotification } from './lib/pushNotifications.js';
 import { applyLeagueData, clearLeagueData } from './lib/leagueStore.js';
+import { loadUserPrefs, patchPrefs, getPrefs, clearPrefs } from './lib/remotePrefs.js';
+import { loadRemoteState, getTradeOffers, getWaivers, saveTradeOffers, saveWaivers, clearRemoteState } from './lib/remoteState.js';
 import { Sidebar, TopBar, MobileNav } from './components/layout.jsx';
 import AICopilot from './components/AICopilot.jsx';
 import { TweaksPanel, TweakSection, TweakColor, TweakRadio, TweakToggle, useTweaks } from './components/TweaksPanel.jsx';
@@ -254,7 +256,7 @@ async function fetchS3Roster(teamId) {
 // Excludes players currently on waivers (dropped).
 function buildMergedRoster(teamId, s3Ids) {
   try {
-    const waiverRaw  = JSON.parse(localStorage.getItem('fantasai_waivers') || '{}');
+    const { claims: waiverRaw } = getWaivers();
     const droppedIds = new Set(Object.keys(waiverRaw).map(Number));
 
     // Use whichever pick source has the most filled picks for this team
@@ -469,12 +471,10 @@ export default function App() {
   const userRef = React.useRef(user);
   React.useEffect(() => { userRef.current = user; }, [user]);
 
-  const [rosterSlotOverrides, setRosterSlotOverrides] = React.useState(() => {
-    try { return JSON.parse(localStorage.getItem('fantasai_slot_overrides') || '{}'); } catch { return {}; }
-  });
+  const [rosterSlotOverrides, setRosterSlotOverrides] = React.useState({});
   function handleSlotOverridesChange(overrides) {
     setRosterSlotOverrides(overrides);
-    localStorage.setItem('fantasai_slot_overrides', JSON.stringify(overrides));
+    patchPrefs({ slotOverrides: overrides });
   }
 
   // Count starters with injury/questionable status — drives the sidebar badge on Lineup Decisions
@@ -501,8 +501,36 @@ export default function App() {
     loadLeagueData(u.leagueId || 'tau');
     setMyRosterIds(new Set());
     setRosterSlotOverrides({});
-    localStorage.removeItem('fantasai_slot_overrides');
     if (u.needsPasswordChange) setNeedsPasswordChange(true);
+
+    // Load per-user prefs and league-wide state from R2 (no localStorage fallback)
+    const teamId = u.teamId || u.email || 'guest';
+    Promise.all([
+      loadUserPrefs(teamId),
+      loadRemoteState(),
+    ]).then(([prefs]) => {
+      // Apply persisted prefs to React state
+      if (prefs.slotOverrides && Object.keys(prefs.slotOverrides).length)
+        setRosterSlotOverrides(prefs.slotOverrides);
+      if (Array.isArray(prefs.watchlist))
+        setWatchlistIds(new Set(prefs.watchlist));
+      if (prefs.sources?.freeApis && prefs.sources?.feeds) {
+        // Merge: any source now enabled:true by default should be turned on even in old prefs
+        const mergedApis = { ...prefs.sources.freeApis };
+        FREE_DATA_SOURCES.forEach(s => { if (s.enabled && mergedApis[s.id] === false) mergedApis[s.id] = true; });
+        setSourcesState({ ...prefs.sources, freeApis: mergedApis });
+      }
+
+      // Apply trade offers and waivers from remoteState
+      const offers = getTradeOffers();
+      setTradeOffers(offers);
+      const { claims } = getWaivers();
+      const now = Date.now();
+      setWaiverQueue(
+        Object.fromEntries(Object.entries(claims).filter(([, v]) => new Date(v.expiresAt).getTime() > now))
+      );
+    });
+
     if (u.teamId) {
       setRosterLoading(true);
       fetchS3Roster(u.teamId).then(s3Ids => {
@@ -545,16 +573,39 @@ export default function App() {
     };
   }, []);
 
-  // On cold load (already logged in): restore league data from cache, then fetch fresh.
+  // On cold load (already logged in): restore league data from server, then load remote prefs.
   // Also silently re-validates the cached user against R2 so isAdmin/isCommissioner
   // are always current — regardless of which browser or device you're on.
   React.useEffect(() => {
     const leagueId = user?.leagueId || 'tau';
-    try {
-      const cached = JSON.parse(localStorage.getItem(`fantasai_league_data_${leagueId}`) || 'null');
-      if (cached) applyLeagueData(cached);
-    } catch {}
     loadLeagueData(leagueId);
+
+    // Load per-user prefs and shared league state from R2 (cold reload path)
+    if (user?.teamId) {
+      const teamId = user.teamId;
+      Promise.all([
+        loadUserPrefs(teamId),
+        loadRemoteState(),
+      ]).then(([prefs]) => {
+        if (prefs.slotOverrides && Object.keys(prefs.slotOverrides).length)
+          setRosterSlotOverrides(prefs.slotOverrides);
+        if (Array.isArray(prefs.watchlist))
+          setWatchlistIds(new Set(prefs.watchlist));
+        if (prefs.sources?.freeApis && prefs.sources?.feeds) {
+          const mergedApis = { ...prefs.sources.freeApis };
+          FREE_DATA_SOURCES.forEach(s => { if (s.enabled && mergedApis[s.id] === false) mergedApis[s.id] = true; });
+          setSourcesState({ ...prefs.sources, freeApis: mergedApis });
+        }
+
+        const offers = getTradeOffers();
+        setTradeOffers(offers);
+        const { claims } = getWaivers();
+        const now = Date.now();
+        setWaiverQueue(
+          Object.fromEntries(Object.entries(claims).filter(([, v]) => new Date(v.expiresAt).getTime() > now))
+        );
+      });
+    }
 
     // Refresh permissions from R2 (fire-and-forget — UI renders from cache first)
     if (user) {
@@ -582,44 +633,16 @@ export default function App() {
   }, []); // intentionally runs only once on mount
 
   // Load live player list from Databricks → Sleeper fallback.
-  // Load live 2026 player list: players_2026_draft (R2) → dbPlayers → Sleeper fallback.
-  // Runs once on mount; the store already holds the static seed so the UI
-  // renders immediately and updates reactively when live data arrives.
+  // Load 2026 player pool from R2 (fantasai/players/export_players_2026_draft.json).
+  // Refreshed daily at 8:00 AM UTC by the Databricks ETL — 988 active+IR roster players.
+  // No fallbacks: if R2 is unavailable the store stays empty and the UI shows 0 players.
   React.useEffect(() => {
-    // Primary: ML-ranked 2026 draft table from Databricks via R2
     api.r2.players2026()
       .then(rows => {
-        // players2026() always returns a plain array (handles {data:[...]}, {players:[...]}, root-array shapes)
-        const filtered = Array.isArray(rows) ? rows.filter(p => (p.isDraftable ?? p.is_draftable) !== false) : [];
-        // Require at least 200 players — a partial/test export falls through to Sleeper
-        if (filtered.length >= 200) { setPlayers(normalizePlayerList(filtered)); return; }
-        throw new Error(`R2 export too small (${filtered.length} records) — falling back`);
+        const arr = Array.isArray(rows) ? rows : [];
+        if (arr.length > 0) setPlayers(normalizePlayerList(arr));
       })
-      // Secondary: CBS Worker Sleeper proxy (~1500 active players, no CORS, 1 h edge cache)
-      .catch(() =>
-        api.sleeperPlayers().then(raw => {
-          const arr = raw?.players || [];
-          const normalized = normalizePlayerList(arr);
-          if (normalized.length > 100) { setPlayers(normalized); return; }
-          throw new Error('empty');
-        })
-      )
-      // Worker Sleeper: api.fantasai.net/api/v1/players (up to 2000 records, 1 h CF cache)
-      .catch(() =>
-        api.allPlayers(2000).then(raw => {
-          const arr = raw?.players || (Array.isArray(raw) ? raw : []);
-          const normalized = normalizePlayerList(arr);
-          if (normalized.length > 100) { setPlayers(normalized); return; }
-          throw new Error('empty');
-        })
-      )
-      .catch(() =>
-        getPlayerMap().then(map => {
-          const arr = Object.values(map).filter(p => p.team && p.status !== 'Inactive');
-          const normalized = normalizePlayerList(arr);
-          if (normalized.length > 0) setPlayers(normalized);
-        }).catch(() => {})
-      )
+      .catch(() => {})
       // After players are loaded (regardless of source), backfill bye weeks from Sleeper.
       // Chained here so patchPlayers always runs after setPlayers, avoiding the race where
       // the separate effect would win and find _players still empty.
@@ -713,11 +736,19 @@ export default function App() {
 
   function handleLogout() {
     localStorage.removeItem('fantasai_user');
-    localStorage.removeItem('fantasai_slot_overrides');
     setUser(null);
     setMyRosterIds(new Set());
     setRosterLoading(false);
     setRosterSlotOverrides({});
+    setWatchlistIds(new Set());
+    setTradeOffers([]);
+    setWaiverQueue({});
+    setSourcesState({
+      freeApis: Object.fromEntries(FREE_DATA_SOURCES.map(s => [s.id, s.enabled])),
+      feeds:    Object.fromEntries(RANKING_SOURCES.map(s => [s.id, { enabled: s.enabled, weight: s.weight }])),
+    });
+    clearPrefs();
+    clearRemoteState();
     clearLeagueData();
   }
 
@@ -733,16 +764,15 @@ export default function App() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      // Wipe every localStorage key that carries roster or draft state
-      [
-        'fantasai_mock_picks_saved',
-        'fantasai_live_picks',
-        'fantasai_mock_picks_wip',
-        'fantasai_mock_session',
-        'fantasai_waivers',
-        'fantasai_slot_overrides',
-        'fantasai_waiver_queue',
-      ].forEach(k => localStorage.removeItem(k));
+      // Wipe mock draft state (legitimately local/ephemeral)
+      ['fantasai_mock_picks_saved', 'fantasai_live_picks',
+       'fantasai_mock_picks_wip',   'fantasai_mock_session'].forEach(k => localStorage.removeItem(k));
+
+      // Wipe R2 waiver and slot-override state
+      await Promise.allSettled([
+        saveWaivers({}, []),
+        (async () => { patchPrefs({ slotOverrides: {} }); })(),
+      ]);
 
       // Reset in-memory TEAM_ROSTERS so all screens see empty state immediately
       clearAllRosters();
@@ -750,6 +780,7 @@ export default function App() {
       // Reset React state for the current session
       setMyRosterIds(new Set());
       setRosterSlotOverrides({});
+      setWaiverQueue({});
       setRosterResetState('done');
       setTimeout(() => setRosterResetState('idle'), 4000);
     } catch {
@@ -809,24 +840,15 @@ export default function App() {
       }
     }
   }, []);
-  const [waiverQueue, setWaiverQueue] = React.useState(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem('fantasai_waivers') || '{}');
-      const now = Date.now();
-      // Drop expired entries on load
-      return Object.fromEntries(Object.entries(raw).filter(([, v]) => new Date(v.expiresAt).getTime() > now));
-    } catch { return {}; }
-  });
-
-  const [tradeOffers, setTradeOffers] = React.useState(() => {
-    try { return JSON.parse(localStorage.getItem('fantasai_trade_offers') || '[]'); } catch { return []; }
-  });
+  // Initialized from remoteState on login — no localStorage
+  const [waiverQueue, setWaiverQueue] = React.useState({});
+  const [tradeOffers, setTradeOffers] = React.useState([]);
 
   function handleSendTradeOffer({ fromTeamId, toTeamId, giveIds, getIds }) {
     const offer = { id: Date.now(), fromTeamId, toTeamId, giveIds, getIds, sentAt: new Date().toISOString(), status: 'pending' };
     setTradeOffers(prev => {
       const next = [...prev, offer];
-      localStorage.setItem('fantasai_trade_offers', JSON.stringify(next));
+      saveTradeOffers(next);
       return next;
     });
     // Log as pending trade — will be superseded by the accept log if accepted
@@ -848,7 +870,7 @@ export default function App() {
   function handleDeleteTradeOffer(offerId) {
     setTradeOffers(prev => {
       const next = prev.filter(o => o.id !== offerId);
-      localStorage.setItem('fantasai_trade_offers', JSON.stringify(next));
+      saveTradeOffers(next);
       return next;
     });
   }
@@ -883,7 +905,7 @@ export default function App() {
       const patch = { status: response };
       if (comment) patch.responseComment = comment;
       const next = prev.map(o => o.id === offerId ? { ...o, ...patch } : o);
-      localStorage.setItem('fantasai_trade_offers', JSON.stringify(next));
+      saveTradeOffers(next);
       return next;
     });
   }
@@ -917,7 +939,7 @@ export default function App() {
     const entry = { droppedAt: drop.toISOString(), expiresAt: earliest.toISOString(), teamId: userRef.current?.teamId };
     setWaiverQueue(prev => {
       const next = { ...prev, [id]: entry };
-      localStorage.setItem('fantasai_waivers', JSON.stringify(next));
+      saveWaivers(next, undefined);
       return next;
     });
   }, []);
@@ -961,37 +983,30 @@ export default function App() {
       const entry = { droppedAt: drop.toISOString(), expiresAt: earliest.toISOString(), teamId: userRef.current?.teamId };
       setWaiverQueue(prev => {
         const next = { ...prev, [dropId]: entry };
-        localStorage.setItem('fantasai_waivers', JSON.stringify(next));
+        saveWaivers(next, undefined);
         return next;
       });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [watchlistIds, setWatchlistIds] = React.useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('fantasai_watchlist') || '[]')); } catch { return new Set(); }
-  });
+  // Initialized from remotePrefs on login — no localStorage
+  const [watchlistIds, setWatchlistIds] = React.useState(new Set());
   const handleToggleWatch = React.useCallback(id => {
     setWatchlistIds(prev => {
       const n = new Set(prev);
       if (n.has(id)) n.delete(id); else n.add(id);
-      localStorage.setItem('fantasai_watchlist', JSON.stringify([...n]));
+      patchPrefs({ watchlist: [...n] });
       return n;
     });
   }, []);
 
-  const [sourcesState, setSourcesState] = React.useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('fantasai_sources') || 'null');
-      if (saved?.freeApis && saved?.feeds) return saved;
-    } catch {}
-    return {
-      freeApis: Object.fromEntries(FREE_DATA_SOURCES.map(s => [s.id, s.enabled])),
-      feeds: Object.fromEntries(RANKING_SOURCES.map(s => [s.id, { enabled: s.enabled, weight: s.weight }])),
-    };
-  });
+  const [sourcesState, setSourcesState] = React.useState(() => ({
+    freeApis: Object.fromEntries(FREE_DATA_SOURCES.map(s => [s.id, s.enabled])),
+    feeds:    Object.fromEntries(RANKING_SOURCES.map(s => [s.id, { enabled: s.enabled, weight: s.weight }])),
+  }));
   function handleSourcesChange(next) {
     setSourcesState(next);
-    localStorage.setItem('fantasai_sources', JSON.stringify(next));
+    patchPrefs({ sources: next });
   }
 
   function handleExport() {

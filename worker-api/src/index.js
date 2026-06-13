@@ -185,6 +185,13 @@ export default {
         // League management
         if (url.pathname === '/api/v1/leagues/create')        return handleLeagueCreate(request, env);
         if (url.pathname === '/api/v1/leagues/import')        return handleLeagueImport(request, env);
+        if (url.pathname === '/api/v1/labels/article')        return await handleLabelsPost(request, env);
+        if (url.pathname === '/api/v1/feedback/vote')         return await handleFeedbackVote(request, env);
+        if (url.pathname === '/api/v1/user-prefs')            return await handleUserPrefsPost(request, env);
+        if (url.pathname === '/api/v1/trade-offers')          return await handleTradeOffersPost(request, env);
+        if (url.pathname === '/api/v1/waivers')               return await handleWaiversPost(request, env);
+        if (url.pathname === '/api/v1/draft/ghost-pick')      return await handleGhostPick(request, env);
+        if (url.pathname === '/api/v1/draft/ghost-reset')     return await handleGhostReset(request, env);
         return json({ error: 'Not found' }, 404);
       }
 
@@ -207,10 +214,10 @@ export default {
       if (url.pathname === '/api/v1/nfl/schedule')        return handleNflSchedule(url);
       if (url.pathname === '/api/v1/nfl/news')            return handleNflNews(url);
       if (url.pathname === '/api/v1/players')             return handlePlayers(url);
-      if (url.pathname === '/api/v1/cbs/players')         return await handleCbsPlayers(env);
+      if (url.pathname === '/api/v1/cbs/players')         return await handleCbsPlayers(request, env);
       if (url.pathname === '/api/v1/weather')            return await handleWeatherGet(env);
       if (url.pathname === '/api/v1/transactions')      return await handleTransactionsGet(env);
-      if (url.pathname === '/api/v1/cbs/rankings')        return await handleCbsRankings(url, env);
+      if (url.pathname === '/api/v1/cbs/rankings')        return await handleCbsRankings(url, request, env);
       if (url.pathname === '/api/v1/twitter/beat')        return await handleBeatWriterNews();
       if (url.pathname.startsWith('/api/v1/player/'))   return await handlePlayerProfile(url, env);
       if (url.pathname === '/api/v1/db/players')          return await handleDbPlayers(env);
@@ -219,6 +226,12 @@ export default {
       if (url.pathname === '/api/v1/news/critical')      return await handleDbCritical(env);
       if (url.pathname === '/api/v1/news/articles')      return await handleDbArticles(url, env);
       if (url.pathname === '/api/v1/news/ai-summaries') return await handleDbAiSummaries(env);
+      if (url.pathname === '/api/v1/labels/article')     return await handleLabelsGet(env);
+      if (url.pathname === '/api/v1/feedback/scores')    return await handleFeedbackScores(env);
+      if (url.pathname === '/api/v1/user-prefs')         return await handleUserPrefsGet(url, env);
+      if (url.pathname === '/api/v1/trade-offers')       return await handleTradeOffersGet(env);
+      if (url.pathname === '/api/v1/waivers')            return await handleWaiversGet(env);
+      if (url.pathname === '/api/v1/draft/ghost-board')  return await handleGhostBoard(url, env);
       if (url.pathname === '/api/v1/leaderboard/live')   return await handleDbLeaderboard(env);
       if (url.pathname === '/api/v1/games/active')       return await handleDbActiveGames(env);
       if (url.pathname === '/api/v1/opportunity/rankings') return await handleDbOpportunity(env);
@@ -490,19 +503,21 @@ async function handleDraft(url, env, req) {
   return cbsFetch(env, `/api/cbs/draft?year=${year}`, req?.headers?.get('X-CBS-Cookie'));
 }
 
-async function handleCbsRankings(url, env) {
+async function handleCbsRankings(url, request, env) {
   if (!env.CBS_WORKER_URL) return json({ error: 'CBS_WORKER_URL not configured', rankings: [], source: 'cbs' }, 503);
-  const pos  = url.searchParams.get('pos') || 'ALL';
-  const data = await cbsFetch(env, `/api/cbs/rankings?pos=${pos}`);
+  const pos    = url.searchParams.get('pos') || 'ALL';
+  const cookie = request?.headers?.get('X-CBS-Cookie') || null;
+  const data   = await cbsFetch(env, `/api/cbs/rankings?pos=${pos}`, cookie);
   return new Response(JSON.stringify(data), {
     status: 200,
     headers: { ...corsHeaders(), 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=900' },
   });
 }
 
-async function handleCbsPlayers(env) {
+async function handleCbsPlayers(request, env) {
   if (!env.CBS_WORKER_URL) return json({ error: 'CBS_WORKER_URL not configured', players: [], count: 0, source: 'cbs' }, 503);
-  const data = await cbsFetch(env, '/api/cbs/players');
+  const cookie = request?.headers?.get('X-CBS-Cookie') || null;
+  const data   = await cbsFetch(env, '/api/cbs/players', cookie);
   return new Response(JSON.stringify(data), {
     status: 200,
     headers: { ...corsHeaders(), 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' },
@@ -510,9 +525,11 @@ async function handleCbsPlayers(env) {
 }
 
 // ── Players (public, cached 1 h) ──────────────────────────────────────────────
+// Includes: active roster, IR, suspended, practice squad, recent free agents.
+// Excludes: retired players, college-only players, non-fantasy positions.
 
 async function handlePlayers(url) {
-  const limit     = Math.min(parseInt(url.searchParams.get('limit') || '300', 10), 500);
+  const limit     = Math.min(parseInt(url.searchParams.get('limit') || '2500', 10), 2500);
   const posFilter = (url.searchParams.get('pos') || 'QB,RB,WR,TE,K,DEF').split(',');
 
   const base = 'https://api.sleeper.app/v1';
@@ -524,18 +541,28 @@ async function handlePlayers(url) {
 
   const raw = await res.json();
   const players = Object.entries(raw)
-    .filter(([, p]) => p.active && posFilter.includes(p.position) && p.search_rank != null)
+    .filter(([, p]) => {
+      if (!posFilter.includes(p.position)) return false;
+      // Active/contracted players: active roster, IR, suspended, practice squad
+      if (p.active) return true;
+      // Free agents who have NFL experience and are still fantasy-relevant
+      if (!p.team && p.years_exp > 0 && p.search_rank != null && p.search_rank < 500) return true;
+      return false;
+    })
     .map(([sleeperId, p]) => ({
-      id:     sleeperId,
-      name:   p.full_name || [p.first_name, p.last_name].filter(Boolean).join(' '),
-      pos:    p.position,
-      team:   p.team || 'FA',
-      num:    p.number   || null,
-      age:    p.age      || null,
-      status: p.injury_status && p.injury_status !== 'Na' ? p.injury_status : 'OK',
-      ecr:    p.search_rank,
-      adp:    p.search_rank,
-      owned:  parseFloat(Math.max(0, 100 - p.search_rank * 0.28).toFixed(1)),
+      id:         sleeperId,
+      name:       p.full_name || [p.first_name, p.last_name].filter(Boolean).join(' '),
+      pos:        p.position,
+      team:       p.team || 'FA',
+      num:        p.number    || null,
+      age:        p.age       || null,
+      years_exp:  p.years_exp ?? null,
+      status:     p.injury_status && p.injury_status !== 'Na' ? p.injury_status : 'OK',
+      ecr:        p.search_rank   ?? 9999,
+      adp:        p.search_rank   ?? 9999,
+      owned:      p.search_rank != null
+                    ? parseFloat(Math.max(0, 100 - p.search_rank * 0.28).toFixed(1))
+                    : 0,
     }))
     .sort((a, b) => a.ecr - b.ecr)
     .slice(0, limit);
@@ -1362,7 +1389,80 @@ function resolveWeekParams(url) {
   return { week, season, type };
 }
 
-// ── FantasAI Chat (Databricks proxy) ─────────────────────────────────────────
+// ── FantasAI Chat ──────────────────────────────────────────────────────────────
+// Priority: LOCAL_CHAT_URL (Ollama) → OPENAI_API_KEY (GPT-4o mini) → ANTHROPIC_API_KEY
+// Recommended: set OPENAI_API_KEY for cloud chat — best reasoning + 128k context at ~$0.001/msg
+const CHAT_SYSTEM_PROMPT =
+  'You are FantasAI, an expert fantasy football copilot. ' +
+  'Answer concisely and directly. Use bullet points for lists. ' +
+  'Focus on actionable advice — start/sit decisions, waiver adds, trade values, injury impact. ' +
+  'When roster context is provided, tailor your answer to those specific players.';
+
+async function callLocalChat(userContent, rosterPlayers, localUrl, fantasaiKey) {
+  const url = localUrl.replace(/\/$/, '') + '/chat';
+  const res = await fetch(url, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'X-FantasAI-Key': fantasaiKey || '',
+    },
+    body:   JSON.stringify({ question: userContent, rosterPlayers }),
+    signal: AbortSignal.timeout(90000),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Local chat ${res.status}: ${detail.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data.answer ?? '';
+}
+
+async function callOpenAI(userContent, apiKey) {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method:  'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      model:      'gpt-4o-mini',
+      max_tokens: 1024,
+      messages:   [
+        { role: 'system', content: CHAT_SYSTEM_PROMPT },
+        { role: 'user',   content: userContent },
+      ],
+    }),
+    signal: AbortSignal.timeout(28000),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`OpenAI ${res.status}: ${detail.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content ?? '';
+}
+
+async function callAnthropic(userContent, apiKey) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:  'POST',
+    headers: {
+      'x-api-key':         apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type':      'application/json',
+    },
+    body:   JSON.stringify({
+      model:      'claude-opus-4-8',
+      max_tokens: 1024,
+      system:     CHAT_SYSTEM_PROMPT,
+      messages:   [{ role: 'user', content: userContent }],
+    }),
+    signal: AbortSignal.timeout(28000),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Anthropic ${res.status}: ${detail.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data?.content?.[0]?.text ?? '';
+}
+
 async function handleChat(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
@@ -1373,13 +1473,14 @@ async function handleChat(request, env) {
   const context       = (body.context || '').trim();
   const rosterPlayers = Array.isArray(body.rosterPlayers) ? body.rosterPlayers : [];
 
-  const workspaceUrl = (env.DATABRICKS_URL || '').replace(/\/$/, '');
-  const token        = env.DATABRICKS_TOKEN;
-  if (!workspaceUrl || !token) {
-    return json({ error: 'AI endpoint not configured — set DATABRICKS_URL and DATABRICKS_TOKEN secrets' }, 503);
+  const hasLocal     = !!env.LOCAL_CHAT_URL;
+  const hasOpenAI    = !!env.OPENAI_API_KEY;
+  const hasAnthropic = !!env.ANTHROPIC_API_KEY;
+  if (!hasLocal && !hasOpenAI && !hasAnthropic) {
+    return json({ error: 'No AI backend configured. Set OPENAI_API_KEY (recommended), LOCAL_CHAT_URL, or ANTHROPIC_API_KEY.' }, 503);
   }
 
-  // #2 — Server-side live enrichment: fetch real-time injury data for roster players
+  // Live enrichment: real-time injury data for roster players
   let liveEnrichment = '';
   if (rosterPlayers.length > 0) {
     try { liveEnrichment = await buildLiveEnrichment(rosterPlayers, env); }
@@ -1387,10 +1488,10 @@ async function handleChat(request, env) {
   }
 
   const enrichedContext = liveEnrichment ? `${context}\n\n${liveEnrichment}` : context;
-  const fullQuestion    = enrichedContext ? `${enrichedContext}\n\nUser question: ${question}` : question;
+  const userContent     = enrichedContext ? `${enrichedContext}\n\nUser question: ${question}` : question;
 
-  // #3 — CF Cache: check before hitting Databricks
-  const cacheKey = await chatCacheKey(fullQuestion);
+  // CF Cache: check before calling any AI
+  const cacheKey = await chatCacheKey(userContent);
   const cache    = caches.default;
   const cached   = await cache.match(cacheKey);
   if (cached) {
@@ -1401,43 +1502,59 @@ async function handleChat(request, env) {
     });
   }
 
-  // #1 — Retry logic: up to 3 attempts with backoff (handles Databricks cold starts)
-  const endpointUrl = `${workspaceUrl}/serving-endpoints/fantasai-chat-api/invocations`;
-  let answer, lastErr;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) await sleep(1500 * attempt);
+  let answer, source, lastErr;
+
+  // 1. Local Ollama (fastest, free — requires tunnel)
+  if (hasLocal) {
     try {
-      const res = await fetch(endpointUrl, {
-        method:  'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ inputs: { question: [fullQuestion] } }),
-        signal:  AbortSignal.timeout(28000),
-      });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => '');
-        throw new Error(`Databricks ${res.status}: ${detail.slice(0, 200)}`);
-      }
-      const data = await res.json();
-      const raw  = data?.predictions?.[0];
-      answer  = typeof raw === 'string' ? raw : (raw?.answer ?? JSON.stringify(raw));
+      answer  = await callLocalChat(userContent, rosterPlayers, env.LOCAL_CHAT_URL, env.FANTASAI_KEY);
+      source  = 'local';
       lastErr = null;
-      break;
     } catch (err) {
       lastErr = err;
-      console.warn(`Databricks attempt ${attempt + 1}/3 failed: ${err.message}`);
+      console.warn(`Local chat failed: ${err.message} — trying cloud`);
     }
   }
 
-  if (lastErr) return json({ error: `Databricks unreachable: ${lastErr.message}` }, 502);
+  // 2. OpenAI GPT-4o mini (recommended cloud — best reasoning + 128k context)
+  if (answer == null && hasOpenAI) {
+    try {
+      answer  = await callOpenAI(userContent, env.OPENAI_API_KEY);
+      source  = 'openai';
+      lastErr = null;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`OpenAI failed: ${err.message} — trying Anthropic`);
+    }
+  }
 
-  // #3 — Store in CF Cache for 5 minutes
-  const payload      = { answer };
+  // 3. Anthropic Claude fallback
+  if (answer == null && hasAnthropic) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await sleep(1500 * attempt);
+      try {
+        answer  = await callAnthropic(userContent, env.ANTHROPIC_API_KEY);
+        source  = 'anthropic';
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        console.warn(`Anthropic attempt ${attempt + 1}/3 failed: ${err.message}`);
+      }
+    }
+  }
+
+  if (answer == null) return json({ error: `AI unreachable: ${lastErr?.message}` }, 502);
+
+  // Store in CF Cache for 5 minutes
+  const payload       = { answer };
   const cacheResponse = new Response(JSON.stringify(payload), {
     status:  200,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' },
   });
   await cache.put(cacheKey, cacheResponse);
 
+  console.log(`Chat answered via ${source}`);
   return json(payload, 200);
 }
 
@@ -1628,31 +1745,38 @@ async function handlePlayerProfile(url, env) {
   return json({ status: 'success', data: rows[0] || null, metadata: { timestamp: new Date().toISOString() } }, 200);
 }
 
-// Preferred player tables in priority order (gold > silver > bronze dim > fallback)
+// Preferred player tables in priority order — export/gold only, never silver/bronze
 const PLAYER_TABLE_CANDIDATES = [
-  'gold_player_dim', 'silver_player_dim', 'dim_players', 'players',
-  'player_dim', 'silver_players', 'gold_players', 'bronze_player_dim',
+  'export_players_2026_draft',
+  'draft_ready_roster_2026',
+  'gold_player_dim',
+  'gold_players',
+  'dim_players',
+  'players',
+  'player_dim',
 ];
 
 async function handleDbPlayers(env) {
-  // Discover which player table exists in main.fantasai
-  const tables = await queryDatabricks(`SHOW TABLES IN main.fantasai`, env);
-  const tableNames = tables.map(t => t.tableName || t.table_name || '').filter(Boolean);
+  // Try the priority list first without a SHOW TABLES round-trip
+  let chosenTable = null;
+  let rows = null;
 
-  let chosenTable = PLAYER_TABLE_CANDIDATES.find(c => tableNames.includes(c));
-  if (!chosenTable) {
-    // Fall back to any table whose name contains 'player'
-    chosenTable = tableNames.find(n => n.includes('player'));
+  for (const candidate of PLAYER_TABLE_CANDIDATES) {
+    try {
+      const r = await queryDatabricks(
+        `SELECT * FROM main.fantasai.${candidate} LIMIT 2500`, env
+      );
+      if (r && r.length > 0) { chosenTable = candidate; rows = r; break; }
+    } catch {}
   }
-  if (!chosenTable) {
+
+  if (!chosenTable || !rows) {
     return json({
       source: 'databricks', error: 'No player table found',
-      availableTables: tableNames,
       fetchedAt: new Date().toISOString(), count: 0, players: [],
     }, 200);
   }
 
-  const rows = await queryDatabricks(`SELECT * FROM main.fantasai.${chosenTable} LIMIT 2000`, env);
   return json({ source: 'databricks', table: chosenTable, fetchedAt: new Date().toISOString(), count: rows.length, players: rows }, 200);
 }
 
@@ -1725,18 +1849,7 @@ async function handleDbArticles(url, env) {
     } catch (_) {}
   }
 
-  // Final fallback: silver_news
-  if (articles.length === 0) {
-    try {
-      const rows = await queryDatabricks(
-        `SELECT title AS headline, source AS article_url, player_id AS primary_player_id, published_at, summary AS description FROM main.fantasai.silver_news ORDER BY published_at DESC LIMIT ${limit}`, env
-      );
-      if (rows.length > 0) {
-        articles = rows.map(normalizeArticleRow).filter(Boolean);
-        source = 'silver_news';
-      }
-    } catch (_) {}
-  }
+  // silver_news fallback removed — violates medallion architecture (silver is internal-only)
 
   return json({
     status: 'success',
@@ -1793,6 +1906,145 @@ async function handleDbOpportunity(env) {
     `SELECT player_name, position, team, opportunity_score, opportunity_tier as tier FROM main.fantasai.player_opportunity_scores ORDER BY opportunity_score DESC LIMIT 100`, env
   );
   return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
+}
+
+// ── Article Labeling ──────────────────────────────────────────────────────────
+
+const LABELS_R2_KEY = 'fantasai/labeling/article_labels.json';
+
+async function handleLabelsGet(env) {
+  try {
+    const obj = await env.BUCKET.get(LABELS_R2_KEY);
+    if (!obj) return json({ status: 'ok', labels: [], metadata: { count: 0 } }, 200);
+    const labels = JSON.parse(await obj.text());
+    const arr = Array.isArray(labels) ? labels : [];
+    return json({ status: 'ok', labels: arr, metadata: { count: arr.length } }, 200);
+  } catch (err) {
+    return json({ status: 'ok', labels: [], error: err.message }, 200);
+  }
+}
+
+async function handleLabelsPost(request, env) {
+  if (env.FANTASAI_KEY) {
+    const k = request.headers.get('X-FantasAI-Key');
+    if (k !== env.FANTASAI_KEY) return json({ error: 'Unauthorized' }, 401);
+  }
+  const body = await request.json().catch(() => ({}));
+  const { article_url, headline, publisher, published_at, original_player_name, original_position,
+          original_team, labeled_player_name, labeled_position, labeled_team, player_sleeper_id,
+          impact_category, impact_direction, relevance_score, is_relevant, notes, user_id } = body;
+  if (!article_url || !labeled_position) return json({ error: 'article_url and labeled_position are required' }, 400);
+
+  let existing = [];
+  try {
+    const obj = await env.BUCKET.get(LABELS_R2_KEY);
+    if (obj) { existing = JSON.parse(await obj.text()); if (!Array.isArray(existing)) existing = []; }
+  } catch (_) {}
+
+  const label = {
+    label_id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    article_url,
+    headline: headline || '',
+    publisher: publisher || '',
+    published_at: published_at || null,
+    original_player_name: original_player_name || '',
+    original_position: original_position || '',
+    original_team: original_team || '',
+    labeled_player_name: labeled_player_name || '',
+    labeled_position,
+    labeled_team: labeled_team || '',
+    player_sleeper_id: player_sleeper_id || null,
+    impact_category: impact_category || 'analysis',
+    impact_direction: impact_direction || 'neutral',
+    relevance_score: Number(relevance_score) || 3,
+    is_relevant: is_relevant !== false,
+    notes: notes || '',
+    labeled_by: user_id ? String(user_id) : 'commissioner',
+    labeled_at: new Date().toISOString(),
+    label_source: 'ui_labeler',
+  };
+
+  existing = existing.filter(l => l.article_url !== article_url);
+  existing.unshift(label);
+
+  await env.BUCKET.put(LABELS_R2_KEY, JSON.stringify(existing, null, 2), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+
+  return json({ status: 'ok', label, metadata: { total_labels: existing.length } }, 200);
+}
+
+// ── Human-in-the-Loop Feedback Voting ────────────────────────────────────────
+
+const FEEDBACK_LABEL_SCORES = {
+  BREAKOUT: 10, INJURY_IMPACT: 15, DEPTH_CHART: 8, START_SIT: 5,
+  WAIVER_WIRE: 8, TRADE_IMPACT: 7, COACH_SPEAK: 2,
+  HYPE_ONLY: -10, OLD_NEWS: -5, CLICKBAIT: -15,
+};
+const FEEDBACK_SCORES_KEY = 'fantasai/feedback/article_scores.json';
+
+async function handleFeedbackVote(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const { article_url, headline, user_id, labels, confidence } = body;
+  if (!article_url || !Array.isArray(labels) || !labels.length) {
+    return json({ error: 'article_url and labels[] required' }, 400);
+  }
+
+  const now = new Date();
+  const [yr, mo, dy] = now.toISOString().slice(0, 10).split('-');
+  const dailyKey = `fantasai/feedback/${yr}/${mo}/${dy}/votes.json`;
+
+  const vote = {
+    article_url,
+    headline:    headline || '',
+    user_id:     user_id  || 'anon',
+    timestamp:   now.toISOString(),
+    labels:      labels.filter(l => FEEDBACK_LABEL_SCORES.hasOwnProperty(l)),
+    confidence:  Math.min(5, Math.max(1, Number(confidence) || 3)),
+  };
+
+  // 1. Append to daily file (Databricks ingests these nightly)
+  let daily = [];
+  try {
+    const obj = await env.BUCKET.get(dailyKey);
+    if (obj) { daily = JSON.parse(await obj.text()); if (!Array.isArray(daily)) daily = []; }
+  } catch (_) {}
+  daily.push(vote);
+  await env.BUCKET.put(dailyKey, JSON.stringify(daily, null, 2), { httpMetadata: { contentType: 'application/json' } });
+
+  // 2. Update running score aggregate (keyed by article_url)
+  let scores = {};
+  try {
+    const obj = await env.BUCKET.get(FEEDBACK_SCORES_KEY);
+    if (obj) { scores = JSON.parse(await obj.text()); if (typeof scores !== 'object' || Array.isArray(scores)) scores = {}; }
+  } catch (_) {}
+
+  const prev = scores[article_url] || { vote_count: 0, score: 0, label_counts: {}, headline: '', last_voted: '' };
+  prev.headline   = headline || prev.headline;
+  prev.last_voted = now.toISOString();
+  prev.vote_count += 1;
+
+  const voteScore = vote.labels.reduce((s, l) => s + (FEEDBACK_LABEL_SCORES[l] || 0), 0);
+  prev.score = Math.round(((prev.score * (prev.vote_count - 1)) + voteScore) / prev.vote_count);
+
+  vote.labels.forEach(l => { prev.label_counts[l] = (prev.label_counts[l] || 0) + 1; });
+  prev.top_labels = Object.entries(prev.label_counts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([l]) => l);
+
+  scores[article_url] = prev;
+  await env.BUCKET.put(FEEDBACK_SCORES_KEY, JSON.stringify(scores, null, 2), { httpMetadata: { contentType: 'application/json' } });
+
+  return json({ status: 'ok', vote, aggregate: prev }, 200);
+}
+
+async function handleFeedbackScores(env) {
+  try {
+    const obj = await env.BUCKET.get(FEEDBACK_SCORES_KEY);
+    if (!obj) return json({ status: 'ok', scores: {} }, 200);
+    const scores = JSON.parse(await obj.text());
+    return json({ status: 'ok', scores: typeof scores === 'object' && !Array.isArray(scores) ? scores : {} }, 200);
+  } catch (err) {
+    return json({ status: 'ok', scores: {}, error: err.message }, 200);
+  }
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -1982,6 +2234,102 @@ async function handlePushSend(request, env) {
   });
 }
 
+// ── Per-user preferences ─────────────────────────────────────────────────────
+// Stored in R2 as fantasai/user-prefs/{teamId}.json
+// Contains: watchlist, slotOverrides, customRankings, scoringWeights, theme, etc.
+
+const USER_PREFS_PREFIX = 'fantasai/user-prefs/';
+
+async function handleUserPrefsGet(url, env) {
+  const teamId = url.searchParams.get('teamId');
+  if (!teamId) return json({ error: 'teamId required' }, 400);
+  try {
+    const obj = await env.BUCKET.get(`${USER_PREFS_PREFIX}${teamId}.json`);
+    if (!obj) return json({ status: 'ok', prefs: {} }, 200);
+    const prefs = JSON.parse(await obj.text());
+    return json({ status: 'ok', prefs: typeof prefs === 'object' ? prefs : {} }, 200);
+  } catch (_) {
+    return json({ status: 'ok', prefs: {} }, 200);
+  }
+}
+
+async function handleUserPrefsPost(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const { teamId, prefs } = body;
+  if (!teamId) return json({ error: 'teamId required' }, 400);
+  if (typeof prefs !== 'object' || prefs === null) return json({ error: 'prefs object required' }, 400);
+  await env.BUCKET.put(
+    `${USER_PREFS_PREFIX}${teamId}.json`,
+    JSON.stringify({ ...prefs, _savedAt: new Date().toISOString() }),
+    { httpMetadata: { contentType: 'application/json' } }
+  );
+  return json({ status: 'ok' }, 200);
+}
+
+// ── League-wide trade offers ──────────────────────────────────────────────────
+// Stored in R2 as fantasai/trades/offers.json
+// Full array replacement on POST — client owns the list.
+
+const TRADE_OFFERS_KEY = 'fantasai/trades/offers.json';
+
+async function handleTradeOffersGet(env) {
+  try {
+    const obj = await env.BUCKET.get(TRADE_OFFERS_KEY);
+    if (!obj) return json({ status: 'ok', offers: [] }, 200);
+    const offers = JSON.parse(await obj.text());
+    return json({ status: 'ok', offers: Array.isArray(offers) ? offers : [] }, 200);
+  } catch (_) {
+    return json({ status: 'ok', offers: [] }, 200);
+  }
+}
+
+async function handleTradeOffersPost(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const { offers } = body;
+  if (!Array.isArray(offers)) return json({ error: 'offers array required' }, 400);
+  await env.BUCKET.put(
+    TRADE_OFFERS_KEY,
+    JSON.stringify(offers),
+    { httpMetadata: { contentType: 'application/json' } }
+  );
+  return json({ status: 'ok', count: offers.length }, 200);
+}
+
+// ── League-wide waiver state ──────────────────────────────────────────────────
+// Stored in R2 as fantasai/waivers/state.json
+// Shape: { claims: { [playerId]: { droppedAt, expiresAt, teamId } }, order: [teamId, ...] }
+
+const WAIVERS_KEY = 'fantasai/waivers/state.json';
+
+async function handleWaiversGet(env) {
+  try {
+    const obj = await env.BUCKET.get(WAIVERS_KEY);
+    if (!obj) return json({ status: 'ok', claims: {}, order: [] }, 200);
+    const data = JSON.parse(await obj.text());
+    return json({ status: 'ok', claims: data.claims || {}, order: data.order || [] }, 200);
+  } catch (_) {
+    return json({ status: 'ok', claims: {}, order: [] }, 200);
+  }
+}
+
+async function handleWaiversPost(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const { claims, order } = body;
+  // Read existing so a partial update (only claims or only order) merges cleanly
+  let existing = { claims: {}, order: [] };
+  try {
+    const obj = await env.BUCKET.get(WAIVERS_KEY);
+    if (obj) existing = JSON.parse(await obj.text());
+  } catch (_) {}
+  const merged = {
+    claims: claims !== undefined ? claims : existing.claims,
+    order:  order  !== undefined ? order  : existing.order,
+    _savedAt: new Date().toISOString(),
+  };
+  await env.BUCKET.put(WAIVERS_KEY, JSON.stringify(merged), { httpMetadata: { contentType: 'application/json' } });
+  return json({ status: 'ok' }, 200);
+}
+
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin':  '*',
@@ -1996,6 +2344,212 @@ function json(data, status = 200) {
     status,
     headers: { ...corsHeaders(), 'Content-Type': 'application/json; charset=utf-8' },
   });
+}
+
+// ── Ghost Picks — Real-Time NFL Draft Engine ──────────────────────────────────
+// Pre-computed AI data (team profiles + prospect scores) lives in R2.
+// During the draft the Worker does pure math — no LLM, sub-50ms per pick.
+//
+// R2 keys (written by job_ghost_picks_builder.py before draft):
+//   fantasai/draft/ghost_picks/team_profiles.json
+//   fantasai/draft/ghost_picks/prospect_scores.json
+//   fantasai/draft/ghost_picks/board.json
+//   fantasai/draft/ghost_picks/draft_state.json
+
+const GHOST_PREFIX = 'fantasai/draft/ghost_picks/';
+
+const GHOST_WEIGHTS = { need: 0.30, history: 0.25, rumor: 0.25, value: 0.10, athletic: 0.10 };
+
+const POSITION_VALUE = {
+  QB: [100,100,100, 80, 80, 70, 60, 50, 50, 50, 45, 45],
+  EDGE:[90, 90, 85, 80, 80, 75, 70, 65, 60, 55, 50, 45],
+  WR: [80, 80, 78, 76, 74, 72, 71, 70, 70, 68, 65, 62],
+  OL: [65, 65, 68, 70, 73, 75, 77, 80, 80, 78, 76, 74],
+  CB: [75, 75, 73, 72, 71, 70, 68, 65, 63, 62, 60, 58],
+  DL: [70, 68, 66, 65, 65, 64, 62, 60, 58, 56, 54, 52],
+  RB: [30, 35, 40, 45, 50, 55, 60, 65, 68, 70, 70, 68],
+  TE: [55, 55, 58, 60, 60, 62, 62, 62, 60, 58, 56, 54],
+  LB: [50, 52, 55, 58, 60, 60, 60, 60, 60, 58, 56, 55],
+  S:  [50, 52, 54, 56, 58, 60, 62, 62, 60, 58, 56, 54],
+};
+
+function ghostPositionValue(position, pickNumber) {
+  const band = Math.min(Math.floor((pickNumber - 1) / 3), 11);
+  return (GHOST_WEIGHTS.value > 0) ? (GHOST_WEIGHTS.value, (POSITION_VALUE[position]?.[band] ?? 50)) : 50;
+}
+
+function computeGhostScore(teamNeeds, teamProfile, prospect, rumor, pickNumber) {
+  const pos   = prospect.position || '';
+  const conf  = prospect.conference || 'Other';
+  const tid   = teamProfile?.team_code || '';
+
+  const n = parseFloat(teamNeeds?.[pos] ?? 0);
+  const posTend  = parseFloat(teamProfile?.position_tendencies?.[pos] ?? 0.1) * 100;
+  const confTend = parseFloat(teamProfile?.conference_tendencies?.[conf] ?? 0.1) * 100;
+  const h = posTend * 0.6 + confTend * 0.4;
+  const r = parseFloat(prospect.rumor_scores?.[tid] ?? rumor ?? 0);
+  const band = Math.min(Math.floor((pickNumber - 1) / 3), 11);
+  const v = POSITION_VALUE[pos]?.[band] ?? 50;
+  const a = parseFloat(prospect.athletic_score ?? 50);
+
+  const total = n * GHOST_WEIGHTS.need + h * GHOST_WEIGHTS.history +
+                r * GHOST_WEIGHTS.rumor + v * GHOST_WEIGHTS.value  +
+                a * GHOST_WEIGHTS.athletic;
+
+  return { ghost_score: Math.round(total * 10) / 10, need: Math.round(n), history: Math.round(h), rumor: Math.round(r), value: v, athletic: Math.round(a) };
+}
+
+async function loadGhostData(env) {
+  const [profilesObj, prospectsObj, boardObj, stateObj] = await Promise.all([
+    env.BUCKET.get(GHOST_PREFIX + 'team_profiles.json'),
+    env.BUCKET.get(GHOST_PREFIX + 'prospect_scores.json'),
+    env.BUCKET.get(GHOST_PREFIX + 'board.json'),
+    env.BUCKET.get(GHOST_PREFIX + 'draft_state.json'),
+  ]);
+  return {
+    profiles:  profilesObj  ? JSON.parse(await profilesObj.text())  : null,
+    prospects: prospectsObj ? JSON.parse(await prospectsObj.text()) : null,
+    board:     boardObj     ? JSON.parse(await boardObj.text())     : null,
+    state:     stateObj     ? JSON.parse(await stateObj.text())     : { picks_made: [], current_pick: 1, available_player_ids: [] },
+  };
+}
+
+// GET /api/v1/draft/ghost-board?pick=1&team=DAL&top=10
+async function handleGhostBoard(url, env) {
+  if (!env.BUCKET) return json({ error: 'R2 not configured' }, 503);
+
+  const { profiles, prospects, board, state } = await loadGhostData(env);
+  if (!profiles || !prospects) {
+    return json({ error: 'Ghost Picks not initialized — run job_ghost_picks_builder.py first', initialized: false }, 404);
+  }
+
+  const pickParam  = parseInt(url.searchParams.get('pick') || state.current_pick || '1');
+  const teamParam  = url.searchParams.get('team') || null;
+  const topN       = Math.min(parseInt(url.searchParams.get('top') || '10'), 32);
+
+  // Determine which player IDs are still available
+  const draftedIds = new Set((state.picks_made || []).map(p => String(p.player_id)));
+  const availableIds = (state.available_player_ids || Object.keys(prospects))
+    .filter(id => !draftedIds.has(String(id)));
+
+  // If a specific team is requested, compute live scores for that team
+  if (teamParam) {
+    const profile   = profiles[teamParam] || {};
+    const rawNeeds  = profile.needs || {};
+    const teamNeeds = typeof rawNeeds === 'object' ? rawNeeds : {};
+
+    const scored = availableIds.map(pid => {
+      const p  = prospects[pid];
+      if (!p) return null;
+      const s  = computeGhostScore(teamNeeds, profile, p, 0, pickParam);
+      const precomputed = board?.board?.[String(pickParam)]?.top_picks?.find(tp => String(tp.player_id) === String(pid));
+      return {
+        player_id:   pid,
+        player_name: p.name,
+        position:    p.position,
+        college:     p.college,
+        ...s,
+        explanation: precomputed?.explanation || '',
+      };
+    }).filter(Boolean);
+
+    scored.sort((a, b) => b.ghost_score - a.ghost_score);
+    return json({
+      pick:       pickParam,
+      team:       teamParam,
+      team_name:  profile.team_name || teamParam,
+      philosophy: profile.draft_philosophy || '',
+      top_picks:  scored.slice(0, topN),
+      picks_made: state.picks_made?.length || 0,
+      available:  availableIds.length,
+    });
+  }
+
+  // No team specified — return the pre-built board for this pick
+  const pickBoard = board?.board?.[String(pickParam)];
+  if (pickBoard) {
+    const filtered = (pickBoard.top_picks || []).filter(p => !draftedIds.has(String(p.player_id)));
+    return json({ ...pickBoard, top_picks: filtered.slice(0, topN), picks_made: state.picks_made?.length || 0 });
+  }
+
+  return json({ error: `No board data for pick ${pickParam}` }, 404);
+}
+
+// POST /api/v1/draft/ghost-pick
+// Body: { pick: 32, team: "TEN", player_id: "jeanty_ashton", player_name: "Ashton Jeanty", position: "RB" }
+async function handleGhostPick(request, env) {
+  if (!env.BUCKET) return json({ error: 'R2 not configured' }, 503);
+
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+
+  const { pick, team, player_id, player_name, position } = body;
+  if (!pick || !team || !player_id) return json({ error: 'pick, team, and player_id required' }, 400);
+
+  const { profiles, prospects, board, state } = await loadGhostData(env);
+  if (!prospects) return json({ error: 'Ghost Picks not initialized' }, 404);
+
+  // Record the pick
+  const pickRecord = { pick, team, player_id: String(player_id), player_name, position, recorded_at: new Date().toISOString() };
+  const newPicks   = [...(state.picks_made || []), pickRecord];
+
+  // Remove player from available pool
+  const newAvailable = (state.available_player_ids?.length > 0
+    ? state.available_player_ids
+    : Object.keys(prospects)
+  ).filter(id => String(id) !== String(player_id));
+
+  // Update team needs: lower the need for the position they just drafted
+  const updatedProfiles = { ...profiles };
+  if (updatedProfiles[team]) {
+    const needs = { ...(updatedProfiles[team].needs || {}) };
+    if (needs[position]) needs[position] = Math.max(0, needs[position] - 40);
+    updatedProfiles[team] = { ...updatedProfiles[team], needs };
+  }
+
+  const newState = {
+    picks_made:          newPicks,
+    current_pick:        pick + 1,
+    available_player_ids: newAvailable,
+    last_updated:        new Date().toISOString(),
+  };
+
+  await env.BUCKET.put(GHOST_PREFIX + 'draft_state.json', JSON.stringify(newState), { httpMetadata: { contentType: 'application/json' } });
+  await env.BUCKET.put(GHOST_PREFIX + 'team_profiles.json', JSON.stringify(updatedProfiles), { httpMetadata: { contentType: 'application/json' } });
+
+  // Return predictions for next pick
+  const nextPick      = pick + 1;
+  const nextPickBoard = board?.board?.[String(nextPick)];
+  const draftedIds    = new Set(newPicks.map(p => String(p.player_id)));
+  const nextTopPicks  = nextPickBoard
+    ? (nextPickBoard.top_picks || []).filter(p => !draftedIds.has(String(p.player_id))).slice(0, 5)
+    : [];
+
+  return json({
+    recorded:      pickRecord,
+    picks_made:    newPicks.length,
+    remaining:     newAvailable.length,
+    next_pick:     nextPick,
+    next_top_picks: nextTopPicks,
+  }, 200);
+}
+
+// POST /api/v1/draft/ghost-reset  — wipe draft state, restart
+async function handleGhostReset(request, env) {
+  if (!env.BUCKET) return json({ error: 'R2 not configured' }, 503);
+
+  const prospects = await env.BUCKET.get(GHOST_PREFIX + 'prospect_scores.json');
+  const prospectIds = prospects ? Object.keys(JSON.parse(await prospects.text())) : [];
+
+  const resetState = {
+    picks_made:           [],
+    current_pick:         1,
+    available_player_ids: prospectIds,
+    last_updated:         new Date().toISOString(),
+  };
+  await env.BUCKET.put(GHOST_PREFIX + 'draft_state.json', JSON.stringify(resetState), { httpMetadata: { contentType: 'application/json' } });
+
+  return json({ status: 'reset', available: prospectIds.length });
 }
 
 // ── League Management ─────────────────────────────────────────────────────────

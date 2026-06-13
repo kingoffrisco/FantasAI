@@ -3,6 +3,7 @@ import { TEAM_ROSTERS, TEAMS_ORDER, findTeam, GAME_WEATHER } from '../lib/data.j
 import { usePlayers, findPlayerByName } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { useR2Waivers } from '../hooks.js';
+import { getWaivers, saveWaivers } from '../lib/remoteState.js';
 
 const DEFAULT_WAIVER_ORDER = [...TEAMS_ORDER].reverse();
 const FLEX_POS = new Set(['RB', 'WR', 'TE']);
@@ -16,11 +17,8 @@ function isDraftComplete() {
 }
 
 function loadWaiverOrder() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('fantasai_waiver_order') || 'null');
-    if (Array.isArray(saved) && saved.length > 0) return saved;
-  } catch {}
-  return [...DEFAULT_WAIVER_ORDER];
+  const order = getWaivers().order;
+  return Array.isArray(order) && order.length > 0 ? order : [...DEFAULT_WAIVER_ORDER];
 }
 
 function nextWaiverDate(processDay) {
@@ -216,7 +214,7 @@ export default function WaiversScreen({ user, myRosterIds = new Set(), onAddPlay
       const remaining = order.filter(id => !teamsGranted.includes(id));
       const newOrder  = [...remaining, ...teamsGranted];
       setWaiverOrder(newOrder);
-      localStorage.setItem('fantasai_waiver_order', JSON.stringify(newOrder));
+      saveWaivers(undefined, newOrder);
     }
 
     setWaiverQueue([]);

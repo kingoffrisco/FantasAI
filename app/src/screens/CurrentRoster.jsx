@@ -1,6 +1,6 @@
 import React from 'react';
 import { TEAM_ROSTERS, findTeam, NEWS, SLOT_ELIGIBILITY, ROSTER_CONFIG, LEAGUE_TEAMS, buildRosterFrame, assignRoster, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES } from '../lib/data.js';
-import { usePlayers, findPlayer, findPlayerByName, patchPlayers } from '../lib/playerStore.js';
+import { usePlayers, findPlayer, findPlayerByName, getPlayers, patchPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge, Sparkline } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 import { useR2Drops, useR2Injuries, useR2PlayerNotes, useR2EnrichedNews, useR2WeatherForecast, useR2BreakoutCandidates, useR2PlayerNewsLinks } from '../hooks.js';
@@ -329,26 +329,95 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   const { data: r2Breakouts }    = useR2BreakoutCandidates();
   const { data: r2PlayerNewsData } = useR2PlayerNewsLinks();
 
-  // Parse raw R2 articles — handles { data:[...] }, { articles:[...] }, or a direct array
+  // Parse R2 player_news.json (unified pipeline, highest priority)
+  // Normalize player_news.json — handles multiple field name conventions from pipeline
   const r2Articles = React.useMemo(() => {
-    if (Array.isArray(r2PlayerNewsData)) return r2PlayerNewsData;
-    if (Array.isArray(r2PlayerNewsData?.data)) return r2PlayerNewsData.data;
-    if (Array.isArray(r2PlayerNewsData?.articles)) return r2PlayerNewsData.articles;
-    return [];
+    const raw = Array.isArray(r2PlayerNewsData) ? r2PlayerNewsData
+              : Array.isArray(r2PlayerNewsData?.data) ? r2PlayerNewsData.data
+              : Array.isArray(r2PlayerNewsData?.articles) ? r2PlayerNewsData.articles : [];
+    return raw.map(a => {
+      const headline    = a.headline || a.title || a.article_title || '';
+      const article_url = a.article_url || a.source_url || a.url || a.link || '';
+      if (!headline) return null;
+      return {
+        ...a,
+        headline,
+        article_url,
+        player_name:  a.player_name || a.primary_player_name || a.mentioned_player || '',
+        position:     (a.position || a.player_position || a.pos || '').toUpperCase(),
+        team:         a.team || a.player_team || '',
+        published_at: a.published_at || a.published_date || a.created_at || null,
+        publisher:    a.publisher || a.source || a.feed_source || 'FantasAI',
+        description:  a.description || a.full_text || a.summary || a.summary_text || '',
+      };
+    }).filter(Boolean);
   }, [r2PlayerNewsData]);
 
-  // Map normalized player name → sorted article array
+  // Normalize enriched_news.json into the same article shape
+  const r2EnrichedArticles = React.useMemo(() => {
+    const raw = Array.isArray(r2EnrichedNews) ? r2EnrichedNews
+              : Array.isArray(r2EnrichedNews?.data) ? r2EnrichedNews.data : [];
+    if (!raw.length) return [];
+    const bySleeperMap = new Map();
+    getPlayers().forEach(p => { if (p.sleeperId) bySleeperMap.set(String(p.sleeperId), p); });
+    return raw.map(a => {
+      const headline    = a.headline || a.title || '';
+      const article_url = a.source_url || a.article_url || a.url || '';
+      if (!headline) return null;
+      const pl = a.primary_player_id ? bySleeperMap.get(String(a.primary_player_id)) : null;
+      return {
+        headline, article_url,
+        player_name: pl?.name || a.player_name || '',
+        position:    (pl?.pos || a.position || '').toUpperCase(),
+        team:        pl?.team || a.team || '',
+        published_at: a.published_at || null,
+        publisher:   a.publisher || a.source || 'FantasAI',
+        description: a.full_text || a.description || a.summary || '',
+      };
+    }).filter(Boolean);
+  }, [r2EnrichedNews]);
+
+  // Live Databricks articles (same endpoint as News & Updates)
+  const [dbArticles, setDbArticles] = React.useState([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/api/v1/news/articles?limit=500`, { signal: AbortSignal.timeout(20000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data) return;
+        setDbArticles(Array.isArray(data.articles) ? data.articles : []);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Merge all three sources — same priority as News & Updates:
+  //   player_news.json (highest) > live Databricks API > enriched_news.json
+  // Key = article_url when available, else headline (handles notes without a URL).
+  const mergedArticles = React.useMemo(() => {
+    const byKey = new Map();
+    const artKey = a => a.article_url || a.headline;
+    for (const a of r2EnrichedArticles) { const k = artKey(a); if (k && a.headline) byKey.set(k, a); }
+    for (const a of dbArticles)         { const k = artKey(a); if (k && a.headline) byKey.set(k, a); }
+    for (const a of r2Articles)         { const k = artKey(a); if (k && a.headline) byKey.set(k, a); }
+    return [...byKey.values()].sort((a, b) => {
+      const ta = a.published_at ? new Date(a.published_at).getTime() : 0;
+      const tb = b.published_at ? new Date(b.published_at).getTime() : 0;
+      return tb - ta;
+    });
+  }, [r2Articles, r2EnrichedArticles, dbArticles]);
+
+  // Map normalized player name → articles sorted newest-first
   const playerNewsMap = React.useMemo(() => {
     const m = new Map();
-    for (const a of r2Articles) {
+    for (const a of mergedArticles) {
       const key = normalizeName(a.player_name || '');
-      if (!key || !a.article_url) continue;
+      if (!key) continue;
       if (!m.has(key)) m.set(key, []);
       m.get(key).push(a);
     }
-    m.forEach(arr => arr.sort((a, b) => (a.article_rank ?? 9) - (b.article_rank ?? 9)));
     return m;
-  }, [r2Articles]);
+  }, [mergedArticles]);
 
   const breakoutByName = React.useMemo(() => {
     if (!Array.isArray(r2Breakouts)) return new Map();
@@ -564,7 +633,11 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
 
       else if (src.id === 'cbs-news') {
         // Fetch full player list with RotoWire news from our CBS Worker proxy
-        const res = await fetch(`${API_BASE}/api/v1/cbs/players`, { signal: AbortSignal.timeout(20000) });
+        const cbsCookie = (() => { try { return localStorage.getItem('fantasai_cbs_cookie') || ''; } catch { return ''; } })();
+        const res = await fetch(`${API_BASE}/api/v1/cbs/players`, {
+          headers: cbsCookie ? { 'X-CBS-Cookie': cbsCookie } : {},
+          signal: AbortSignal.timeout(20000),
+        });
         if (res.ok) {
           const { players: cbsPlayers = [] } = await res.json();
           for (const cp of cbsPlayers) {
@@ -820,24 +893,19 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   const rosterPlayerIds = new Set(fullRoster.map(r => r.playerId).filter(Boolean));
   const rosterPlayers   = allPlayers.filter(p => rosterPlayerIds.has(p.id));
 
-  // All R2 articles sorted newest-first, each tagged with isRostered + matched player object.
-  // This powers the News & Updates tab — shows everything, not just roster matches.
+  // All merged articles sorted newest-first, tagged with isRostered + matched player.
+  // Uses the same 3-source merge as News & Updates.
   const allNewsArticles = React.useMemo(() => {
-    if (!r2Articles.length) return [];
+    if (!mergedArticles.length) return [];
     const rosterByNorm = new Map(rosterPlayers.map(p => [normalizeName(p.name), p]));
-    return r2Articles
+    return mergedArticles
       .filter(a => a.headline && a.article_url)
       .map(a => {
         const normKey = normalizeName(a.player_name || '');
         const player = rosterByNorm.get(normKey) || null;
         return { article: a, isRostered: !!player, player };
-      })
-      .sort((x, y) => {
-        const ta = x.article.published_at ? new Date(x.article.published_at).getTime() : 0;
-        const tb = y.article.published_at ? new Date(y.article.published_at).getTime() : 0;
-        return tb - ta;
       });
-  }, [r2Articles, rosterPlayers]);
+  }, [mergedArticles, rosterPlayers]);
 
   // Roster-only subset — used for the "My Roster" filter mode
   const rosterNewsArticles = React.useMemo(
@@ -1469,6 +1537,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                     </div>
                   )}
                 </th>
+                <th style={{ maxWidth: 300 }}>News Articles</th>
                 <th style={{ fontSize: 9, color: 'var(--text-faint)' }}>▶</th>
                 <th></th>
               </tr>
@@ -1481,7 +1550,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                 const isFirstBench = isBench && prevEntry && prevEntry.slot !== 'BENCH';
                 const benchDivider = isFirstBench ? (
                   <tr key={`bench-divider-${i}`} style={{ pointerEvents: 'none' }}>
-                    <td colSpan={14} style={{ padding: '6px 14px 4px', background: 'rgba(255,255,255,.03)', borderTop: '2px solid var(--border)' }}>
+                    <td colSpan={15} style={{ padding: '6px 14px 4px', background: 'rgba(255,255,255,.03)', borderTop: '2px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.1em', color: 'var(--text-faint)', textTransform: 'uppercase' }}>Bench</span>
                         <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>— drag any player above this line to put them in the starting lineup</span>
@@ -1524,7 +1593,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                           {entry.slot}
                         </span>
                       </td>
-                      <td colSpan={13} style={{ fontSize: 12 }}>
+                      <td colSpan={14} style={{ fontSize: 12 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <span className="dim">{isBench ? 'Empty bench slot · drop here' : `Empty ${entry.slot} slot · drop ${entry.slot === 'FLEX' ? 'RB/WR' : entry.slot} here`}</span>
                           <button
@@ -1800,6 +1869,58 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                                 </div>
                               );
                             })}
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    <td style={{ maxWidth: 300, verticalAlign: 'top', paddingTop: 8 }}>
+                      {(() => {
+                        const arts = (playerNewsMap.get(normalizeName(p.name)) || playerNewsMap.get(p.name.toLowerCase().trim()) || [])
+                          .slice().sort((a, b) => {
+                            const ta = a.published_at ? new Date(a.published_at).getTime() : 0;
+                            const tb = b.published_at ? new Date(b.published_at).getTime() : 0;
+                            return tb - ta;
+                          });
+                        const latest = arts[0];
+                        if (!latest) return <span className="faint" style={{ fontSize: 11 }}>—</span>;
+                        const diff = latest.published_at ? Date.now() - new Date(latest.published_at).getTime() : null;
+                        const ago = diff == null ? '' : diff < 3600000 ? `${Math.round(diff / 60000)}m ago`
+                          : diff < 86400000 ? `${Math.round(diff / 3600000)}h ago`
+                          : `${Math.round(diff / 86400000)}d ago`;
+                        const insight = latest.fantasy_insight || latest.summary_text || '';
+                        const headline = latest.headline || '';
+                        return (
+                          <div style={{ fontSize: 11, lineHeight: 1.5, whiteSpace: 'normal' }} onClick={e => e.stopPropagation()}>
+                            {latest.article_url ? (
+                              <a
+                                href={latest.article_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ fontWeight: 600, color: 'var(--text)', textDecoration: 'none', display: 'block', marginBottom: 3, lineHeight: 1.4 }}
+                                onMouseEnter={e => e.currentTarget.style.color = '#4ea8ff'}
+                                onMouseLeave={e => e.currentTarget.style.color = 'var(--text)'}
+                              >
+                                {headline.slice(0, 90)}{headline.length > 90 ? '…' : ''}
+                              </a>
+                            ) : (
+                              <div style={{ fontWeight: 600, marginBottom: 3, lineHeight: 1.4 }}>
+                                {headline.slice(0, 90)}{headline.length > 90 ? '…' : ''}
+                              </div>
+                            )}
+                            {insight && (
+                              <div style={{ fontSize: 10, color: 'var(--accent)', fontStyle: 'italic', lineHeight: 1.4, marginBottom: 3 }}>
+                                {insight.slice(0, 130)}{insight.length > 130 ? '…' : ''}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              {latest.publisher && <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-dim)' }}>{latest.publisher}</span>}
+                              {ago && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{ago}</span>}
+                              {arts.length > 1 && (
+                                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
+                                  +{arts.length - 1} more
+                                </span>
+                              )}
+                            </div>
                           </div>
                         );
                       })()}

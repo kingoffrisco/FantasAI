@@ -5,6 +5,8 @@ import { usePlayers, isLiveData, findPlayer } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
 import { useApi, useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending } from '../lib/sleeper.js';
+import { DataSourceDebugger } from './Sources.jsx';
+import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 
 const FREE_DATA_SOURCES_LIST = FREE_DATA_SOURCES.map(s => ({ id: s.id, name: s.name, defaultEnabled: s.enabled }));
 const FEED_NAMES = Object.fromEntries(RANKING_SOURCES.map(s => [s.id, s.name.replace(' (ECR)', '').replace(' Fantasy', '').replace(' Sports Rankings', '').replace(' Rankings', '')]));
@@ -58,10 +60,7 @@ function useScheduleOppMap() {
 }
 
 function loadScoringWeights() {
-  try {
-    const raw = localStorage.getItem('fantasai_scoring_weights');
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  return getPrefs().scoringWeights ?? null;
 }
 
 function computeSleeperScores(playerList, weights) {
@@ -179,26 +178,34 @@ function WeatherBadge({ opp }) {
 
 // ── Column config ─────────────────────────────────────────────────────────────
 const DEFAULT_COLUMNS = [
-  { id: 'proj',      label: 'Proj',    visible: true,  sortKey: 'proj' },
-  { id: 'last',      label: 'Last',    visible: true,  sortKey: 'last' },
-  { id: 'avg',       label: 'Avg',     visible: true,  sortKey: 'avg' },
-  { id: 'trend',     label: 'Trend',   visible: true,  sortKey: null },
-  { id: 'opp_score', label: 'Opp Sc',  visible: true,  sortKey: 'oppScore' },
-  { id: 'bye',       label: 'Bye',     visible: true,  sortKey: 'bye' },
-  { id: 'owned',     label: '%Own',    visible: true,  sortKey: 'owned' },
-  { id: 'adp',       label: 'ADP',     visible: true,  sortKey: 'adp' },
-  { id: 'depth',     label: 'Depth',   visible: true,  sortKey: null },
-  { id: 'snaps',     label: 'Snaps/G', visible: true,  sortKey: null },
-  { id: 'tgt',       label: 'Tgt%',    visible: false, sortKey: 'targetShare' },
-  { id: 'routes',    label: 'Routes',  visible: false, sortKey: 'routes' },
-  { id: 'yac',       label: 'YAC',     visible: false, sortKey: 'yac' },
-  { id: 'weather',   label: 'Weather', visible: false, sortKey: null },
-  { id: 'status',    label: 'Status',  visible: true,  sortKey: null },
+  { id: 'proj',      label: 'Proj',     visible: true,  sortKey: 'proj' },
+  { id: 'last',      label: 'Last',     visible: true,  sortKey: 'last' },
+  { id: 'avg',       label: 'Avg',      visible: true,  sortKey: 'avg' },
+  { id: 'trend',     label: 'Trend',    visible: true,  sortKey: null },
+  { id: 'opp_score', label: 'Opp Sc',   visible: true,  sortKey: 'oppScore' },
+  { id: 'bye',       label: 'Bye',      visible: true,  sortKey: 'bye' },
+  { id: 'owned',     label: '%Own',     visible: true,  sortKey: 'owned' },
+  { id: 'adp',       label: 'ADP',      visible: true,  sortKey: 'adp' },
+  { id: 'depth',     label: 'Depth',    visible: true,  sortKey: null },
+  { id: 'snaps',     label: 'Snaps/G',  visible: true,  sortKey: null },
+  { id: 'tgt',       label: 'Tgt%',     visible: false, sortKey: 'targetShare' },
+  { id: 'routes',    label: 'Routes',   visible: false, sortKey: 'routes' },
+  { id: 'yac',       label: 'YAC',      visible: false, sortKey: 'yac' },
+  { id: 'weather',   label: 'Weather',  visible: false, sortKey: null },
+  { id: 'status',    label: 'Status',   visible: true,  sortKey: null },
+  // Advanced stats (from Sleeper wks 14-17, 2025 season)
+  { id: 'snap_pct',  label: 'Snap%',    visible: false, sortKey: 'snapPct',  group: 'adv' },
+  { id: 'tgt_g',     label: 'Tgt/G',    visible: false, sortKey: 'tgtG',     group: 'adv' },
+  { id: 'adot',      label: 'ADOT',     visible: false, sortKey: 'adot',     group: 'adv' },
+  { id: 'air_yds',   label: 'Air Yds',  visible: false, sortKey: 'airYds',   group: 'adv' },
+  { id: 'att_g',     label: 'Att/G',    visible: false, sortKey: 'attG',     group: 'adv' },
+  { id: 'yptgt',     label: 'Yds/Tgt',  visible: false, sortKey: 'yptgt',    group: 'adv' },
+  { id: 'combo',     label: 'Combo Yds',visible: false, sortKey: 'combo',    group: 'adv' },
 ];
 
 function loadColumns() {
   try {
-    const saved = JSON.parse(localStorage.getItem('fantasai_columns') || 'null');
+    const saved = getPrefs().columns;
     if (!Array.isArray(saved)) return DEFAULT_COLUMNS.map(c => ({ ...c }));
     const savedIds = new Set(saved.map(c => c.id));
     const merged = [
@@ -219,14 +226,14 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   const [breakoutOnly, setBreakoutOnly] = React.useState(false);
 
   // ── Custom Rankings (sort dropdown) ─────────────────────────────────────────
-  const [customRankings, setCustomRankings] = React.useState(() => {
-    try { return JSON.parse(localStorage.getItem('fantasai_custom_rankings') || '[]'); } catch { return []; }
-  });
+  const [customRankings, setCustomRankings] = React.useState(() => getPrefs().customRankings || []);
   const [activeRankingId, setActiveRankingId] = React.useState(null);
 
   // ── Column customization ──────────────────────────────────────────────────
   const [columns, setColumns] = React.useState(loadColumns);
   const [showColPicker, setShowColPicker] = React.useState(false);
+  const [draggedColId, setDraggedColId]   = React.useState(null);
+  const [dragOverColId, setDragOverColId] = React.useState(null);
 
   // ── Waiver claim state ────────────────────────────────────────────────────
   const draftDone = React.useMemo(() => isDraftComplete(), []);
@@ -290,7 +297,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   // Global player store — seeds from static data, replaced with live Databricks/Sleeper on startup
   const apiPlayerList = usePlayers();
 
-  // R2 injury overlay — real status + depth chart from Databricks silver_player_news
+  // R2 injury overlay — injury status + depth chart from R2 injury_overlay export
   const { data: r2InjuryData } = useR2Injuries();
   const { data: r2Notes } = useR2PlayerNotes();
 
@@ -416,6 +423,33 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               notes:    p.injury_notes      || null,
             };
           }
+          // Advanced stats: average over weeks 14-17 (indices 1-4 in TREND_WEEKS)
+          let spSum = 0, spWks = 0, adotSum = 0, adotWks = 0;
+          let airSum = 0, tgtSum = 0, recYdsSum = 0, attSum = 0, rushYdsSum = 0, advWks = 0;
+          for (let i = 1; i <= 4; i++) {
+            const ws = weekStatsArr[i]?.[sid];
+            if (!ws) continue;
+            advWks++;
+            const offSnp = ws.off_snp ?? ws.snp ?? 0;
+            const tmSnp  = ws.tm_off_snp ?? 0;
+            if (offSnp > 0 && tmSnp > 0) { spSum += (offSnp / tmSnp) * 100; spWks++; }
+            if ((ws.adot ?? 0) > 0) { adotSum += ws.adot; adotWks++; }
+            airSum    += ws.rec_air_yds ?? 0;
+            tgtSum    += ws.rec_tgt     ?? 0;
+            recYdsSum += ws.rec_yds     ?? 0;
+            attSum    += ws.rush_att    ?? 0;
+            rushYdsSum += ws.rush_yds   ?? 0;
+          }
+          const advStats = {
+            snapPct: spWks   > 0 ? Math.round(spSum / spWks) : null,
+            adot:    adotWks > 0 ? Math.round((adotSum / adotWks) * 10) / 10 : null,
+            airYds:  advWks  > 0 && airSum  > 0 ? Math.round((airSum  / advWks) * 10) / 10 : null,
+            tgtG:    advWks  > 0 && tgtSum  > 0 ? Math.round((tgtSum  / advWks) * 10) / 10 : null,
+            attG:    advWks  > 0 && attSum  > 0 ? Math.round((attSum  / advWks) * 10) / 10 : null,
+            yptgt:   tgtSum  > 0               ? Math.round((recYdsSum / tgtSum) * 10) / 10 : null,
+            combo:   advWks  > 0 && (recYdsSum + rushYdsSum) > 0
+              ? Math.round(((recYdsSum + rushYdsSum) / advWks) * 10) / 10 : null,
+          };
           // Pts trend for weeks 13-18
           const trendPts = weekStatsArr.map(wk => {
             if (!wk) return 0;
@@ -427,9 +461,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
             // last: most recent non-zero week (prefer wk17 over wk18 for accuracy)
             const lastVal = trendPts[4] > 0 ? trendPts[4] : trendPts[5] > 0 ? trendPts[5] : nonZero[nonZero.length - 1];
             const avgVal  = Math.round((nonZero.reduce((s, v) => s + v, 0) / nonZero.length) * 10) / 10;
-            stats[name] = { last: lastVal, avg: avgVal, trend: trendPts, bye: p.bye_week ?? 0 };
-          } else if (p.bye_week) {
-            stats[name] = { last: null, avg: null, trend: [], bye: p.bye_week };
+            stats[name] = { last: lastVal, avg: avgVal, trend: trendPts, bye: p.bye_week ?? 0, ...advStats };
+          } else if (p.bye_week || advWks > 0) {
+            stats[name] = { last: null, avg: null, trend: [], bye: p.bye_week ?? 0, ...advStats };
           }
         }
         setDepthData(depths);
@@ -480,10 +514,17 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       if (!sl) return p;
       return {
         ...p,
-        last:  p.last  > 0 ? p.last  : (sl.last  ?? 0),
-        avg:   p.avg   > 0 ? p.avg   : (sl.avg   ?? 0),
-        trend: p.trend?.length > 0 ? p.trend : (sl.trend ?? []),
-        bye:   p.bye   > 0 ? p.bye   : (sl.bye   ?? 0),
+        last:    p.last  > 0 ? p.last  : (sl.last  ?? 0),
+        avg:     p.avg   > 0 ? p.avg   : (sl.avg   ?? 0),
+        trend:   p.trend?.length > 0 ? p.trend : (sl.trend ?? []),
+        bye:     p.bye   > 0 ? p.bye   : (sl.bye   ?? 0),
+        snapPct: p.snapPct ?? sl.snapPct ?? null,
+        adot:    p.adot    ?? sl.adot    ?? null,
+        airYds:  p.airYds  ?? sl.airYds  ?? null,
+        tgtG:    p.tgtG    ?? sl.tgtG    ?? null,
+        attG:    p.attG    ?? sl.attG    ?? null,
+        yptgt:   p.yptgt   ?? sl.yptgt   ?? null,
+        combo:   p.combo   ?? sl.combo   ?? null,
       };
     });
   }, [allPlayersList, sleeperStats]);
@@ -527,6 +568,13 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       if (sort === 'targetShare') return b.targetShare - a.targetShare;
       if (sort === 'routes')      return b.routes - a.routes;
       if (sort === 'yac')         return b.yac - a.yac;
+      if (sort === 'snapPct')     return (b.snapPct ?? -1) - (a.snapPct ?? -1);
+      if (sort === 'tgtG')        return (b.tgtG    ?? -1) - (a.tgtG    ?? -1);
+      if (sort === 'adot')        return (b.adot    ?? -1) - (a.adot    ?? -1);
+      if (sort === 'airYds')      return (b.airYds  ?? -1) - (a.airYds  ?? -1);
+      if (sort === 'attG')        return (b.attG    ?? -1) - (a.attG    ?? -1);
+      if (sort === 'yptgt')       return (b.yptgt   ?? -1) - (a.yptgt   ?? -1);
+      if (sort === 'combo')       return (b.combo   ?? -1) - (a.combo   ?? -1);
       if (sort === 'name')        return a.name.localeCompare(b.name);
       if (sort === 'oppScore') {
         const as = breakoutSet.get(a.name.toLowerCase().trim())?.opportunity_score ?? -1;
@@ -541,7 +589,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   function saveCustomRanking(ranking) {
     const updated = [...customRankings.filter(r => r.id !== ranking.id), ranking];
     setCustomRankings(updated);
-    localStorage.setItem('fantasai_custom_rankings', JSON.stringify(updated));
+    patchPrefs({ customRankings: updated });
     setActiveRankingId(ranking.id);
     setSort('custom');
   }
@@ -549,14 +597,14 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   function deleteCustomRanking(id) {
     const updated = customRankings.filter(r => r.id !== id);
     setCustomRankings(updated);
-    localStorage.setItem('fantasai_custom_rankings', JSON.stringify(updated));
+    patchPrefs({ customRankings: updated });
     if (activeRankingId === id) { setActiveRankingId(null); setSort('proj'); }
   }
 
   // ── Column helpers ────────────────────────────────────────────────────────
   function saveColumns(cols) {
     setColumns(cols);
-    localStorage.setItem('fantasai_columns', JSON.stringify(cols));
+    patchPrefs({ columns: cols });
   }
   function toggleColumn(id) {
     saveColumns(columns.map(c => c.id === id ? { ...c, visible: !c.visible } : c));
@@ -570,7 +618,21 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
     saveColumns(next);
   }
-  const visibleCols = columns.filter(c => c.visible);
+  function moveColumnTo(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    const fromIdx = columns.findIndex(c => c.id === fromId);
+    const toIdx   = columns.findIndex(c => c.id === toId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const next = [...columns];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    saveColumns(next);
+  }
+  // Keep standard cols in user-defined order; always group adv cols together at the end
+  const visibleCols = [
+    ...columns.filter(c => c.visible && c.group !== 'adv'),
+    ...columns.filter(c => c.visible && c.group === 'adv'),
+  ];
 
   // ── Waiver claim helpers ──────────────────────────────────────────────────
   function openClaim(player) { setClaimPlayer(player); setClaimDrop(null); }
@@ -902,13 +964,8 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           className="btn ghost"
           style={{ fontSize: 11, padding: '4px 10px', flexShrink: 0 }}
           onClick={() => setShowColPicker(p => !p)}
-          title="Customize visible columns"
-        >⚙ Columns</button>
-        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
-          {isLiveData() ? '◆ 2026 Players' : '○ Static'} · {allPlayersList.length}
-          {r2InjuryData ? ' · R2 injuries' : ''}
-        </span>
-        <span className="faint mono" style={{ fontSize: 11 }}>HALF PPR</span>
+          title="Customize visible stat columns"
+        >⚙ Player Stat Selector</button>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
@@ -919,13 +976,33 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               <th className={sort === 'name' ? 'sorted' : ''} style={{ cursor: 'pointer' }} onClick={() => { setSort('name'); setUseSleeperSort(false); }}>Player</th>
               <th>Opp</th>
               {useSleeperSort && <th className="num sorted" style={{ color: 'var(--accent)' }}>Score</th>}
-              {visibleCols.map(col => {
+              {visibleCols.map((col, idx) => {
                 const isSorted = !useSleeperSort && sort === col.sortKey;
+                const isAdv = col.group === 'adv';
+                const isFirstAdv = isAdv && (idx === 0 || visibleCols[idx - 1]?.group !== 'adv');
+                const isDragging = draggedColId === col.id;
+                const isDragOver = dragOverColId === col.id && draggedColId !== col.id;
                 return (
                   <th key={col.id}
                     className={`num${isSorted ? ' sorted' : ''}`}
-                    style={{ cursor: col.sortKey ? 'pointer' : 'default' }}
+                    draggable
+                    onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDraggedColId(col.id); }}
+                    onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverColId(col.id); }}
+                    onDrop={e => { e.preventDefault(); moveColumnTo(draggedColId, col.id); setDraggedColId(null); setDragOverColId(null); }}
+                    onDragEnd={() => { setDraggedColId(null); setDragOverColId(null); }}
+                    style={{
+                      cursor: 'grab',
+                      opacity: isDragging ? 0.35 : 1,
+                      outline: isDragOver ? '2px dashed rgba(255,255,255,.35)' : 'none',
+                      outlineOffset: '-2px',
+                      transition: 'opacity .15s',
+                      ...(isAdv ? { color: '#ffcc44', background: 'rgba(255,204,68,.08)' } : {}),
+                      ...(isFirstAdv ? { borderLeft: '2px solid rgba(255,204,68,.5)' } : {}),
+                      ...(isDragOver && isAdv ? { background: 'rgba(255,204,68,.18)' } : {}),
+                      ...(isDragOver && !isAdv ? { background: 'rgba(255,255,255,.1)' } : {}),
+                    }}
                     onClick={col.sortKey ? () => { setSort(col.sortKey); setUseSleeperSort(false); } : undefined}
+                    title={isAdv ? `${col.label} — Advanced (NextGen) stat · 2025 wks 14-17` : `Drag to reorder · Click to sort`}
                   >{col.label}</th>
                 );
               })}
@@ -960,7 +1037,13 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               const breakoutData = breakoutSet.get(pKey);
               return (
                 <tr key={p.id} className={selected === p.id ? 'selected' : ''} onClick={() => setSelected(p.id)}
-                  style={isOnWaivers ? { background: 'rgba(255,149,0,.04)' } : undefined}>
+                  style={
+                    isOnWaivers               ? { background: 'rgba(255,149,0,.04)' }
+                    : p.status === 'Out' || p.status === 'IR' ? { background: 'rgba(255,60,60,.07)' }
+                    : p.status === 'Q'        ? { background: 'rgba(255,140,0,.07)' }
+                    : p.status === 'D'        ? { background: 'rgba(255,80,30,.07)' }
+                    : undefined
+                  }>
                   <td className="rank">{i + 1}</td>
                   <td onClick={(e) => { e.stopPropagation(); onOpenPlayer(p.id); }} style={{ cursor: 'pointer' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1004,8 +1087,11 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                       </span>
                     </td>
                   )}
-                  {visibleCols.map(col => {
+                  {visibleCols.map((col, idx) => {
+                    const isAdv = col.group === 'adv';
+                    const isFirstAdv = isAdv && (idx === 0 || visibleCols[idx - 1]?.group !== 'adv');
                     const isRecvr = p.pos === 'WR' || p.pos === 'TE' || p.pos === 'RB';
+                    const cell = (() => {
                     if (col.id === 'proj') {
                       const projVal = p.proj > 0 ? p.proj : null;
                       return (
@@ -1056,6 +1142,41 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                     if (col.id === 'tgt')     return <td key="tgt" className="num">{isRecvr && p.targetShare > 0 ? `${p.targetShare.toFixed(1)}%` : <span className="faint" style={{ fontSize: 10 }}>—</span>}</td>;
                     if (col.id === 'routes')  return <td key="routes" className="num">{isRecvr && p.routes > 0 ? p.routes : <span className="faint" style={{ fontSize: 10 }}>—</span>}</td>;
                     if (col.id === 'yac')     return <td key="yac" className="num">{isRecvr && p.yac > 0 ? p.yac.toFixed(1) : <span className="faint" style={{ fontSize: 10 }}>—</span>}</td>;
+                    if (col.id === 'snap_pct') return (
+                      <td key="snap_pct" className="num mono" style={{ fontSize: 11 }}>
+                        {p.snapPct != null ? `${p.snapPct}%` : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'tgt_g') return (
+                      <td key="tgt_g" className="num mono" style={{ fontSize: 11 }}>
+                        {p.tgtG != null ? p.tgtG.toFixed(1) : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'adot') return (
+                      <td key="adot" className="num mono" style={{ fontSize: 11 }}>
+                        {p.adot != null ? p.adot.toFixed(1) : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'air_yds') return (
+                      <td key="air_yds" className="num mono" style={{ fontSize: 11 }}>
+                        {p.airYds != null ? p.airYds.toFixed(1) : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'att_g') return (
+                      <td key="att_g" className="num mono" style={{ fontSize: 11 }}>
+                        {p.attG != null ? p.attG.toFixed(1) : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'yptgt') return (
+                      <td key="yptgt" className="num mono" style={{ fontSize: 11 }}>
+                        {p.yptgt != null ? p.yptgt.toFixed(1) : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'combo') return (
+                      <td key="combo" className="num mono" style={{ fontSize: 11 }}>
+                        {p.combo != null ? p.combo.toFixed(1) : <span className="faint">—</span>}
+                      </td>
+                    );
                     if (col.id === 'weather') return <td key="weather"><WeatherBadge opp={p.opp} /></td>;
                     if (col.id === 'status')  return (
                       <td key="status">
@@ -1077,7 +1198,16 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                         {aiPick && <div><AIHint>{aiPick}</AIHint></div>}
                       </td>
                     );
-                    return null;
+                      return null;
+                    })();
+                    if (!cell || !isAdv) return cell;
+                    return React.cloneElement(cell, {
+                      style: {
+                        ...(cell.props.style || {}),
+                        background: 'rgba(255,204,68,.07)',
+                        ...(isFirstAdv ? { borderLeft: '2px solid rgba(255,204,68,.45)' } : {}),
+                      }
+                    });
                   })}
                   <td>
                     <div className="flex gap-8" style={{ alignItems: 'center' }}>
@@ -1153,6 +1283,20 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       </>}
     </div>
 
+    {/* ── TEMP: Data Source Debugger right panel ── */}
+    <div style={{ width: 400, flexShrink: 0, borderLeft: '1px solid var(--border)', overflow: 'auto', background: 'var(--bg-2)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'rgba(255,180,0,.06)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 9, fontWeight: 800, color: '#ffb547', fontFamily: 'var(--font-mono)', letterSpacing: '.1em', background: 'rgba(255,180,0,.15)', border: '1px solid rgba(255,180,0,.35)', borderRadius: 3, padding: '1px 5px' }}>TEMP DEBUG</span>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>Data Source Debugger</span>
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 3 }}>Identify which source injects bad player records. Disable &amp; reload to test.</div>
+      </div>
+      <div style={{ overflow: 'auto', flex: 1 }}>
+        <DataSourceDebugger />
+      </div>
+    </div>
+
     {/* ── Column Picker Modal ────────────────────────────────────────────── */}
     {showColPicker && (
       <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', padding: '64px 16px 0' }}
@@ -1160,22 +1304,48 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
         <div style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 16, width: 240, boxShadow: '0 12px 40px rgba(0,0,0,.5)' }}
           onClick={e => e.stopPropagation()}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div style={{ fontWeight: 800, fontSize: 13 }}>⚙ Columns</div>
+            <div style={{ fontWeight: 800, fontSize: 13 }}>⚙ Player Stat Selector</div>
             <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--text-faint)', lineHeight: 1 }} onClick={() => setShowColPicker(false)}>✕</button>
           </div>
-          <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 8 }}>Toggle, reorder with arrows</div>
+          <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 8 }}>Drag to reorder · check to show/hide</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {columns.map((col, idx) => (
-              <div key={col.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', borderRadius: 6, background: col.visible ? 'rgba(255,255,255,.04)' : 'transparent' }}>
-                <input type="checkbox" checked={col.visible} onChange={() => toggleColumn(col.id)}
-                  style={{ accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: 12, color: col.visible ? 'var(--text)' : 'var(--text-faint)' }}>{col.label}</span>
-                <button style={{ background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', opacity: idx === 0 ? 0.2 : 0.6, fontSize: 11, color: 'var(--text-dim)', padding: '0 2px', lineHeight: 1 }}
-                  onClick={() => moveColumn(col.id, -1)} disabled={idx === 0}>▲</button>
-                <button style={{ background: 'none', border: 'none', cursor: idx === columns.length - 1 ? 'default' : 'pointer', opacity: idx === columns.length - 1 ? 0.2 : 0.6, fontSize: 11, color: 'var(--text-dim)', padding: '0 2px', lineHeight: 1 }}
-                  onClick={() => moveColumn(col.id, 1)} disabled={idx === columns.length - 1}>▼</button>
-              </div>
-            ))}
+            {columns.map((col, idx) => {
+              const isFirstAdv = col.group === 'adv' && (idx === 0 || columns[idx - 1].group !== 'adv');
+              const isDragging = draggedColId === col.id;
+              const isDragOver = dragOverColId === col.id && draggedColId !== col.id;
+              return (
+                <React.Fragment key={col.id}>
+                  {isFirstAdv && (
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: '#ffcc44', paddingLeft: 6, marginTop: 8, marginBottom: 2 }}>
+                      Advanced Stats (NextGen)
+                    </div>
+                  )}
+                  <div
+                    draggable
+                    onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDraggedColId(col.id); }}
+                    onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverColId(col.id); }}
+                    onDrop={e => { e.preventDefault(); moveColumnTo(draggedColId, col.id); setDraggedColId(null); setDragOverColId(null); }}
+                    onDragEnd={() => { setDraggedColId(null); setDragOverColId(null); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px', borderRadius: 6,
+                      cursor: 'grab',
+                      opacity: isDragging ? 0.35 : 1,
+                      background: isDragOver
+                        ? 'rgba(255,255,255,.12)'
+                        : col.visible ? 'rgba(255,255,255,.04)' : 'transparent',
+                      outline: isDragOver ? '1px dashed rgba(255,255,255,.3)' : 'none',
+                      transition: 'background .1s, opacity .1s',
+                    }}
+                  >
+                    <span style={{ color: 'var(--text-faint)', fontSize: 14, lineHeight: 1, flexShrink: 0, userSelect: 'none' }}>⠿</span>
+                    <input type="checkbox" checked={col.visible} onChange={() => toggleColumn(col.id)}
+                      style={{ accentColor: col.group === 'adv' ? '#ffcc44' : 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
+                      onClick={e => e.stopPropagation()} />
+                    <span style={{ flex: 1, fontSize: 12, color: col.group === 'adv' ? (col.visible ? '#ffcc44' : 'rgba(255,204,68,.45)') : (col.visible ? 'var(--text)' : 'var(--text-faint)') }}>{col.label}</span>
+                  </div>
+                </React.Fragment>
+              );
+            })}
           </div>
           <button className="btn ghost sm" style={{ width: '100%', marginTop: 10, fontSize: 11 }}
             onClick={() => saveColumns(DEFAULT_COLUMNS.map(c => ({ ...c })))}>Reset to Default</button>
@@ -1517,19 +1687,39 @@ function PlayerNewsCard({ items = [], loading = false, playerName = '' }) {
           </div>
         ) : items.map((n, i) => {
           const color = n.sourceColor || SOURCE_META[n.source]?.color || 'var(--accent-2)';
-          const minsAgo = n.fetchedAt ? Math.round((Date.now() - n.fetchedAt) / 60000) : null;
+          // Prefer source's own publication date; fall back to our fetch time
+          const pubTs   = n.publishedAt || null;
+          const fetchTs = n.fetchedAt   || null;
+          function fmtTs(ts) {
+            if (!ts) return null;
+            const d = new Date(ts);
+            const now2 = new Date();
+            const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            if (d.toDateString() === now2.toDateString()) return `Today ${time}`;
+            const yest = new Date(now2); yest.setDate(yest.getDate() - 1);
+            if (d.toDateString() === yest.toDateString()) return `Yesterday ${time}`;
+            return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${time}`;
+          }
+          const pubStr   = fmtTs(pubTs);
+          const fetchStr = fmtTs(fetchTs);
+          const showFetchStr = fetchStr && (!pubStr || Math.abs((fetchTs||0) - (pubTs||0)) > 5 * 60 * 1000);
           return (
             <div key={i} style={{ padding:'10px 16px', borderTop: i > 0 ? '1px solid var(--border)' : 'none', background: i % 2 !== 0 ? 'rgba(255,255,255,.015)' : 'transparent' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5, flexWrap:'wrap' }}>
                 <span style={{ fontSize:9, fontFamily:'var(--font-mono)', fontWeight:700, padding:'2px 6px', borderRadius:3, background:`${color}22`, color, border:`1px solid ${color}55`, whiteSpace:'nowrap' }}>
                   {n.source}
                 </span>
-                {minsAgo != null && (
-                  <span style={{ fontSize:10, color:'var(--accent)', fontFamily:'var(--font-mono)' }}>
-                    {minsAgo < 1 ? 'just now' : `${minsAgo}m ago`}
+                {pubStr && (
+                  <span style={{ fontSize:10, color:'var(--accent)', fontFamily:'var(--font-mono)' }} title="Date source published this">
+                    {pubStr}
                   </span>
                 )}
-                {n.mins != null && minsAgo == null && (
+                {showFetchStr && (
+                  <span style={{ fontSize:10, color:'var(--text-faint)', fontFamily:'var(--font-mono)' }} title="When we fetched this">
+                    {pubStr ? `(fetched ${fetchStr})` : fetchStr}
+                  </span>
+                )}
+                {n.mins != null && !pubStr && !fetchStr && (
                   <span style={{ fontSize:10, color:'var(--text-faint)', fontFamily:'var(--font-mono)' }}>
                     {n.mins < 60 ? `${n.mins}m ago` : `${Math.floor(n.mins/60)}h ago`}
                   </span>
@@ -1551,6 +1741,49 @@ function PlayerNewsCard({ items = [], loading = false, playerName = '' }) {
   );
 }
 
+// ─── PlayerArticlesCard ───────────────────────────────────────────────────────
+
+function PlayerArticlesCard({ articles = [], loading = false }) {
+  if (loading) return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <div className="card-head"><div className="card-title">🤖 Articles & AI</div><div className="ai-orb" style={{ width: 12, height: 12 }} /></div>
+      <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-faint)' }}>Loading articles…</div>
+    </div>
+  );
+  if (!articles.length) return null;
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <div className="card-head">
+        <div className="card-title">🤖 Articles & AI</div>
+        <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{articles.length} article{articles.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div className="card-body" style={{ padding: 0 }}>
+        {articles.map((a, i) => {
+          const pub     = a.published_at ? new Date(a.published_at) : null;
+          const pubStr  = pub ? pub.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+          const isAi    = !!a.ai_generated_at;
+          const insight = a.fantasy_insight || '';
+          const desc    = a.description || a.full_text || a.summary || '';
+          const url     = a.article_url || a.source_url || '';
+          return (
+            <div key={i} style={{ padding: '10px 16px', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(78,168,255,.12)', color: '#4ea8ff', border: '1px solid rgba(78,168,255,.25)' }}>{a.publisher || 'FantasAI'}</span>
+                {isAi && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', background: 'rgba(198,255,58,.1)', borderRadius: 3, padding: '1px 5px' }}>🤖 AI</span>}
+                {pubStr && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>{pubStr}</span>}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4, marginBottom: (insight || desc) ? 4 : 0 }}>{a.headline || a.title}</div>
+              {insight && <div style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1.5, marginBottom: desc ? 3 : 0 }}>{insight}</div>}
+              {!insight && desc && <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>{desc.slice(0, 220)}{desc.length > 220 ? '…' : ''}</div>}
+              {url && <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: '#4ea8ff', textDecoration: 'none', display: 'inline-block', marginTop: 4 }}>Open Article ↗</a>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── PlayerDetail ─────────────────────────────────────────────────────────────
 
 export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPlayer, onTradePlayer, sourcesState }) {
@@ -1559,6 +1792,8 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const [added, setAdded] = React.useState(false);
   const [fetchedNewsItems, setFetchedNewsItems] = React.useState([]);
   const [newsLoading, setNewsLoading] = React.useState(true);
+  const [playerArticles,  setPlayerArticles]  = React.useState([]);
+  const [articlesLoading, setArticlesLoading] = React.useState(true);
 
   React.useEffect(() => { setAdded(false); }, [player.id]);
 
@@ -1587,12 +1822,14 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
             return n.includes(fl) && n.includes(ll);
           });
           if (match && (match.newsTitle || match.news)) {
+            const cbsDate = match.newsDate || match.updatedDate || null;
             items.push({
               source: 'CBS Sports',
               sourceColor: '#0d4ea2',
               title: match.newsTitle || null,
               body:  match.news     || null,
-              fetchedAt: now,
+              fetchedAt:   now,
+              publishedAt: cbsDate ? new Date(cbsDate).getTime() || null : null,
               impact: /^out$/i.test(match.status||'') ? 'bad'
                 : /questionable/i.test(match.status||'') ? 'medium'
                 : 'low',
@@ -1611,7 +1848,8 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                 sourceColor: '#cc0000',
                 title: art.headline    || null,
                 body:  art.description || null,
-                fetchedAt: art.published ? new Date(art.published).getTime() : now,
+                fetchedAt:   now,
+                publishedAt: art.published ? new Date(art.published).getTime() : null,
                 impact: 'low',
               });
             }
@@ -1624,6 +1862,28 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
       }
     }
     fetchPlayerNews();
+    return () => { cancelled = true; };
+  }, [player.id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setPlayerArticles([]);
+    setArticlesLoading(true);
+    const nameLow = player.name.toLowerCase().trim();
+    fetch(`${API_BASE}/api/v1/news/articles?limit=500`, { signal: AbortSignal.timeout(15000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data) return;
+        const arr = Array.isArray(data.articles) ? data.articles : [];
+        const matched = arr.filter(a => {
+          const pn = (a.player_name || a.primary_player_name || '').toLowerCase().trim();
+          if (!pn) return false;
+          return pn === nameLow || nameLow.startsWith(pn) || pn.startsWith(nameLow.split(' ').slice(-1)[0]);
+        }).slice(0, 12);
+        setPlayerArticles(matched);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setArticlesLoading(false); });
     return () => { cancelled = true; };
   }, [player.id]);
 
@@ -1931,6 +2191,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
               </div>
 
               <PlayerNewsCard items={playerNewsItems} loading={newsLoading || loading} playerName={player.name} />
+              <PlayerArticlesCard articles={playerArticles} loading={articlesLoading} />
             </React.Fragment>
           )}
 
@@ -2012,7 +2273,10 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
 
           {/* ── News ── */}
           {activeTab === 'news' && (
-            <PlayerNewsCard items={playerNewsItems} loading={newsLoading || loading} playerName={player.name} />
+            <>
+              <PlayerNewsCard items={playerNewsItems} loading={newsLoading || loading} playerName={player.name} />
+              <PlayerArticlesCard articles={playerArticles} loading={articlesLoading} />
+            </>
           )}
 
           {/* ── Matchup ── */}

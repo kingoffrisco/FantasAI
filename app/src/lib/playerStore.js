@@ -95,39 +95,45 @@ export function normalizePlayerList(rawArr) {
     return 0;
   }
 
-  const seen   = new Set();
-  const result = [];
+  const seen      = new Set(); // keyed by name
+  const seenIds   = new Set(); // keyed by Sleeper player_id string
+  const result    = [];
 
   for (const p of rawArr) {
     // Support both camelCase (new export) and snake_case (old schema)
     const isDraftable = p.isDraftable ?? p.is_draftable;
     if (isDraftable === false || isDraftable === 'false') continue;
 
-    const rawPos  = p.position;
+    const rawPos  = p.position || p.pos;
     const rawTeam = p.team;
-    if (!rawTeam || rawTeam === 'FA') continue;
-    // Map source positions to canonical set; reject anything unexpected
+    // 'UNK' is the Databricks export sentinel for "team not resolved" — treat same as FA
+    const isTeamless = !rawTeam || rawTeam === 'FA' || rawTeam === 'UNK';
+    if (isTeamless) {
+      // Keep free agents / unknowns only if they have evidence of NFL relevance
+      const hasRank  = Number(p.positionRank || p.position_rank || p.search_rank || p.ecr) > 0;
+      const hasGames = Number(p.games_played_2025 || p.games_played) > 0;
+      if (!hasRank && !hasGames) continue;
+    }
+    // Map source positions to canonical set; reject anything unexpected.
+    // Use fantasy_positions only as a fallback when `position` is absent or unrecognised —
+    // NOT as an override when `position` is already a valid canonical value.  Overriding
+    // caused QBs with stale/multi-value fantasy_positions arrays (e.g. ["WR","QB"]) to be
+    // misclassified as WR.
     let pos = rawPos === 'DEF' ? 'DST' : (rawPos || '');
-
-    // Sleeper stores fantasy_positions as an authoritative array — use it to correct
-    // cases where the single `position` field is stale or wrong (e.g. a QB listed as WR
-    // from a bad ETL export).
-    const fantasyPositions = p.fantasy_positions;
-    if (Array.isArray(fantasyPositions) && fantasyPositions.length > 0) {
-      const fp = fantasyPositions[0] === 'DEF' ? 'DST' : fantasyPositions[0];
-      if (['QB', 'RB', 'WR', 'TE', 'K', 'DST'].includes(fp) && fp !== pos) {
-        pos = fp;
-      }
+    if (!['QB', 'RB', 'WR', 'TE', 'K', 'DST'].includes(pos)) {
+      // position field is missing or unrecognised — try fantasy_positions as rescue
+      const fp0 = Array.isArray(p.fantasy_positions) ? p.fantasy_positions[0] : null;
+      if (fp0) pos = fp0 === 'DEF' ? 'DST' : fp0;
     }
 
     if (!['QB', 'RB', 'WR', 'TE', 'K', 'DST'].includes(pos)) continue;
 
     let name;
     if (pos === 'DST') {
-      // DST entries always get a team-based name — never a real player name
+      if (isTeamless) continue; // DST without a real team is meaningless
       name = `${rawTeam.toUpperCase()} D/ST`;
     } else {
-      name = (p.full_name || p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim()).trim();
+      name = (p.full_name || p.name || p.player_name || `${p.first_name || ''} ${p.last_name || ''}`.trim()).trim();
       if (!name) continue;
       // Guard: if a non-DST entry somehow has a D/ST-style name, treat it as DST
       if (/\bd\/st\b/i.test(name)) {
@@ -136,17 +142,33 @@ export function normalizePlayerList(rawArr) {
       }
     }
 
-    const key = name.toLowerCase().trim();
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const nameKey = name.toLowerCase().trim();
 
-    // camelCase (new) takes priority over snake_case (old)
+    // Secondary dedup: when both first_name and last_name are present, also index by
+    // "firstname lastname" so the same player doesn't slip through when one source uses
+    // full_name and another uses first_name + last_name with different formatting.
+    const fnlnKey = pos !== 'DST' && p.first_name && p.last_name
+      ? `${p.first_name.toLowerCase().trim()} ${p.last_name.toLowerCase().trim()}`
+      : null;
+
+    if (seen.has(nameKey)) continue;
+    if (fnlnKey && fnlnKey !== nameKey && seen.has(fnlnKey)) continue;
+
+    // Tertiary dedup: same Sleeper player_id in the same source file means the same player
+    // regardless of minor name formatting differences (e.g. "Geno Smith" vs "Geno C Smith").
     const sleeperId  = p.playerId || p.player_id || p.id || null;
-    const stableId   = idByName.get(key);
+    const sleeperKey = sleeperId ? String(sleeperId) : null;
+    if (sleeperKey && seenIds.has(sleeperKey)) continue;
+
+    seen.add(nameKey);
+    if (fnlnKey && fnlnKey !== nameKey) seen.add(fnlnKey);
+    if (sleeperKey) seenIds.add(sleeperKey);
+    const stableId   = idByName.get(nameKey);
     const id         = stableId ?? (Number(sleeperId) || 10000 + result.length);
 
-    // proj: new schema has p.proj directly; old schema uses projected_avg_points
-    const projRaw    = Number(p.proj) || Number(p.projected_avg_points) || 0;
+    // proj: R2 export uses season_avg_points_2025; older schemas use proj / projected_avg_points
+    const projRaw    = Number(p.proj) || Number(p.projected_avg_points)
+                    || Number(p.season_avg_points_2025) || Number(p.career_ppg) || 0;
     // ECR: new schema has positionRank; old has position_rank / search_rank
     const posRank    = Number(p.positionRank || p.position_rank) || null;
     const searchRank = Number(p.search_rank || p.ecr) || null;
@@ -156,17 +178,14 @@ export function normalizePlayerList(rawArr) {
       ? Math.max(0, parseFloat((100 - ecr * 0.28).toFixed(1)))
       : 0);
 
-    // Proj fallback: estimate from ECR when no source provides a projection.
-    // Used when Databricks R2 export isn't available yet — Sleeper/Databricks news fallback.
-    // ECR is positional rank when available (players_2026_draft), else overall search_rank.
+    // Proj: if we have real stats data (season_avg_points_2025), use it directly.
+    // Otherwise fall back to ECR-based estimate (used when only Sleeper data is available).
     let proj = projRaw;
     if (proj === 0) {
       if (pos === 'DST') {
-        // Always synthesize a DST proj — cap ECR at 32 so unranked DSTs get a mid-tier value (~8).
         const dstRank = ecr < 500 ? ecr : 16;
         proj = parseFloat(Math.max(4, 15 - dstRank * 0.6).toFixed(1));
       } else if (ecr < 500) {
-        // Skill positions: base ± ECR-scaled drop-off, floored at a minimum.
         const base  = { QB: 26, RB: 22, WR: 20, TE: 16, K: 10 }[pos] ?? 18;
         const slope = { QB: 0.5, RB: 0.5, WR: 0.5, TE: 0.65, K: 0.4 }[pos] ?? 0.5;
         const floor = { QB: 10, RB: 5,  WR: 5,  TE: 5,  K:  4 }[pos] ?? 5;
@@ -174,8 +193,8 @@ export function normalizePlayerList(rawArr) {
       }
     }
 
-    // tier: new schema has string like "Elite"; old has season_tier
-    const tierStr    = (typeof p.tier === 'string' ? p.tier : null) || p.season_tier || null;
+    // tier: new schema has string like "Elite"; R2 export uses draft_tier (e.g. "QB1"); old has season_tier
+    const tierStr    = (typeof p.tier === 'string' ? p.tier : null) || p.draft_tier || p.season_tier || null;
 
     // trend: support both native array and JSON-encoded string
     const rawTrend   = p.trend;
@@ -212,6 +231,28 @@ export function normalizePlayerList(rawArr) {
       seasonTier:  tierStr,
       news:        p.news || '',
       status:      injStatusCode(p.injury_status || p.player_status),
+    });
+  }
+
+  // If the source had no ranking data (all ECR = 999), derive ECR and ADP from proj values.
+  // This applies when loading from the R2 export which has stats but no pre-computed ranks.
+  const hasRanks = result.some(p => p.ecr < 999);
+  if (!hasRanks) {
+    // Positional ECR: rank each position group by proj descending
+    const byPos = {};
+    for (const p of result) {
+      if (!byPos[p.pos]) byPos[p.pos] = [];
+      byPos[p.pos].push(p);
+    }
+    for (const group of Object.values(byPos)) {
+      group.sort((a, b) => b.proj - a.proj);
+      group.forEach((p, i) => { p.ecr = i + 1; });
+    }
+    // Overall ADP: sort all players by proj, assign overall rank
+    const sorted = [...result].sort((a, b) => b.proj - a.proj);
+    sorted.forEach((p, i) => {
+      p.adp   = i + 1;
+      p.owned = Math.max(0, parseFloat((100 - (i + 1) * 0.045).toFixed(1)));
     });
   }
 

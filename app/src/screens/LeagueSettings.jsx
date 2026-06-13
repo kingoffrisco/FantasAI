@@ -278,12 +278,12 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     try {
       const u = new URL(raw.trim());
       if (u.hostname.includes('youtube.com') && u.searchParams.get('v'))
-        return `https://www.youtube.com/embed/${u.searchParams.get('v')}`;
+        return `https://www.youtube.com/embed/${u.searchParams.get('v')}?autoplay=0`;
       if (u.hostname === 'youtu.be')
-        return `https://www.youtube.com/embed${u.pathname}`;
+        return `https://www.youtube.com/embed${u.pathname}?autoplay=0`;
       if (u.hostname.includes('vimeo.com')) {
         const id = u.pathname.split('/').filter(Boolean).pop();
-        return `https://player.vimeo.com/video/${id}`;
+        return `https://player.vimeo.com/video/${id}?autoplay=0`;
       }
       return raw.trim();
     } catch { return raw.trim(); }
@@ -383,6 +383,30 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
   // For inline field editing
   const [editField, setEditField] = React.useState(null);
   const [fieldDraft, setFieldDraft] = React.useState('');
+
+  // CBS Sports FantasAI Key
+  const [keyDraft, setKeyDraft] = React.useState('');
+  const [keyTestStatus, setKeyTestStatus] = React.useState(() => data.fantasaiKey ? 'untested' : null);
+
+  async function setAndTestKey() {
+    const k = keyDraft.trim();
+    if (!k) return;
+    const next = { ...data, fantasaiKey: k };
+    persist(next);
+    setData(next);
+    localStorage.setItem('fantasai.workerKey', k);
+    setKeyDraft('');
+    setKeyTestStatus('testing');
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/league`, {
+        headers: { 'X-FantasAI-Key': k },
+        signal: AbortSignal.timeout(8000),
+      });
+      setKeyTestStatus(res.status === 401 ? 'fail' : 'ok');
+    } catch {
+      setKeyTestStatus('fail');
+    }
+  }
 
   function startFieldEdit(key, value) {
     setEditField(key);
@@ -820,9 +844,132 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               { label: 'League Email',         key: 'leagueEmail', value: data.leagueEmail },
               { label: 'Number of Teams',      key: 'numTeams',    value: data.numTeams },
               { label: 'Player Pool',          key: 'playerPool',  value: data.playerPool },
-              ...(canEdit ? [{ label: 'Commissioner Key', key: 'fantasaiKey', value: data.fantasaiKey ? '••••••••' : '(not set)', editValue: '', password: true }] : []),
             ]}
           />
+
+          {canEdit && (
+            <Card title="CBS Sports FantasAI Key">
+              <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+                  Required for CBS probe endpoints and push notifications. Enter your <code style={{ fontSize: 11, background: 'var(--panel-3)', padding: '1px 5px', borderRadius: 3 }}>FANTASAI_KEY</code> worker secret — stored locally and sent as <code style={{ fontSize: 11, background: 'var(--panel-3)', padding: '1px 5px', borderRadius: 3 }}>X-FantasAI-Key</code> on all authenticated requests.
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    className="input mono"
+                    type="password"
+                    placeholder={data.fantasaiKey ? '••••••••  (key is set — enter new value to replace)' : 'Enter your FANTASAI_KEY worker secret…'}
+                    value={keyDraft}
+                    onChange={e => setKeyDraft(e.target.value)}
+                    style={{ flex: 1, fontSize: 12 }}
+                  />
+                  <button
+                    className="btn primary sm"
+                    onClick={setAndTestKey}
+                    disabled={!keyDraft.trim() || keyTestStatus === 'testing'}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    {keyTestStatus === 'testing' ? '⏳ Testing…' : '⚡ Set & Test Key'}
+                  </button>
+                </div>
+                {keyTestStatus === 'ok' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'rgba(76,175,130,.1)', border: '1px solid rgba(76,175,130,.3)', borderRadius: 6 }}>
+                    <span style={{ fontSize: 14 }}>✓</span>
+                    <span style={{ fontSize: 12, color: '#4caf82', fontWeight: 700 }}>Key valid — CBS endpoints are working.</span>
+                  </div>
+                )}
+                {keyTestStatus === 'fail' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'rgba(255,90,110,.08)', border: '1px solid rgba(255,90,110,.3)', borderRadius: 6 }}>
+                    <span style={{ fontSize: 14 }}>✗</span>
+                    <div>
+                      <div style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>Key rejected — Unauthorized.</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>Double-check the value matches your <code style={{ fontSize: 10 }}>FANTASAI_KEY</code> worker secret.</div>
+                    </div>
+                  </div>
+                )}
+                {keyTestStatus === 'untested' && (
+                  <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                    ● Key is saved. Enter it again and click <strong>Set &amp; Test Key</strong> to verify it's still working.
+                  </div>
+                )}
+                {!data.fantasaiKey && keyTestStatus !== 'testing' && keyTestStatus !== 'ok' && keyTestStatus !== 'fail' && (
+                  <div style={{ fontSize: 11, color: 'var(--warn)' }}>⚠ Not set — CBS probe endpoints will return Unauthorized.</div>
+                )}
+              </div>
+            </Card>
+          )}
+
+          {canEdit && (
+            <Card title="Setup & Maintenance Reference">
+              <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 14, fontSize: 12 }}>
+
+                {/* FANTASAI_KEY */}
+                <div>
+                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 15 }}>🔑</span> CBS Sports FantasAI Key (FANTASAI_KEY)
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', background: 'rgba(52,211,153,.12)', color: '#4caf82', border: '1px solid rgba(52,211,153,.3)', borderRadius: 4, padding: '1px 7px', fontWeight: 700 }}>SET ONCE</span>
+                  </div>
+                  <div style={{ color: 'var(--text-faint)', lineHeight: 1.7, marginBottom: 6 }}>
+                    This secret authenticates FantasAI's API worker. It lives permanently on the Cloudflare Worker — you only re-run the command if you want to change the value.
+                  </div>
+                  <div style={{ background: 'var(--panel-3)', borderRadius: 6, padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', lineHeight: 2 }}>
+                    <div style={{ color: 'var(--text-faint)', marginBottom: 2 }}># Run once in your terminal (off VPN):</div>
+                    <div>cd "d:\Project\Fantasy\worker-api"</div>
+                    <div>npx wrangler secret put FANTASAI_KEY --name fantasai-api</div>
+                    <div style={{ color: 'var(--text-faint)', marginTop: 4 }}># Then enter the key above in "CBS Sports FantasAI Key" and click Set &amp; Test Key</div>
+                  </div>
+                  <div style={{ color: 'var(--text-faint)', marginTop: 6, lineHeight: 1.6 }}>
+                    <strong style={{ color: 'var(--text-dim)' }}>When to re-run:</strong> Only if you rotate the key for security, or first-time setup. The worker remembers it permanently — no redeploy needed after setting a secret.
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border)' }} />
+
+                {/* CBS Cookie */}
+                <div>
+                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 15 }}>🍪</span> CBS Session Cookie
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', background: 'rgba(255,193,7,.12)', color: 'var(--warn)', border: '1px solid rgba(255,193,7,.3)', borderRadius: 4, padding: '1px 7px', fontWeight: 700 }}>REFRESH PERIODICALLY</span>
+                  </div>
+                  <div style={{ color: 'var(--text-faint)', lineHeight: 1.7, marginBottom: 6 }}>
+                    CBS Sports session cookies expire every few weeks. When CBS data stops loading, refresh it from the Sources page — <strong style={{ color: 'var(--text-dim)' }}>no terminal command needed.</strong>
+                  </div>
+                  <div style={{ background: 'var(--panel-3)', borderRadius: 6, padding: '8px 12px', fontSize: 11, color: 'var(--text-dim)', lineHeight: 2 }}>
+                    <div>1. Go to <strong>Sources</strong> page → <strong>🍪 Get Cookie</strong></div>
+                    <div>2. Open CBS Sports, F12 → Network → filter "cbssports.com"</div>
+                    <div>3. Click any "ownerlogo" request → Request Headers → copy the <code style={{ background: 'var(--panel)', padding: '1px 4px', borderRadius: 3 }}>cookie:</code> value</div>
+                    <div>4. Paste it in the modal → <strong>Save Cookie</strong></div>
+                  </div>
+                  <div style={{ color: 'var(--text-faint)', marginTop: 6 }}>
+                    <strong style={{ color: 'var(--text-dim)' }}>Signs it's expired:</strong> League / roster / draft probe endpoints return errors, or CBS data shows stale.
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border)' }} />
+
+                {/* Deploy commands */}
+                <div>
+                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 15 }}>🚀</span> Deployment Commands
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', background: 'rgba(148,163,184,.1)', color: 'var(--text-faint)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 7px', fontWeight: 700 }}>CODE CHANGES ONLY</span>
+                  </div>
+                  <div style={{ color: 'var(--text-faint)', lineHeight: 1.7, marginBottom: 6 }}>
+                    Only needed when the app code itself changes — not for cookies or secrets.
+                  </div>
+                  <div style={{ background: 'var(--panel-3)', borderRadius: 6, padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', lineHeight: 2.2 }}>
+                    <div style={{ color: 'var(--text-faint)', marginBottom: 2 }}># Frontend (Cloudflare Pages):</div>
+                    <div>cd "d:\Project\Fantasy\app" &amp;&amp; npm run build</div>
+                    <div>npx wrangler pages deploy dist --project-name fantasai</div>
+                    <div style={{ color: 'var(--text-faint)', marginTop: 4, marginBottom: 2 }}># Main API Worker:</div>
+                    <div>cd "d:\Project\Fantasy\worker-api" &amp;&amp; npx wrangler deploy</div>
+                    <div style={{ color: 'var(--text-faint)', marginTop: 4, marginBottom: 2 }}># CBS Cookie Worker (rarely changes):</div>
+                    <div>cd "d:\Project\Fantasy\worker" &amp;&amp; npx wrangler deploy</div>
+                  </div>
+                </div>
+
+              </div>
+            </Card>
+          )}
+
           <Card title="Draft Settings">
             {editingDraft ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

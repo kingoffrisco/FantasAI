@@ -1086,8 +1086,8 @@ select.input { appearance: none; padding-right: 28px; background-image: url("dat
   border-color: rgba(78,168,255,.4);
 }
 .ghost-card.me {
-  border-color: var(--accent);
-  background: linear-gradient(135deg, rgba(198,255,58,.08), rgba(198,255,58,.02));
+  border-color: rgba(78,168,255,.55);
+  background: linear-gradient(135deg, rgba(78,168,255,.1), rgba(78,168,255,.02));
 }
 .ghost-head {
   display: flex; align-items: center; gap: 8px; font-size: 11px;
@@ -1114,22 +1114,26 @@ select.input { appearance: none; padding-right: 28px; background-image: url("dat
   background: var(--accent-2); color: var(--accent-2-ink);
   padding: 2px 6px; border-radius: 3px; letter-spacing: .08em; font-weight: 800;
 }
-.ghost-card.me .ghost-now { background: var(--accent); color: var(--accent-ink); }
+.ghost-card.me .ghost-now { background: var(--accent-2); color: var(--accent-2-ink); }
 .ghost-targets { display: flex; flex-direction: column; gap: 3px; }
 .ghost-targets.sm { gap: 2px; }
 .ghost-target {
   display: flex; align-items: center; gap: 6px;
   padding: 3px 6px; border-radius: 3px;
   background: var(--panel-2); font-size: 11px;
-  border-left: 2px solid transparent;
+  border: 1px solid transparent;
 }
-.ghost-target.rank-0 { border-left-color: var(--accent-2); background: var(--panel-3); }
-.ghost-target.rank-0.me { border-left-color: var(--accent); }
+.ghost-target.rank-0 {
+  border-color: rgba(78,168,255,.45);
+  background: rgba(78,168,255,.08);
+  box-shadow: 0 0 0 1px rgba(78,168,255,.15);
+}
+.ghost-target.rank-0.me { border-color: rgba(78,168,255,.6); }
 .ghost-target.compact { padding: 2px 5px; font-size: 10px; }
 .ghost-name { flex: 1; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ghost-pct { color: var(--text-dim); font-size: 10px; min-width: 28px; text-align: right; }
 .ghost-target.rank-0 .ghost-pct { color: var(--accent-2); font-weight: 700; }
-.ghost-target.rank-0.me .ghost-pct { color: var(--accent); }
+.ghost-target.rank-0.me .ghost-pct { color: var(--accent-2); font-weight: 700; }
 
 /* ============================================================
    MOCK DRAFT MODAL

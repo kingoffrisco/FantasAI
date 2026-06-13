@@ -10,13 +10,13 @@ const SKIP_KEY = 'fantasai_debug_source_skips';
 
 const DEBUG_SOURCES = [
   { id: 'r2_players',    label: 'R2 - FantasAI',       role: 'PRIMARY',    desc: 'fantasai/players/players_2026_draft.json',        url: `${API_BASE}/api/v1/r2/fantasai/players/players_2026_draft.json` },
-  { id: 'db_players',    label: 'Databricks SQL',        role: 'FALLBACK 1', desc: '/api/v1/db/players → main.fantasai.bronze_player_news_raw', url: `${API_BASE}/api/v1/db/players` },
+  { id: 'db_players',    label: 'Databricks SQL',        role: 'FALLBACK 1', desc: '/api/v1/db/players → main.fantasai.export_players_2026_draft', url: `${API_BASE}/api/v1/db/players` },
   { id: 'cbs_sleeper',   label: 'CBS Sleeper Proxy',    role: 'FALLBACK 2', desc: '/api/cbs/sleeper-players (CBS Worker, ~1500 players)',    url: `${CBS_BASE}/api/cbs/sleeper-players` },
   { id: 'worker_sleeper',label: 'Worker Sleeper',            role: 'FALLBACK 3', desc: '/api/v1/players?limit=2000 (up to 2000 records, 1 h CF cache)',          url: `${API_BASE}/api/v1/players?limit=2000` },
   { id: 'sleeper_direct',label: 'Sleeper Direct',       role: 'FALLBACK 4', desc: 'api.sleeper.app/v1/players/nfl (CORS blocked)',          url: 'https://api.sleeper.app/v1/players/nfl' },
   { id: 'bye_backfill',  label: 'Bye Backfill',         role: 'PATCH',      desc: 'BYE_WEEKS_2026 static map + Sleeper getPlayerMap()',     url: null },
   { id: 'proj_backfill', label: 'Projection Backfill',  role: 'PATCH',      desc: 'Sleeper weekly stats → localStorage proj cache',         url: null },
-  { id: 'r2_injuries',   label: 'R2 Injury Overlay',    role: 'OVERLAY',    desc: 'fantasai/injuries/silver_player_news.json',              url: `${API_BASE}/api/v1/r2/fantasai/injuries/silver_player_news.json` },
+  { id: 'r2_injuries',   label: 'R2 Injury Overlay',    role: 'OVERLAY',    desc: 'fantasai/players/injury_overlay.json',                  url: `${API_BASE}/api/v1/r2/fantasai/players/injury_overlay.json` },
   { id: 'r2_notes',      label: 'R2 Player Notes',      role: 'OVERLAY',    desc: 'fantasai/news/player_notes.json',                       url: `${API_BASE}/api/v1/r2/fantasai/news/player_notes.json` },
   { id: 'sleeper_depth', label: 'Sleeper Depth & Stats',role: 'OVERLAY',    desc: 'getPlayerMap() depth chart + weekly stats overlay',      url: null },
 ];

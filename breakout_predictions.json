@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-06-01T02:15:23Z",
+  "season": 2025,
+  "week": 18,
+  "total_players": 483,
+  "high_alerts": 5,
+  "medium_alerts": 5,
+  "predictions": [
+    {
+      "player_name": "Devontez Walker",
+      "position": "WR",
+      "team": "BAL",
+      "breakout_score": 0.0805,
+      "alert_level": "HIGH",
+      "snap_share": 0.73,
+      "targets": 2
+    }
+  ]
+}

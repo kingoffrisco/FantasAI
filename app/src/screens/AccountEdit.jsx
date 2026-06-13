@@ -2,102 +2,118 @@ import React from 'react';
 import { LEAGUE_TEAMS, findTeam } from '../lib/data.js';
 import { getMyTeamPrefs, saveMyTeamPrefs, clearMyTeamPrefs } from '../lib/leagueStore.js';
 import { TeamLogoBadge } from '../components/ui.jsx';
+import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 
 // ── Scoring weight config ─────────────────────────────────────────────────────
 
 const POSITION_FEATURES = {
   QB:  [
-    { key: 'proj',    label: 'Projected Points' },
-    { key: 'avg',     label: 'Season Avg Pts'   },
-    { key: 'passYds', label: 'Passing Yards'     },
-    { key: 'passTDs', label: 'Passing TDs'       },
-    { key: 'ints',    label: 'Interceptions'     },
-    { key: 'rushYds', label: 'Rushing Yards'     },
-    { key: 'last',    label: 'Last Week Pts'     },
-    { key: 'ecr',     label: 'ECR Rank'          },
-    { key: 'adp',     label: 'ADP'               },
-    { key: 'oppRank', label: 'Matchup Rank'      },
-    { key: 'owned',   label: 'Ownership %'       },
-    { key: 'tier',    label: 'Tier'              },
+    { key: 'proj',         label: 'Projected Points'            },
+    { key: 'avg',          label: 'Season Avg Pts'              },
+    { key: 'passYds',      label: 'Passing Yards'               },
+    { key: 'passTDs',      label: 'Passing TDs'                 },
+    { key: 'ints',         label: 'Interceptions'               },
+    { key: 'rushYds',      label: 'Rushing Yards'               },
+    { key: 'last',         label: 'Last Week Pts'               },
+    { key: 'ecr',          label: 'ECR Rank'                    },
+    { key: 'adp',          label: 'ADP'                         },
+    { key: 'oppRank',      label: 'Matchup Rank'                },
+    { key: 'owned',        label: 'Ownership %'                 },
+    { key: 'tier',         label: 'Tier'                        },
+    { key: 'cpoe',         label: 'NextGen: Completion % Over Expected' },
+    { key: 'timeToThrow',  label: 'NextGen: Avg Time to Throw'  },
+    { key: 'aggressiveness', label: 'NextGen: Aggressiveness %' },
   ],
   RB:  [
-    { key: 'proj',    label: 'Projected Points'  },
-    { key: 'avg',     label: 'Season Avg Pts'    },
-    { key: 'rushYds', label: 'Rushing Yards'     },
-    { key: 'rushTDs', label: 'Rushing TDs'       },
-    { key: 'recYds',  label: 'Receiving Yards'   },
-    { key: 'recTDs',  label: 'Receiving TDs'     },
-    { key: 'targets', label: 'Targets'           },
-    { key: 'last',    label: 'Last Week Pts'     },
-    { key: 'ecr',     label: 'ECR Rank'          },
-    { key: 'adp',     label: 'ADP'               },
-    { key: 'oppRank', label: 'Matchup Rank'      },
-    { key: 'owned',   label: 'Ownership %'       },
-    { key: 'tier',    label: 'Tier'              },
+    { key: 'proj',         label: 'Projected Points'            },
+    { key: 'avg',          label: 'Season Avg Pts'              },
+    { key: 'rushYds',      label: 'Rushing Yards'               },
+    { key: 'rushTDs',      label: 'Rushing TDs'                 },
+    { key: 'recYds',       label: 'Receiving Yards'             },
+    { key: 'recTDs',       label: 'Receiving TDs'               },
+    { key: 'targets',      label: 'Targets'                     },
+    { key: 'last',         label: 'Last Week Pts'               },
+    { key: 'ecr',          label: 'ECR Rank'                    },
+    { key: 'adp',          label: 'ADP'                         },
+    { key: 'oppRank',      label: 'Matchup Rank'                },
+    { key: 'owned',        label: 'Ownership %'                 },
+    { key: 'tier',         label: 'Tier'                        },
+    { key: 'rushEff',      label: 'NextGen: Rush Efficiency (Yds Over Expected)' },
+    { key: 'breakaway',    label: 'NextGen: Breakaway Run %'    },
+    { key: 'yac',          label: 'NextGen: Yards After Contact'},
   ],
   WR:  [
-    { key: 'proj',     label: 'Projected Points' },
-    { key: 'avg',      label: 'Season Avg Pts'   },
-    { key: 'recYds',   label: 'Receiving Yards'  },
-    { key: 'recTDs',   label: 'Receiving TDs'    },
-    { key: 'targets',  label: 'Targets'          },
-    { key: 'tgtShare', label: 'Target Share %'   },
-    { key: 'airYards', label: 'Air Yards'        },
-    { key: 'last',     label: 'Last Week Pts'    },
-    { key: 'ecr',      label: 'ECR Rank'         },
-    { key: 'adp',      label: 'ADP'              },
-    { key: 'oppRank',  label: 'Matchup Rank'     },
-    { key: 'owned',    label: 'Ownership %'      },
-    { key: 'tier',     label: 'Tier'             },
+    { key: 'proj',         label: 'Projected Points'            },
+    { key: 'avg',          label: 'Season Avg Pts'              },
+    { key: 'recYds',       label: 'Receiving Yards'             },
+    { key: 'recTDs',       label: 'Receiving TDs'               },
+    { key: 'targets',      label: 'Targets'                     },
+    { key: 'tgtShare',     label: 'Target Share %'              },
+    { key: 'airYards',     label: 'Air Yards'                   },
+    { key: 'last',         label: 'Last Week Pts'               },
+    { key: 'ecr',          label: 'ECR Rank'                    },
+    { key: 'adp',          label: 'ADP'                         },
+    { key: 'oppRank',      label: 'Matchup Rank'                },
+    { key: 'owned',        label: 'Ownership %'                 },
+    { key: 'tier',         label: 'Tier'                        },
+    { key: 'separation',   label: 'NextGen: Avg Separation'     },
+    { key: 'cushion',      label: 'NextGen: Avg Cushion at Snap'},
+    { key: 'yac',          label: 'NextGen: Yards After Catch'  },
+    { key: 'catchPct',     label: 'NextGen: Catch % Above Avg'  },
   ],
   TE:  [
-    { key: 'proj',     label: 'Projected Points' },
-    { key: 'avg',      label: 'Season Avg Pts'   },
-    { key: 'recYds',   label: 'Receiving Yards'  },
-    { key: 'recTDs',   label: 'Receiving TDs'    },
-    { key: 'targets',  label: 'Targets'          },
-    { key: 'tgtShare', label: 'Target Share %'   },
-    { key: 'last',     label: 'Last Week Pts'    },
-    { key: 'ecr',      label: 'ECR Rank'         },
-    { key: 'adp',      label: 'ADP'              },
-    { key: 'oppRank',  label: 'Matchup Rank'     },
-    { key: 'owned',    label: 'Ownership %'      },
-    { key: 'tier',     label: 'Tier'             },
+    { key: 'proj',         label: 'Projected Points'            },
+    { key: 'avg',          label: 'Season Avg Pts'              },
+    { key: 'recYds',       label: 'Receiving Yards'             },
+    { key: 'recTDs',       label: 'Receiving TDs'               },
+    { key: 'targets',      label: 'Targets'                     },
+    { key: 'tgtShare',     label: 'Target Share %'              },
+    { key: 'last',         label: 'Last Week Pts'               },
+    { key: 'ecr',          label: 'ECR Rank'                    },
+    { key: 'adp',          label: 'ADP'                         },
+    { key: 'oppRank',      label: 'Matchup Rank'                },
+    { key: 'owned',        label: 'Ownership %'                 },
+    { key: 'tier',         label: 'Tier'                        },
+    { key: 'separation',   label: 'NextGen: Avg Separation'     },
+    { key: 'cushion',      label: 'NextGen: Avg Cushion at Snap'},
+    { key: 'yac',          label: 'NextGen: Yards After Catch'  },
   ],
   K:   [
-    { key: 'proj',    label: 'Projected Points' },
-    { key: 'avg',     label: 'Season Avg Pts'   },
-    { key: 'fgPct',   label: 'FG Percentage'    },
-    { key: 'fgAtt',   label: 'FG Attempts'      },
-    { key: 'longFG',  label: 'Long FG Made'     },
-    { key: 'xp',      label: 'Extra Points'     },
-    { key: 'ecr',     label: 'ECR Rank'         },
-    { key: 'adp',     label: 'ADP'              },
-    { key: 'oppRank', label: 'Matchup Rank'     },
-    { key: 'owned',   label: 'Ownership %'      },
+    { key: 'proj',         label: 'Projected Points'            },
+    { key: 'avg',          label: 'Season Avg Pts'              },
+    { key: 'fgPct',        label: 'FG Percentage'               },
+    { key: 'fgAtt',        label: 'FG Attempts'                 },
+    { key: 'longFG',       label: 'Long FG Made'                },
+    { key: 'xp',           label: 'Extra Points'                },
+    { key: 'ecr',          label: 'ECR Rank'                    },
+    { key: 'adp',          label: 'ADP'                         },
+    { key: 'oppRank',      label: 'Matchup Rank'                },
+    { key: 'owned',        label: 'Ownership %'                 },
   ],
   DST: [
-    { key: 'proj',     label: 'Projected Points'   },
-    { key: 'avg',      label: 'Season Avg Pts'     },
-    { key: 'ptsAllow', label: 'Points Allowed'     },
-    { key: 'sacks',    label: 'Sacks'              },
-    { key: 'ints',     label: 'Interceptions'      },
-    { key: 'fumbles',  label: 'Fumble Recoveries'  },
-    { key: 'dstTDs',   label: 'Defensive TDs'      },
-    { key: 'ecr',      label: 'ECR Rank'           },
-    { key: 'adp',      label: 'ADP'               },
-    { key: 'oppRank',  label: 'Matchup Rank'       },
-    { key: 'owned',    label: 'Ownership %'        },
+    { key: 'proj',         label: 'Projected Points'            },
+    { key: 'avg',          label: 'Season Avg Pts'              },
+    { key: 'ptsAllow',     label: 'Points Allowed'              },
+    { key: 'sacks',        label: 'Sacks'                       },
+    { key: 'ints',         label: 'Interceptions'               },
+    { key: 'fumbles',      label: 'Fumble Recoveries'           },
+    { key: 'dstTDs',       label: 'Defensive TDs'               },
+    { key: 'ecr',          label: 'ECR Rank'                    },
+    { key: 'adp',          label: 'ADP'                         },
+    { key: 'oppRank',      label: 'Matchup Rank'                },
+    { key: 'owned',        label: 'Ownership %'                 },
+    { key: 'pressureRate', label: 'NextGen: QB Pressure Rate'   },
+    { key: 'coverage',     label: 'NextGen: Coverage Grade'     },
   ],
 };
 
 const DEFAULT_WEIGHT_DIST = {
-  QB:  [25, 20, 12, 10, 5,  8, 5,  8,  3,  2,  1,  1],
-  RB:  [25, 18, 12,  8,  8, 6,  5, 4,  7,  3,  2,  1,  1],
-  WR:  [25, 18, 12,  8,  8, 6,  5, 4,  7,  3,  2,  1,  1],
-  TE:  [25, 18, 14,  8,  8, 6,  4, 8,  3,  2,  3,  1],
+  QB:  [25, 20, 12, 10, 5,  8, 5,  8,  3,  2,  1,  1, 0, 0, 0],
+  RB:  [25, 18, 12,  8,  8, 6,  5, 4,  7,  3,  2,  1,  1, 0, 0, 0],
+  WR:  [25, 18, 12,  8,  8, 6,  5, 4,  7,  3,  2,  1,  1, 0, 0, 0, 0],
+  TE:  [25, 18, 14,  8,  8, 6,  4, 8,  3,  2,  3,  1, 0, 0, 0],
   K:   [30, 20, 15, 10,  8, 7,  5,  3,  1,  1],
-  DST: [25, 18, 12, 10,  8, 7,  5, 7,  3,  3,  2],
+  DST: [25, 18, 12, 10,  8, 7,  5, 7,  3,  3,  2, 0, 0],
 };
 
 function buildDefaultWeights() {
@@ -112,9 +128,8 @@ function buildDefaultWeights() {
 
 function loadScoringWeights() {
   try {
-    const raw = localStorage.getItem('fantasai_scoring_weights');
-    if (!raw) return buildDefaultWeights();
-    const saved = JSON.parse(raw);
+    const saved = getPrefs().scoringWeights;
+    if (!saved) return buildDefaultWeights();
     const defaults = buildDefaultWeights();
     const result = {};
     for (const pos of ['QB', 'RB', 'WR', 'TE', 'K', 'DST']) {
@@ -226,23 +241,16 @@ export default function AccountEditScreen({ user }) {
 
   // Appearance tab state
   const VALID_THEME_IDS = new Set(THEMES.map(t => t.id));
-  const storedTheme = localStorage.getItem('fantasai_theme') || 'sportsbook-dark';
+  const _initPrefs = getPrefs();
+  const storedTheme = _initPrefs.theme || 'sportsbook-dark';
   const [activeTheme, setActiveTheme] = React.useState(VALID_THEME_IDS.has(storedTheme) ? storedTheme : 'sportsbook-dark');
-  const [lightMode, setLightMode] = React.useState(localStorage.getItem('fantasai_light_mode') === 'true');
+  const [lightMode, setLightMode] = React.useState(_initPrefs.lightMode || false);
 
   // Sleeper tab state
-  const [sleeperUsername, setSleeperUsername] = React.useState(
-    () => { try { return localStorage.getItem('fantasai_sleeper_username') || ''; } catch { return ''; } }
-  );
-  const [sleeperLeagueId, setSleeperLeagueId] = React.useState(
-    () => { try { return localStorage.getItem('fantasai_sleeper_league_id') || ''; } catch { return ''; } }
-  );
-  const [sleeperAdpWeight, setSleeperAdpWeight] = React.useState(
-    () => { try { return Number(localStorage.getItem('fantasai_sleeper_adp_weight') ?? 70); } catch { return 70; } }
-  );
-  const [sleeperAutoSync, setSleeperAutoSync] = React.useState(
-    () => { try { return localStorage.getItem('fantasai_sleeper_auto_sync') === 'true'; } catch { return false; } }
-  );
+  const [sleeperUsername, setSleeperUsername] = React.useState(_initPrefs.sleeperUsername || '');
+  const [sleeperLeagueId, setSleeperLeagueId] = React.useState(_initPrefs.sleeperLeagueId || '');
+  const [sleeperAdpWeight, setSleeperAdpWeight] = React.useState(_initPrefs.sleeperAdpWeight ?? 70);
+  const [sleeperAutoSync, setSleeperAutoSync] = React.useState(_initPrefs.sleeperAutoSync || false);
   const [sleeperSyncing, setSleeperSyncing] = React.useState(false);
   const [sleeperSynced, setSleeperSynced]   = React.useState(false);
   const [sleeperError, setSleeperError]     = React.useState(null);
@@ -271,9 +279,8 @@ export default function AccountEditScreen({ user }) {
   }, [teamName]);
 
   React.useEffect(() => {
-    const savedTheme = localStorage.getItem('fantasai_theme');
-    const savedLight = localStorage.getItem('fantasai_light_mode') === 'true';
-    if (savedTheme && THEME_VARS[savedTheme]) applyTheme(savedTheme, savedLight);
+    const p = getPrefs();
+    if (p.theme && THEME_VARS[p.theme]) applyTheme(p.theme, p.lightMode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -289,17 +296,33 @@ export default function AccountEditScreen({ user }) {
 
   function setFeatureWeight(pos, idx, val) {
     setScoringWeights(prev => {
-      const list = prev[pos].map((f, i) => i === idx ? { ...f, weight: val } : f);
-      return { ...prev, [pos]: list };
+      const clamped    = Math.max(0, Math.min(100, val));
+      const remaining  = 100 - clamped;
+      const otherTotal = prev[pos].reduce((s, f, i) => i !== idx ? s + (f.weight || 0) : s, 0);
+
+      const newList = prev[pos].map((f, i) => {
+        if (i === idx) return { ...f, weight: clamped };
+        if (remaining === 0) return { ...f, weight: 0 };
+        if (otherTotal === 0) return { ...f, weight: Math.floor(remaining / (prev[pos].length - 1)) };
+        return { ...f, weight: Math.round((f.weight / otherTotal) * remaining) };
+      });
+
+      // Fix rounding: total may be off by ±1 after Math.round — adjust the largest other slider
+      const diff = 100 - newList.reduce((s, f) => s + f.weight, 0);
+      if (diff !== 0) {
+        let bestIdx = -1, bestVal = -1;
+        newList.forEach((f, i) => { if (i !== idx && f.weight > bestVal) { bestVal = f.weight; bestIdx = i; } });
+        if (bestIdx >= 0) newList[bestIdx] = { ...newList[bestIdx], weight: Math.max(0, newList[bestIdx].weight + diff) };
+      }
+
+      return { ...prev, [pos]: newList };
     });
   }
 
   function saveScoringWeights() {
-    try {
-      localStorage.setItem('fantasai_scoring_weights', JSON.stringify(scoringWeights));
-      setWeightsSaved(true);
-      setTimeout(() => setWeightsSaved(false), 2500);
-    } catch {}
+    patchPrefs({ scoringWeights });
+    setWeightsSaved(true);
+    setTimeout(() => setWeightsSaved(false), 2500);
   }
 
   function resetScoringWeights() {
@@ -348,23 +371,23 @@ export default function AccountEditScreen({ user }) {
     const vars = THEME_VARS[themeId] ?? THEME_VARS['sportsbook-dark'];
     const merged = isLight ?? lightMode ? { ...vars, ...LIGHT_SURFACE_VARS } : vars;
     Object.entries(merged).forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
-    localStorage.setItem('fantasai_theme', themeId);
+    patchPrefs({ theme: themeId });
     setActiveTheme(themeId);
   }
 
   function toggleLightMode(next) {
-    localStorage.setItem('fantasai_light_mode', next ? 'true' : 'false');
+    patchPrefs({ lightMode: next });
     setLightMode(next);
     applyTheme(activeTheme, next);
   }
 
   function saveSleeperSettings() {
-    try {
-      localStorage.setItem('fantasai_sleeper_username', sleeperUsername.trim());
-      localStorage.setItem('fantasai_sleeper_league_id', sleeperLeagueId.trim());
-      localStorage.setItem('fantasai_sleeper_adp_weight', String(sleeperAdpWeight));
-      localStorage.setItem('fantasai_sleeper_auto_sync', sleeperAutoSync ? 'true' : 'false');
-    } catch {}
+    patchPrefs({
+      sleeperUsername: sleeperUsername.trim(),
+      sleeperLeagueId: sleeperLeagueId.trim(),
+      sleeperAdpWeight,
+      sleeperAutoSync,
+    });
   }
 
   async function handleSleeperSync() {
@@ -711,7 +734,7 @@ export default function AccountEditScreen({ user }) {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <div>
                 <label style={{ ...labelStyle, marginBottom: 2 }}>Site Color Theme</label>
-                <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>Changes apply instantly and are remembered for your browser</div>
+                <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>Changes apply instantly and sync to your account across all devices</div>
               </div>
               <button
                 onClick={() => toggleLightMode(!lightMode)}

@@ -2,6 +2,7 @@ import React from 'react';
 import { CBS_RANKINGS } from '../lib/data.js';
 import { getPlayers, findPlayer } from '../lib/playerStore.js';
 import { PosBadge, PlayerCell, TeamLogoBadge } from './ui.jsx';
+import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 
 export function CBSConnectModal({ onClose, onConnected, mode }) {
   const [step, setStep] = React.useState(mode === 'resync' ? 4 : 1);
@@ -702,12 +703,8 @@ function ImportRankingsModal({ onClose, onImport, initialTab = 'file' }) {
 
 export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
   const [tab, setTab] = React.useState('cbs');
-  const [savedRankings, setSavedRankings] = React.useState(() => {
-    try { return JSON.parse(localStorage.getItem('fantasai_saved_rankings') || '[]'); } catch { return []; }
-  });
-  const [personalRanks, setPersonalRanks] = React.useState(() => {
-    try { return JSON.parse(localStorage.getItem('fantasai_personal_rankings') || '[]'); } catch { return []; }
-  });
+  const [savedRankings, setSavedRankings] = React.useState(() => getPrefs().savedRankings || []);
+  const [personalRanks, setPersonalRanks] = React.useState(() => getPrefs().personalRankings || []);
   const [prPos, setPrPos] = React.useState('ALL');
   const [prSearch, setPrSearch] = React.useState('');
   const [showImport, setShowImport] = React.useState(false);
@@ -715,12 +712,12 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
 
   const saveRanks = (ranks) => {
     setPersonalRanks(ranks);
-    localStorage.setItem('fantasai_personal_rankings', JSON.stringify(ranks));
+    patchPrefs({ personalRankings: ranks });
   };
 
   const persistSaved = (list) => {
     setSavedRankings(list);
-    localStorage.setItem('fantasai_saved_rankings', JSON.stringify(list));
+    patchPrefs({ savedRankings: list });
   };
 
   const deleteSaved = (id) => {
@@ -980,13 +977,60 @@ function Movement({ value, prev }) {
 }
 
 export function WorkerConfig() {
-  const [url, setUrl] = React.useState(() => localStorage.getItem('fantasai.workerUrl') || '');
+  const [url, setUrl] = React.useState(() => localStorage.getItem('fantasai.workerUrl') || 'https://api.fantasai.net');
   const [key, setKey] = React.useState(() => localStorage.getItem('fantasai.workerKey') || '');
   const [status, setStatus] = React.useState(null);
   const [statusMsg, setStatusMsg] = React.useState('');
   const [healthData, setHealthData] = React.useState(null);
   const [expanded, setExpanded] = React.useState(true);
   const [leagueResult, setLeagueResult] = React.useState(null);
+  const [showCookieModal, setShowCookieModal] = React.useState(false);
+  const [cookiePaste, setCookiePaste] = React.useState(() => localStorage.getItem('fantasai_cbs_cookie') || '');
+  const [cookieSaved, setCookieSaved] = React.useState(false);
+  const [iframeBlocked, setIframeBlocked] = React.useState(true);
+  const [cookieStatus, setCookieStatus] = React.useState(() => {
+    const c = localStorage.getItem('fantasai_cbs_cookie') || '';
+    if (!c) return null;
+    const ok = c.length > 50 && c.includes(';') && c.includes('=') && !c.includes('Expires=') && !c.includes('Path=/') && !c.includes('SameSite=');
+    return ok ? 'ok' : 'expired';
+  }); // null | 'ok' | 'expired'
+  const [cookieSavedAt, setCookieSavedAt] = React.useState(() => localStorage.getItem('fantasai_cbs_cookie_saved_at') || null);
+  const [modalCookieStatus, setModalCookieStatus] = React.useState(null); // null | 'testing' | 'ok' | 'expired'
+
+  function saveCookie() {
+    const val = cookiePaste.trim();
+    if (!val) return;
+    const now = new Date().toISOString();
+    localStorage.setItem('fantasai_cbs_cookie', val);
+    localStorage.setItem('fantasai_cbs_cookie_saved_at', now);
+    const ok = val.length > 50 && val.includes(';') && val.includes('=') && !val.includes('Expires=') && !val.includes('Path=/') && !val.includes('SameSite=');
+    setCookieStatus(ok ? 'ok' : 'expired');
+    setCookieSavedAt(now);
+    setCookieSaved(true);
+    setTimeout(() => { setCookieSaved(false); setShowCookieModal(false); }, 1200);
+  }
+
+  function clearCookie() {
+    localStorage.removeItem('fantasai_cbs_cookie');
+    setCookiePaste('');
+    setCookieSaved(false);
+    setCookieStatus(null);
+  }
+
+  const testModalCookie = async () => {
+    const cookie = cookiePaste.trim() || ((() => { try { return localStorage.getItem('fantasai_cbs_cookie') || ''; } catch { return ''; } })());
+    if (!cookie) { setModalCookieStatus('expired'); return; }
+    // Structural check: must be long, contain semicolons (multiple cookies), and NOT look like a set-cookie response header
+    const looksValid = cookie.length > 50
+      && cookie.includes(';')
+      && cookie.includes('=')
+      && !cookie.includes('Expires=')
+      && !cookie.includes('Path=/')
+      && !cookie.includes('SameSite=');
+    if (!looksValid) { setModalCookieStatus('expired'); return; }
+    // Passed local check — mark valid immediately (network test is bonus and may fail due to CORS until worker-api is redeployed)
+    setModalCookieStatus('ok');
+  };
 
   const save = (u, k) => {
     localStorage.setItem('fantasai.workerUrl', u);
@@ -998,7 +1042,8 @@ export function WorkerConfig() {
     try {
       const u = url.replace(/\/$/, '') + '/api/health';
       const headers = {};
-      if (key) headers['X-FantasAI-Key'] = key;
+      const effectiveKey = key || (import.meta.env.VITE_FANTASAI_KEY ?? '');
+      if (effectiveKey) headers['X-FantasAI-Key'] = effectiveKey;
       const res = await fetch(u, { headers });
       const data = await res.json();
       setHealthData(data);
@@ -1021,7 +1066,9 @@ export function WorkerConfig() {
     setResult({ loading: true });
     try {
       const headers = {};
-      if (key) headers['X-FantasAI-Key'] = key;
+      const effectiveKey = key || (import.meta.env.VITE_FANTASAI_KEY ?? '');
+      if (effectiveKey) headers['X-FantasAI-Key'] = effectiveKey;
+      try { const c = localStorage.getItem('fantasai_cbs_cookie'); if (c) headers['X-CBS-Cookie'] = c; } catch {}
       const res = await fetch(url.replace(/\/$/, '') + path, { headers });
       const data = await res.json();
       setResult({ data });
@@ -1041,6 +1088,7 @@ export function WorkerConfig() {
     : 'var(--text-faint)';
 
   return (
+    <>
     <div className="worker-config">
       <div className="worker-head">
         <span className="worker-dot" style={{ background: dotColor, boxShadow: `0 0 0 4px ${dotColor}33` }}></span>
@@ -1053,6 +1101,14 @@ export function WorkerConfig() {
           </div>
           <div className="worker-sub">{url ? <span className="mono">{url}</span> : 'Configure your Cloudflare Worker to pull real CBS data'}</div>
         </div>
+        <button
+          className="btn sm ghost"
+          style={{ borderColor: 'var(--accent-2)', color: 'var(--accent-2)' }}
+          onClick={() => setShowCookieModal(true)}
+          title="Open CBS Sports and paste your session cookie to refresh authentication"
+        >
+          🍪 Get Cookie
+        </button>
         <button className="btn sm ghost" onClick={() => setExpanded(!expanded)}>{expanded ? 'Collapse' : 'Expand'}</button>
       </div>
 
@@ -1062,19 +1118,69 @@ export function WorkerConfig() {
             <div className="worker-form">
               <label className="cbs-field">
                 <span className="k">WORKER URL</span>
-                <input className="input mono" placeholder="https://fantasai-cbs.YOU.workers.dev"
+                <input className="input mono" placeholder="https://api.fantasai.net"
                   value={url} onChange={e => setUrl(e.target.value)} />
               </label>
               <label className="cbs-field">
-                <span className="k">SHARED SECRET <span className="faint" style={{ textTransform: 'none', letterSpacing: 0 }}>(optional · X-FantasAI-Key)</span></span>
-                <input className="input mono" type="password" placeholder="leave blank if you didn't set FANTASAI_KEY"
-                  value={key} onChange={e => setKey(e.target.value)} />
+                <span className="k">SHARED SECRET <span className="faint" style={{ textTransform: 'none', letterSpacing: 0 }}>(X-FantasAI-Key · required for CBS probe endpoints)</span></span>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input className="input mono" type="password" placeholder="enter your FANTASAI_KEY worker secret"
+                    value={key} onChange={e => setKey(e.target.value)} style={{ flex: 1 }} />
+                  <button className="btn primary sm" onClick={() => { save(url, key); }}
+                    disabled={!key.trim()} title="Save shared secret to browser storage">
+                    Save
+                  </button>
+                </div>
+                {key ? (
+                  <span style={{ fontSize: 11, color: '#4caf82', marginTop: 4, display: 'block' }}>✓ Shared Secret set</span>
+                ) : (
+                  <div style={{ marginTop: 6, padding: '10px 14px', background: 'rgba(255,60,80,.12)', border: '2px solid rgba(255,60,80,.5)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 22, flexShrink: 0 }}>🔴</span>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--danger)', lineHeight: 1.3 }}>Shared Secret Not Set</div>
+                      <div style={{ fontSize: 12, color: 'var(--danger)', opacity: 0.85, marginTop: 2 }}>All CBS probe endpoints will return Unauthorized until this is configured. See League Settings → General for setup instructions.</div>
+                    </div>
+                  </div>
+                )}
               </label>
-              <div className="flex gap-8" style={{ marginTop: 4 }}>
+              <div className="flex gap-8" style={{ marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button className="btn primary" onClick={test} disabled={!url || status === 'testing'}>
-                  {status === 'testing' ? 'Testing…' : '⚡ Test & Save'}
+                  {status === 'testing' ? 'Testing…' : '⚡ Test Connection'}
                 </button>
-                <button className="btn ghost" onClick={() => { setUrl(''); setKey(''); save('', ''); setStatus(null); setHealthData(null); }}>Clear</button>
+                <button className="btn ghost" onClick={() => { setUrl(''); setKey(''); save('', ''); setStatus(null); setHealthData(null); }}>Clear All</button>
+                {cookieStatus === 'ok' && (
+                  <span style={{ fontSize: 11, color: '#4caf82', fontFamily: 'var(--font-mono)', alignSelf: 'center', fontWeight: 700 }}>
+                    ✓ Cookie valid{cookieSavedAt ? ` · Saved ${new Date(cookieSavedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                  </span>
+                )}
+                {cookieStatus === 'expired' && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {/* Cookie Monster */}
+                    <svg width="36" height="36" viewBox="0 0 40 40" style={{ flexShrink: 0 }}>
+                      <circle cx="20" cy="23" r="17" fill="#1565C0"/>
+                      <circle cx="13" cy="14" r="7" fill="white"/>
+                      <circle cx="27" cy="14" r="7" fill="white"/>
+                      <circle cx="14" cy="15" r="4" fill="#111"/>
+                      <circle cx="28" cy="15" r="4" fill="#111"/>
+                      <circle cx="15" cy="14" r="1.2" fill="white"/>
+                      <circle cx="29" cy="14" r="1.2" fill="white"/>
+                      <path d="M 6 28 Q 20 40 34 28" fill="#111"/>
+                      <circle cx="20" cy="32" r="5.5" fill="#c8860a"/>
+                      <circle cx="18" cy="31" r="1" fill="#5D3A1A"/>
+                      <circle cx="22" cy="33" r="1" fill="#5D3A1A"/>
+                      <circle cx="20" cy="29" r="1" fill="#5D3A1A"/>
+                    </svg>
+                    <span style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 700, lineHeight: 1.4 }}>
+                      Cookie Expired<br/>
+                      <span style={{ fontWeight: 400, color: 'var(--danger)', opacity: 0.85 }}>Need to get a new cookie</span>
+                    </span>
+                  </span>
+                )}
+                {cookiePaste && cookieStatus === null && (
+                  <span style={{ fontSize: 10, color: '#4caf82', fontFamily: 'var(--font-mono)', alignSelf: 'center' }}>
+                    ● cookie saved
+                  </span>
+                )}
               </div>
               {status && statusMsg && (
                 <div className={`worker-msg ${status}`}>
@@ -1106,7 +1212,7 @@ export function WorkerConfig() {
                   { label: '/api/v1/league', path: '/api/v1/league' },
                   { label: '/api/v1/rosters', path: '/api/v1/rosters' },
                   { label: '/api/v1/injuries', path: '/api/v1/injuries' },
-                  { label: '/api/v1/draft?year=2025', path: '/api/v1/draft?year=2025' },
+                  { label: '/api/v1/draft?year=2026', path: '/api/v1/draft?year=2026' },
                   { label: '/api/v1/storage/test', path: '/api/v1/storage/test' },
                   { label: '/api/v1/nfl/scoreboard', path: '/api/v1/nfl/scoreboard?week=1&season=2025' },
                   { label: '/api/v1/nfl/schedule', path: '/api/v1/nfl/schedule?week=1&season=2025' },
@@ -1129,5 +1235,221 @@ export function WorkerConfig() {
         </div>
       )}
     </div>
+
+    {/* ── Get Cookie Modal ──────────────────────────────────────────────────── */}
+    {showCookieModal && (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 900, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+
+        {/* Header bar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--border)', background: 'var(--panel)', flexShrink: 0 }}>
+          <span style={{ fontWeight: 800, fontSize: 14 }}>🍪 Get CBS Cookie</span>
+          <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Log into CBS Sports, grab your session cookie, paste it below</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {cookieSaved && <span style={{ fontSize: 11, color: '#4caf82', fontWeight: 700 }}>✓ Saved!</span>}
+            <button className="btn primary sm" onClick={saveCookie} disabled={!cookiePaste.trim()}>Save Cookie</button>
+            <button className="btn ghost sm" onClick={clearCookie}>Clear</button>
+            <button onClick={() => setShowCookieModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 18, cursor: 'pointer', padding: '2px 8px' }}>✕</button>
+          </div>
+        </div>
+
+        {/* Body — iframe left, instructions right */}
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+
+          {/* Left — CBS iframe */}
+          <div style={{ flex: 1, position: 'relative', borderRight: '1px solid var(--border)', background: '#000' }}>
+            {iframeBlocked ? (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 40, textAlign: 'center', background: 'var(--panel)' }}>
+                <div style={{ fontSize: 40 }}>🚫</div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>CBS blocked the embedded view</div>
+                <div style={{ fontSize: 12, color: 'var(--text-faint)', maxWidth: 340, lineHeight: 1.6 }}>
+                  CBS Sports prevents embedding in iframes. Click below to open your league — it'll open side-by-side with these instructions so you can follow along.
+                </div>
+                <button
+                  className="btn primary"
+                  style={{ marginTop: 4, padding: '10px 20px', fontSize: 13, fontWeight: 700 }}
+                  onClick={() => {
+                    const half = Math.floor(window.screen.width / 2);
+                    const h = window.screen.height;
+                    const w = window.open('https://atotauleague.football.cbssports.com', 'cbssports',
+                      `width=${half},height=${h},left=0,top=0`);
+                    if (w) w.focus();
+                    // Move this window to the right half
+                    try { window.moveTo(half, 0); window.resizeTo(half, h); } catch {}
+                  }}
+                >
+                  Open CBS Sports — Side by Side →
+                </button>
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', maxWidth: 320 }}>
+                  This app will also try to move itself to the right half automatically. If it doesn't, use <strong>Win + ←</strong> on CBS and <strong>Win + →</strong> on this window.
+                </div>
+              </div>
+            ) : (
+              <iframe
+                src="https://atotauleague.football.cbssports.com"
+                title="CBS Sports League"
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                onError={() => setIframeBlocked(true)}
+                onLoad={e => {
+                  try {
+                    const doc = e.target.contentDocument;
+                    if (!doc || doc.title === '') setIframeBlocked(true);
+                  } catch { setIframeBlocked(true); }
+                }}
+              />
+            )}
+          </div>
+
+          {/* Right — instructions + paste */}
+          <div style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'auto', background: 'var(--panel)' }}>
+
+            {/* Steps */}
+            <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontSize: 10, fontWeight: 800, fontFamily: 'var(--font-mono)', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 12 }}>Steps</div>
+
+              {/* Step 1 */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'flex-start' }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--accent-2)', color: '#000', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>1</span>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>Open your CBS league in a new tab and make sure you're logged in.</span>
+              </div>
+
+              {/* Step 2 — highlight the filter text */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start' }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--accent-2)', color: '#000', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>2</span>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>Press <strong>F12</strong> → <strong>Network</strong> tab. In the filter / search box type:</span>
+              </div>
+              <div style={{ marginLeft: 30, marginBottom: 12, padding: '7px 12px', background: 'rgba(255,193,7,.12)', border: '2px solid rgba(255,193,7,.5)', borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 800, color: '#ffc107', letterSpacing: '.02em' }}>
+                cbssports.com
+                <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-faint)', marginLeft: 10 }}>← type this exactly, no "domain:" prefix</span>
+              </div>
+
+              {/* Step 3 */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'flex-start' }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--accent-2)', color: '#000', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>3</span>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>Reload the page (F5). The list now shows only CBS Sports requests.</span>
+              </div>
+
+              {/* Step 4 — highlight ownerlogo */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start' }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--accent-2)', color: '#000', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>4</span>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>In the <strong>Name</strong> column, look for a row containing:</span>
+              </div>
+              <div style={{ marginLeft: 30, marginBottom: 12, padding: '7px 12px', background: 'rgba(99,179,237,.12)', border: '2px solid rgba(99,179,237,.5)', borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 800, color: '#63b3ed', letterSpacing: '.02em' }}>
+                ownerlogo
+                <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-faint)', marginLeft: 10 }}>← click any row with this in the name</span>
+              </div>
+
+              {/* Step 5 — highlight Request Headers */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start' }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--accent-2)', color: '#000', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>5</span>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>In the right panel → <strong>Headers</strong> tab. Scroll <em>down</em> past the Response Headers section until you reach:</span>
+              </div>
+              <div style={{ marginLeft: 30, marginBottom: 12, padding: '7px 12px', background: 'rgba(154,205,50,.1)', border: '2px solid rgba(154,205,50,.4)', borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 800, color: '#9acd32', letterSpacing: '.02em' }}>
+                Request Headers
+              </div>
+
+              {/* Step 6 — highlight cookie: */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start' }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--accent-2)', color: '#000', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>6</span>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>Find the row labeled:</span>
+              </div>
+              <div style={{ marginLeft: 30, marginBottom: 6, padding: '7px 12px', background: 'rgba(167,139,250,.12)', border: '2px solid rgba(167,139,250,.5)', borderRadius: 6, fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 800, color: '#a78bfa', letterSpacing: '.02em' }}>
+                cookie
+                <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-faint)', marginLeft: 10 }}>← one huge blob of text — no "Expires" or "Path" in it</span>
+              </div>
+              <div style={{ marginLeft: 30, marginBottom: 12, fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.5 }}>
+                Click anywhere in that value → <strong>Ctrl+A</strong> to select all → <strong>Ctrl+C</strong> to copy.
+              </div>
+
+              {/* Step 7 */}
+              <div style={{ display: 'flex', gap: 10, marginBottom: 4, alignItems: 'flex-start' }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--accent-2)', color: '#000', fontSize: 10, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>7</span>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>Paste the entire blob into the box below and click <strong>Save Cookie</strong>.</span>
+              </div>
+            </div>
+
+            {/* What to look for */}
+            <div style={{ padding: '10px 18px', borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,.15)' }}>
+              <div style={{ fontSize: 10, fontWeight: 800, fontFamily: 'var(--font-mono)', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 8 }}>What to look for</div>
+              <div style={{ marginBottom: 6 }}>
+                <span style={{ fontSize: 10, color: 'var(--danger)', fontWeight: 700 }}>✗ Wrong</span>
+                <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginLeft: 8 }}>set-cookie: AWSALB=...; Expires=...; Path=/</span>
+              </div>
+              <div>
+                <span style={{ fontSize: 10, color: '#4caf82', fontWeight: 700 }}>✓ Right</span>
+                <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginLeft: 8 }}>cookie: cbsAuthToken=...; cbsid=...; ...</span>
+              </div>
+            </div>
+
+            {/* Paste area */}
+            <div style={{ padding: '14px 18px', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, fontFamily: 'var(--font-mono)', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Paste Cookie</div>
+              <textarea
+                className="input"
+                placeholder="cbsAuthToken=...; cbsid=...; (paste full cookie string here)"
+                value={cookiePaste}
+                onChange={e => setCookiePaste(e.target.value)}
+                style={{ flex: 1, minHeight: 140, fontFamily: 'var(--font-mono)', fontSize: 11, resize: 'vertical', lineHeight: 1.5 }}
+              />
+              <div style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.5 }}>
+                Stored in your browser only. Sent to the CBS worker with each request via a secure header — never stored in plain text on a server.
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn primary" onClick={saveCookie} disabled={!cookiePaste.trim()} style={{ fontWeight: 700, flex: 1 }}>
+                  {cookieSaved ? '✓ Saved!' : 'Save Cookie'}
+                </button>
+                <button
+                  className="btn ghost"
+                  onClick={testModalCookie}
+                  disabled={(!cookiePaste.trim() && !localStorage.getItem('fantasai_cbs_cookie')) || modalCookieStatus === 'testing'}
+                  style={{ fontWeight: 700 }}
+                  title="Test whether this cookie authenticates with CBS"
+                >
+                  {modalCookieStatus === 'testing' ? '⏳ Testing…' : '🔍 Test Cookie'}
+                </button>
+              </div>
+              {modalCookieStatus === 'ok' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'rgba(76,175,130,.1)', border: '1px solid rgba(76,175,130,.3)', borderRadius: 6 }}>
+                  <span style={{ fontSize: 16 }}>✓</span>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#4caf82', fontWeight: 700 }}>Cookie valid — save it and you're good to go.</div>
+                    {cookieSavedAt && (
+                      <div style={{ fontSize: 11, color: '#4caf82', opacity: 0.8, marginTop: 2 }}>
+                        Saved {new Date(cookieSavedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · CBS cookies typically expire in 2–4 weeks
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {modalCookieStatus === 'expired' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'rgba(255,90,110,.08)', border: '1px solid rgba(255,90,110,.3)', borderRadius: 6 }}>
+                  <svg width="28" height="28" viewBox="0 0 40 40" style={{ flexShrink: 0 }}>
+                    <circle cx="20" cy="23" r="17" fill="#1565C0"/>
+                    <circle cx="13" cy="14" r="7" fill="white"/>
+                    <circle cx="27" cy="14" r="7" fill="white"/>
+                    <circle cx="14" cy="15" r="4" fill="#111"/>
+                    <circle cx="28" cy="15" r="4" fill="#111"/>
+                    <circle cx="15" cy="14" r="1.2" fill="white"/>
+                    <circle cx="29" cy="14" r="1.2" fill="white"/>
+                    <path d="M 6 28 Q 20 40 34 28" fill="#111"/>
+                    <circle cx="20" cy="32" r="5.5" fill="#c8860a"/>
+                    <circle cx="18" cy="31" r="1" fill="#5D3A1A"/>
+                    <circle cx="22" cy="33" r="1" fill="#5D3A1A"/>
+                    <circle cx="20" cy="29" r="1" fill="#5D3A1A"/>
+                  </svg>
+                  <div>
+                    <div style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>Cookie invalid or missing auth tokens</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>Make sure you copied from Request Headers → cookie: (not set-cookie)</div>
+                  </div>
+                </div>
+              )}
+              {cookiePaste && (
+                <button className="btn ghost sm" onClick={() => { clearCookie(); setModalCookieStatus(null); }} style={{ fontSize: 11, color: 'var(--danger)' }}>Remove saved cookie</button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

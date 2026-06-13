@@ -2,6 +2,7 @@ import React from 'react';
 import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster } from '../lib/data.js';
 import { findPlayer } from '../lib/playerStore.js';
 import { PosBadge } from '../components/ui.jsx';
+import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 
 const NUM_WEEKS = 18;
 
@@ -92,10 +93,8 @@ const DEFAULT_RULES = {
 };
 
 function loadRules() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('fantasai_scoring_rules') || 'null');
-    return saved ? { ...DEFAULT_RULES, ...saved } : { ...DEFAULT_RULES };
-  } catch { return { ...DEFAULT_RULES }; }
+  const saved = getPrefs().scoringRules;
+  return saved ? { ...DEFAULT_RULES, ...saved } : { ...DEFAULT_RULES };
 }
 
 export function applyScoring(player, rules) {
@@ -316,7 +315,7 @@ export default function ScoringTestScreen({ user }) {
   }
 
   function saveRules() {
-    localStorage.setItem('fantasai_scoring_rules', JSON.stringify(rules));
+    patchPrefs({ scoringRules: rules });
     setRulesDirty(false);
   }
 

@@ -23,7 +23,7 @@ bucket_name = "fantasai-r2"
 SLEEPER_BASE             = "https://api.sleeper.app/v1"
 CBS_WORKER_URL           = "https://fantasai-cbs.fantasai.workers.dev"
 # DATABRICKS_HOST / DATABRICKS_URL — already set as secrets above
-DATABRICKS_WAREHOUSE_ID  = "bf2143dada93343348cfcfc5a751da264c260bde2ad2d287f5d3b835e6179b56"
+DATABRICKS_WAREHOUSE_ID  = "d0d577334268e08f"
 
 # Secrets — add with: wrangler secret put <NAME> --name fantasai-api
 #   FANTASAI_KEY          optional shared key for protected GET routes

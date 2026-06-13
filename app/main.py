@@ -54,9 +54,10 @@ async def get_trending_players_from_databricks(
         )
 
     query = f"""
-    SELECT player_id, trend_count, add_drop, lookback_hours, ingested_at
-    FROM {settings.databricks_catalog}.{settings.databricks_schema}.silver_trending_players
-    ORDER BY ingested_at DESC, trend_count DESC
+    SELECT player_id, player_name, position, team, value_score, projected_pts,
+           ownership_pct, reason, matchup_grade
+    FROM {settings.databricks_catalog}.{settings.databricks_schema}.export_sleeper_picks
+    ORDER BY value_score DESC
     LIMIT {limit}
     """.strip()
 
@@ -94,10 +95,10 @@ async def get_roster_recommendations(
         )
 
     query = f"""
-    SELECT player_id, trend_count, add_drop, lookback_hours, ingested_at
-    FROM {settings.databricks_catalog}.{settings.databricks_schema}.silver_trending_players
-    WHERE add_drop = 'add'
-    ORDER BY trend_count DESC, ingested_at DESC
+    SELECT player_id, player_name, position, team, value_score, projected_pts,
+           ownership_pct, reason, matchup_grade
+    FROM {settings.databricks_catalog}.{settings.databricks_schema}.export_sleeper_picks
+    ORDER BY value_score DESC
     LIMIT {limit}
     """.strip()
 

@@ -308,7 +308,7 @@ export const SOURCE_META = {
   'FantasyPros':       { color: '#c6ff3a' },
 };
 
-export const QUEUE = [82, 31, 6, 85, 63, 102];
+export const QUEUE = [];
 
 export const CHAT_MESSAGES = [
   { who: "Marcus", color: "#ff5a6e", ts: "7:14", msg: "lol that pick was a reach" },
@@ -397,7 +397,7 @@ export const FREE_DATA_SOURCES = [
     provides: ["Team rosters & schedules", "Player injury reports", "Game scores & stats", "Standings"],
     docUrl: "https://gist.github.com/nntrn/ee26cb2a0716de0947a0a4e9a157bc1c",
     color: "#d00",
-    enabled: false,
+    enabled: true,
     leagueIdRequired: false,
   },
   {
@@ -443,15 +443,16 @@ export const LIMITED_FREE_SOURCES = [
   },
   {
     id: "tank01",
-    name: "Tank01 Fantasy Stats",
-    url: "https://tank01-fantasy-stats.p.rapidapi.com",
+    name: "Tank01 NFL News",
+    url: "https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com",
     keyHeader: "x-rapidapi-key",
-    keyHost: "tank01-fantasy-stats.p.rapidapi.com",
+    keyHost: "tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com",
     authNote: "100 req/day free · RapidAPI account",
-    provides: ["Fantasy projections", "Player injury news", "Game-by-game stats", "DFS salaries"],
-    docUrl: "https://rapidapi.com/tank01/api/tank01-fantasy-stats",
+    provides: ["NFL fantasy news", "Player injury articles"],
+    docUrl: "https://rapidapi.com/tank01/api/tank01-nfl-live-in-game-real-time-statistics-nfl",
     signupUrl: "https://rapidapi.com/auth/sign-up",
     color: "#e67e22",
+    hasPlayerTest: true,
   },
   {
     id: "sportsdb",
@@ -459,8 +460,8 @@ export const LIMITED_FREE_SOURCES = [
     url: "https://www.thesportsdb.com/api/v1/json",
     keyHeader: null,
     keyInUrl: true,
-    defaultKey: "3",
-    authNote: "Free sandbox key '3' — no signup needed",
+    defaultKey: "123",
+    authNote: "Free key '123' — no signup needed · 30 free req/min",
     provides: ["Player bios & photos", "Team info", "Event results", "Venue data"],
     docUrl: "https://www.thesportsdb.com/api.php",
     signupUrl: "https://www.thesportsdb.com/register.php",

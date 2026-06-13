@@ -5,6 +5,7 @@ import { predictPicks } from '../lib/draft.js';
 import { PosBadge, PlayerAvatar, PlayerCell, TeamLogoBadge } from '../components/ui.jsx';
 import { useR2BreakoutCandidates } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
+import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 
 // ── Next Gen stat definitions per position ────────────────────────────────
 const NG_STATS = {
@@ -387,9 +388,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   const [fpRanks,       setFpRanks]       = React.useState(null);   // [{ player_name, player_positions, rank_ecr }]
   const [fpRankLoad,    setFpRankLoad]    = React.useState(false);
   const [fpRankErr,     setFpRankErr]     = React.useState(null);
-  const [ownerRanks,    setOwnerRanks]    = React.useState(() => {
-    try { return JSON.parse(localStorage.getItem('fantasai_owner_ranks') || '{}'); } catch { return {}; }
-  });
+  const [ownerRanks,    setOwnerRanks]    = React.useState(() => getPrefs().draftOwnerRanks || {});
 
   async function fetchCbsRankings() {
     if (cbsRanks || cbsRankLoad) return;
@@ -430,7 +429,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     if (!rank || isNaN(rank)) { delete next[playerId]; }
     else { next[playerId] = Number(rank); }
     setOwnerRanks(next);
-    try { localStorage.setItem('fantasai_owner_ranks', JSON.stringify(next)); } catch {}
+    patchPrefs({ draftOwnerRanks: next });
   }
 
   // Returns sort rank for a player under the active ranking source
@@ -1312,6 +1311,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             {mockActive && paused && (
               <span style={{ fontSize: 11, color: '#ffb547', fontFamily: 'var(--font-mono)' }}>AI paused</span>
             )}
+            <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={() => onNav?.('roster')}>← Exit Draft</button>
           </div>
           {/* Panel visibility toggles */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', paddingLeft: 2 }}>
