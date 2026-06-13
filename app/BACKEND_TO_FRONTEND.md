@@ -21,50 +21,40 @@ This document describes all data available from the FantasAI backend, how to acc
 
 ## 📦 Available Data Exports
 
-### 1. Draft-Ready Roster (`draft_ready_roster_2026.json`)
+### 1. 2026 Draft Players (`export_players_2026_draft`)
 
-**Purpose:** Complete player roster with 2025 stats and NFL Combine metrics for draft preparation
+**Purpose:** All active 2026 fantasy draft candidates with tiers, rankings, and recent performance.
 
 **Refresh Schedule:** Daily 08:00 UTC  
-**Records:** 1,637 draftable players  
-**Source Table:** `main.fantasai.draft_ready_roster_2026`
+**Records:** 997 players (all `isDraftable: true` — retired players removed June 12, 2026)  
+**Worker Endpoint:** `GET https://api.fantasai.net/api/v1/db/players`  
+**Source Table:** `main.fantasai.export_players_2026_draft`
 
-**Schema:**
+**Live R2 Schema (camelCase):**
 ```json
 {
-  "player_id": "string (master player ID)",
-  "player_name": "string",
-  "position": "string (QB, RB, WR, TE, K, DEF)",
-  "team": "string (3-letter team code)",
-  "age": "integer",
-  "years_exp": "integer",
-  "2025_stats": {
-    "games_played": "integer",
-    "total_fantasy_pts": "float",
-    "avg_fantasy_pts_per_game": "float",
-    "position_rank": "integer (rank within position)",
-    "passing_yards": "float (QB only)",
-    "passing_tds": "integer (QB only)",
-    "rushing_yards": "float",
-    "rushing_tds": "integer",
-    "receptions": "integer",
-    "receiving_yards": "float",
-    "receiving_tds": "integer"
-  },
-  "combine_metrics": {
-    "height_inches": "float",
-    "weight_lbs": "float",
-    "forty_time": "float (40-yard dash)",
-    "vertical_jump": "float (inches)",
-    "bench_reps": "integer (225 lbs)",
-    "broad_jump": "float (inches)",
-    "three_cone": "float (seconds)",
-    "twenty_shuttle": "float (seconds)"
-  },
-  "availability_status": "string (Active, Injured, Questionable, Out)",
-  "draft_tier": "string (Elite, High, Mid, Low, Deep)"
+  "playerId": "string",
+  "name": "string",
+  "position": "string (QB, RB, WR, TE, K, DEF, FB)",
+  "team": "string (3-letter code e.g. 'KC', 'PHI')",
+  "proj": "float | null (projected fantasy points)",
+  "avg": "string (season average e.g. '22.5')",
+  "last": "string (last game score)",
+  "trend": "string (JSON array of 6 recent scores)",
+  "positionRank": "integer | null",
+  "percentile": "float | null (0-100)",
+  "tier": "string (Elite | High | Mid | Low | Unproven)",
+  "isDraftable": "string ('true' for all 997)",
+  "status": "string (Active | Injured | Questionable)",
+  "lastSeasonPlayed": "string (e.g. '2025')",
+  "experience": "string (years in NFL e.g. '3')",
+  "isRookie": "string ('true' | 'false')"
 }
 ```
+
+> **Note:** ADP is not yet in this export. It is a planned ETL addition.
+
+**Position breakdown:** QB(124) · RB(198) · WR(391) · TE(204) · K(43) · FB(5) · DEF(32)
 
 **Frontend Usage:**
 - Draft board player lists
@@ -242,7 +232,7 @@ This document describes all data available from the FantasAI backend, how to acc
 }
 ```
 
-**⚠️ Known Issue:** `ownership_pct` currently returns 0 for all records. Fix pending (JOIN to `bronze_sleeper_ownership` needed).
+**⚠️ Known Issue:** `ownership_pct` currently returns 0 for all records. Fix pending in the Gold → Export pipeline (ownership join not yet wired).
 
 **Frontend Usage:**
 - Deep sleeper recommendations

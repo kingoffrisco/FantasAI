@@ -1,8 +1,46 @@
 # FantasAI UI Integration Guide
 
-**Last Updated:** June 4, 2026  
+**Last Updated:** June 9, 2026  
 **Status:** ✅ Production Ready  
 **Database:** Databricks Unity Catalog (main.fantasai)
+
+---
+
+## ⚠️ Data Source Rules
+
+**ALWAYS consume from Export tables. NEVER from Bronze or Silver:**
+
+| Layer | Tables | Status |
+|-------|--------|--------|
+| ✅ USE | `main.fantasai.export_*` | Filtered, enriched, frontend-optimized |
+| ❌ AVOID | `main.fantasai.bronze_*` | Raw dumps — nulls, duplicates, untrusted |
+| ❌ AVOID | `main.fantasai.silver_*` | Internal operational data — incomplete joins, sensitive fields |
+
+**Why it matters:**
+
+| Aspect | `silver_player_news` ❌ | `export_player_news` ✅ |
+|--------|------------------------|------------------------|
+| Rows | 242 (everything) | 86 (filtered to relevant) |
+| Columns | 11 (operational) | 15 (frontend-optimized) |
+| AI Summary | No | Yes (`summary_text`) |
+| Fantasy Insight | No | Yes (`fantasy_insight`) |
+| Impact Score | No | Yes (`impact_score`) |
+| Source | Bronze → Silver | Gold → Export |
+
+**Correct ETL flow:**
+```
+Bronze (raw APIs) → Silver (cleaned) → Gold (enriched) → Export (frontend snapshots) → R2 (gzipped JSON) → Frontend
+```
+
+**Frontend-ready Export tables:**
+
+| Table | Records | Purpose |
+|-------|---------|---------|
+| `export_players_2026_draft` | 997 | Draft board with tiers/rankings — all active, all draftable |
+| `export_player_news` | 86 articles | AI-enriched news with fantasy insights |
+| `export_defense_performance` | 606 | Weekly matchup rankings |
+| `export_breakout_candidates` | 7 | ML-powered sleeper picks |
+| `export_sleeper_picks` | 24 | High-value waiver targets |
 
 ---
 
@@ -10,13 +48,15 @@
 
 ### Primary Table: 2026 Players
 
-Use **`main.fantasai.players_2026_draft`** as your main player source for the 2026 fantasy draft season.
+Use **`export_players_2026_draft`** (via R2 / Worker API) as your main player source for the 2026 fantasy draft season.
+
+> **Data Access:** Frontend reads R2 snapshots via `api.fantasai.net/api/v1/db/players` — direct Databricks queries are not used in production.
 
 **Key Stats:**
-- **1,631 total players** (1,338 draftable)
-- **Positions:** QB, RB, WR, TE
-- **Coverage:** Active 2024-2025 NFL players
-- **Updates:** Weekly during season
+- **997 total players** (all have `isDraftable: true` — retired players removed June 12, 2026)
+- **Positions:** QB(124), RB(198), WR(391), TE(204), K(43), FB(5), DEF(32)
+- **Coverage:** Active 2026 NFL players
+- **Updates:** Daily R2 export at 08:00 UTC
 
 ---
 
@@ -44,108 +84,67 @@ Replace all UI labels like "active players" or "current players" with **"2026 Pl
 
 ## 📊 Table Reference
 
-### 🏈 Table 1: players_2026_draft
+### 🏈 Table 1: export_players_2026_draft
 
-**Full Name:** `main.fantasai.players_2026_draft`  
-**Size:** 139 KB | 1,631 rows  
-**Purpose:** Draft player list, rankings, search, filtering
+**Full Name:** `main.fantasai.export_players_2026_draft`  
+**R2 Access:** `GET api.fantasai.net/api/v1/db/players` (source: `databricks`, table: `export_players_2026_draft`)  
+**Records:** 997 (all `isDraftable: true` — retired players removed June 12, 2026)  
+**Purpose:** Draft board, player lists, rankings, search
 
-#### Key Columns
+#### Live R2 Field Schema (camelCase)
 
-| Column | Type | Purpose | Notes |
-|--------|------|---------|-------|
-| `master_player_id` | STRING | Unique player identifier | Primary key |
-| `player_name` | STRING | Display name | e.g., "Patrick Mahomes" |
-| `position` | STRING | QB/RB/WR/TE | Filter value |
-| `current_team` | STRING | Team abbreviation | e.g., "KAN", "TAM" |
-| `is_draftable` | BOOLEAN | ⚠️ CRITICAL filter | TRUE = active, FALSE = retired |
-| `player_status` | STRING | Human-readable status | "Active 2025" (best) to "Limited 2024 Activity" |
-| `projected_avg_points` | DOUBLE | ML prediction | Best for rankings |
-| `season_avg_points` | DOUBLE | Historical average | Last season actual |
-| `recent_3game_avg` | DOUBLE | Last 3 games | Recent form |
-| `recent_5game_avg` | DOUBLE | Last 5 games | Consistency |
-| `position_rank` | INTEGER | Within-position rank | 1 = best at position |
-| `season_percentile` | DOUBLE | 0-100 percentile | Higher = better |
-| `season_tier` | STRING | Elite/High/Mid/Low | Badge/color coding |
-| `projected_ceiling` | DOUBLE | Best-case projection | Max predicted points |
-| `combine_height` | DOUBLE | Height (inches) | ~40% coverage |
-| `combine_weight` | DOUBLE | Weight (pounds) | ~40% coverage |
-| `combine_40_time` | DOUBLE | 40-yard dash | ~40% coverage |
-| `athleticism_composite` | DOUBLE | Overall athleticism | Composite score |
-| `speed_score` | DOUBLE | Speed rating | Normalized metric |
-| `years_in_nfl` | INTEGER | Experience | 0 = rookie |
-| `is_rookie_eligible` | BOOLEAN | Rookie filter | <= 1 year |
-| `nfl_draft_year` | INTEGER | NFL draft year | e.g., 2020 |
-| `fantasy_draft_year` | INTEGER | Always 2026 | Constant |
-| `last_updated` | TIMESTAMP | Data freshness | Last refresh |
+| Field | Type | Notes |
+|--------|------|-------|
+| `playerId` | string | Unique player identifier |
+| `name` | string | Display name e.g. "Patrick Mahomes" |
+| `position` | string | QB / RB / WR / TE / K / DEF / FB |
+| `team` | string | 3-letter team code e.g. "KC", "PHI" |
+| `proj` | number \| null | Projected fantasy points |
+| `avg` | string | Season average (e.g. "22.5") |
+| `last` | string | Last game score |
+| `trend` | string | JSON array of 6 recent scores e.g. `["22","18","24","0","0","0"]` |
+| `positionRank` | number \| null | Within-position rank |
+| `percentile` | number \| null | 0–100 percentile vs position peers |
+| `tier` | string | "Elite" / "High" / "Mid" / "Low" / "Unproven" |
+| `isDraftable` | string | `"true"` for all 997 records |
+| `status` | string | "Active", "Injured", "Questionable" |
+| `lastSeasonPlayed` | string | e.g. "2025" |
+| `experience` | string | Years in NFL e.g. "3" |
+| `isRookie` | string | `"true"` or `"false"` |
+
+> **Note:** ADP is not yet in this table. It is a planned addition to the ETL pipeline.
 
 #### Example Queries
 
-**Get all draftable players (ranked):**
-```sql
-SELECT 
-  player_name,
-  position,
-  current_team,
-  projected_avg_points,
-  position_rank,
-  season_tier
-FROM main.fantasai.players_2026_draft
-WHERE is_draftable = TRUE
-ORDER BY projected_avg_points DESC
-LIMIT 100;
+**Fetch all 997 draftable players (via Worker API):**
+```js
+const res = await fetch('https://api.fantasai.net/api/v1/db/players');
+const { source, table, count, players } = await res.json();
+// source: "databricks", table: "export_players_2026_draft", count: 997
 ```
 
-**Search players by name (autocomplete):**
-```sql
-SELECT 
-  master_player_id,
-  player_name,
-  position,
-  current_team,
-  projected_avg_points,
-  player_status
-FROM main.fantasai.players_2026_draft
-WHERE is_draftable = TRUE
-  AND LOWER(player_name) LIKE LOWER('%mahomes%')
-ORDER BY projected_avg_points DESC
-LIMIT 10;
+**Filter by position (client-side):**
+```js
+const qbs = players.filter(p => p.position === 'QB');
+const ranked = [...players].sort((a, b) => (b.proj ?? 0) - (a.proj ?? 0));
 ```
 
-**Filter by position (e.g., QBs only):**
-```sql
-SELECT 
-  player_name,
-  current_team,
-  projected_avg_points,
-  position_rank,
-  season_tier,
-  recent_3game_avg
-FROM main.fantasai.players_2026_draft
-WHERE is_draftable = TRUE
-  AND position = 'QB'
-ORDER BY projected_avg_points DESC;
-```
-
-**Get player detail card:**
-```sql
-SELECT *
-FROM main.fantasai.players_2026_draft
-WHERE master_player_id = '<player_id>';
+**Search by name:**
+```js
+const results = players.filter(p =>
+  p.name.toLowerCase().includes(query.toLowerCase())
+);
 ```
 
 **Rookies only:**
+```js
+const rookies = players.filter(p => p.isRookie === 'true');
+```
+
+**If querying Databricks directly** (internal tooling only — not frontend):
 ```sql
-SELECT 
-  player_name,
-  position,
-  current_team,
-  projected_avg_points,
-  years_in_nfl
-FROM main.fantasai.players_2026_draft
-WHERE is_draftable = TRUE
-  AND is_rookie_eligible = TRUE
-ORDER BY projected_avg_points DESC;
+SELECT * FROM main.fantasai.export_players_2026_draft LIMIT 2500;
+-- All 997 rows have isDraftable = 'true'
 ```
 
 ---

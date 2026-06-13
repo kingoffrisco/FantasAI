@@ -1,0 +1,202 @@
+{
+  "model": "qwen3:8b",
+  "player_notes": {
+    "generated_at": "2026-06-12T01:41:56.375898+00:00",
+    "player_count": 6,
+    "players": {
+      "Drake London": {
+        "player_name": "Drake London",
+        "articles": [
+          {
+            "headline": "How the Falcons rebuilt their wide receiver room around Drake LondonAtlanta wasn't searching for ano",
+            "summary": "Fantasy managers should prioritize Drake London in Atlanta's revamped receiver room while monitoring the impact of new additions on his target share.",
+            "relevance": 7.5,
+            "waiver_relevance": 3.0,
+            "dynasty_relevance": 6.0,
+            "rookie_relevance": 2.0,
+            "priority": "medium",
+            "sentiment": "neutral",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 7.5,
+        "max_waiver_relevance": 3.0,
+        "max_dynasty_relevance": 6.0,
+        "max_rookie_relevance": 2.0,
+        "latest_summary": "Fantasy managers should prioritize Drake London in Atlanta's revamped receiver room while monitoring the impact of new additions on his target share.",
+        "latest_sentiment": "neutral",
+        "article_count": 1
+      },
+      "Jonathon Brooks": {
+        "player_name": "Jonathon Brooks",
+        "articles": [
+          {
+            "headline": "Three takeaways from coordinators, including Jonathon Brooks' early work, and moreMay 27, 2026The th",
+            "summary": "Jonathon Brooks and Jaelan Phillips made positive early impressions during OTA sessions, suggesting they could be valuable fantasy assets as rookies.",
+            "relevance": 7.0,
+            "waiver_relevance": 6.0,
+            "dynasty_relevance": 5.0,
+            "rookie_relevance": 8.0,
+            "priority": "high",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 7.0,
+        "max_waiver_relevance": 6.0,
+        "max_dynasty_relevance": 5.0,
+        "max_rookie_relevance": 8.0,
+        "latest_summary": "Jonathon Brooks and Jaelan Phillips made positive early impressions during OTA sessions, suggesting they could be valuable fantasy assets as rookies.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      },
+      "Jaelan Phillips": {
+        "player_name": "Jaelan Phillips",
+        "articles": [
+          {
+            "headline": "Three takeaways from coordinators, including Jonathon Brooks' early work, and moreMay 27, 2026The th",
+            "summary": "Jonathon Brooks and Jaelan Phillips made positive early impressions during OTA sessions, suggesting they could be valuable fantasy assets as rookies.",
+            "relevance": 7.0,
+            "waiver_relevance": 6.0,
+            "dynasty_relevance": 5.0,
+            "rookie_relevance": 8.0,
+            "priority": "high",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 7.0,
+        "max_waiver_relevance": 6.0,
+        "max_dynasty_relevance": 5.0,
+        "max_rookie_relevance": 8.0,
+        "latest_summary": "Jonathon Brooks and Jaelan Phillips made positive early impressions during OTA sessions, suggesting they could be valuable fantasy assets as rookies.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      },
+      "Bryce Young": {
+        "player_name": "Bryce Young",
+        "articles": [
+          {
+            "headline": "Five takeaways from OTAs, including Bryce Young taking \"ownership\" and more from TuesdayMay 26, 2026",
+            "summary": "Bryce Young's proactive approach during OTAs suggests he could be a key contributor in the upcoming season, while Freeling's competition opportunity may impact roster decisions.",
+            "relevance": 3.5,
+            "waiver_relevance": 2.0,
+            "dynasty_relevance": 4.0,
+            "rookie_relevance": 5.0,
+            "priority": "low",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 3.5,
+        "max_waiver_relevance": 2.0,
+        "max_dynasty_relevance": 4.0,
+        "max_rookie_relevance": 5.0,
+        "latest_summary": "Bryce Young's proactive approach during OTAs suggests he could be a key contributor in the upcoming season, while Freeling's competition opportunity may impact roster decisions.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      },
+      "Freeling": {
+        "player_name": "Freeling",
+        "articles": [
+          {
+            "headline": "Five takeaways from OTAs, including Bryce Young taking \"ownership\" and more from TuesdayMay 26, 2026",
+            "summary": "Bryce Young's proactive approach during OTAs suggests he could be a key contributor in the upcoming season, while Freeling's competition opportunity may impact roster decisions.",
+            "relevance": 3.5,
+            "waiver_relevance": 2.0,
+            "dynasty_relevance": 4.0,
+            "rookie_relevance": 5.0,
+            "priority": "low",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 3.5,
+        "max_waiver_relevance": 2.0,
+        "max_dynasty_relevance": 4.0,
+        "max_rookie_relevance": 5.0,
+        "latest_summary": "Bryce Young's proactive approach during OTAs suggests he could be a key contributor in the upcoming season, while Freeling's competition opportunity may impact roster decisions.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      },
+      "Chris Olave": {
+        "player_name": "Chris Olave",
+        "articles": [
+          {
+            "headline": "Bigger, better Chris Olave ready to lead New Orleans Saints to more wins\"I'm excited to see what he ",
+            "summary": "Chris Olave is expected to have a strong impact for the Saints, benefiting fantasy managers looking to capitalize on his improved performance.",
+            "relevance": 9.5,
+            "waiver_relevance": 2,
+            "dynasty_relevance": 6,
+            "rookie_relevance": 1,
+            "priority": "high",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 9.5,
+        "max_waiver_relevance": 2,
+        "max_dynasty_relevance": 6,
+        "max_rookie_relevance": 1,
+        "latest_summary": "Chris Olave is expected to have a strong impact for the Saints, benefiting fantasy managers looking to capitalize on his improved performance.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      }
+    }
+  },
+  "ai_summaries": {
+    "generated_at": "2026-06-12T01:41:56.375953+00:00",
+    "article_count": 2,
+    "summaries": [
+      {
+        "headline": "Bigger, better Chris Olave ready to lead New Orleans Saints to more wins\"I'm excited to see what he ",
+        "summary": "Chris Olave is expected to have a strong impact for the Saints, benefiting fantasy managers looking to capitalize on his improved performance.",
+        "players": [
+          "Chris Olave"
+        ],
+        "relevance": 9.5,
+        "waiver_relevance": 2,
+        "dynasty_relevance": 6,
+        "rookie_relevance": 1,
+        "priority_level": "high",
+        "sentiment": "positive",
+        "injury_related": false,
+        "source": "raw_rss_articles"
+      },
+      {
+        "headline": "Three takeaways from coordinators, including Jonathon Brooks' early work, and moreMay 27, 2026The th",
+        "summary": "Jonathon Brooks and Jaelan Phillips made positive early impressions during OTA sessions, suggesting they could be valuable fantasy assets as rookies.",
+        "players": [
+          "Jonathon Brooks",
+          "Jaelan Phillips"
+        ],
+        "relevance": 7.0,
+        "waiver_relevance": 6.0,
+        "dynasty_relevance": 5.0,
+        "rookie_relevance": 8.0,
+        "priority_level": "high",
+        "sentiment": "positive",
+        "injury_related": false,
+        "source": "raw_rss_articles"
+      }
+    ]
+  },
+  "beat_writer_signals": {
+    "generated_at": "2026-06-12T01:41:56.375981+00:00",
+    "signal_count": 0,
+    "signals": [],
+    "rumor_scores": {}
+  }
+}

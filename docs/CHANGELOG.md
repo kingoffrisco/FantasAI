@@ -4,6 +4,54 @@ All notable changes to the FantasAI ML pipeline project.
 
 ---
 
+## [1.4.0] - 2026-06-12
+
+### 🎯 Summary
+Incremental processing for both local Qwen jobs — only new articles and changed players are processed on each run.
+
+### ✨ Added
+- **Job 1 (`job1_news_processor.py`) — incremental by default**
+  - Loads classified article cache from R2 (`fantasai/news/classified_cache.json`)
+  - Fingerprints each article (real ID or headline MD5 hash as fallback)
+  - Skips articles already in cache; classifies only new ones
+  - Merges new results into cache, prunes entries older than 60 days
+  - Rebuilds `player_notes.json` and `ai_summaries.json` from full merged history
+  - `--full` flag forces reprocessing of all articles
+- **Job 2 (`job2_fantasy_analyzer.py`) — incremental by default**
+  - Loads existing `player_scores.json` from R2 on startup
+  - Skips players whose `max_relevance` hasn't changed by more than 0.5
+  - Preserves scores for players not in the current enriched set
+  - `--full` flag forces re-scoring of all players
+- **`pipeline_runner.py`** — `--full` flag propagates to both jobs
+
+### Pipeline quick reference
+| Script | Model | Default behavior |
+|---|---|---|
+| `job1_news_processor.py` | Qwen3 8B | Incremental — new articles only |
+| `job2_fantasy_analyzer.py` | Qwen3 14B | Incremental — changed players only |
+| `pipeline_runner.py` | Both | Orchestrates Job 1 → Job 2 |
+
+---
+
+## [1.3.0] - 2026-06-12
+
+### 🎯 Summary
+Cleaned retired players from `export_players_2026_draft`. Reduced from 1,631 to 997 active players. Confirmed no retired players (e.g. Roethlisberger, Le'Veon Bell) remain. All 997 records now have `isDraftable: true`.
+
+### ✨ Added / Changed
+- **`export_players_2026_draft`** pruned to 997 active 2026 draft candidates
+  - Removed 634 retired/inactive players
+  - Breakdown: QB(124), RB(198), WR(391), TE(204), K(43), FB(5), DEF(32)
+  - R2 export re-triggered (Run ID 152985611666989, 11:06–11:07 UTC) and confirmed live
+- **Local Qwen AI pipeline** operational end-to-end (see project_tier1_pipeline)
+  - Job 1: Qwen3 8B bulk news → R2 enrichments
+  - Job 2: Qwen3 14B fantasy analysis → R2 enrichments → Databricks Gold ingestion
+- **`export_players_2026_draft` field schema** (live camelCase R2 format):
+  `playerId`, `name`, `position`, `team`, `proj`, `avg`, `last`, `trend`, `positionRank`, `percentile`, `tier`, `isDraftable`, `status`, `lastSeasonPlayed`, `experience`, `isRookie`
+- **ADP not yet present** in `export_players_2026_draft` — pending ETL addition
+
+---
+
 ## [1.2.0] - 2026-06-04
 
 ### 🎯 Summary

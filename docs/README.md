@@ -37,18 +37,16 @@ connection = sql.connect(
 )
 ```
 
-### 2. Query 2026 Players
+### 2. Fetch 2026 Players (Frontend — via Worker API)
+```js
+const { players } = await fetch('https://api.fantasai.net/api/v1/db/players').then(r => r.json());
+// 997 players, all isDraftable: "true"
+// Fields: playerId, name, position, team, proj, avg, last, trend, positionRank, percentile, tier, status, experience, isRookie
+```
+
+Or query Databricks directly (internal tooling only):
 ```sql
-SELECT 
-  player_name,
-  position,
-  current_team,
-  projected_avg_points,
-  season_tier
-FROM main.fantasai.players_2026_draft
-WHERE is_draftable = TRUE
-ORDER BY projected_avg_points DESC
-LIMIT 100;
+SELECT * FROM main.fantasai.export_players_2026_draft LIMIT 2500;
 ```
 
 ### 3. Verify Performance
@@ -58,12 +56,15 @@ Expected query latency: **< 300ms**
 
 ## 📊 Available Tables
 
-| Table | Rows | Purpose | Size |
-|-------|------|---------|------|
-| `players_2026_draft` | 1,631 | Draft player list | 139 KB |
-| `ml_weekly_predictions` | 24,862 | Weekly projections | 826 KB |
-| `ml_feature_importance` | 70 | Model explainability | Small |
-| `ml_player_features` | 162,896 | Full dataset | Large |
+| Table | Rows | Purpose |
+|-------|------|---------|
+| `export_players_2026_draft` | 997 | Draft board — all active 2026 players (all draftable) |
+| `export_player_news` | ~86 | AI-enriched news with fantasy insights |
+| `export_defense_performance` | 606 | Weekly matchup rankings |
+| `export_breakout_candidates` | ~7 | ML-powered sleeper picks |
+| `export_sleeper_picks` | ~24 | High-value waiver targets |
+| `ml_weekly_predictions` | 24,862 | Weekly projections (internal) |
+| `ml_player_features` | 162,896 | Full feature dataset (internal) |
 
 ---
 
@@ -91,7 +92,7 @@ Expected query latency: **< 300ms**
 - [x] ML pipeline operational
 - [x] Features table (70 features, 162,896 rows)
 - [x] Predictions table (24,862 predictions)
-- [x] 2026 players table (1,338 draftable)
+- [x] 2026 players table (997 active, all draftable — retired players removed June 12, 2026)
 - [x] R2 optimization enabled
 - [x] Documentation complete
 

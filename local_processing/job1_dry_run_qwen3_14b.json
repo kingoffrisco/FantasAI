@@ -1,0 +1,201 @@
+{
+  "model": "qwen3:14b",
+  "player_notes": {
+    "generated_at": "2026-06-12T01:44:18.264770+00:00",
+    "player_count": 6,
+    "players": {
+      "Drake London": {
+        "player_name": "Drake London",
+        "articles": [
+          {
+            "headline": "How the Falcons rebuilt their wide receiver room around Drake LondonAtlanta wasn't searching for ano",
+            "summary": "Fantasy managers should prioritize Drake London as the Falcons have built a supporting cast around him, enhancing his prospects for increased targets and production.",
+            "relevance": 8.5,
+            "waiver_relevance": 3.0,
+            "dynasty_relevance": 7.0,
+            "rookie_relevance": 2.0,
+            "priority": "high",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 8.5,
+        "max_waiver_relevance": 3.0,
+        "max_dynasty_relevance": 7.0,
+        "max_rookie_relevance": 2.0,
+        "latest_summary": "Fantasy managers should prioritize Drake London as the Falcons have built a supporting cast around him, enhancing his prospects for increased targets and production.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      },
+      "Jonathon Brooks": {
+        "player_name": "Jonathon Brooks",
+        "articles": [
+          {
+            "headline": "Three takeaways from coordinators, including Jonathon Brooks' early work, and moreMay 27, 2026The th",
+            "summary": "Fantasy managers should monitor Jonathon Brooks and Jaelan Phillips as their early OTA performances indicate potential positive impact.",
+            "relevance": 7.5,
+            "waiver_relevance": 6.0,
+            "dynasty_relevance": 8.0,
+            "rookie_relevance": 5.0,
+            "priority": "medium",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 7.5,
+        "max_waiver_relevance": 6.0,
+        "max_dynasty_relevance": 8.0,
+        "max_rookie_relevance": 5.0,
+        "latest_summary": "Fantasy managers should monitor Jonathon Brooks and Jaelan Phillips as their early OTA performances indicate potential positive impact.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      },
+      "Jaelan Phillips": {
+        "player_name": "Jaelan Phillips",
+        "articles": [
+          {
+            "headline": "Three takeaways from coordinators, including Jonathon Brooks' early work, and moreMay 27, 2026The th",
+            "summary": "Fantasy managers should monitor Jonathon Brooks and Jaelan Phillips as their early OTA performances indicate potential positive impact.",
+            "relevance": 7.5,
+            "waiver_relevance": 6.0,
+            "dynasty_relevance": 8.0,
+            "rookie_relevance": 5.0,
+            "priority": "medium",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 7.5,
+        "max_waiver_relevance": 6.0,
+        "max_dynasty_relevance": 8.0,
+        "max_rookie_relevance": 5.0,
+        "latest_summary": "Fantasy managers should monitor Jonathon Brooks and Jaelan Phillips as their early OTA performances indicate potential positive impact.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      },
+      "Bryce Young": {
+        "player_name": "Bryce Young",
+        "articles": [
+          {
+            "headline": "Five takeaways from OTAs, including Bryce Young taking \"ownership\" and more from TuesdayMay 26, 2026",
+            "summary": "Fantasy managers should note Bryce Young's increased practice ownership and Freeling's competition opportunity, as both may signal evolving roles impacting fantasy value.",
+            "relevance": 6.5,
+            "waiver_relevance": 5.0,
+            "dynasty_relevance": 4.0,
+            "rookie_relevance": 3.0,
+            "priority": "medium",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 6.5,
+        "max_waiver_relevance": 5.0,
+        "max_dynasty_relevance": 4.0,
+        "max_rookie_relevance": 3.0,
+        "latest_summary": "Fantasy managers should note Bryce Young's increased practice ownership and Freeling's competition opportunity, as both may signal evolving roles impacting fantasy value.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      },
+      "Freeling": {
+        "player_name": "Freeling",
+        "articles": [
+          {
+            "headline": "Five takeaways from OTAs, including Bryce Young taking \"ownership\" and more from TuesdayMay 26, 2026",
+            "summary": "Fantasy managers should note Bryce Young's increased practice ownership and Freeling's competition opportunity, as both may signal evolving roles impacting fantasy value.",
+            "relevance": 6.5,
+            "waiver_relevance": 5.0,
+            "dynasty_relevance": 4.0,
+            "rookie_relevance": 3.0,
+            "priority": "medium",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 6.5,
+        "max_waiver_relevance": 5.0,
+        "max_dynasty_relevance": 4.0,
+        "max_rookie_relevance": 3.0,
+        "latest_summary": "Fantasy managers should note Bryce Young's increased practice ownership and Freeling's competition opportunity, as both may signal evolving roles impacting fantasy value.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      },
+      "Chris Olave": {
+        "player_name": "Chris Olave",
+        "articles": [
+          {
+            "headline": "Bigger, better Chris Olave ready to lead New Orleans Saints to more wins\"I'm excited to see what he ",
+            "summary": "Chris Olave's improved physical condition and performance potential make him a high-priority fantasy asset for the Saints' upcoming games.",
+            "relevance": 8.5,
+            "waiver_relevance": 7.5,
+            "dynasty_relevance": 8,
+            "rookie_relevance": 5,
+            "priority": "high",
+            "sentiment": "positive",
+            "injury_related": false
+          }
+        ],
+        "injury_flag": false,
+        "injury_status": "none",
+        "max_relevance": 8.5,
+        "max_waiver_relevance": 7.5,
+        "max_dynasty_relevance": 8,
+        "max_rookie_relevance": 5,
+        "latest_summary": "Chris Olave's improved physical condition and performance potential make him a high-priority fantasy asset for the Saints' upcoming games.",
+        "latest_sentiment": "positive",
+        "article_count": 1
+      }
+    }
+  },
+  "ai_summaries": {
+    "generated_at": "2026-06-12T01:44:18.264828+00:00",
+    "article_count": 2,
+    "summaries": [
+      {
+        "headline": "How the Falcons rebuilt their wide receiver room around Drake LondonAtlanta wasn't searching for ano",
+        "summary": "Fantasy managers should prioritize Drake London as the Falcons have built a supporting cast around him, enhancing his prospects for increased targets and production.",
+        "players": [
+          "Drake London"
+        ],
+        "relevance": 8.5,
+        "waiver_relevance": 3.0,
+        "dynasty_relevance": 7.0,
+        "rookie_relevance": 2.0,
+        "priority_level": "high",
+        "sentiment": "positive",
+        "injury_related": false,
+        "source": "raw_rss_articles"
+      },
+      {
+        "headline": "Bigger, better Chris Olave ready to lead New Orleans Saints to more wins\"I'm excited to see what he ",
+        "summary": "Chris Olave's improved physical condition and performance potential make him a high-priority fantasy asset for the Saints' upcoming games.",
+        "players": [
+          "Chris Olave"
+        ],
+        "relevance": 8.5,
+        "waiver_relevance": 7.5,
+        "dynasty_relevance": 8,
+        "rookie_relevance": 5,
+        "priority_level": "high",
+        "sentiment": "positive",
+        "injury_related": false,
+        "source": "raw_rss_articles"
+      }
+    ]
+  },
+  "beat_writer_signals": {
+    "generated_at": "2026-06-12T01:44:18.264858+00:00",
+    "signal_count": 0,
+    "signals": [],
+    "rumor_scores": {}
+  }
+}
