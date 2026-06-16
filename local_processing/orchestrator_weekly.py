@@ -43,6 +43,11 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 
+try:
+    from notify import send_failure
+except ImportError:
+    def send_failure(*a, **kw): pass
+
 
 def run(script: str, extra_args: list[str], label: str) -> bool:
     cmd = [sys.executable, str(HERE / script)] + extra_args
@@ -151,6 +156,7 @@ def main():
     print(f"Duration: {elapsed}s ({elapsed // 60}m {elapsed % 60}s)")
     if failed:
         print(f"❌ FAILED tasks: {', '.join(failed)}")
+        send_failure(failed, orchestrator="Weekly")
         sys.exit(1)
     else:
         print("✅ Weekly orchestration complete")
