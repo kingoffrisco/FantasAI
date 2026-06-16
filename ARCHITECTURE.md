@@ -1,8 +1,10 @@
 # FantasAI System Architecture
 
-**Last Updated:** June 9, 2026  
-**Version:** 2.1  
-**Platform:** Databricks on AWS
+**Last Updated:** June 16, 2026  
+**Version:** 3.3  
+**Platform:** Local Python / DuckDB / Windows Task Scheduler
+
+> **Migration Notice (June 15, 2026):** Databricks infrastructure (30 jobs, Unity Catalog, 79 Delta tables) has been decommissioned. The full ETL pipeline now runs locally on the RTX 4080 server using DuckDB as the data warehouse. All notebook logic has been converted to standalone Python scripts under `local_processing/`. Cloudflare R2 exports and the frontend are unchanged.
 
 ---
 
@@ -23,51 +25,61 @@
 
 ---
 
-## 📊 System Inventory (Last Updated: June 12, 2026)
+## 📊 System Inventory (Last Updated: June 16, 2026)
 
 ### Current State
 ```
-📓 NOTEBOOKS:  60 total
-   ├─ Bronze Layer (Ingestion):        34
-   ├─ Silver Layer (Transformation):    0
-   ├─ Gold Layer (Business Logic):      1
-   ├─ Analysis:                         0
-   ├─ ML Training:                      4
-   ├─ ML Registration:                  3
-   ├─ Scheduled Jobs:                   7
-   └─ Exports:                          3
+📓 NOTEBOOKS:  30 active (reference only — pipeline runs from local_processing/)
+   ├─ Bronze Layer — future/reference:  13  (schedules, historical, ML data, API evals)
+   ├─ Analysis:                          4  (data source comparison, player metrics)
+   ├─ ML Training:                       4  (LightGBM QB/RB/WR/TE pipeline)
+   ├─ ML Registration:                   3  (MLflow, vector search, chat API)
+   ├─ Scheduled Jobs:                    1  (ML Training Orchestrator — Databricks ref)
+   └─ Exports:                           2  (breakout predictions R2, chat API deployment)
 
-⚙️ JOBS:      30 active (33% duplication) [Phase 1 Complete ✅]
-   ├─ Optimal State:                   17
-   ├─ Phase 1 Archived:                 4 (see ARCHIVED_JOBS.md)
-   ├─ Remaining Duplicates:            11
-   └─ Waste Remaining:                 33%
+   _Archive_20260601/:  53 files  ← all notebooks superseded by local_processing/ scripts
+
+🗄️  DATABASE:   DuckDB (local_processing/db/fantasai.duckdb)
+   ├─ Bronze tables:                   10  (+ bronze_adp_rankings, bronze_dst_weekly_stats, bronze_nfl_schedules, bronze_player_ownership, bronze_combine_data)
+   ├─ Silver tables:                    4
+   ├─ Gold tables:                      3
+   ├─ Export tables:                    1
+   ├─ Supplemental (headshots, YAC, NGS, depth):  4
+   └─ Analysis (weather, DST perf):     3  (weather_forecasts, weather_historical, bronze_dst_weekly_stats)
+
+⚙️ JOBS:       2 Windows Task Scheduler tasks (replaced 30 Databricks jobs)
+   ├─ orchestrator_daily.py    — 7:00 AM daily  (Sleeper → ESPN → Google → Gold → R2)
+   └─ orchestrator_weekly.py   — Tuesday 3:00 AM (nflverse → API-Sports → ADP → DST → Schedules → Combine → Ownership → Gold → R2)
+
+🤖 LOCAL AI:   Runs as Task 4 inside orchestrator_daily.py (with --skip-ai flag)
+   ├─ job1_news_processor.py   — Qwen 8B, bulk news enrichment
+   ├─ job2_fantasy_analyzer.py — Qwen 14B, fantasy scoring + drop/waiver/trade/lineup
+   ├─ job3_player_writeups.py  — Qwen 14B, nightly (rostered) + Sunday (all players)
+   └─ pipeline_runner.py       — watcher / sequencer for Jobs 1-2 (standalone mode)
 ```
 
 ### Validation Rule
 
 **This document is OUT OF DATE if:**
-- Notebook count in repo ≠ documented notebook count
-- Active job count ≠ documented job count
-- New data sources exist without Bronze notebooks
-- Exports to R2 exist without Export notebooks
+- New data sources exist without Bronze notebooks AND without `local_processing/ingest/` scripts
+- Exports to R2 exist without a corresponding key in `local_processing/export/export_to_r2.py`
 
-**To validate counts:**
+**To validate local pipeline state:**
 ```bash
-# Count notebooks
-find /Workspace/Repos/kingoffrisco@yahoo.com/FantasAI/notebooks -name "*.py" -o -name "*.ipynb" | wc -l
+# Count Python scripts in local pipeline
+ls local_processing/ingest/ local_processing/gold/ local_processing/export/
 
-# Count jobs
-databricks jobs list --output JSON | jq '. | length'
+# Check DuckDB tables
+python -c "import duckdb; c=duckdb.connect('local_processing/db/fantasai.duckdb'); print(c.execute('SHOW TABLES').fetchall())"
+
+# Check Task Scheduler jobs
+# PowerShell: Get-ScheduledTask -TaskPath "\FantasAI\"
 ```
 
 **Update this section when:**
-- ✅ Creating new notebooks
-- ✅ Deleting old jobs
-- ✅ Adding data sources
-- ✅ Consolidating duplicates
-
-**Archive File:** All removed/archived jobs are documented in [ARCHIVED_JOBS.md](#file-4166639283357659) with full configurations for restoration if needed.
+- ✅ Adding new `local_processing/ingest/` scripts
+- ✅ Adding new R2 export keys
+- ✅ Adding new DuckDB tables in `local_processing/db.py`
 
 ---
 
@@ -91,7 +103,7 @@ FantasAI is a comprehensive fantasy football analytics platform that ingests dat
 
 ## AI Architecture (3-Tier Design)
 
-**Last Updated:** June 10, 2026  
+**Last Updated:** June 13, 2026  
 **Design Principle:** Optimize for latency & quality first, cost second
 
 ### Overview
@@ -224,6 +236,7 @@ Generate:
 - Matchup analysis
 - Injury impact assessment
 - Dynasty asset valuation
+- ✅ **Player writeups** (Job 3) — 2-3 paragraph narrative profiles grounded in real 2025 stats
 
 **Data Flow:**
 ```
@@ -423,13 +436,38 @@ hosted a private workout, and ranks 28th in rushing efficiency.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    STAGE 1: DATA COLLECTION                      │
-│                         (Databricks ETL)                         │
+│              (Local Python Pipeline — RTX 4080 Server)           │
+├─────────────────────────────────────────────────────────────────┤
+│  Daily (7:00 AM):                                               │
+│    orchestrator_daily.py                                         │
+│    → ingest_sleeper_players.py  (Sleeper API, ESPN IDs)         │
+│    → ingest_espn_news.py        (ESPN News API)                 │
+│    → ingest_google_news.py      (Google News RSS)               │
+│    → ingest_nfl_transactions.py (ESPN Transactions)             │
+│    → gold_player_consolidation.py                               │
+│    → export_to_r2.py            (all JSON exports → Worker API) │
+│                                                                  │
+│  Weekly Tue 3:00 AM:                                            │
+│    orchestrator_weekly.py                                        │
+│    → ingest_nflverse.py         (nfl_data_py: stats, NGS, YAC) │
+│    → ingest_apisports.py        (API-Sports.io game stats)      │
+│    → ingest_sleeper_players.py                                   │
+│    → ingest_adp.py              (FantasyPros PPR+Std+DST)       │
+│    → ingest_dst_performance.py  (Sleeper DST pts_ppr)           │
+│    → ingest_schedules.py        (nflverse game schedule)        │
+│    → ingest_combine.py          (nflverse combine measurables)  │
+│    → ingest_ownership.py        (Sleeper public league crawl)   │
+│    → gold_player_consolidation.py → export_to_r2.py             │
+│                                                                  │
+│  Database: local_processing/db/fantasai.duckdb                  │
+│    Bronze → Silver → Gold → Export tables                       │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │
+                            │ export_to_r2.py
+                            │ PUT https://api.fantasai.net/api/v1/r2/{key}
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      R2 Storage (Raw Data)                       │
-│  players.parquet | news.parquet | injuries.parquet | matchups   │
+│                      R2 Storage (Enriched Data)                  │
+│  player_news.json | injury_report.json | player_scores.json     │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
                             ▼
@@ -445,19 +483,19 @@ hosted a private workout, and ranks 28th in rushing efficiency.
 │  Tier 2 (Qwen 14B):                                             │
 │    • Fantasy scoring (waiver, trade, start/sit)                 │
 │    • Pre-draft Ghost Pick profiles                              │
-│    • Dynasty valuations                                         │
+│    • Player writeups (job3_player_writeups.py)                  │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│              R2 Storage (Enriched Data + Scores)                 │
-│  fantasy_metadata.json | player_scores.json | ghost_picks.json  │
+│              R2 Storage (AI-Enriched Scores)                     │
+│  player_notes.json | ai_summaries.json | player_scores.json     │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                 STAGE 3: API LAYER                               │
-│                  (Cloudflare Workers)                            │
+│                  (Cloudflare Workers — api.fantasai.net)         │
 ├─────────────────────────────────────────────────────────────────┤
 │  • Serve pre-computed scores (no AI)                            │
 │  • Real-time Ghost Picks probability engine (no AI)             │
@@ -587,9 +625,9 @@ hosted a private workout, and ranks 28th in rushing efficiency.
 - `main.fantasai.gold_player_mapping_corrections` — Cleaned mapped corrections suitable for ML training (error_pattern, correction_type, etc.)
 - `main.fantasai.user_settings` — User persistence table (data for UI/commissioner experience)
 
-**Notebooks:**
-- `/Repos/kingoffrisco@yahoo.com/FantasAI/databricks/Notebook/01_Ingestion/Bronze/article_labeling_feedback_ingestion.py` (bronze ingestion)
-- `/Repos/kingoffrisco@yahoo.com/FantasAI/databricks/Notebook/01_Ingestion/Gold/gold_player_mapping_corrections.py` (gold transformation)
+**Notebooks (consolidated June 15, 2026):**
+- `notebooks/01_Ingestion/Bronze/article_labeling_feedback_ingestion.py` (bronze ingestion)
+- `notebooks/01_Ingestion/Gold/gold_player_mapping_corrections.py` (gold transformation)
 
 **Guide:**
 - `/Repos/kingoffrisco@yahoo.com/FantasAI/docs/HUMAN_IN_THE_LOOP_INTEGRATION.md`
@@ -607,7 +645,9 @@ hosted a private workout, and ranks 28th in rushing efficiency.
 
 ## Job Schedules
 
-**Last Updated:** June 12, 2026
+**Last Updated:** June 15, 2026
+
+> **Note:** Databricks jobs (30 total) were decommissioned June 15, 2026. All scheduling now runs via Windows Task Scheduler on the local RTX 4080 server.
 
 ### Critical Rule: Every Ingestion Job Must Have a Documented Output Path
 
@@ -615,461 +655,341 @@ hosted a private workout, and ranks 28th in rushing efficiency.
 
 ---
 
-## 🚨 CRITICAL ISSUE: 44% Job Duplication Detected
+## Local Pipeline Jobs (Windows Task Scheduler)
 
-**Audit Date:** June 12, 2026  
-**Current State:** 34 jobs (15 duplicates)  
-**Target State:** 19 consolidated jobs  
-**Efficiency Gain:** 44% reduction
-
-### Duplicate Jobs to Delete
-
-#### Stats Ingestion Duplicates (12 jobs → 4 jobs)
-**Keep ONE of each:**
-- ✅ **nflverse**: Keep 444982717808117, Delete: 530144362139462, 988933669189816
-- ✅ **Sleeper API**: Keep 307753042426414, Delete: 475179063418847, 442856552948533, 518453877190141
-- ✅ **ESPN Public API**: Keep 778277626953647, Delete: 608639812767789, 763538880653266
-- ✅ **API-Sports.io**: Keep 556044300919171, Delete: 1083340841351365, 878836084760675
-
-#### News & Injury Duplicates (3 jobs → 1 job)
-**Consolidate into: FantasAI - Daily News Ingestion (943551462212511)**
-- Already has 3-task pipeline: Ingest → Transform → Export
-- Delete: 185216139919059 (Daily NFL News & Injury Updates)
-- Delete: 667550437388679 (Fantasy News Daily Refresh)
-
-#### R2 Export Duplicates (4 jobs → 2 jobs)
-**Two distinct purposes:**
-- ✅ **News Export**: Now integrated into 943551462212511 (Task 3)
-- ✅ **Analysis Export**: Keep 848536035023585, runs after analytics job
-- Delete: 24271112387268 (duplicate analysis export)
-- Delete: 533461232082366 (news export - now in orchestrator)
-- Delete: 723299865616961 (every 6 hours - excessive)
-
-#### Breakout Predictions (2 jobs → 1 job)
-- Keep: 822442342570173
-- Delete: 1029762522315672 (exact duplicate)
-
----
-
-## Optimal Job Architecture
-
-### Daily Jobs (Run Every Day)
-
-#### 1. FantasAI - Daily News Ingestion (943551462212511)
-**Schedule:** 7:00 AM UTC (2:00 AM Central)  
-**Duration:** ~24 minutes  
-**Tasks:**
-1. news_orchestrator (17 min) → Ingest from Sleeper, ESPN, Google, NFL Transactions
-2. gold_transformation (5 min) → Transform Bronze → Gold
-3. r2_export (2 min) → Upload to R2 for UI
-
-**Output:** `export_player_news` → R2 → UI
-
----
-
-#### 2. Article Labeling Feedback - Daily Ingestion (803627611593135)
-**Schedule:** 6:00 AM UTC (1:00 AM Central)  
-**Duration:** ~5 minutes  
-**Purpose:** Ingest commissioner corrections from R2 → bronze_article_labels
-
-**Output:** `bronze_article_labels`, `gold_player_mapping_corrections`
-
----
-
-#### 3. API-Sports.io Daily Stats Update (556044300919171)
-**Schedule:** 2:00 AM Central  
-**Duration:** ~10 minutes  
-**Purpose:** Ingest daily game stats from API-Sports.io
-
-**Output:** `bronze_weekly_stats` (daily updates)
-
----
-
-#### 4. Daily Player Analytics Update (448879035335090)
-**Schedule:** 4:00 AM Central  
-**Duration:** ~15 minutes  
-**Purpose:** Calculate player trends, opportunity scores, positional rankings
-
-**Dependencies:** Runs after stats ingestion  
-**Output:** `analytics_player_trends`, `analytics_positional_rankings`
-
----
-
-#### 5. FantasAI - Export Analysis Data to R2 (848536035023585)
-**Schedule:** 8:30 AM UTC (3:30 AM Central)  
-**Duration:** ~5 minutes  
-**Purpose:** Export analytics tables to R2 for UI
-
-**Dependencies:** Runs after Daily Player Analytics (job 4)  
-**Output:** Analytics data → R2 → UI
-
----
-
-### Weekly Jobs (Tuesday Morning)
-
-**Execution Order:**
-```
-1. Stats Ingestion (parallel) → 3:00 AM Central
-   ├─ nflverse Weekly Stats (444982717808117)
-   ├─ Sleeper API Weekly (307753042426414)
-   └─ ESPN Public API Weekly (778277626953647)
-        ↓
-2. Weekly ML Model Training (763487314454311) → 5:00 AM Central
-        ↓
-3. Weekly Fantasy Breakout Predictions (822442342570173) → 10:00 AM Central
-        ↓
-4. Weekly Defense Rankings (867627996885375) → 10:30 AM Central
+**Register all tasks:**
+```powershell
+# See registration commands in each orchestrator's module docstring:
+#   local_processing/orchestrator_daily.py
+#   local_processing/orchestrator_weekly.py
 ```
 
-#### 6-8. Stats Ingestion (Parallel Execution)
-**Schedule:** 3:00 AM Central, Tuesday
-- **nflverse** (444982717808117): Season-long stats, depth charts
-- **Sleeper API** (307753042426414): League data, rosters, matchups
-- **ESPN Public API** (778277626953647): Player metadata, combine data
+### Daily Pipeline — `orchestrator_daily.py`
 
-**Output:** Bronze layer stats tables
+**Schedule:** 7:00 AM daily  
+**Task Scheduler Name:** `FantasAI - Daily Pipeline`  
+**Duration:** ~20 minutes
 
----
+| Phase | Script | Output |
+|-------|--------|--------|
+| 1 | ingest_sleeper_players.py | bronze_player_news_raw (w/ ESPN IDs), silver tables |
+| 1 | ingest_espn_news.py | bronze_player_news_espn_api |
+| 1 | ingest_google_news.py | bronze_google_news (7-day rolling) |
+| 1 | ingest_nfl_transactions.py | bronze_nfl_transactions |
+| 2 | gold_player_consolidation.py | gold_player_dim, gold_player_id_mapping, gold_weekly_stats |
+| 3 | export_to_r2.py | 11 JSON keys → R2 via Worker API |
 
-#### 9. Weekly ML Model Training (763487314454311)
-**Schedule:** 5:00 AM Central, Tuesday  
-**Duration:** ~30 minutes  
-**Dependencies:** Waits for stats ingestion (jobs 6-8)
-
-**Output:** Trained ML models for QB/RB/WR/TE predictions
-
----
-
-#### 10. Weekly Fantasy Breakout Predictions (822442342570173)
-**Schedule:** 10:00 AM Central, Tuesday  
-**Duration:** ~15 minutes  
-**Dependencies:** Waits for ML training (job 9)
-
-**Output:** `breakout_predictions_current` → R2 export
+**R2 Keys Written:**
+- `fantasai/news/player_notes.json`, `injury_report.json`, `critical_alerts.json`
+- `fantasai/news/enriched_news.json`, `player_news.json`
+- `fantasai/analysis/breakout_candidates.json`, `nfl_transactions.json`, `trending_players.json`, `injury_overlay.json`
+- `fantasai/players/export_players_2026_draft.json`
+- `fantasai/stats/gold_weekly_stats.json`
 
 ---
 
-#### 11. Weekly Defense Rankings Update (867627996885375)
-**Schedule:** 10:30 AM Central, Tuesday  
-**Duration:** ~10 minutes  
-**Dependencies:** Waits for stats ingestion
+### Weekly Pipeline — `orchestrator_weekly.py`
 
-**Output:** `defense_rankings_current` → R2 export
+**Schedule:** Tuesday 3:00 AM  
+**Task Scheduler Name:** `FantasAI - Weekly Stats Orchestrator`  
+**Duration:** ~60 minutes
 
----
+| Phase | Script | Output |
+|-------|--------|--------|
+| 1 | ingest_nflverse.py | headshots, YAC, NGS, depth_charts, silver_weekly_stats |
+| 1 | ingest_apisports.py | bronze_weekly_stats (source=api_sports) |
+| 1 | ingest_sleeper_players.py | bronze_player_news_raw refresh |
+| 1 | ingest_adp.py | bronze_adp_rankings (PPR + Standard + DST) |
+| 1 | ingest_dst_performance.py | bronze_dst_weekly_stats (32 teams × N weeks) |
+| 1 | ingest_schedules.py | bronze_nfl_schedules (570 games — 2 R2 keys) |
+| 1 | ingest_ownership.py | bronze_player_ownership (ownership % — non-fatal) |
+| 1 | ingest_combine.py | bronze_combine_data (NFL Combine measurables, 2023-2025) |
+| 2 | gold_player_consolidation.py | gold tables refreshed |
+| 3 | export_to_r2.py | Full R2 sync |
 
-### Weekly Jobs (Monday)
+**Free-tier limits:** API-Sports.io = 100 req/day (1 + N_games per run). Runs weekly to stay within quota.
 
-#### 12. ADP Pipeline - Bronze to Gold (100016462470325)
-**Schedule:** 7:00 AM UTC, Monday  
-**Duration:** ~10 minutes  
-**Purpose:** Ingest ADP data for PPR and Standard formats
-
-**Output:** `gold_adp_ppr`, `gold_adp_standard`
-
----
-
-#### 13. Export Players Draft Data (100559857891019)
-**Schedule:** 8:00 AM UTC, Monday  
-**Duration:** ~5 minutes  
-**Dependencies:** Runs after ADP pipeline
-
-**Output:** Draft data → R2
-
----
-
-### Weekly Jobs (Wednesday)
-
-#### 14. Weekly NFL Injury Updates (369873943083480)
-**Schedule:** 3:00 AM Eastern, Wednesday  
-**Duration:** ~10 minutes  
-**Purpose:** Backfill injury reports to historical table
-
-**Output:** `silver_injury_reports_historical`
+**R2 Keys Written (weekly, in addition to daily keys):**
+- `players/adp_ppr.json`, `players/adp_standard.json`
+- `analysis/gold_adp_defense.json`, `fantasai/analysis/gold_adp_defense.json`
+- `analysis/defense_performance.json`, `fantasai/analysis/defense_performance.json`
+- `fantasai/analysis/weather_forecast.json`
+- `fantasai/analysis/nfl_schedule.json`, `fantasai/analysis/opponent_lookup.json`
+- `fantasai/analysis/player_ownership.json`
+- `fantasai/analysis/combine_data.json`
+- `fantasai/analysis/performance_trends.json` (from `export_to_r2.py`, requires gold_weekly_stats data)
 
 ---
 
-#### 15. Weekly Stats Ingestion (432312901354426)
-**Schedule:** 7:00 AM Eastern, Wednesday  
-**Duration:** ~15 minutes  
-**Purpose:** Additional weekly stats consolidation
+### Local Qwen Pipeline Jobs (Windows Task Scheduler)
+
+These jobs run on the local RTX 4080 server via Windows Task Scheduler and upload results directly to R2.
+
+#### Job 1 — News Processor (`job1_news_processor.py`)
+**Model:** Qwen3 8B  
+**Schedule:** Triggered by pipeline watcher (R2 new-data signal), or manually  
+**Mode:** Incremental by default — skips articles already in cache  
+**Input:** `fantasai/news/enriched_news.json` (R2)  
+**Output:** `fantasai/news/player_notes.json`, `fantasai/news/ai_summaries.json` (R2)
 
 ---
 
-#### 16. Opportunity Score Recalculation (935857894190744)
-**Schedule:** 8:00 AM Eastern, Wednesday  
-**Duration:** ~10 minutes  
-**Purpose:** Recalculate weekly opportunity metrics
-
-**Output:** `player_opportunity_scores`
-
----
-
-#### 17. Vegas Totals Weekly Refresh (696826434401062)
-**Schedule:** 10:00 PM Eastern, Tuesday  
-**Duration:** ~5 minutes  
-**Purpose:** Update game totals and betting lines
-
-**Output:** `game_vegas_totals`
+#### Job 2 — Fantasy Analyzer (`job2_fantasy_analyzer.py`)
+**Model:** Qwen3 14B  
+**Schedule:** Runs after Job 1 completes (via `pipeline_runner.py`)  
+**Mode:** Incremental — skips players whose relevance score hasn't changed by > 0.5  
+**Input:** `fantasai/news/player_notes.json` (R2)  
+**Output:** `fantasai/analysis/player_scores.json` (R2) → ingested to Databricks Gold
 
 ---
 
-#### 18. FantasAI Weekly Stats Ingestion (862306600850562)
-**Schedule:** 8:00 AM Central, Tuesday  
-**Duration:** ~10 minutes  
-**Purpose:** Consolidate all stats sources
+#### Job 3a — Player Writeups: Rostered (`job3_player_writeups.py --mode rostered`)
+**Model:** Qwen3 14B  
+**Schedule:** Nightly at **2:00 AM** (Windows Task Scheduler: `FantasAI - Job3 Rostered Writeups (Nightly)`)  
+**Execution time limit:** 3 hours  
+**Players:** ~180 players — live CBS roster data when cookie is valid; falls back to ADP top-200 proxy when CBS is unavailable  
+**Cache behavior:** Skips any player generated within the last **20 hours** (safe to re-run)  
+**Output:** `players/player_writeups.json` (R2) — merged with existing entries  
+
+**PowerShell to register:**
+```powershell
+$action = New-ScheduledTaskAction `
+    -Execute "C:\Python314\python.exe" `
+    -Argument "D:\Project\Fantasy\local_processing\job3_player_writeups.py --mode rostered" `
+    -WorkingDirectory "D:\Project\Fantasy\local_processing"
+$trigger = New-ScheduledTaskTrigger -Daily -At "02:00AM"
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 3) -StartWhenAvailable -DontStopOnIdleEnd
+Register-ScheduledTask -TaskName "FantasAI - Job3 Rostered Writeups (Nightly)" -TaskPath "\FantasAI\" -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force
+```
 
 ---
 
-#### 19. Fantasy Football Daily Analysis (712488215166349)
-**Schedule:** 6:00 AM Central, Daily  
-**Duration:** ~10 minutes  
-**Purpose:** Generate daily fantasy insights
+#### Job 3b — Player Writeups: All Players (`job3_player_writeups.py --mode all`)
+**Model:** Qwen3 14B  
+**Schedule:** Weekly, **Sunday at 3:00 AM** (Windows Task Scheduler: `FantasAI - Job3 All Player Writeups (Weekly)`)  
+**Execution time limit:** 10 hours  
+**Players:** ~977 skill position players (QB/RB/WR/TE with games, news, or ADP rank)  
+**Cache behavior:** Skips any player generated within the last **6 days** (safe to re-run)  
+**Output:** `players/player_writeups.json` (R2) — incremental merge, preserves nightly rostered writeups  
+
+**PowerShell to register:**
+```powershell
+$action2 = New-ScheduledTaskAction `
+    -Execute "C:\Python314\python.exe" `
+    -Argument "D:\Project\Fantasy\local_processing\job3_player_writeups.py --mode all" `
+    -WorkingDirectory "D:\Project\Fantasy\local_processing"
+$trigger2 = New-ScheduledTaskTrigger -Weekly -WeeksInterval 1 -DaysOfWeek Sunday -At "03:00AM"
+$settings2 = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 10) -StartWhenAvailable -DontStopOnIdleEnd
+Register-ScheduledTask -TaskName "FantasAI - Job3 All Player Writeups (Weekly)" -TaskPath "\FantasAI\" -Action $action2 -Trigger $trigger2 -Settings $settings2 -RunLevel Highest -Force
+```
+
+**Job 3 R2 Output Format:**
+```json
+{
+  "generated_at": "2026-06-13T02:00:00Z",
+  "model": "qwen3:14b",
+  "mode": "rostered",
+  "player_count": 178,
+  "players": {
+    "Bijan Robinson": {
+      "player_name": "Bijan Robinson",
+      "position": "RB",
+      "team": "ATL",
+      "writeup": "Bijan Robinson dominated in 2025, rushing for 1,456 yards...",
+      "summary": "Bijan Robinson dominated in 2025, rushing for 1,456 yards.",
+      "injury_status": "Active",
+      "adp_rank_ppr": 3,
+      "generated_at": "2026-06-13T02:14:22Z",
+      "_cache_key": "a3f92b1c4d7e",
+      "_mode": "rostered"
+    }
+  }
+}
+```
+
+**Rostered Player Detection (priority order):**
+1. `GET /api/v1/cbs/players` — live CBS roster sync (requires valid CBS cookie)
+2. `percent_owned > 0` in `fantasai/players/export_players_2026_draft.json` R2 export
+3. ADP rank ≤ 200 fallback (covers all roster spots + handcuffs when CBS unavailable)
+
+**To verify Task Scheduler jobs:**
+```powershell
+Get-ScheduledTask -TaskPath "\FantasAI\"
+```
 
 ---
 
-## Consolidation Action Plan
+### News Ingestion Pipeline (Daily)
 
-### Phase 1: Delete Unscheduled Duplicates (Immediate - No Impact)
-**Delete these 4 jobs** (no schedule, likely dead):
-- 530144362139462 (nflverse - no schedule)
-- 475179063418847 (Sleeper - no schedule)
-- 1083340841351365 (API-Sports - no schedule)
-- 608639812767789 (ESPN - no schedule)
-
-**Risk:** Zero (not running)
-
----
-
-### Phase 2: Consolidate Stats Ingestion (Week 1)
-**Test the "keep" jobs for 1 week:**
-- 444982717808117 (nflverse)
-- 307753042426414 (Sleeper)
-- 778277626953647 (ESPN)
-- 556044300919171 (API-Sports)
-
-**If successful, delete duplicates:**
-- 988933669189816 (nflverse)
-- 442856552948533, 518453877190141 (Sleeper)
-- 763538880653266 (ESPN)
-- 878836084760675 (API-Sports)
-
-**Savings:** 7 jobs deleted
-
----
-
-### Phase 3: Consolidate R2 Exports (Week 2)
-**Verify orchestrator job 943551462212511 exports news successfully**
-- Task 3 should handle news export
-
-**Delete standalone news export jobs:**
-- 533461232082366 (FantasAI - Export Fantasy News to R2)
-- 24271112387268 (R2 Export - Analysis Data - duplicate)
-- 723299865616961 (FantasAI - Export to R2 Storage - every 6 hours)
-
-**Savings:** 3 jobs deleted
-
----
-
-### Phase 4: Delete Obvious Duplicates (Week 3)
-**Delete exact duplicate breakout job:**
-- 1029762522315672 (Weekly Fantasy Breakout Predictions)
-
-**Delete duplicate news jobs** (after verifying 943551462212511 works):
-- 185216139919059 (Daily NFL News & Injury Updates)
-- 667550437388679 (Fantasy News Daily Refresh)
-
-**Savings:** 3 jobs deleted
-
----
-
-### Final State
-**Before:** 34 jobs  
-**After:** 17 jobs  
-**Reduction:** 50%
-
-**Benefits:**
-- ✅ Clear execution order
-- ✅ No duplicate work
-- ✅ Easier troubleshooting
-- ✅ Documented dependencies
-- ✅ Predictable execution times
-
----
-
-### News Ingestion Pipeline (Job ID: 943551462212511)
-
-**Schedule:** Daily at 7:00 AM UTC (2 AM Central)
+**Schedule:** 7:00 AM daily via `orchestrator_daily.py`
 
 **End-to-End Flow:**
-
 ```
-Task 1: News Orchestrator (17 min)
-   ├─ Sleeper API → bronze_player_news_raw (4,254 players)
-   ├─ ESPN News API → bronze_player_news_espn_api (12,240 articles)
-   ├─ Google News RSS → bronze_google_news (7,786 articles)
-   └─ NFL Transactions → bronze_nfl_transactions (125 transactions)
-        ↓ (waits for success)
-Task 2: Gold Transformation (5 min)
-   └─ Runs: /Repos/.../01_Ingestion/Gold/Gold Layer - Player Consolidation
-   └─ Updates: gold_enriched_news, export_player_news
-        ↓ (waits for success)
-Task 3: R2 Export (2 min)
-   └─ Runs: /Repos/.../06_Exports/Export Fantasy News to R2
-   └─ Uploads: export_player_news → R2 → UI
+Phase 1: Ingest (~15 min)
+   ├─ Sleeper API → bronze_player_news_raw (4,000+ players, includes espn_id)
+   ├─ ESPN News API → bronze_player_news_espn_api (uses espn_id from Sleeper)
+   ├─ Google News RSS → bronze_google_news (7-day window, 60-day purge)
+   └─ NFL Transactions → bronze_nfl_transactions (MD5-dedup)
         ↓
-✅ UI sees fresh articles
+Phase 2: Gold Consolidation (~3 min)
+   └─ gold_player_consolidation.py
+   └─ Updates: gold_player_dim, gold_player_id_mapping, gold_weekly_stats
+        ↓
+Phase 3: R2 Export (~2 min)
+   └─ export_to_r2.py → PUT api.fantasai.net/api/v1/r2/{key}
+        ↓
+✅ UI sees fresh data
 ```
 
 **Output Validation:**
-- ✅ Bronze tables updated? Check `MAX(fetched_at)` = TODAY
-- ✅ Gold tables updated? Check `gold_enriched_news` row count > 86
-- ✅ R2 export succeeded? Check UI article count matches gold table
-
-**Critical Note:** If Task 1 completes but UI shows old data, Tasks 2 and 3 did not run. Always verify the full chain.
+```python
+import duckdb
+c = duckdb.connect("local_processing/db/fantasai.duckdb")
+# Bronze updated today?
+print(c.execute("SELECT MAX(fetched_at) FROM bronze_player_news_raw").fetchone())
+# Gold updated?
+print(c.execute("SELECT COUNT(*) FROM gold_player_dim").fetchone())
+```
 
 ---
 
-### Other Scheduled Jobs
+### Stats Ingestion Pipeline (Weekly)
 
-**Weekly Stats Ingestion**
-- Schedule: Daily at 8:00 AM UTC
-- Flow: Bronze → Silver → Gold → ML Features
-- Output: R2 export for player stats
+**Schedule:** Tuesday 3:00 AM via `orchestrator_weekly.py`
 
-**ML Model Training**
-- Schedule: Weekly on Sundays at 10:00 AM UTC
-- Flow: Gold features → Model training → Predictions → R2 export
-- Output: R2 export for predictions
-
-**Breakout Predictions**
-- Schedule: Daily at 9:00 AM UTC
-- Flow: ML predictions → R2 export
-- Output: R2 export for breakout candidates
+```
+Phase 1: Ingest (~60 min)
+   ├─ nflverse (headshots, YAC, NGS, depth_charts, weekly_stats)
+   ├─ API-Sports.io (bronze_weekly_stats, source=api_sports)
+   ├─ Sleeper API (refresh bronze_player_news_raw)
+   ├─ FantasyPros ADP (bronze_adp_rankings: PPR + Standard + DST)
+   ├─ Sleeper Stats API (bronze_dst_weekly_stats: DST pts_ppr all 32 teams)
+   ├─ nflverse schedules (bronze_nfl_schedules: home/away, venue, scores)
+   ├─ nflverse combine (bronze_combine_data: 40-time, bench, vertical, etc.)
+   └─ Sleeper public leagues (bronze_player_ownership: ownership % — non-fatal)
+        ↓
+Phase 2: Gold Consolidation (~3 min)
+        ↓
+Phase 3: R2 Export (~2 min)
+        ↓
+✅ Updated stats available in UI
+```
 
 ---
 
 ## Repository Structure
 
-### Notebook Inventory (60 notebooks)
+> **Note:** Notebooks in `/notebooks/` are historical reference for data source logic. The active production pipeline is under `local_processing/`. Do not run notebooks directly — they contain Databricks/PySpark code that will not work locally.
 
-#### 📥 Bronze Layer - Data Ingestion (34 notebooks)
-**Location:** `/notebooks/01_Ingestion/Bronze/`
+### Local Pipeline (`local_processing/`)
 
-**Active Production Notebooks:**
-1. `Player_News_Ingestion_Sleeper_API.ipynb` - Sleeper player news API (daily)
-2. `ESPN News API Ingestion.ipynb` - ESPN news articles (daily)
-3. `Google News RSS Ingestion.ipynb` - Google News RSS feed (daily)
-4. `NFL Transactions Ingestion.ipynb` - NFL.com transaction wire (daily)
-5. `API-Sports.io NFL Ingestion.ipynb` - Game stats from API-Sports (daily)
-6. `ESPN Public API Ingestion.ipynb` - ESPN player metadata (weekly)
-7. `Sleeper Ownership - Public Leagues.ipynb` - Ownership percentages (weekly)
-8. `Import nflverse Player Data.ipynb` - Historical stats from nflverse (weekly)
+```
+local_processing/
+├── db.py                          # DuckDB connection + schema init (24 tables)
+├── db/
+│   └── fantasai.duckdb            # Single-file data warehouse (D: drive)
+├── ssl_utils.py                   # Windows certificate store injection (truststore)
+├── orchestrator_daily.py          # Daily 7AM: news → gold → R2 (+ AI as Task 4)
+├── orchestrator_weekly.py         # Tue 3AM: stats → ADP → DST → schedules → combine → ownership → gold → R2
+├── ingest/
+│   ├── ingest_sleeper_players.py  # Sleeper API (bronze_player_news_raw + espn_id)
+│   ├── ingest_espn_news.py        # ESPN News API (uses espn_id from Sleeper)
+│   ├── ingest_google_news.py      # Google News RSS (feedparser, 60-day rolling)
+│   ├── ingest_nfl_transactions.py # ESPN Transactions API (MD5 dedup)
+│   ├── ingest_apisports.py        # API-Sports.io game stats (100 req/day limit)
+│   ├── ingest_nflverse.py         # nfl_data_py: headshots, YAC, NGS, depth, stats
+│   ├── ingest_adp.py              # FantasyPros ADP (PPR + Standard + DST via HTML scrape)
+│   ├── ingest_weather.py          # WorldWeatherOnline 7-day forecasts (22 outdoor stadiums)
+│   ├── ingest_dst_performance.py  # Sleeper Stats API: weekly DST fantasy scores (all 32 teams)
+│   ├── ingest_schedules.py        # nflverse: NFL game schedule (home/away, venue, scores) → 2 R2 keys
+│   ├── ingest_ownership.py        # Sleeper: public league crawl → player ownership % → R2
+│   └── ingest_combine.py          # nflverse: NFL Combine measurables (40-time, bench, vertical, etc.)
+├── gold/
+│   └── gold_player_consolidation.py  # master_player_id (SHA-256), gold tables
+├── export/
+│   └── export_to_r2.py            # PUT api.fantasai.net/api/v1/r2/{key} (15+ keys)
+├── job1_news_processor.py         # Qwen 8B: article enrichment (bulk, incremental)
+├── job2_fantasy_analyzer.py       # Qwen 14B: fantasy scores + drop/waiver/trade/lineup
+├── job3_player_writeups.py        # Qwen 14B: player narrative writeups
+├── pipeline_runner.py             # Watcher/sequencer for Jobs 1-2 (standalone mode)
+└── chat_server.py                 # Local chat API server
+```
 
-**Development/Testing Notebooks:**
-9. `00_api_test.ipynb` - API endpoint testing
-10. `01_bronze_ingestion.py` - Generic bronze template
-11. `02_bronze_ingestion.py` - Alternative bronze pattern
-12. `02_silver_normalization.py` - Silver transformation template
-13. `03_player_metadata_ingestion.py` - Player metadata
-14. `04_league_ingestion.py` - League settings
-15. `05_roster_ingestion.py` - Team rosters
-16. `06_matchups_ingestion.py` - Weekly matchups
-17. `07_news_ingestion.py` - News aggregation
-18. `08_silver_domain_normalization.py` - Domain normalization
-19. `09_injuries_ingestion.ipynb` - Injury reports
-20. `10_stats_ingestion.ipynb` - Stats aggregation
-21. `11_fantasydata_ingestion.ipynb` - FantasyData.com API
-22. `11_projections_ingestion.ipynb` - Projection data
-23. `13_espn_fantasy_ingestion.ipynb` - ESPN fantasy data
-24. `14_nflverse_ingestion.ipynb` - nflverse library
-25. `15_fantasy_data_pros_ingestion.ipynb` - FantasyPros API
-26. `15_sleeper_api_ingestion.ipynb` - Sleeper API
-27. `16_api_football_rapidapi_ingestion.ipynb` - RapidAPI football
-28. `17_nflverse_schedules_ingestion.ipynb` - NFL schedules
-29. `17_thesportsdb_ingestion.ipynb` - TheSportsDB API
-30. `18_weatherapi_com_ingestion.ipynb` - Weather data
-31. `19_injury_ingestion_historical.ipynb` - Historical injuries
-32. `19_openweathermap_ingestion.ipynb` - OpenWeatherMap
-33. `20_worldweatheronline_ingestion.ipynb` - WorldWeatherOnline
-34. `Player News Sources - API Evaluation.ipynb` - Source comparison
+### DuckDB Schema (`local_processing/db.py`)
 
-#### 🔄 Silver Layer - Data Transformation (0 notebooks)
-**Location:** `/notebooks/01_Ingestion/Silver/`
+| Layer | Table | Source |
+|-------|-------|--------|
+| Bronze | bronze_player_news_raw | Sleeper API (includes espn_id) |
+| Bronze | bronze_player_news_espn_api | ESPN News API |
+| Bronze | bronze_google_news | Google News RSS |
+| Bronze | bronze_nfl_transactions | ESPN Transactions |
+| Bronze | bronze_weekly_stats | API-Sports.io |
+| Bronze | bronze_adp_rankings | FantasyPros HTML scrape (PPR + Standard + DST) |
+| Bronze | bronze_dst_weekly_stats | Sleeper Stats API (DST pts_ppr per week per team) |
+| Bronze | bronze_nfl_schedules | nflverse: game_id, week, home/away teams, scores, venue, roof |
+| Bronze | bronze_player_ownership | Sleeper public leagues: ownership_pct per player_id |
+| Bronze | bronze_combine_data | nflverse: 40-time, bench, vertical, cone, shuttle per draft class |
+| Silver | silver_player_news | Normalized from Sleeper (7-day) |
+| Silver | silver_injury_reports | Injury status from Sleeper |
+| Silver | silver_trending_players | Trending from Sleeper |
+| Silver | silver_weekly_stats | Aggregated game stats |
+| Supplemental | player_headshots | nfl_data_py |
+| Supplemental | player_yac_stats | nfl_data_py play-by-play |
+| Supplemental | player_nextgen_stats | NGS (YACOE) |
+| Supplemental | depth_charts | nfl_data_py |
+| Gold | gold_player_dim | SHA-256 master_player_id |
+| Gold | gold_player_id_mapping | Cross-source ID mapping |
+| Gold | gold_weekly_stats | Aggregated stats (all sources) |
+| Export | export_player_news | Frontend-ready news feed |
+| Weather | weather_forecasts | WorldWeatherOnline 7-day per-team (full replace each run) |
+| Weather | weather_historical | WorldWeatherOnline historical per-team per-date (append) |
 
-**Status:** No dedicated Silver notebooks. Transformations handled in Bronze or Gold layers.
+### Notebook Reference (`notebooks/`)
 
-#### ✨ Gold Layer - Business Logic (1 notebook)
-**Location:** `/notebooks/01_Ingestion/Gold/`
+> **Rule:** Do NOT run these notebooks directly. All contain Databricks/PySpark code (`spark`, `dbutils`, `%python` magic). They are retained as blueprints for logic that may be ported to `local_processing/` in the future.
 
-1. `Gold Layer - Player Consolidation.ipynb` - Master player deduplication, news enrichment
+#### 📥 Bronze Layer — Future/Reference (13 notebooks)
+**Location:** `/notebooks/01_Ingestion/Bronze/` and `/notebooks/01_Ingestion/` root
 
-#### 🤖 ML Training (4 notebooks)
-**Location:** `/notebooks/03_ML_Training/`
+| Notebook | Status | Notes |
+|---|---|---|
+| `17_nflverse_schedules_ingestion.ipynb` | ✅ Ported | → `ingest/ingest_schedules.py` — 570 games (2024+2025), 3 R2 keys |
+| `Sleeper Ownership - Public Leagues.ipynb` | ✅ Ported | → `ingest/ingest_ownership.py` — public league crawl → `player_ownership.json` |
+| `14_nflverse_ingestion.ipynb` | 🟢 Reference | 10-year nflverse stats (2016-2025) — ML training history |
+| `15_fantasy_data_pros_ingestion.ipynb` | 🟢 Reference | 22 seasons historical (1999-2020) — deep ML training data |
+| `19_injury_ingestion_historical.ipynb` | 🟢 Reference | Historical injuries 2016-2026 — ML feature engineering |
+| `NFL_Draft_Capital_Ingestion.py` | 🟢 Reference | 2026 NFL Draft pick capital values |
+| `Defense Rankings Ingestion - FantasyPros.ipynb` | 🟢 Reference | FantasyPros DST expert rankings (covered by ingest_adp.py) |
+| `00_api_test.ipynb` | 🟢 Reference | Worker API endpoint test suite |
+| `10_stats_ingestion.ipynb` | 🟢 Reference | Weekly stats via Cloudflare Worker API |
+| `11_fantasydata_ingestion.ipynb` | 🟢 Reference | FantasyData.com — alternative stats source |
+| `11_projections_ingestion.ipynb` | 🟢 Reference | Sleeper weekly projections |
+| `13_espn_fantasy_ingestion.ipynb` | 🟢 Reference | ESPN Public API game scores/stats |
+| `Player News Sources - API Evaluation.ipynb` | 🟢 Reference | API source comparison analysis |
 
-1. `ml_feature_engineering.ipynb` - Create ml_player_features (70 features)
-2. `ml_prediction_data_prep.ipynb` - Prepare training datasets
-3. `ml_prediction_model_training.ipynb` - Train XGBoost models (QB/RB/WR/TE)
-4. `ML Model Enhancement Analysis.ipynb` - Model evaluation and tuning
+#### 🤖 ML Pipeline (11 notebooks)
+**Locations:** `02_Analysis_Metrics/`, `03_ML_Training/`, `03_Predictions/`, `04_ML_Registration/`
 
-#### 📦 ML Registration (3 notebooks)
-**Location:** `/notebooks/04_ML_Registration/`
+*(LightGBM QB/RB/WR/TE training, breakout prediction engine, MLflow model registration — all Databricks-specific. Blueprint for future local ML pipeline.)*
 
-1. `ml_model_registration.ipynb` - Register models to MLflow
-2. `ml_vector_search.ipynb` - Vector search for player similarity
-3. `fantasai_chat_api.ipynb` - Chat API integration
-
-#### ⏰ Scheduled Jobs (7 notebooks)
+#### ⏰ Scheduled Jobs — ML Only (1 notebook)
 **Location:** `/notebooks/05_Scheduled_Jobs/`
 
-1. `00_News_Ingestion_Master_Orchestrator.ipynb` - Daily news orchestrator
-2. `00_ML_Training_Master_Orchestrator.ipynb` - Weekly ML training orchestrator
-3. `API-Sports.io - Scheduled Daily Update.ipynb` - Daily stats job
-4. `ESPN Public API - Scheduled Weekly Update.ipynb` - Weekly ESPN job
-5. `nflverse - Scheduled Weekly Update.ipynb` - Weekly nflverse job
-6. `Sleeper API - Scheduled Weekly Update.ipynb` - Weekly Sleeper job
-7. `R2 Export - Analysis Data.ipynb` - Daily analytics export
+- `00_ML_Training_Master_Orchestrator.ipynb` — ML training orchestration (Databricks reference)
+- All other scheduled job notebooks archived (replaced by `orchestrator_daily.py` / `orchestrator_weekly.py`)
 
-#### 📤 Exports (3 notebooks)
+#### 📤 Exports — Partial Reference (2 notebooks)
 **Location:** `/notebooks/06_Exports/`
 
-1. `Export Fantasy News to R2.ipynb` - News export (integrated into orchestrator)
-2. `Export Breakout Predictions to R2.ipynb` - Breakout candidates export
-3. `fantasai_chat_api_deployment.ipynb` - API deployment
+- `Export Breakout Predictions to R2.ipynb` — Predictions export schema (partially replaced by job2/job3)
+- `fantasai_chat_api_deployment.ipynb` — Chat API deployment reference
 
----
+#### 🗄️ Archived (53 files in `_Archive_20260601/`)
+All notebooks fully superseded by `local_processing/` scripts as of June 15, 2026:
+- 39 notebooks moved to archive in latest consolidation pass
+- 14 previously archived from databricks/ directory removal
 
-### Expected Notebook-to-Job Mapping
-
-**After consolidation (17 jobs → 60 notebooks):**
-
-| Job Name | Notebooks Used | Count |
-|----------|----------------|-------|
-| News Ingestion Orchestrator | Sleeper News, ESPN News, Google RSS, NFL Transactions, Gold Consolidation, Export News | 6 |
-| Article Labeling Feedback | (TBD - not yet created) | 1 |
-| API-Sports Daily | API-Sports Ingestion | 1 |
-| Daily Player Analytics | (Uses views, no dedicated notebook) | 0 |
-| Export Analysis to R2 | R2 Export - Analysis Data | 1 |
-| nflverse Weekly Stats | nflverse Ingestion | 1 |
-| Sleeper API Weekly | Sleeper Ownership | 1 |
-| ESPN Public API Weekly | ESPN Public API Ingestion | 1 |
-| ML Training Orchestrator | Feature Engineering, Data Prep, Model Training | 3 |
-| Breakout Predictions | Export Breakout Predictions | 1 |
-| Defense Rankings | (TBD - not yet created) | 0 |
-| ADP Pipeline | (TBD - not yet created) | 0 |
-| Export Draft Data | (TBD - not yet created) | 0 |
-| Weekly Injury Updates | Injury Ingestion | 1 |
-| Opportunity Score Calc | (Uses views, no dedicated notebook) | 0 |
-| Vegas Totals Refresh | (TBD - not yet created) | 0 |
-| Stats Ingestion | Stats Ingestion | 1 |
-| **TOTAL** | | **18 notebooks** |
-
-**Notebook Usage:**
-- 💚 **Active in jobs:** 18 notebooks
-- 🟡 **Development/testing:** 34 notebooks
-- 🔴 **Archived/unused:** 8 notebooks
-
-**Rule:** If a job exists without a documented notebook, or a production notebook exists without a job, documentation is incomplete.
+**To see what replaced a specific archived notebook:** check the "Superseded By Local Scripts" table in `docs/LOCAL_MIGRATION_CHECKLIST.md`.
 
 ---
 
@@ -1079,33 +999,33 @@ Task 3: R2 Export (2 min)
 
 **Example: Adding a new news source (e.g., ProFootballTalk RSS)**
 
-1. **Create Bronze Ingestion Notebook**
-   - Path: `/notebooks/01_Ingestion/Bronze/PFT_News_Ingestion.ipynb`
-   - Output table: `main.fantasai.bronze_pft_news`
+1. **Create ingest script**
+   - Path: `local_processing/ingest/ingest_pft_news.py`
+   - Add `bronze_pft_news` table to `local_processing/db.py` → `init_schema()`
 
-2. **Add to News Orchestrator**
-   - Edit: `/notebooks/05_Scheduled_Jobs/00_News_Ingestion_Master_Orchestrator.ipynb`
-   - Add config flag: `RUN_PFT_NEWS = True`
-   - Add notebook run: `dbutils.notebook.run("/Repos/.../PFT_News_Ingestion", ...)`
+2. **Add to daily orchestrator**
+   - Edit: `local_processing/orchestrator_daily.py`
+   - Add call in Phase 1 after existing news ingests
 
-3. **Update Gold Transformation**
-   - Edit: `/notebooks/01_Ingestion/Gold/Gold Layer - Player Consolidation.ipynb`
-   - Add UNION to include `bronze_pft_news` in `gold_enriched_news`
+3. **Update Gold Consolidation**
+   - Edit: `local_processing/gold/gold_player_consolidation.py`
+   - Add `bronze_pft_news` to the player source UNION
 
-4. **Verify R2 Export**
-   - The existing R2 export notebook reads from `export_player_news`
-   - No changes needed IF gold transformation populates that table
+4. **Add R2 export key**
+   - Edit: `local_processing/export/export_to_r2.py`
+   - Add export function for any new derived data
 
 5. **Test End-to-End**
-   - Run orchestrator job manually
-   - Verify bronze table has data: `SELECT COUNT(*) FROM bronze_pft_news`
-   - Verify gold table has data: `SELECT COUNT(*) FROM gold_enriched_news WHERE source = 'pft'`
-   - Verify UI shows new articles
+   ```python
+   python local_processing/ingest/ingest_pft_news.py
+   python -c "import duckdb; c=duckdb.connect('local_processing/db/fantasai.duckdb'); print(c.execute('SELECT COUNT(*) FROM bronze_pft_news').fetchone())"
+   python local_processing/gold/gold_player_consolidation.py
+   python local_processing/export/export_to_r2.py
+   ```
 
 6. **Update This Document**
    - Add new source to "Data Sources" section
-   - Update "News Ingestion Pipeline" flow diagram
-   - Document expected row counts
+   - Add table to DuckDB Schema table above
 
 **Rule: If you can't trace data from source → bronze → gold → R2 → UI, the pipeline is incomplete.**
 

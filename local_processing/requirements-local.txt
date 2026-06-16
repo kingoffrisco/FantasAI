@@ -1,0 +1,16 @@
+# Local pipeline dependencies
+# pip install -r local_processing/requirements-local.txt
+
+# Core data layer (replaces Databricks Delta Lake)
+duckdb>=0.10.0
+
+# Already used by existing local pipeline
+requests
+python-dotenv
+pandas
+
+# Google News RSS parsing
+feedparser
+
+# nflverse data (headshots, YAC, NGS, depth charts, weekly stats)
+nfl_data_py

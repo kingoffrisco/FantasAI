@@ -84,7 +84,10 @@ export const api = {
       // Backend exports to analysis/ (no fantasai/ prefix) — try both paths.
       for (const p of ['analysis/breakout_candidates.json', 'fantasai/analysis/breakout_candidates.json']) {
         const r2 = await r2Get(p);
-        if (r2) return r2;
+        if (r2) {
+          const arr = extractPlayerArray(r2);
+          if (arr.length > 0) return arr;
+        }
       }
       // Fall back to live Databricks SQL endpoint.
       try {
@@ -106,11 +109,23 @@ export const api = {
       // Backend exports to analysis/ (no fantasai/ prefix) — try both paths.
       for (const p of ['analysis/sleeper_picks.json', 'fantasai/analysis/sleeper_picks.json']) {
         const r2 = await r2Get(p);
-        if (r2) return r2;
+        if (r2) {
+          const arr = extractPlayerArray(r2);
+          if (arr.length > 0) return arr;
+        }
       }
       return null;
     },
     weatherForecast:      () => r2Get('fantasai/analysis/weather_forecast.json'),
+    // Clean 32-row DST ranking table (main.fantasai.gold_adp_defense → R2).
+    // Fields: team, adp_rank (1-32), avg_pts, avg_last_4_weeks. No duplicates.
+    defenseAdp: async () => {
+      for (const p of ['analysis/gold_adp_defense.json', 'fantasai/analysis/gold_adp_defense.json']) {
+        const r2 = await r2Get(p);
+        if (r2) return r2;
+      }
+      return null;
+    },
     defensePerformance: async () => {
       for (const p of ['analysis/defense_performance.json', 'fantasai/analysis/defense_performance.json']) {
         const r2 = await r2Get(p);
@@ -127,6 +142,13 @@ export const api = {
     },
     // 583K records — only use on demand, not on page load
     weeklyStats: () => r2Get('fantasai/stats/gold_weekly_stats.json'),
+    adpPPR:        () => r2Get('players/adp_ppr.json'),
+    adpStandard:   () => r2Get('players/adp_standard.json'),
+    playerWriteups:  () => r2Get('players/player_writeups.json'),
+    nflSchedule:     () => r2Get('fantasai/analysis/nfl_schedule.json'),
+    opponentLookup:  () => r2Get('fantasai/analysis/opponent_lookup.json'),
+    playerOwnership: () => r2Get('fantasai/analysis/player_ownership.json'),
+    combineData:     () => r2Get('fantasai/analysis/combine_data.json'),
   },
 
   transactions: {

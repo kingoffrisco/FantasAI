@@ -1,0 +1,27 @@
+name = "fantasai-cbs"
+main = "src/index.js"
+compatibility_date = "2024-11-12"
+account_id = "a121da9c5331b463f2c3651bd2e6e789"
+
+# Optional: bind a KV namespace to cache CBS HTML responses (5 min TTL).
+# After running `wrangler kv:namespace create CACHE`, paste the id below
+# and uncomment.
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = "<paste from wrangler output>"
+
+# Web Push subscription storage — required for push notifications.
+# Run: wrangler kv:namespace create PUSH_SUBS
+# Then paste the returned id below and uncomment.
+# [[kv_namespaces]]
+# binding = "PUSH_SUBS"
+# id = "<paste from wrangler output>"
+
+# Allowed CORS origins. Use "*" for development. In production, list the
+# hostnames that host your FantasAI Football app, comma-separated.
+[vars]
+ALLOWED_ORIGINS = "*"
+
+# Secrets you set with `wrangler secret put <NAME>` (do NOT put them here):
+#   CBS_COOKIE     - your full Cookie header from cbssports.com
+#   FANTASAI_KEY   - (optional) shared secret so only your app can hit the worker

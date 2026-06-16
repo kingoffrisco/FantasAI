@@ -4,6 +4,203 @@ All notable changes to the FantasAI ML pipeline project.
 
 ---
 
+## [2.0.0] - 2026-06-15
+
+### Summary
+Full infrastructure migration from Databricks (30 jobs, Unity Catalog, 79 Delta tables) to a local DuckDB pipeline running on the RTX 4080 server. All data sources tested and passing. R2 exports verified end-to-end. Notebooks consolidated and deduplicated.
+
+---
+
+### Infrastructure — Databricks Decommissioned
+- **Removed:** All 30 Databricks jobs (lost access to workspace)
+- **Removed:** Unity Catalog schema `main.fantasai` (79 Delta tables)
+- **Replaced with:** Single DuckDB file at `local_processing/db/fantasai.duckdb` (17 tables, Bronze/Silver/Gold)
+- **Replaced with:** 2 Windows Task Scheduler orchestrators (`orchestrator_daily.py`, `orchestrator_weekly.py`)
+
+### New: Local ETL Pipeline (`local_processing/`)
+| Script | Status | Output |
+|--------|--------|--------|
+| `ingest/ingest_sleeper_players.py` | Tested | 4,254 players, 258 news, 167 injuries, 100 trending |
+| `ingest/ingest_espn_news.py` | Tested | 120 articles (limited test) |
+| `ingest/ingest_google_news.py` | Tested | 48 articles (5-player test) |
+| `ingest/ingest_nfl_transactions.py` | Tested | 27 transactions (7-day) |
+| `ingest/ingest_apisports.py` | Tested | 713 player-stat records (Week 18/2024 dry-run) |
+| `ingest/ingest_nflverse.py` | Not tested | Needs weekly run |
+| `gold/gold_player_consolidation.py` | Tested | 4,151 unique players in gold_player_dim |
+| `export/export_to_r2.py` | Tested | All 11 R2 keys uploaded |
+
+### Bug Fixes Discovered During Testing
+- `db.py`: `executescript()` is SQLite-only — replaced with `split(";")` + individual `execute()` calls
+- `ingest_sleeper_players.py`: Sleeper trending API returns `{count, player_id}` (count first) — fixed column reorder
+- `ingest_google_news.py`: Gold fallback only triggered on exceptions, not empty results — fixed to check `df.empty`
+- `ingest_google_news.py`: DuckDB `INTERVAL ?` parameterized syntax unsupported — replaced with f-string
+- `gold_player_consolidation.py`: Blocked on empty `silver_weekly_stats` — now builds from Sleeper bronze alone on daily runs
+- All scripts: SSL cert failure (corporate proxy) — created `ssl_utils.py` using `truststore` (Windows cert store)
+- All scripts: Emoji in print statements → `UnicodeEncodeError` on Windows cp1252 — set `PYTHONIOENCODING=utf-8`
+
+### Notebook Consolidation
+- **Moved** to `notebooks/01_Ingestion/Bronze/`: `article_labeling_feedback_ingestion.py`, `NFL_Draft_Capital_Ingestion.py`, `08_weather_ingestion.py`
+- **Moved** to `notebooks/01_Ingestion/Gold/`: `ADP_Consolidation_Gold.py`, `gold_player_mapping_corrections.py`
+- **Archived** to `notebooks/_Archive_20260601/`: both `07_news_ingestion.py` versions (superseded), `ESPN Public API - Scheduled Weekly Update.ipynb` (duplicate of `13_espn_fantasy_ingestion.ipynb`), `ESPN Public API Ingestion.ipynb` (mislabeled — actually SportsData.io, API auth failed)
+
+### Docs Updated
+- `ARCHITECTURE.md` → v3.0 (platform, system inventory, data flow diagram, job schedules, repo structure)
+- `README.md` → v2 (stack table, architecture diagram, data flow, R2 keys, setup instructions, removed Databricks Jobs section)
+
+---
+
+## [1.5.0] - 2026-06-13
+
+### 🎯 Summary
+Job 3 player writeup pipeline operational. Two-mode scheduling (nightly rostered + weekly all-players). Frontend wired to display real Qwen-generated writeups in player detail drawer. Multiple UI fixes across Current Roster, Players, and Sources screens.
+
+---
+
+### 🤖 Local Pipeline — Job 3 Player Writeups
+
+#### New Script: `local_processing/job3_player_writeups.py`
+- **Model:** Qwen3 14B
+- Generates 2-3 paragraph narrative player profiles grounded in real 2025 stats (rushing yards, receiving yards, passing yards, TDs, PPG)
+- Reads `players/player_profiles.json` from R2 (Databricks gold export with real stats)
+- Reads `fantasai/news/player_notes.json` for recent headline context
+- Writes `players/player_writeups.json` to R2
+
+#### Two Scheduling Modes
+| Mode | Flag | Schedule | Players | Est. Runtime |
+|------|------|----------|---------|--------------|
+| Rostered | `--mode rostered` | Nightly 2:00 AM | ~180 (ADP ≤ 200 / live CBS) | ~90 min |
+| All players | `--mode all` | Weekly Sunday 3:00 AM | ~977 skill players | ~8 hrs |
+
+#### Cache / Freshness Rules
+- **Rostered mode:** skips players generated within the last 20 hours — safe to re-run nightly without duplicate work
+- **All mode:** skips players generated within the last 6 days
+- **Data-change cache:** also skips if `injury_status + news_count + adp_rank + fantasy_pts` hash unchanged
+- `--full` flag bypasses all cache and regenerates everything
+- Existing writeups for players not in the current run are preserved (incremental merge)
+
+#### Rostered Player Detection (priority order)
+1. `GET /api/v1/cbs/players` — live CBS roster (requires valid CBS cookie)
+2. `percent_owned > 0` in `export_players_2026_draft` R2 export
+3. ADP rank ≤ 200 fallback — covers all 12-team roster spots + handcuffs when CBS unavailable
+
+#### Windows Task Scheduler Registration
+Both jobs live in the `\FantasAI\` Task Scheduler folder:
+- **`FantasAI - Job3 Rostered Writeups (Nightly)`** — Daily 2:00 AM, 3hr time limit
+- **`FantasAI - Job3 All Player Writeups (Weekly)`** — Sunday 3:00 AM, 10hr time limit
+- Both use `-StartWhenAvailable` (runs on next wake if machine was sleeping at trigger time)
+- Both use `-RunLevel Highest`
+
+```powershell
+# Verify jobs registered:
+Get-ScheduledTask -TaskPath "\FantasAI\"
+```
+
+#### R2 Output: `players/player_writeups.json`
+```json
+{
+  "generated_at": "2026-06-13T02:00:00Z",
+  "model": "qwen3:14b",
+  "mode": "rostered",
+  "player_count": 178,
+  "players": {
+    "Bijan Robinson": {
+      "writeup": "Bijan Robinson dominated in 2025...",
+      "summary": "Bijan Robinson dominated in 2025.",
+      "position": "RB", "team": "ATL",
+      "adp_rank_ppr": 3,
+      "generated_at": "2026-06-13T02:14:22Z",
+      "_cache_key": "a3f92b1c4d7e",
+      "_mode": "rostered"
+    }
+  }
+}
+```
+
+---
+
+### 🌐 Frontend — Player Writeups Display
+
+#### `app/src/api.js`
+- Added `api.r2.playerWriteups()` → fetches `players/player_writeups.json`
+
+#### `app/src/hooks.js`
+- Added `useR2PlayerWriteups` hook
+
+#### `app/src/screens/Players.jsx` — PlayerDetail drawer
+- Imports `useR2PlayerWriteups`
+- Loads writeups on drawer open; looks up player by full name
+- **FantasAI Insight card** now shows real Qwen writeup (paragraphs split on `\n\n`) when available
+- Shows "Qwen · date" label in top-right when writeup is live
+- Falls back to existing proj-based template when no writeup exists yet
+
+---
+
+### 🖥️ Frontend — UI Fixes & Improvements
+
+#### `app/src/screens/CurrentRoster.jsx`
+- **Column group headers:** SCHEDULE, WEATHER, TRENDS, and FANTASY POINTS all use light blue style (`rgba(78,168,255,.12)` background, `#4ea8ff` text/border)
+- **Slot and Player column headers:** now bold white (`fontWeight: 800, color: '#fff'`)
+- **Apply Optimal Lineup (`<LineupDecisions>`):** moved from the removed "Add Player" tab to the bottom of the **My Roster** tab
+- **Add Player tab removed:** tab button and full content block deleted; dead state (`addFilter`, `addSearch`, `available` filter) cleaned up
+- **Free agent replace list:** sorted by `proj` descending (was ECR); cap raised from 15 → 20; only shows unrostered players
+
+#### `app/src/screens/Players.jsx`
+- **Breakout filter button:** active state changed from yellow-green (`#c6ff3a`) to blue (`#4ea8ff`) to match the blue breakout badges on player rows
+- Count badge color updated to match
+
+#### `app/src/screens/Sources.jsx`
+- **Cookie alert banner:** now includes "🍪 Get Cookie" button that directly opens the CBS cookie modal
+- **Green success animation:** banner, CBS hero card border, and CBS Cookie Worker card all flip to green when cookie is saved; revert to normal after 5 seconds
+- **CBS Cookie Worker card:** shows "CONNECTED" green badge on success; "NEEDS ATTENTION" red badge when alert active
+- **`WorkerConfig`** wired with `openCookieTrigger` and `onCookieSaved` props
+
+#### `app/src/components/CBSConnectModal.jsx`
+- `WorkerConfig` accepts `openCookieTrigger` (counter) and `onCookieSaved` callback
+- Opens cookie modal when `openCookieTrigger` increments
+- Calls `onCookieSaved?.()` after successful cookie validation
+
+---
+
+### 🐛 Bug Fixes
+
+#### Spark JSON String Deserialization (`notes` field)
+- **Root cause:** Databricks/Spark serializes array fields (e.g., `notes`) as JSON-encoded strings in R2 exports, not parsed arrays
+- **Fixed in:** `CurrentRoster.jsx`, `News.jsx` (×2 locations), `Players.jsx`
+- **Pattern applied everywhere:**
+  ```js
+  const notes = Array.isArray(pn.notes) ? pn.notes
+    : typeof pn.notes === 'string' ? (() => { try { return JSON.parse(pn.notes); } catch { return []; } })()
+    : [];
+  ```
+
+#### ADP Fixes (`app/src/lib/playerStore.js`)
+- Removed `search_rank` as ADP fallback — Sleeper `search_rank` is trending popularity, NOT draft position (was causing Cameron Latu to appear as ADP 1.0)
+- Removed proj-based ADP fallback in `!hasRanks` block — user confirmed these values were inaccurate
+- ADP stays at 999 until the R2 `adp_ppr` / `adp_standard` patch runs
+
+#### ADP Patch Survival (`app/src/App.jsx`)
+- **Root cause:** `patchPlayers()` ADP values applied at t~1s were erased by `setPlayers()` at t=5s from `dbPlayers` DB reload
+- **Fix:** `adpByNameRef` caches the ADP map by name and re-applies it after every `setPlayers()` call
+
+#### Player Deduplication (`app/src/App.jsx`)
+- Pre-dedup now uses name-only key across all name fields (`full_name`, `player_name`, `name`, `first_name + last_name`)
+- Two-pass sort in `normalizePlayerList`: valid NFL team entries processed first so corrupt-team duplicates always lose name-based dedup
+- NFL team validation via `BYE_WEEKS_2026` rejects values like "TEPHI"
+
+#### Power Rankings projected points (`app/src/lib/powerUtils.js`)
+- `projPts` now sums **all roster entries** (not just starters)
+
+---
+
+### 📦 New R2 Artifacts
+
+| R2 Path | Written by | Consumed by | Notes |
+|---------|-----------|-------------|-------|
+| `players/player_writeups.json` | Job 3 (local Qwen 14B) | PlayerDetail drawer | Nightly (rostered) + weekly (all) |
+| `players/player_profiles.json` | Databricks ETL | Job 3 | Real 2025 stats: rush yds, rec yds, pass yds, TDs |
+
+---
+
 ## [1.4.0] - 2026-06-12
 
 ### 🎯 Summary

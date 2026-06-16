@@ -1398,31 +1398,44 @@ const CHAT_SYSTEM_PROMPT =
   'Focus on actionable advice — start/sit decisions, waiver adds, trade values, injury impact. ' +
   'When roster context is provided, tailor your answer to those specific players.';
 
-async function callLocalChat(userContent, rosterPlayers, localUrl, fantasaiKey) {
-  const url = localUrl.replace(/\/$/, '') + '/chat';
-  const res = await fetch(url, {
+// ── Intent classification ────────────────────────────────────────────────────
+
+const SIMPLE_RE  = /what happened|summarize|explain|who is|tell me about|injury report|depth chart|why is .{1,40} ranked|draft recap|news on|latest on/i;
+const COMPLEX_RE = /dynasty|rebuild|3-team|three.team|\b3\+\s*player|\bfive.player|\bsalary cap|championship plan|multi.year|future pick|offseason plan|full season/i;
+
+function classifyByKeywords(question) {
+  if (COMPLEX_RE.test(question)) return 'complex';
+  if (SIMPLE_RE.test(question))  return 'simple';
+  return 'medium';
+}
+
+// ── Local chat server ────────────────────────────────────────────────────────
+
+async function callLocalChat(userContent, rosterPlayers, tier, localUrl, fantasaiKey) {
+  // 150s — 14B cold-start (model load ~30s) + generation (~60-90s) can exceed 90s
+  const res = await fetch(localUrl.replace(/\/$/, '') + '/chat', {
     method:  'POST',
-    headers: {
-      'Content-Type':  'application/json',
-      'X-FantasAI-Key': fantasaiKey || '',
-    },
-    body:   JSON.stringify({ question: userContent, rosterPlayers }),
-    signal: AbortSignal.timeout(90000),
+    headers: { 'Content-Type': 'application/json', 'X-FantasAI-Key': fantasaiKey || '' },
+    body:    JSON.stringify({ question: userContent, rosterPlayers, tier }),
+    signal:  AbortSignal.timeout(150000),
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`Local chat ${res.status}: ${detail.slice(0, 200)}`);
+    throw new Error(`Local chat [${tier}] ${res.status}: ${detail.slice(0, 200)}`);
   }
   const data = await res.json();
   return data.answer ?? '';
 }
 
-async function callOpenAI(userContent, apiKey) {
+// ── Cloud backends ───────────────────────────────────────────────────────────
+
+// model: 'gpt-4o-mini' for medium fallback, 'gpt-4o' for complex
+async function callOpenAI(userContent, apiKey, model = 'gpt-4o-mini') {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method:  'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body:    JSON.stringify({
-      model:      'gpt-4o-mini',
+      model,
       max_tokens: 1024,
       messages:   [
         { role: 'system', content: CHAT_SYSTEM_PROMPT },
@@ -1433,7 +1446,7 @@ async function callOpenAI(userContent, apiKey) {
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`OpenAI ${res.status}: ${detail.slice(0, 200)}`);
+    throw new Error(`OpenAI [${model}] ${res.status}: ${detail.slice(0, 200)}`);
   }
   const data = await res.json();
   return data?.choices?.[0]?.message?.content ?? '';
@@ -1480,6 +1493,11 @@ async function handleChat(request, env) {
     return json({ error: 'No AI backend configured. Set OPENAI_API_KEY (recommended), LOCAL_CHAT_URL, or ANTHROPIC_API_KEY.' }, 503);
   }
 
+  // Classify intent — explicit tier from client wins, otherwise keyword classify
+  const tier = ['simple', 'medium', 'complex'].includes(body.tier)
+    ? body.tier
+    : classifyByKeywords(question);
+
   // Live enrichment: real-time injury data for roster players
   let liveEnrichment = '';
   if (rosterPlayers.length > 0) {
@@ -1504,31 +1522,46 @@ async function handleChat(request, env) {
 
   let answer, source, lastErr;
 
-  // 1. Local Ollama (fastest, free — requires tunnel)
-  if (hasLocal) {
+  // ── Routing logic ──────────────────────────────────────────────────────────
+  // simple / medium  → local Qwen (8B or 14B) → cloud fallback
+  // complex          → cloud first (GPT-4o)   → local fallback
+
+  if (tier !== 'complex' && hasLocal) {
     try {
-      answer  = await callLocalChat(userContent, rosterPlayers, env.LOCAL_CHAT_URL, env.FANTASAI_KEY);
-      source  = 'local';
-      lastErr = null;
+      answer = await callLocalChat(userContent, rosterPlayers, tier, env.LOCAL_CHAT_URL, env.FANTASAI_KEY);
+      source = tier === 'simple' ? 'local-8b' : 'local-14b';
     } catch (err) {
       lastErr = err;
-      console.warn(`Local chat failed: ${err.message} — trying cloud`);
+      console.warn(`Local [${tier}] failed: ${err.message} — escalating to cloud`);
     }
   }
 
-  // 2. OpenAI GPT-4o mini (recommended cloud — best reasoning + 128k context)
+  // Complex → GPT-4o directly; simple/medium cloud fallback → GPT-4o-mini
   if (answer == null && hasOpenAI) {
+    const model = tier === 'complex' ? 'gpt-4o' : 'gpt-4o-mini';
     try {
-      answer  = await callOpenAI(userContent, env.OPENAI_API_KEY);
-      source  = 'openai';
+      answer = await callOpenAI(userContent, env.OPENAI_API_KEY, model);
+      source = `openai-${model}`;
       lastErr = null;
     } catch (err) {
       lastErr = err;
-      console.warn(`OpenAI failed: ${err.message} — trying Anthropic`);
+      console.warn(`OpenAI [${model}] failed: ${err.message} — trying Anthropic`);
     }
   }
 
-  // 3. Anthropic Claude fallback
+  // Complex local fallback — if cloud unavailable, try local 14B
+  if (answer == null && tier === 'complex' && hasLocal) {
+    try {
+      answer = await callLocalChat(userContent, rosterPlayers, 'complex', env.LOCAL_CHAT_URL, env.FANTASAI_KEY);
+      source = 'local-14b-fallback';
+      lastErr = null;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`Local complex fallback failed: ${err.message} — trying Anthropic`);
+    }
+  }
+
+  // Anthropic — last resort for any tier
   if (answer == null && hasAnthropic) {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await sleep(1500 * attempt);
@@ -1547,25 +1580,56 @@ async function handleChat(request, env) {
   if (answer == null) return json({ error: `AI unreachable: ${lastErr?.message}` }, 502);
 
   // Store in CF Cache for 5 minutes
-  const payload       = { answer };
+  const payload       = { answer, tier, source };
   const cacheResponse = new Response(JSON.stringify(payload), {
     status:  200,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' },
   });
   await cache.put(cacheKey, cacheResponse);
 
-  console.log(`Chat answered via ${source}`);
+  console.log(`Chat [${tier}] answered via ${source}`);
   return json(payload, 200);
+}
+
+async function loadDefenseRanks(env) {
+  // Returns { TEAM: rank } where rank 1 = toughest defense, 32 = easiest
+  try {
+    const r2Key = 'analysis/defense_performance.json';
+    const obj   = await env.BUCKET.get(r2Key);
+    if (!obj) return {};
+    const data  = await obj.json();
+    const arr   = data?.data || (Array.isArray(data) ? data : []);
+
+    const latestByTeam = {};
+    for (const row of arr) {
+      const t = row.team;
+      if (t && (!latestByTeam[t] || row.week > latestByTeam[t].week))
+        latestByTeam[t] = row;
+    }
+    const sorted = Object.values(latestByTeam)
+      .sort((a, b) => (b.avg_last_4_weeks || 0) - (a.avg_last_4_weeks || 0));
+    const ranks = {};
+    sorted.forEach((row, i) => { ranks[row.team] = i + 1; });
+    return ranks;
+  } catch {
+    return {};
+  }
 }
 
 async function buildLiveEnrichment(rosterPlayers, env) {
   const base = env.SLEEPER_BASE || 'https://api.sleeper.app/v1';
-  const res  = await fetch(`${base}/players/nfl`, {
-    headers: { Accept: 'application/json' },
-    cf: { cacheTtl: 600, cacheEverything: true },
-  });
-  if (!res.ok) throw new Error(`Sleeper /players/nfl → ${res.status}`);
-  const allPlayers = await res.json();
+
+  // Fetch Sleeper player data and defense ranks in parallel
+  const [sleeperRes, defRanks] = await Promise.all([
+    fetch(`${base}/players/nfl`, {
+      headers: { Accept: 'application/json' },
+      cf: { cacheTtl: 600, cacheEverything: true },
+    }),
+    loadDefenseRanks(env),
+  ]);
+
+  if (!sleeperRes.ok) throw new Error(`Sleeper /players/nfl → ${sleeperRes.status}`);
+  const allPlayers = await sleeperRes.json();
 
   // Build name → Sleeper player map
   const byName = {};
@@ -1574,18 +1638,32 @@ async function buildLiveEnrichment(rosterPlayers, env) {
     if (name) byName[name.toLowerCase()] = p;
   }
 
+  const hasDefRanks = Object.keys(defRanks).length > 0;
   const lines = [];
   for (const rp of rosterPlayers) {
     const sp = byName[rp.name?.toLowerCase()];
     if (!sp) continue;
-    const status   = sp.injury_status && sp.injury_status !== 'Na' ? sp.injury_status : 'Active';
-    const injNote  = sp.injury_notes ? ` — ${sp.injury_notes}` : '';
-    const injPart  = sp.injury_body_part ? ` (${sp.injury_body_part})` : '';
-    lines.push(`  ${rp.pos}: ${rp.name} (${rp.team}) — Status: ${status}${injPart}${injNote}`);
+    const status  = sp.injury_status && sp.injury_status !== 'Na' ? sp.injury_status : 'Active';
+    const injNote = sp.injury_notes    ? ` — ${sp.injury_notes}` : '';
+    const injPart = sp.injury_body_part ? ` (${sp.injury_body_part})` : '';
+
+    let defNote = '';
+    if (hasDefRanks && rp.opp) {
+      const rank = defRanks[rp.opp];
+      if (rank) {
+        const label = rank <= 5 ? 'elite defense (tough matchup)'
+          : rank <= 10 ? 'strong defense'
+          : rank <= 20 ? 'average defense'
+          : 'weak defense (favorable matchup)';
+        defNote = ` | vs ${rp.opp} def rank #${rank}/32 — ${label}`;
+      }
+    }
+
+    lines.push(`  ${rp.pos}: ${rp.name} (${rp.team}) — Status: ${status}${injPart}${injNote}${defNote}`);
   }
 
   return lines.length > 0
-    ? `LIVE INJURY DATA (real-time):\n${lines.join('\n')}`
+    ? `LIVE ROSTER DATA (real-time injury + defense matchup):\n${lines.join('\n')}`
     : '';
 }
 
