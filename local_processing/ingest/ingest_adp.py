@@ -53,6 +53,26 @@ FP_PAGES = {
     "DST":      "https://www.fantasypros.com/nfl/adp/dst.php",
 }
 
+# ECR (Expert Consensus Rankings) — overall cheatsheets include all positions
+FP_ECR_PAGES = {
+    "ECR_PPR": "https://www.fantasypros.com/nfl/rankings/ppr-cheatsheets.php",
+    "ECR_STD": "https://www.fantasypros.com/nfl/rankings/consensus-cheatsheets.php",
+}
+
+NFL_TEAM_NAME_TO_ABBR = {
+    "arizona cardinals": "ARI", "atlanta falcons": "ATL", "baltimore ravens": "BAL",
+    "buffalo bills": "BUF", "carolina panthers": "CAR", "chicago bears": "CHI",
+    "cincinnati bengals": "CIN", "cleveland browns": "CLE", "dallas cowboys": "DAL",
+    "denver broncos": "DEN", "detroit lions": "DET", "green bay packers": "GB",
+    "houston texans": "HOU", "indianapolis colts": "IND", "jacksonville jaguars": "JAX",
+    "kansas city chiefs": "KC", "las vegas raiders": "LV", "los angeles chargers": "LAC",
+    "los angeles rams": "LAR", "miami dolphins": "MIA", "minnesota vikings": "MIN",
+    "new england patriots": "NE", "new orleans saints": "NO", "new york giants": "NYG",
+    "new york jets": "NYJ", "philadelphia eagles": "PHI", "pittsburgh steelers": "PIT",
+    "san francisco 49ers": "SF", "seattle seahawks": "SEA", "tampa bay buccaneers": "TB",
+    "tennessee titans": "TEN", "washington commanders": "WAS",
+}
+
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -66,6 +86,69 @@ REQUEST_HEADERS = {
 
 
 # ── Scraping ──────────────────────────────────────────────────────────────────
+
+def fetch_fp_ecr(format_name: str, url: str) -> list[dict]:
+    """Fetch a FantasyPros consensus rankings page.
+    Data is embedded as `var ecrData = {...}` in the page JS (no HTML table).
+    Fields used: rank_ecr (overall), rank_ave (expert avg), player_position_id,
+    player_team_id, player_name.
+    """
+    print(f"   Fetching {format_name} from FantasyPros…")
+    try:
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=20)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"   WARNING {format_name}: fetch failed — {e}")
+        return []
+
+    import json as _json
+    m = re.search(r"var ecrData\s*=\s*(\{.*?\});", resp.text, re.DOTALL)
+    if not m:
+        print(f"   WARNING {format_name}: ecrData not found in page")
+        return []
+
+    try:
+        data = _json.loads(m.group(1))
+    except Exception as e:
+        print(f"   WARNING {format_name}: JSON parse error — {e}")
+        return []
+
+    players = data.get("players", [])
+    if not players:
+        print(f"   WARNING {format_name}: ecrData.players is empty")
+        return []
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = []
+    for p in players:
+        name = str(p.get("player_name") or "").strip()
+        team = str(p.get("player_team_id") or "").strip()
+        pos  = str(p.get("player_position_id") or "").strip().upper()
+        if not name or pos not in ("QB", "RB", "WR", "TE", "K", "DST"):
+            continue
+        try:
+            ecr_rank = int(p["rank_ecr"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        try:
+            ecr_avg = float(p.get("rank_ave") or ecr_rank)
+        except (TypeError, ValueError):
+            ecr_avg = float(ecr_rank)
+
+        rows.append({
+            "player_name": name,
+            "position":    pos,
+            "team":        team,
+            "adp_rank":    ecr_rank,
+            "adp_value":   ecr_avg,
+            "format":      format_name,
+            "source":      "fantasypros",
+            "fetched_at":  now,
+        })
+
+    print(f"   {format_name}: {len(rows)} players parsed")
+    return rows
+
 
 def clean_player_name(raw: str) -> tuple[str, str]:
     """Return (player_name, team) from a FantasyPros player cell string.
@@ -131,6 +214,12 @@ def fetch_fp_html(format_name: str, url: str) -> list[dict]:
         player_name, team = clean_player_name(raw_player)
         if not player_name:
             continue
+
+        # DST pages use full team names ("Houston Texans") instead of abbrs — resolve them
+        if format_name == "DST" and not team:
+            team = NFL_TEAM_NAME_TO_ABBR.get(player_name.lower(), "")
+            if team:
+                player_name = f"{team} D/ST"
 
         try:
             adp_rank = int(str(row[rank_col]).strip()) if rank_col else i + 1
@@ -259,6 +348,41 @@ def export_skill_adp(conn, dry_run: bool):
         r2_put(key, {"generated_at": now, "format": fmt, "source": "fantasypros", "players": rows}, dry_run)
 
 
+def export_ecr(conn, dry_run: bool):
+    now = datetime.now(timezone.utc).isoformat()
+    for fmt, key, label in [
+        ("ECR_PPR", "players/ecr_ppr.json", "PPR"),
+        ("ECR_STD", "players/ecr_std.json", "Standard"),
+    ]:
+        rows = conn.execute("""
+            SELECT
+                CASE WHEN position = 'DST' AND team != ''
+                     THEN team || ' D/ST'
+                     ELSE player_name
+                END AS player_name,
+                position, team,
+                adp_rank  AS ecr_rank,
+                adp_value AS ecr_avg
+            FROM bronze_adp_rankings
+            WHERE format = ?
+              AND position IN ('QB','RB','WR','TE','K','DST')
+            ORDER BY adp_rank
+            LIMIT 500
+        """, [fmt]).df().to_dict(orient="records")
+
+        if not rows:
+            print(f"   SKIP {key} — no {fmt} data in bronze_adp_rankings")
+            continue
+        payload = {
+            "generated_at": now,
+            "format": fmt,
+            "scoring": label,
+            "source": "fantasypros",
+            "players": rows,
+        }
+        r2_put(key, payload, dry_run)
+
+
 def export_defense_adp(conn, dry_run: bool):
     now = datetime.now(timezone.utc).isoformat()
 
@@ -303,7 +427,7 @@ def main():
     init_schema(conn)
 
     if not args.skip_scrape:
-        print("\n── Scraping FantasyPros (HTML) ───────────────────────────────────────")
+        print("\n── Scraping FantasyPros ADP ──────────────────────────────────────────")
         all_rows: list[dict] = []
 
         for fmt, url in FP_PAGES.items():
@@ -316,16 +440,30 @@ def main():
         if all_rows:
             write_bronze(conn, all_rows, args.dry_run)
         else:
-            print("   WARNING: No ADP data scraped — using Sleeper fallback for DST only")
+            print("   WARNING: No ADP data — using Sleeper fallback for DST only")
             dst_rows = build_dst_from_sleeper(conn)
             write_bronze(conn, dst_rows, args.dry_run)
+
+        print("\n── Scraping FantasyPros ECR ──────────────────────────────────────────")
+        ecr_rows: list[dict] = []
+        for fmt, url in FP_ECR_PAGES.items():
+            rows = fetch_fp_ecr(fmt, url)
+            ecr_rows.extend(rows)
+            time.sleep(1.5)
+        if ecr_rows:
+            write_bronze(conn, ecr_rows, args.dry_run)
+        else:
+            print("   WARNING: No ECR data scraped")
     else:
-        count = conn.execute("SELECT COUNT(*) FROM bronze_adp_rankings").fetchone()[0]
-        print(f"\n── Using existing bronze_adp_rankings ({count} rows) ──────────────────")
+        count = conn.execute(
+            "SELECT COUNT(*) FROM bronze_adp_rankings"
+        ).fetchone()[0]
+        print(f"\n── Using existing bronze_adp_rankings ({count} rows) ─────────────")
 
     print("\n── Exporting to R2 ───────────────────────────────────────────────────")
     export_skill_adp(conn, args.dry_run)
     export_defense_adp(conn, args.dry_run)
+    export_ecr(conn, args.dry_run)
 
     conn.close()
     print("\n✅ ADP ingestion complete")

@@ -121,8 +121,18 @@ function renderSegs(segs, bold, k, injuredNames) {
 }
 
 function inlineMd(text, rosterNames, allNames, injuredNames) {
-  const boldParts = text.split(/(\*\*[^*]+\*\*)/);
   const els = [];
+  let processText = text;
+
+  // "Label:" prefix → bold blue. Matches "Player:", "Start/Sit:", "Roster Context:", etc.
+  const labelMatch = processText.match(/^([A-Z][A-Za-z\s/'.-]{0,30}):\s*/);
+  if (labelMatch) {
+    els.push(<strong key="lbl" style={{ color: '#4ea8ff', fontWeight: 700 }}>{labelMatch[1]}:</strong>);
+    els.push(<span key="lbl-sp"> </span>);
+    processText = processText.slice(labelMatch[0].length);
+  }
+
+  const boldParts = processText.split(/(\*\*[^*]+\*\*)/);
   let k = 0;
   for (const part of boldParts) {
     if (part.startsWith('**') && part.endsWith('**')) {
@@ -474,6 +484,7 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
   ]);
   const [input,       setInput]       = React.useState('');
   const [loading,     setLoading]     = React.useState(false);
+  const sendingRef    = React.useRef(false);   // synchronous guard against double-submit
   const [waiverClaim, setWaiverClaim] = React.useState(null);
   const bodyRef = React.useRef(null);
 
@@ -535,7 +546,8 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
 
   async function send(questionOverride) {
     const q = (questionOverride ?? input).trim();
-    if (!q || loading) return;
+    if (!q || loading || sendingRef.current) return;
+    sendingRef.current = true;
     setInput('');
     const thinking = { type: 'ai', text: '◆ Thinking…', pending: true };
     setMessages(prev => [...prev, { type: 'user', text: q }, thinking]);
@@ -565,6 +577,7 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
       });
     } finally {
       setLoading(false);
+      sendingRef.current = false;
     }
   }
 

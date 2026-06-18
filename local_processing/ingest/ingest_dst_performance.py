@@ -230,7 +230,7 @@ def export_to_r2(conn, season: int, dry_run: bool):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--season",   type=int, default=2024, help="NFL season year (default: 2024)")
+    parser.add_argument("--season",   type=int, default=2025, help="NFL season year (default: 2025)")
     parser.add_argument("--weeks",    type=str, default=None, help="Comma-separated week list, e.g. 15,16,17,18")
     parser.add_argument("--dry-run",  action="store_true")
     parser.add_argument("--export-only", action="store_true", help="Skip fetch, just re-export from existing DB data")

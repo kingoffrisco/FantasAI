@@ -1,11 +1,11 @@
 import React from 'react';
 import WatchlistScreen from './Watchlist.jsx';
-import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, GAME_WEATHER, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
+import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes } from '../hooks.js';
-import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending } from '../lib/sleeper.js';
-import { DataSourceDebugger } from './Sources.jsx';
+import { useApi, useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance } from '../hooks.js';
+import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
+// import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 
 const FREE_DATA_SOURCES_LIST = FREE_DATA_SOURCES.map(s => ({ id: s.id, name: s.name, defaultEnabled: s.enabled }));
@@ -165,13 +165,21 @@ function fmtWaiverDate(d) {
 }
 
 function WeatherBadge({ opp }) {
-  const w = GAME_WEATHER[opp];
-  if (!w) return null;
-  if (w.cond === 'Dome') return <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 2 }}>🏟️ Dome</div>;
-  const isAlert = w.wind >= 15 || w.temp <= 32;
+  const { data: r2Weather } = useR2WeatherForecast();
+  const entry = r2Weather?.teams?.[opp?.toUpperCase()];
+  if (!entry) return null;
+  if (entry.is_dome) return <div style={{ fontSize: 10, color: '#1affa0', marginTop: 2 }}>🏟️ Dome</div>;
+  if (!entry.forecast?.length) return null;
+  const day = entry.forecast[0];
+  const hour = day?.hourly?.find(h => h.time === '1300') || day?.hourly?.[0];
+  if (!hour) return null;
+  const temp = Math.round(hour.temp_f || day.max_temp_f || 0);
+  const wind = Math.round(hour.wind_mph || 0);
+  const isAlert = wind >= 15 || temp <= 32;
+  const icon = wind >= 20 ? '🌬️' : temp <= 32 ? '❄️' : temp >= 80 ? '☀️' : '⛅';
   return (
     <div style={{ fontSize: 10, marginTop: 2, color: isAlert ? 'var(--warn)' : 'var(--text-faint)' }}>
-      {w.icon} {w.temp}°F{w.wind > 0 ? ` · ${w.wind}mph` : ''}
+      {icon} {temp}°F{wind > 0 ? ` · ${wind}mph` : ''}
     </div>
   );
 }
@@ -186,6 +194,7 @@ const DEFAULT_COLUMNS = [
   { id: 'bye',       label: 'Bye',      visible: true,  sortKey: 'bye' },
   { id: 'owned',     label: '%Own',     visible: true,  sortKey: 'owned' },
   { id: 'adp',       label: 'ADP',      visible: true,  sortKey: 'adp' },
+  { id: 'ecr_rank',  label: 'Rank',     visible: true,  sortKey: 'rank' },
   { id: 'depth',     label: 'Depth',    visible: true,  sortKey: null },
   { id: 'snaps',     label: 'Snaps/G',  visible: true,  sortKey: null },
   { id: 'tgt',       label: 'Tgt%',     visible: false, sortKey: 'targetShare' },
@@ -220,7 +229,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   const _addFilter = (() => { try { const f = localStorage.getItem('fantasai_add_filter'); if (f) { localStorage.removeItem('fantasai_add_filter'); return f; } } catch {} return null; })();
   const [pos, setPos] = React.useState(_addFilter ?? 'ALL');
   const [search, setSearch] = React.useState('');
-  const [sort, setSort] = React.useState('adp');
+  const [sort, setSort] = React.useState('rank');
   const [avail, setAvail] = React.useState(_addFilter ? 'available' : 'all');
   const [useSleeperSort, setUseSleeperSort] = React.useState(false);
   const [breakoutOnly, setBreakoutOnly] = React.useState(false);
@@ -283,6 +292,23 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   const sleeperWeights = React.useMemo(() => loadScoringWeights(), []);
 
   const scheduleOppMap = useScheduleOppMap();
+
+  const { data: r2DefenseData } = useR2DefensePerformance();
+  const defRankByTeam = React.useMemo(() => {
+    const arr = r2DefenseData?.data || (Array.isArray(r2DefenseData) ? r2DefenseData : []);
+    if (!arr.length) return {};
+    const latestByTeam = {};
+    for (const row of arr) {
+      const t = row.team;
+      if (t && (!latestByTeam[t] || (row.week || 0) > (latestByTeam[t].week || 0)))
+        latestByTeam[t] = row;
+    }
+    const sorted = Object.values(latestByTeam)
+      .sort((a, b) => (b.avg_last_4_weeks || 0) - (a.avg_last_4_weeks || 0));
+    const ranks = {};
+    sorted.forEach((row, i) => { ranks[row.team] = i + 1; });
+    return ranks;
+  }, [r2DefenseData]);
 
   const { data: r2Breakouts } = useR2BreakoutCandidates();
   const breakoutSet = React.useMemo(() => {
@@ -364,8 +390,11 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       }
       if (r2?.depth_chart_order != null) updates.depthChartOrder = r2.depth_chart_order;
       if (r2?.depth_chart_position)      updates.depthChartPos   = r2.depth_chart_position;
-      if (note?.notes?.length) {
-        const topNote = note.notes[0];
+      const noteNotes = Array.isArray(note?.notes) ? note.notes
+        : typeof note?.notes === 'string' ? (() => { try { return JSON.parse(note.notes); } catch { return []; } })()
+        : [];
+      if (noteNotes.length) {
+        const topNote = noteNotes[0];
         updates.news = topNote.note_text ? topNote.note_text.slice(0, 100) : p.news;
         updates.hasCriticalNews   = note.has_critical_news   || false;
         updates.hasInjuryConcern  = note.has_injury_concern  || false;
@@ -563,8 +592,25 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       if (sort === 'last')        return b.last - a.last;
       if (sort === 'avg')         return b.avg - a.avg;
       if (sort === 'owned')       return b.owned - a.owned;
-      if (sort === 'adp')         return a.adp - b.adp;
-      if (sort === 'rank')        return a.ecr - b.ecr;
+      if (sort === 'adp') {
+        // DST and K are not in ADP rankings — always push to the bottom
+        const SKILL = new Set(['QB', 'RB', 'WR', 'TE']);
+        const aSkill = SKILL.has(a.pos), bSkill = SKILL.has(b.pos);
+        if (aSkill !== bSkill) return aSkill ? -1 : 1;
+        // For unranked players (adp=999) fall back to ECR so alphabetical insertion order
+        // never accidentally puts an unranked player (e.g. Aaron Bailey) at the top.
+        const aVal = a.adp < 999 ? a.adp : (a.ecr < 999 ? a.ecr : 9999);
+        const bVal = b.adp < 999 ? b.adp : (b.ecr < 999 ? b.ecr : 9999);
+        return aVal - bVal;
+      }
+      if (sort === 'rank') {
+        // Push K and DST after skill positions — matches ADP sort behavior.
+        // Within same tier, sort by FantasyPros overall ECR (or 999 if unranked).
+        const MAIN = new Set(['QB', 'RB', 'WR', 'TE']);
+        const aMain = MAIN.has(a.pos), bMain = MAIN.has(b.pos);
+        if (aMain !== bMain) return aMain ? -1 : 1;
+        return (a.ecr || 999) - (b.ecr || 999);
+      }
       if (sort === 'targetShare') return b.targetShare - a.targetShare;
       if (sort === 'routes')      return b.routes - a.routes;
       if (sort === 'yac')         return b.yac - a.yac;
@@ -673,7 +719,6 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     <div className="col" style={{ flex: 1, minWidth: 0, overflow: 'hidden', height: '100%' }}>
       <div className="page-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {user && <TeamLogoBadge team={user.teamId ? findTeam(user.teamId) : null} size={40} />}
           <div>
             <h1>Players</h1>
             <div className="sub">
@@ -880,9 +925,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           style={{
             padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 700,
             cursor: breakoutSet.size === 0 ? 'default' : 'pointer',
-            border: `1px solid ${breakoutOnly ? 'rgba(198,255,58,.6)' : 'var(--border)'}`,
-            background: breakoutOnly ? 'rgba(198,255,58,.12)' : 'transparent',
-            color: breakoutOnly ? '#c6ff3a' : breakoutSet.size === 0 ? 'var(--text-faint)' : 'var(--text-dim)',
+            border: `1px solid ${breakoutOnly ? 'rgba(78,168,255,.6)' : 'var(--border)'}`,
+            background: breakoutOnly ? 'rgba(78,168,255,.12)' : 'transparent',
+            color: breakoutOnly ? '#4ea8ff' : breakoutSet.size === 0 ? 'var(--text-faint)' : 'var(--text-dim)',
             display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
             transition: 'all .15s',
             opacity: breakoutSet.size === 0 ? 0.5 : 1,
@@ -892,7 +937,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           <span style={{ fontSize: 13 }}>↑</span>
           Breakout
           {breakoutOnly && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.8 }}>ON</span>}
-          {breakoutSet.size > 0 && !breakoutOnly && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: '#c6ff3a', opacity: 0.8 }}>{breakoutSet.size}</span>}
+          {breakoutSet.size > 0 && !breakoutOnly && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: '#4ea8ff', opacity: 0.8 }}>{breakoutSet.size}</span>}
         </button>
         <button
           onClick={() => setUseSleeperSort(s => !s)}
@@ -972,7 +1017,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
         <table className="data-table">
           <thead>
             <tr>
-              <th className={`num${sort === 'rank' ? ' sorted' : ''}`} style={{ cursor: 'pointer' }} onClick={() => { setSort('rank'); setUseSleeperSort(false); }}>#</th>
+              <th className={`num${sort === 'adp' || sort === 'rank' ? ' sorted' : ''}`} style={{ cursor: 'pointer' }} onClick={() => { setSort(sort === 'adp' ? 'rank' : 'adp'); setUseSleeperSort(false); }} title="Click to toggle ADP / Expert Rank">{sort === 'adp' ? 'ADP' : sort === 'rank' ? 'ECR' : '#'}</th>
               <th className={sort === 'name' ? 'sorted' : ''} style={{ cursor: 'pointer' }} onClick={() => { setSort('name'); setUseSleeperSort(false); }}>Player</th>
               <th>Opp</th>
               {useSleeperSort && <th className="num sorted" style={{ color: 'var(--accent)' }}>Score</th>}
@@ -1042,27 +1087,14 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                     : p.status === 'Out' || p.status === 'IR' ? { background: 'rgba(255,60,60,.07)' }
                     : p.status === 'Q'        ? { background: 'rgba(255,140,0,.07)' }
                     : p.status === 'D'        ? { background: 'rgba(255,80,30,.07)' }
+                    : isAvail                 ? { background: 'rgba(26,210,130,.06)' }
                     : undefined
                   }>
-                  <td className="rank">{i + 1}</td>
+                  <td className="rank">
+                    {i + 1}
+                  </td>
                   <td onClick={(e) => { e.stopPropagation(); onOpenPlayer(p.id); }} style={{ cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <PlayerCell player={p} watched={watchlistIds.has(p.id)} />
-                      {ownerTeam && (
-                        <span title={`On ${ownerTeam.name}'s roster`} style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                          flexShrink: 0, fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)',
-                          padding: '1px 6px', borderRadius: 3, letterSpacing: '.03em',
-                          background: isOnMyRoster ? 'rgba(198,255,58,.13)' : 'rgba(255,255,255,.07)',
-                          color: isOnMyRoster ? 'var(--accent)' : 'var(--text-dim)',
-                          border: isOnMyRoster ? '1px solid rgba(198,255,58,.3)' : '1px solid rgba(255,255,255,.1)',
-                          whiteSpace: 'nowrap', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis',
-                        }}>
-                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: ownerTeam.color || (isOnMyRoster ? 'var(--accent)' : '#666'), flexShrink: 0, display: 'inline-block' }} />
-                          {isOnMyRoster ? 'My Team' : ownerTeam.name}
-                        </span>
-                      )}
-                    </div>
+                    <PlayerCell player={p} watched={watchlistIds.has(p.id)} />
                   </td>
                   <td>
                     {(() => {
@@ -1071,11 +1103,14 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                       const label = displayOpp
                         ? <span className="mono dim" style={{ fontSize: 11 }}>vs {displayOpp}</span>
                         : <span className="mono faint" style={{ fontSize: 10 }}>—</span>;
+                      const defRank = displayOpp
+                        ? (defRankByTeam[displayOpp.toUpperCase()] || defRankByTeam[displayOpp] || p.oppRank || 0)
+                        : (p.oppRank || 0);
                       return (
                         <>
                           {label}
                           {displayOpp && <div className="mono faint" style={{ fontSize: 9 }}>Wk {wk}</div>}
-                          {p.oppRank > 0 && <div className="mono faint" style={{ fontSize: 10 }}>D #{p.oppRank}</div>}
+                          {defRank > 0 && <div className="mono faint" style={{ fontSize: 10 }}>D #{defRank}</div>}
                         </>
                       );
                     })()}
@@ -1130,7 +1165,8 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                     }
                     if (col.id === 'bye')     return <td key="bye" className="num">{p.bye > 0 ? p.bye : <span className="faint">—</span>}</td>;
                     if (col.id === 'owned')   return <td key="owned" className="num">{p.owned.toFixed(1)}%</td>;
-                    if (col.id === 'adp')     return <td key="adp" className="num faint">{p.adp.toFixed(1)}</td>;
+                    if (col.id === 'adp')     return <td key="adp" className="num faint">{p.adp < 999 ? p.adp.toFixed(1) : <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>999</span>}</td>;
+                    if (col.id === 'ecr_rank') return <td key="ecr_rank" className="num">{p.ecr < 999 ? <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 11 }}>{p.ecr}</span> : <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>999</span>}</td>;
                     if (col.id === 'depth')   return (
                       <td key="depth" className="num">
                         {depthLabel
@@ -1284,6 +1320,8 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     </div>
 
     {/* ── TEMP: Data Source Debugger right panel ── */}
+    {/* To re-enable: uncomment the block below and import DataSourceDebugger if needed */}
+    {/*
     <div style={{ width: 400, flexShrink: 0, borderLeft: '1px solid var(--border)', overflow: 'auto', background: 'var(--bg-2)', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'rgba(255,180,0,.06)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1296,6 +1334,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
         <DataSourceDebugger />
       </div>
     </div>
+    */}
 
     {/* ── Column Picker Modal ────────────────────────────────────────────── */}
     {showColPicker && (
@@ -1531,6 +1570,26 @@ function glRow(pos, s) {
   return [fmtStat(s.off_snp), fmtStat(s.rec_tgt), fmtStat(s.rec), fmtStat(s.rec_yd), fmtStat(s.rec_air_yd), fmtStat(s.rec_yac), fmtStat(s.rec_td), fmtStat(pts, 1)];
 }
 
+// Raw numeric values parallel to glRow — used for percentile coloring
+function glRawNums(pos, s) {
+  if (!s) return null;
+  const pts = s.pts_half_ppr ?? s.pts_std ?? 0;
+  if (pos === 'QB')  return [s.pass_att||0, s.pass_cmp||0, s.pass_att>0 ? (s.pass_cmp||0)/s.pass_att*100 : 0, s.pass_yd||0, s.pass_td||0, s.pass_int||0, s.pass_air_yd||s.pass_cmp_air_yd||0, pts];
+  if (pos === 'RB')  return [s.rush_att||0, s.rush_yd||0, s.rush_att>0 ? (s.rush_yd||0)/s.rush_att : 0, (s.rush_td||0)+(s.rec_td||0), s.rec||0, s.rec_tgt||0, s.rec_yd||0, s.off_snp||0, pts];
+  if (pos === 'K')   return [s.fgm||0, s.fga||0, s.fga>0 ? (s.fgm||0)/s.fga*100 : 0, s.fg_lng||0, s.xpm||0, pts];
+  if (pos === 'DST') return [s.sack||0, s.def_int||0, s.def_fr||0, s.def_td||0, s.pts_allow||0, pts];
+  return [s.off_snp||0, s.rec_tgt||0, s.rec||0, s.rec_yd||0, s.rec_air_yd||0, s.rec_yac||0, s.rec_td||0, pts];
+}
+
+// true = higher is better (false = lower is better, e.g. INTs, pts_allowed)
+function glHigherIsBetter(pos) {
+  if (pos === 'QB')  return [true, true, true, true, true, false, true, true];
+  if (pos === 'RB')  return [true, true, true, true, true, true, true, true, true];
+  if (pos === 'K')   return [true, true, true, true, true, true];
+  if (pos === 'DST') return [true, true, true, true, false, true];
+  return [true, true, true, true, true, true, true, true]; // WR / TE
+}
+
 // Next Gen Stats — advanced metrics from season totals
 function NextGenStatsPanel({ pos, tot, gp }) {
   if (!tot || !gp) return <div className="dim" style={{ fontSize: 12, padding: 8 }}>Next Gen Stats require live Sleeper data. Enable Sleeper API in Sources.</div>;
@@ -1639,17 +1698,47 @@ function NextGenStatsPanel({ pos, tot, gp }) {
   return <div className="dim" style={{ fontSize: 12 }}>Advanced stats not available for this position.</div>;
 }
 
-function SeasonStatBar({ label, val, max }) {
-  const pct = Math.min(100, (val / max) * 100);
+// 2025 NFL starter averages (top fantasy-relevant players per position)
+const LEAGUE_AVG_STATS = {
+  QB: { pass_yd: 3500, pass_td: 23, pass_cmp: 260, pass_int: 11, rush_yd: 185, pts_half_ppr: 265 },
+  RB: { rush_att: 165, rush_yd: 780, rush_td: 6, rec: 36, rec_yd: 275, pts_half_ppr: 160 },
+  WR: { rec_tgt: 80, rec: 52, rec_yd: 700, rec_td: 5, rec_yac: 225, catch_pct: 68, yac_per_rec: 5.0, pts_half_ppr: 155 },
+  TE: { rec_tgt: 58, rec: 40, rec_yd: 490, rec_td: 4, rec_yac: 130, catch_pct: 72, yac_per_rec: 4.5, pts_half_ppr: 115 },
+};
+
+function SeasonStatBar({ label, val, max, rank, leagueN, leagueAvg }) {
+  const numVal = typeof val === 'string' ? parseFloat(val) || 0 : (Number(val) || 0);
+  const pct    = max > 0 ? Math.min(100, (numVal   / max) * 100) : 0;
+  const avgPct = leagueAvg != null && max > 0 ? Math.min(100, (leagueAvg / max) * 100) : null;
+  const rankColor = rank <= 10 ? '#1affa0' : rank <= 20 ? '#4ea8ff' : rank <= 27 ? '#ff9800' : '#ff4f4f';
+  const barColor  = rank == null ? 'var(--accent-2)'
+    : rank <= 10 ? '#1affa0'
+    : rank <= 20 ? '#4ea8ff'
+    : rank <= 27 ? '#ff9800'
+    : '#ff4f4f';
+  const fmtAvg = v => typeof v === 'number' ? (v % 1 === 0 ? v : v.toFixed(1)) : v;
   return (
-    <div style={{ marginBottom: 8 }}>
-      <div className="flex" style={{ justifyContent:'space-between', marginBottom: 3 }}>
+    <div style={{ marginBottom: 10 }}>
+      <div className="flex" style={{ justifyContent:'space-between', alignItems: 'center', marginBottom: 3 }}>
         <span className="dim" style={{ fontSize: 11 }}>{label}</span>
-        <span style={{ fontFamily:'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{val ?? '—'}</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {rank != null && leagueN != null && (
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: rankColor, fontWeight: 700, letterSpacing: '.04em' }}>#{rank}/{leagueN}</span>
+          )}
+          <span style={{ fontFamily:'var(--font-mono)', fontSize: 12, fontWeight: 600 }}>{val ?? '—'}</span>
+        </div>
       </div>
-      <div style={{ height: 3, background:'var(--panel-3)', borderRadius: 2 }}>
-        <div style={{ width:`${pct}%`, height:'100%', background:'var(--accent-2)', borderRadius: 2, transition:'width .4s' }} />
+      <div style={{ height: 3, background:'var(--panel-3)', borderRadius: 2, position: 'relative' }}>
+        <div style={{ width:`${pct}%`, height:'100%', background: barColor, borderRadius: 2, transition:'width .4s' }} />
+        {avgPct != null && (
+          <div style={{ position: 'absolute', top: -3, left: `${avgPct}%`, width: 2, height: 9, background: '#ffd700', borderRadius: 1, transform: 'translateX(-50%)', opacity: 0.85 }} />
+        )}
       </div>
+      {leagueAvg != null && (
+        <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#ffd700', marginTop: 3, letterSpacing: '.04em', opacity: 0.85 }}>
+          Lg Avg: {fmtAvg(leagueAvg)}
+        </div>
+      )}
     </div>
   );
 }
@@ -1746,36 +1835,38 @@ function PlayerNewsCard({ items = [], loading = false, playerName = '' }) {
 function PlayerArticlesCard({ articles = [], loading = false }) {
   if (loading) return (
     <div className="card" style={{ marginTop: 12 }}>
-      <div className="card-head"><div className="card-title">🤖 Articles & AI</div><div className="ai-orb" style={{ width: 12, height: 12 }} /></div>
-      <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-faint)' }}>Loading articles…</div>
+      <div className="card-head"><div className="card-title">AI Summaries</div><div className="ai-orb" style={{ width: 12, height: 12 }} /></div>
+      <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-faint)' }}>Loading AI summaries…</div>
     </div>
   );
   if (!articles.length) return null;
   return (
     <div className="card" style={{ marginTop: 12 }}>
       <div className="card-head">
-        <div className="card-title">🤖 Articles & AI</div>
+        <div className="card-title">AI Summaries</div>
         <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{articles.length} article{articles.length !== 1 ? 's' : ''}</span>
       </div>
       <div className="card-body" style={{ padding: 0 }}>
         {articles.map((a, i) => {
           const pub     = a.published_at ? new Date(a.published_at) : null;
           const pubStr  = pub ? pub.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
-          const isAi    = !!a.ai_generated_at;
+          const isAi    = !!(a.ai_processed || a.summary_text || a.fantasy_insight);
           const insight = a.fantasy_insight || '';
+          const summary = a.summary_text || '';
           const desc    = a.description || a.full_text || a.summary || '';
           const url     = a.article_url || a.source_url || '';
           return (
             <div key={i} style={{ padding: '10px 16px', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexWrap: 'wrap' }}>
+                {isAi && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', background: 'rgba(198,255,58,.1)', borderRadius: 3, padding: '1px 5px', border: '1px solid rgba(198,255,58,.2)' }}>AI</span>}
                 <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '2px 6px', borderRadius: 3, background: 'rgba(78,168,255,.12)', color: '#4ea8ff', border: '1px solid rgba(78,168,255,.25)' }}>{a.publisher || 'FantasAI'}</span>
-                {isAi && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', background: 'rgba(198,255,58,.1)', borderRadius: 3, padding: '1px 5px' }}>🤖 AI</span>}
                 {pubStr && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>{pubStr}</span>}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4, marginBottom: (insight || desc) ? 4 : 0 }}>{a.headline || a.title}</div>
-              {insight && <div style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1.5, marginBottom: desc ? 3 : 0 }}>{insight}</div>}
-              {!insight && desc && <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>{desc.slice(0, 220)}{desc.length > 220 ? '…' : ''}</div>}
-              {url && <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: '#4ea8ff', textDecoration: 'none', display: 'inline-block', marginTop: 4 }}>Open Article ↗</a>}
+              <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4, marginBottom: (insight || summary || desc) ? 4 : 0 }}>{a.headline || a.title}</div>
+              {insight && <div style={{ fontSize: 11, color: 'var(--accent)', lineHeight: 1.5, marginBottom: summary ? 3 : 0 }}>Fantasy: {insight}</div>}
+              {summary && <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, marginBottom: 0 }}>{summary.slice(0, 240)}{summary.length > 240 ? '…' : ''}</div>}
+              {!summary && !insight && desc && <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>{desc.slice(0, 220)}{desc.length > 220 ? '…' : ''}</div>}
+              {url && <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: '#4ea8ff', textDecoration: 'none', display: 'inline-block', marginTop: 4 }}>Read Article ↗</a>}
             </div>
           );
         })}
@@ -1790,12 +1881,17 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   if (!player) return null;
   const [activeTab, setTab] = React.useState('overview');
   const [added, setAdded] = React.useState(false);
+  // Show 2025 stats until 2026 Week 1 is complete (~Sep 9 2026)
+  const [statYear, setStatYear] = React.useState(() => new Date() >= new Date('2026-09-09') ? 2026 : 2025);
   const [fetchedNewsItems, setFetchedNewsItems] = React.useState([]);
   const [newsLoading, setNewsLoading] = React.useState(true);
   const [playerArticles,  setPlayerArticles]  = React.useState([]);
   const [articlesLoading, setArticlesLoading] = React.useState(true);
 
-  React.useEffect(() => { setAdded(false); }, [player.id]);
+  React.useEffect(() => {
+    setAdded(false);
+    setStatYear(new Date() >= new Date('2026-09-09') ? 2026 : 2025);
+  }, [player.id]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1901,6 +1997,18 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     return detailBreakouts.find(b => (b.player_name || '').toLowerCase().trim() === key)?.opportunity_score ?? null;
   }, [detailBreakouts, player.name]);
 
+  const { data: allWriteups } = useR2PlayerWriteups();
+  const playerWriteup = React.useMemo(() => {
+    if (!allWriteups || typeof allWriteups !== 'object') return null;
+    return allWriteups[player.name] ?? null;
+  }, [allWriteups, player.name]);
+
+  const { data: allR2Notes } = useR2PlayerNotes();
+  const playerAiNotes = React.useMemo(() => {
+    if (!Array.isArray(allR2Notes)) return null;
+    return allR2Notes.find(n => n.player_name?.toLowerCase().trim() === player.name.toLowerCase().trim()) || null;
+  }, [allR2Notes, player.name]);
+
   function handleAdd() {
     if (isOnRoster || added) return;
     onAddPlayer?.(player.id);
@@ -1908,27 +2016,111 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     setTimeout(onClose, 1300);
   }
 
+  // League rank computation from Databricks export stats in playerStore
+  const allPlayersForRank = usePlayers();
+  const posPlayers = React.useMemo(() => {
+    return allPlayersForRank.filter(p => p.pos === player.pos && (p.pts2025 > 0 || p.avg > 0));
+  }, [allPlayersForRank, player.pos]);
+
+  const leagueRankOf = React.useCallback((field) => {
+    const sorted = [...posPlayers].sort((a, b) => (b[field] || 0) - (a[field] || 0));
+    const rank = sorted.findIndex(p => p.id === player.id) + 1;
+    return { rank: rank > 0 ? rank : null, n: posPlayers.length };
+  }, [posPlayers, player.id]);
+
+  // For Sleeper-fetched stats (pass_yd, rush_yd, etc.) estimate rank from val vs. hardcoded league-leader max
+  function approxRank(val, max, leagueN) {
+    const v = Number(val) || 0;
+    if (!v || !max) return {};
+    const rank = Math.max(1, Math.ceil((1 - v / max) * leagueN));
+    return { rank, leagueN };
+  }
+
+  const posAvg = LEAGUE_AVG_STATS[player.pos] ?? {};
+
   const { data: live, loading, error } = useApi(
     () => sleeperEnabled
-      ? fetchSleeperPlayerStats(player.name, player.pos)
+      ? fetchSleeperPlayerStats(player.name, player.pos, statYear)
       : Promise.resolve(null),
-    [player.id, sleeperEnabled]
+    [player.id, sleeperEnabled, statYear]
   );
 
-  const hasLive = !loading && live?.found && live.weeklyStats && Object.keys(live.weeklyStats).length > 0;
-  const statusFromLive = live?.status && live.status !== 'Active' ? live.status : null;
+  // Keep the last successful response visible while a year-switch re-fetch is in flight
+  const [stableLive, setStableLive] = React.useState(null);
+  React.useEffect(() => { if (live != null) setStableLive(live); }, [live]);
+  React.useEffect(() => { setStableLive(null); }, [player.id]); // clear on player change
+  const displayLive = live ?? stableLive;
+
+  const hasLive = !loading && displayLive?.found && displayLive.weeklyStats && Object.keys(displayLive.weeklyStats).length > 0;
+  const has2026Data = statYear === 2026 && !loading && live?.found && live.weeklyStats && Object.keys(live.weeklyStats).length > 0;
+  const statusFromLive = displayLive?.status && displayLive.status !== 'Active' ? displayLive.status : null;
+
+  // Fetch league-wide season totals for this position — week payloads are already
+  // cached from the player fetch above, so this aggregation is essentially free.
+  const { data: leagueTotals } = useApi(
+    () => hasLive && sleeperEnabled
+      ? fetchLeagueSeasonTotals(player.pos, statYear)
+      : Promise.resolve(null),
+    [hasLive, player.pos, statYear, sleeperEnabled]
+  );
+
+  // Real rank among all players at this position who had stats in the chosen year.
+  // Returns { rank, leagueN } for spreading into SeasonStatBar.
+  const lRank = React.useCallback((statKey) => {
+    if (!leagueTotals || !displayLive?.sleeperId) return {};
+    const sid = String(displayLive.sleeperId);
+    const entries = Object.entries(leagueTotals)
+      .filter(([, d]) => (d.totals[statKey] || 0) > 0)
+      .sort(([, a], [, b]) => (b.totals[statKey] || 0) - (a.totals[statKey] || 0));
+    const rank = entries.findIndex(([id]) => id === sid) + 1;
+    return { rank: rank > 0 ? rank : null, leagueN: entries.length };
+  }, [leagueTotals, displayLive?.sleeperId]);
+
+  // Real league average for a stat across all players who had stats.
+  const lAvg = React.useCallback((statKey, fallback) => {
+    if (!leagueTotals) return fallback ?? null;
+    const vals = Object.values(leagueTotals)
+      .map(d => d.totals[statKey] || 0)
+      .filter(v => v > 0);
+    if (!vals.length) return fallback ?? null;
+    return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+  }, [leagueTotals]);
 
   const playerNewsItems = React.useMemo(() => {
-    const items = [...fetchedNewsItems];
-    if (!loading && live?.status && !['Active','OK','Na',''].includes(live.status)) {
-      const isBad = ['Out','Injured_Reserve','IR','Non_Football_Injury','NFI'].includes(live.status);
+    const items = [];
+
+    // FantasAI Job 1 notes — AI-classified article summaries, shown first
+    if (playerAiNotes?.notes?.length > 0) {
+      const noteTs = playerAiNotes.last_updated ? new Date(playerAiNotes.last_updated).getTime() : null;
+      for (const note of playerAiNotes.notes.slice(0, 5)) {
+        if (!note.note_text) continue;
+        const impact = note.priority === 'critical' ? 'bad'
+          : note.impact_direction === 'positive' ? 'good'
+          : note.priority === 'high' ? 'medium' : 'low';
+        items.push({
+          source: 'FantasAI',
+          sourceColor: '#c6ff3a',
+          title: null,
+          body: note.note_text,
+          fetchedAt: noteTs,
+          impact,
+        });
+      }
+    }
+
+    // CBS Sports + ESPN live items
+    items.push(...fetchedNewsItems);
+
+    // Injury status from Sleeper — always at the top
+    if (!loading && displayLive?.status && !['Active','OK','Na',''].includes(displayLive.status)) {
+      const isBad = ['Out','Injured_Reserve','IR','Non_Football_Injury','NFI'].includes(displayLive.status);
       items.unshift({
         source: 'Sleeper',
         sourceColor: '#7c5cbf',
-        title: `${live.status}${live.injuryBodyPart ? ` — ${live.injuryBodyPart}` : ''}`,
+        title: `${displayLive.status}${displayLive.injuryBodyPart ? ` — ${displayLive.injuryBodyPart}` : ''}`,
         body: null,
         fetchedAt: Date.now(),
-        impact: isBad ? 'bad' : live.status === 'Questionable' || live.status === 'Doubtful' ? 'medium' : 'low',
+        impact: isBad ? 'bad' : displayLive.status === 'Questionable' || displayLive.status === 'Doubtful' ? 'medium' : 'low',
       });
     }
     // Fall back to static news when live APIs returned nothing
@@ -1958,21 +2150,43 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
       }
     }
     return items;
-  }, [fetchedNewsItems, live, loading, newsLoading, player]);
+  }, [fetchedNewsItems, playerAiNotes, displayLive, loading, newsLoading, player]);
 
   // Priority: 1) stored photoUrl from normalized data, 2) Sleeper CDN by stored sleeperId,
   // 3) Sleeper CDN by live sleeperId (available after API resolves)
+  // Prefer the verified Sleeper ID from the live API response (guaranteed numeric Sleeper ID)
+  // over player.sleeperId which may be an artificial local ID when R2 export lacks player_id
   const sleeperAvatarUrl =
     player.photoUrl ||
-    (player.sleeperId ? `https://sleepercdn.com/content/nfl/players/thumb/${player.sleeperId}.jpg` : null) ||
-    (live?.sleeperId  ? `https://sleepercdn.com/content/nfl/players/thumb/${live.sleeperId}.jpg`   : null);
+    (displayLive?.sleeperId  ? `https://sleepercdn.com/content/nfl/players/thumb/${displayLive.sleeperId}.jpg` : null) ||
+    (player.sleeperId ? `https://sleepercdn.com/content/nfl/players/thumb/${player.sleeperId}.jpg` : null);
 
   // Game log rows from live data or mock fallback
   const liveRows = hasLive
-    ? Object.entries(live.weeklyStats)
+    ? Object.entries(displayLive.weeklyStats)
         .map(([wk, s]) => ({ wk: Number(wk), s }))
         .sort((a, b) => b.wk - a.wk)
     : null;
+
+  // Per-column 25th/75th percentile thresholds across this player's season weeks
+  const pctThresholds = React.useMemo(() => {
+    if (!liveRows || liveRows.length < 3) return null;
+    const higherBetter = glHigherIsBetter(player.pos);
+    const sample = glRawNums(player.pos, liveRows[0]?.s);
+    if (!sample) return null;
+    return sample.map((_, col) => {
+      const vals = liveRows
+        .map(({ s }) => glRawNums(player.pos, s)?.[col] ?? 0)
+        .filter(v => v > 0)
+        .sort((a, b) => a - b);
+      if (vals.length < 2) return null;
+      return {
+        p25: vals[Math.floor(vals.length * 0.25)],
+        p75: vals[Math.floor(vals.length * 0.75)],
+        higher: higherBetter[col] ?? true,
+      };
+    });
+  }, [liveRows, player.pos]);
 
   const mockGameLog = [
     { wk: 10, opp: player.opp,  snaps: 64, tar: 9,  rec: 6, yds: 78,  td: 1, pts: player.last },
@@ -1985,10 +2199,10 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   ];
 
   // Season stats derived from live totals or mock
-  const tot = hasLive ? live.seasonTotals : null;
-  const gp  = hasLive ? live.gamesPlayed : 10;
-  const liveLastPts = hasLive && live.currentWeek
-    ? (live.weeklyStats[live.currentWeek] ?? live.weeklyStats[live.currentWeek - 1])?.pts_half_ppr
+  const tot = hasLive ? displayLive.seasonTotals : null;
+  const gp  = hasLive ? displayLive.gamesPlayed : 10;
+  const liveLastPts = hasLive && displayLive.currentWeek
+    ? (displayLive.weeklyStats[displayLive.currentWeek] ?? displayLive.weeklyStats[displayLive.currentWeek - 1])?.pts_half_ppr
     : null;
   const liveAvg = tot?.pts_half_ppr != null && gp > 0 ? (tot.pts_half_ppr / gp) : null;
 
@@ -2011,7 +2225,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
             <h2>{player.name}</h2>
             <div className="meta">
               <span>ECR #{player.ecr}</span><span className="dot"></span>
-              <span>ADP {player.adp.toFixed(1)}</span><span className="dot"></span>
+              {player.adp < 999 && <><span>ADP {player.adp.toFixed(1)}</span><span className="dot"></span></>}
               <span>Tier {player.tier}</span><span className="dot"></span>
               <span>{player.owned.toFixed(1)}% rostered</span>
             </div>
@@ -2063,11 +2277,11 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
               <div style={{ display:'grid', gridTemplateColumns:`repeat(${detailOppScore != null ? 5 : 4},1fr)`, gap:10, marginBottom:16 }}>
                 <div className="stat">
                   <div className="k">
-                    Wk {live?.currentWeek || '—'} Proj
+                    Wk {displayLive?.currentWeek || '—'} Proj
                     {hasLive && <span style={{ marginLeft: 5, fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', verticalAlign: 'middle' }}>SLEEPER</span>}
                   </div>
                   <div className="v accent">
-                    {(live?.projection?.pts_half_ppr ?? live?.projection?.pts_std ?? player.proj).toFixed(1)}
+                    {(displayLive?.projection?.pts_half_ppr ?? displayLive?.projection?.pts_std ?? player.proj).toFixed(1)}
                   </div>
                   <div className="sub">vs {player.opp} (D #{player.oppRank})</div>
                 </div>
@@ -2147,47 +2361,60 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   </div>
                   <div className="card-body" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 24px' }}>
                     {player.pos === 'QB' && <>
-                      <SeasonStatBar label="Pass Yards"  val={Math.round(tot.pass_yd  || 0)} max={5000} />
-                      <SeasonStatBar label="Pass TDs"    val={Math.round(tot.pass_td  || 0)} max={50}   />
-                      <SeasonStatBar label="Completions" val={Math.round(tot.pass_cmp || 0)} max={400}  />
-                      <SeasonStatBar label="INTs"        val={Math.round(tot.pass_int || 0)} max={20}   />
-                      <SeasonStatBar label="Rush Yards"  val={Math.round(tot.rush_yd  || 0)} max={800}  />
-                      <SeasonStatBar label="Fantasy Pts" val={fmtStat(tot.pts_half_ppr,1)} max={400}  />
+                      <SeasonStatBar label="Pass Yards"  val={Math.round(tot.pass_yd  || 0)} max={5000} leagueAvg={lAvg('pass_yd',  posAvg.pass_yd)}  {...lRank('pass_yd')}  />
+                      <SeasonStatBar label="Pass TDs"    val={Math.round(tot.pass_td  || 0)} max={50}   leagueAvg={lAvg('pass_td',  posAvg.pass_td)}  {...lRank('pass_td')}  />
+                      <SeasonStatBar label="Completions" val={Math.round(tot.pass_cmp || 0)} max={400}  leagueAvg={lAvg('pass_cmp', posAvg.pass_cmp)} {...lRank('pass_cmp')} />
+                      <SeasonStatBar label="INTs"        val={Math.round(tot.pass_int || 0)} max={20}   leagueAvg={lAvg('pass_int', posAvg.pass_int)} />
+                      <SeasonStatBar label="Rush Yards"  val={Math.round(tot.rush_yd  || 0)} max={800}  leagueAvg={lAvg('rush_yd',  posAvg.rush_yd)}  {...lRank('rush_yd')}  />
+                      <SeasonStatBar label="Fantasy Pts" val={fmtStat(tot.pts_half_ppr,1)} max={400}   leagueAvg={lAvg('pts_half_ppr', posAvg.pts_half_ppr)} {...lRank('pts_half_ppr')} />
                     </>}
                     {player.pos === 'RB' && <>
-                      <SeasonStatBar label="Rush Attempts" val={Math.round(tot.rush_att || 0)} max={300} />
-                      <SeasonStatBar label="Rush Yards"    val={Math.round(tot.rush_yd  || 0)} max={1800}/>
-                      <SeasonStatBar label="Rush TDs"      val={Math.round(tot.rush_td  || 0)} max={20}  />
-                      <SeasonStatBar label="Receptions"    val={Math.round(tot.rec      || 0)} max={100} />
-                      <SeasonStatBar label="Rec Yards"     val={Math.round(tot.rec_yd   || 0)} max={800} />
-                      <SeasonStatBar label="Fantasy Pts"   val={fmtStat(tot.pts_half_ppr,1)} max={350}  />
+                      <SeasonStatBar label="Rush Attempts" val={Math.round(tot.rush_att || 0)} max={300}  leagueAvg={lAvg('rush_att', posAvg.rush_att)} {...lRank('rush_att')} />
+                      <SeasonStatBar label="Rush Yards"    val={Math.round(tot.rush_yd  || 0)} max={1800} leagueAvg={lAvg('rush_yd',  posAvg.rush_yd)}  {...lRank('rush_yd')}  />
+                      <SeasonStatBar label="Rush TDs"      val={Math.round(tot.rush_td  || 0)} max={20}   leagueAvg={lAvg('rush_td',  posAvg.rush_td)}  {...lRank('rush_td')}  />
+                      <SeasonStatBar label="Receptions"    val={Math.round(tot.rec      || 0)} max={100}  leagueAvg={lAvg('rec',      posAvg.rec)}      {...lRank('rec')}      />
+                      <SeasonStatBar label="Rec Yards"     val={Math.round(tot.rec_yd   || 0)} max={800}  leagueAvg={lAvg('rec_yd',   posAvg.rec_yd)}   {...lRank('rec_yd')}   />
+                      <SeasonStatBar label="Fantasy Pts"   val={fmtStat(tot.pts_half_ppr,1)} max={350}   leagueAvg={lAvg('pts_half_ppr', posAvg.pts_half_ppr)} {...lRank('pts_half_ppr')} />
                     </>}
                     {(player.pos === 'WR' || player.pos === 'TE') && <>
-                      <SeasonStatBar label="Targets"     val={Math.round(tot.rec_tgt || 0)} max={200} />
-                      <SeasonStatBar label="Receptions"  val={Math.round(tot.rec     || 0)} max={150} />
-                      <SeasonStatBar label="Rec Yards"   val={Math.round(tot.rec_yd  || 0)} max={1800}/>
-                      <SeasonStatBar label="Rec TDs"     val={Math.round(tot.rec_td  || 0)} max={20}  />
-                      <SeasonStatBar label="Catch %"     val={tot.rec_tgt > 0 ? fmtStat((tot.rec/tot.rec_tgt)*100,1)+'%' : '—'} max={100} />
-                      <SeasonStatBar label="YAC Total"   val={Math.round(tot.rec_yac || player.yac || 0)} max={600} />
-                      <SeasonStatBar label="YAC/Rec"     val={tot.rec > 0 && (tot.rec_yac || player.yac) ? fmtStat((tot.rec_yac || player.yac) / tot.rec, 1) : player.yac > 0 ? fmtStat(player.yac, 1) : '—'} max={12} />
-                      <SeasonStatBar label="Fantasy Pts" val={fmtStat(tot.pts_half_ppr,1)} max={350}  />
+                      <SeasonStatBar label="Targets"     val={Math.round(tot.rec_tgt || 0)} max={200}  leagueAvg={lAvg('rec_tgt', posAvg.rec_tgt)} {...lRank('rec_tgt')} />
+                      <SeasonStatBar label="Receptions"  val={Math.round(tot.rec     || 0)} max={150}  leagueAvg={lAvg('rec',     posAvg.rec)}     {...lRank('rec')}     />
+                      <SeasonStatBar label="Rec Yards"   val={Math.round(tot.rec_yd  || 0)} max={1800} leagueAvg={lAvg('rec_yd',  posAvg.rec_yd)}  {...lRank('rec_yd')}  />
+                      <SeasonStatBar label="Rec TDs"     val={Math.round(tot.rec_td  || 0)} max={20}   leagueAvg={lAvg('rec_td',  posAvg.rec_td)}  {...lRank('rec_td')}  />
+                      <SeasonStatBar label="Catch %"     val={tot.rec_tgt > 0 ? fmtStat((tot.rec/tot.rec_tgt)*100,1)+'%' : '—'} max={100} leagueAvg={posAvg.catch_pct} />
+                      <SeasonStatBar label="YAC Total"   val={Math.round(tot.rec_yac || player.yac || 0)} max={600} leagueAvg={lAvg('rec_yac', posAvg.rec_yac)} {...lRank('rec_yac')} />
+                      <SeasonStatBar label="YAC/Rec"     val={tot.rec > 0 && (tot.rec_yac || player.yac) ? fmtStat((tot.rec_yac || player.yac) / tot.rec, 1) : player.yac > 0 ? fmtStat(player.yac, 1) : '—'} max={12} leagueAvg={posAvg.yac_per_rec} />
+                      <SeasonStatBar label="Fantasy Pts" val={fmtStat(tot.pts_half_ppr,1)} max={350}   leagueAvg={lAvg('pts_half_ppr', posAvg.pts_half_ppr)} {...lRank('pts_half_ppr')} />
                     </>}
                   </div>
                 </div>
               )}
 
 
-              {/* AI insight */}
+              {/* AI insight — Qwen writeup when available, template fallback */}
               <div className="muted-card" style={{ marginBottom:16, borderLeft:'3px solid var(--accent-2)' }}>
                 <div className="flex gap-8" style={{ alignItems:'center', marginBottom:8 }}>
                   <div className="ai-orb" style={{ width:20, height:20 }}></div>
                   <span style={{ fontFamily:'var(--font-display)', fontStretch:'87%', fontWeight:800, fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:'var(--accent-2)' }}>FantasAI Insight</span>
+                  {playerWriteup && (
+                    <span style={{ marginLeft:'auto', fontSize:9, fontFamily:'var(--font-mono)', color:'var(--accent-2)', opacity:.7 }}>
+                      Qwen · {playerWriteup.generated_at ? new Date(playerWriteup.generated_at).toLocaleDateString() : 'local'}
+                    </span>
+                  )}
                 </div>
-                <div style={{ fontSize:13, lineHeight:1.55 }}>
-                  {player.proj > 18
-                    ? `Lock 'em in. Matchup model loves ${player.opp.replace('@','')} — ${player.name} should see volume at depth. Proj ${player.proj.toFixed(1)} is conservative; 75th-pct is ${(player.proj*1.25).toFixed(1)}.`
-                    : `Mixed signals. Volume is fine but ${player.opp.replace('@','')} has been stingy near the goal line. Floor ${(player.proj*0.6).toFixed(1)}, ceiling ${(player.proj*1.4).toFixed(1)}.`}
-                </div>
+                {playerWriteup?.writeup ? (
+                  <div style={{ fontSize:13, lineHeight:1.6 }}>
+                    {playerWriteup.writeup.split('\n\n').map((para, i) => (
+                      <p key={i} style={{ margin: i > 0 ? '10px 0 0' : 0 }}>{para}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize:13, lineHeight:1.55 }}>
+                    {player.proj > 18
+                      ? `Lock 'em in. Matchup model loves ${player.opp.replace('@','')} — ${player.name} should see volume at depth. Proj ${player.proj.toFixed(1)} is conservative; 75th-pct is ${(player.proj*1.25).toFixed(1)}.`
+                      : `Mixed signals. Volume is fine but ${player.opp.replace('@','')} has been stingy near the goal line. Floor ${(player.proj*0.6).toFixed(1)}, ceiling ${(player.proj*1.4).toFixed(1)}.`}
+                  </div>
+                )}
               </div>
 
               <PlayerNewsCard items={playerNewsItems} loading={newsLoading || loading} playerName={player.name} />
@@ -2197,61 +2424,93 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
 
           {/* ── Game Log ── */}
           {activeTab === 'gamelog' && (
-            loading
-              ? <div className="muted-card" style={{ padding:18, display:'flex', alignItems:'center', gap:10 }}>
-                  <div className="ai-orb" style={{ width:16, height:16 }} />
-                  <span className="dim" style={{ fontSize:12 }}>Loading game log from Sleeper…</span>
-                </div>
-              : liveRows
-                ? <>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-                      <span className="dim" style={{ fontSize:11 }}>2025 · Week-by-Week</span>
-                      <LiveBadge />
-                      <span className="mono faint" style={{ fontSize:9 }}>Sleeper API</span>
-                    </div>
-                    <div style={{ overflowX: 'auto' }}>
-                    <table className="gamelog">
-                      <thead>
-                        <tr>
-                          <th>Wk</th>
-                          {glCols(player.pos).map(c => <th key={c}>{c}</th>)}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {liveRows.map(({ wk, s }) => {
-                          const cells = glRow(player.pos, s);
-                          if (!cells) return null;
-                          const ptsIdx = cells.length - 1;
-                          return (
-                            <tr key={wk}>
-                              <td className="mono" style={{ color:'var(--text-faint)' }}>{wk}</td>
-                              {cells.map((c, i) => (
-                                <td key={i} style={i===ptsIdx ? { fontWeight:600, color:'var(--accent)' } : {}}>{c}</td>
-                              ))}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    </div>
-                  </>
-                : <>
-                    {error && <div className="dim" style={{ fontSize:11, marginBottom:10 }}>Live data unavailable — showing sample data.</div>}
-                    <div style={{ overflowX: 'auto' }}>
-                    <table className="gamelog">
-                      <thead><tr><th>Wk</th><th>Opp</th><th>Snp</th><th>Tar</th><th>Rec</th><th>Yds</th><th>TD</th><th>Pts</th></tr></thead>
-                      <tbody>
-                        {mockGameLog.map(g => (
-                          <tr key={g.wk}>
-                            <td>{g.wk}</td><td>{g.opp}</td><td>{g.snaps}</td>
-                            <td>{g.tar}</td><td>{g.rec}</td><td>{g.yds}</td><td>{g.td}</td>
-                            <td style={{ fontWeight:600, color:'var(--accent)' }}>{typeof g.pts==='number' ? g.pts.toFixed(1) : g.pts}</td>
+            <>
+              {/* Year filter */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                {[2025, 2026].map(yr => (
+                  <button
+                    key={yr}
+                    onClick={() => setStatYear(yr)}
+                    style={{
+                      fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700,
+                      padding: '3px 12px', borderRadius: 4, cursor: 'pointer',
+                      border: statYear === yr ? '1px solid var(--accent)' : '1px solid var(--border)',
+                      background: statYear === yr ? 'rgba(198,255,58,.12)' : 'transparent',
+                      color: statYear === yr ? 'var(--accent)' : 'var(--text-faint)',
+                    }}
+                  >{yr}{yr === 2026 && !has2026Data ? <span style={{ fontSize: 9, marginLeft: 4, opacity: 0.5 }}>No data yet</span> : null}</button>
+                ))}
+                {hasLive && <LiveBadge />}
+                <span className="mono faint" style={{ fontSize: 9 }}>Sleeper API</span>
+              </div>
+
+              {loading
+                ? <div className="muted-card" style={{ padding:18, display:'flex', alignItems:'center', gap:10 }}>
+                    <div className="ai-orb" style={{ width:16, height:16 }} />
+                    <span className="dim" style={{ fontSize:12 }}>Loading {statYear} stats from Sleeper…</span>
+                  </div>
+                : liveRows
+                  ? <div style={{ overflowX: 'auto' }}>
+                      <table className="gamelog">
+                        <thead>
+                          <tr>
+                            <th>Wk</th>
+                            {glCols(player.pos).map(c => <th key={c}>{c}</th>)}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {[...liveRows].sort((a, b) => a.wk - b.wk).map(({ wk, s }) => {
+                            const cells   = glRow(player.pos, s);
+                            if (!cells) return null;
+                            const rawNums = glRawNums(player.pos, s) ?? [];
+                            const ptsIdx  = cells.length - 1;
+                            return (
+                              <tr key={wk}>
+                                <td className="mono" style={{ color:'var(--text-faint)', fontWeight: 600 }}>W{wk}</td>
+                                {cells.map((c, i) => {
+                                  const th = pctThresholds?.[i];
+                                  const v  = rawNums[i] ?? 0;
+                                  let color;
+                                  if (th && v > 0) {
+                                    const isTop    = th.higher ? v >= th.p75 : v <= th.p25;
+                                    const isBottom = th.higher ? v <= th.p25 : v >= th.p75;
+                                    color = isTop ? '#1affa0' : isBottom ? '#ff4f4f' : undefined;
+                                  }
+                                  return (
+                                    <td key={i} style={{ fontWeight: i === ptsIdx ? 700 : undefined, color: color ?? (i === ptsIdx && v === 0 ? 'var(--text-faint)' : undefined) }}>
+                                      {c}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
-                  </>
+                  : statYear === 2026
+                    ? <div className="muted-card" style={{ padding: 18, textAlign: 'center' }}>
+                        <div className="dim" style={{ fontSize: 12 }}>2026 season hasn't started yet — check back in September.</div>
+                      </div>
+                    : <>
+                        {error && <div className="dim" style={{ fontSize:11, marginBottom:10 }}>Live data unavailable — showing sample data.</div>}
+                        <div style={{ overflowX: 'auto' }}>
+                        <table className="gamelog">
+                          <thead><tr><th>Wk</th><th>Opp</th><th>Snp</th><th>Tar</th><th>Rec</th><th>Yds</th><th>TD</th><th>Pts</th></tr></thead>
+                          <tbody>
+                            {mockGameLog.map(g => (
+                              <tr key={g.wk}>
+                                <td>{g.wk}</td><td>{g.opp}</td><td>{g.snaps}</td>
+                                <td>{g.tar}</td><td>{g.rec}</td><td>{g.yds}</td><td>{g.td}</td>
+                                <td style={{ fontWeight:600, color:'var(--accent)' }}>{typeof g.pts==='number' ? g.pts.toFixed(1) : g.pts}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        </div>
+                      </>
+              }
+            </>
           )}
 
           {/* ── Next Gen Stats ── */}

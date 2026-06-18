@@ -91,6 +91,10 @@ const DEFAULTS = {
     { code: 'YDS',   name: 'Yards Allowed',                                               value: '0 points' },
   ],
 
+  // Scoring format — drives ADP rankings and projection scoring
+  // 'ppr' | 'half-ppr' | 'standard'
+  scoringFormat: 'half-ppr',
+
   // Scoring policies
   scoringPolicies: {
     system:              'Head-to-Head, Points',
@@ -789,7 +793,6 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <TeamLogoBadge team={null} size={40} />
           <div>
             <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 2 }}>{data.leagueName}</div>
             <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
@@ -1517,6 +1520,58 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
       {/* ── Scoring ── */}
       {activeTab === 'scoring' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Reception Scoring Format selector */}
+          <Card title="Reception Scoring">
+            <div style={{ padding: '14px 16px' }}>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 12, lineHeight: 1.6 }}>
+                Controls points awarded per reception. This setting also drives which ADP rankings are used in the Draft Room — PPR ADP for PPR/Half-PPR leagues, Standard ADP for no-reception leagues.
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {[
+                  { value: 'ppr',      label: 'PPR',      sub: '1 pt / reception' },
+                  { value: 'half-ppr', label: 'Half PPR', sub: '0.5 pts / reception' },
+                  { value: 'standard', label: 'Standard', sub: 'No reception points' },
+                ].map(opt => {
+                  const active = (data.scoringFormat || 'half-ppr') === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      disabled={!canEdit}
+                      onClick={() => {
+                        if (!canEdit) return;
+                        const next = { ...data, scoringFormat: opt.value };
+                        persist(next);
+                        setData(next);
+                        flash();
+                        logChange('scoring', `Scoring format changed to ${opt.label}`);
+                      }}
+                      style={{
+                        flex: '1 1 140px', minWidth: 120, padding: '10px 16px',
+                        border: `2px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                        borderRadius: 8,
+                        background: active ? 'rgba(198,255,58,.08)' : 'var(--panel-2)',
+                        color: active ? 'var(--accent)' : 'var(--text-dim)',
+                        cursor: canEdit ? 'pointer' : 'default',
+                        textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 3,
+                        opacity: !canEdit && !active ? 0.5 : 1,
+                        transition: 'border-color .15s, background .15s',
+                      }}
+                    >
+                      <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '-.01em' }}>{opt.label}</span>
+                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', opacity: 0.75 }}>{opt.sub}</span>
+                      {active && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)', letterSpacing: '.08em', marginTop: 2 }}>ACTIVE</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {!canEdit && (
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 10 }}>
+                  Only Commissioners and Admins can change the scoring format.
+                </div>
+              )}
+            </div>
+          </Card>
+
           <Card title="Scoring Policies">
             <Row label="Scoring System"     value={data.scoringPolicies.system} />
             <Row label="Scoring per Period" value={data.scoringPolicies.perPeriod} />

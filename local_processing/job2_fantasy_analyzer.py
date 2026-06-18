@@ -5,10 +5,11 @@ Stores scores, not conclusions. The UI derives any page
 (waiver, trade, start/sit, dynasty, rankings) directly from scores.
 
 Output:
-  fantasai/analysis/player_scores.json             master scores file
-  fantasai/analysis/waiver_wire_recommendations.json  derived
-  fantasai/analysis/trade_values.json                 derived
-  fantasai/analysis/lineup_recommendations.json        derived
+  fantasai/analysis/player_scores.json                master scores file
+  fantasai/analysis/waiver_wire_recommendations.json   derived
+  fantasai/analysis/trade_values.json                  derived
+  fantasai/analysis/lineup_recommendations.json         derived
+  fantasai/analysis/drop_candidates.json               derived (sit_score + injury_risk)
 
 Score dimensions per player (0-10 each):
   waiver_score   waiver wire priority (10 = must-add)
@@ -251,6 +252,31 @@ def derive_trade_file(scores: dict) -> dict:
     }
 
 
+def derive_drop_file(scores: dict) -> dict:
+    players = sorted(
+        [p for p in scores.values()
+         if p.get("sit_score", 0) >= 6.0 or p.get("injury_risk", 0) >= 7.0],
+        key=lambda p: p.get("sit_score", 0) * 0.6 + p.get("injury_risk", 0) * 0.4,
+        reverse=True,
+    )[:25]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "model": MODEL,
+        "drop_candidates": [
+            {
+                "player_name":  p["player_name"],
+                "position":     p.get("position", ""),
+                "team":         p.get("team", ""),
+                "sit_score":    p.get("sit_score", 0),
+                "injury_risk":  p.get("injury_risk", 0),
+                "drop_score":   round(p.get("sit_score", 0) * 0.6 + p.get("injury_risk", 0) * 0.4, 2),
+                "reason":       p.get("start_reason", ""),
+            }
+            for p in players
+        ],
+    }
+
+
 def derive_lineup_file(scores: dict) -> dict:
     all_players = list(scores.values())
     starts = sorted(
@@ -433,8 +459,9 @@ def main():
     }
 
     waiver_file = derive_waiver_file(scored_players)
-    trade_file = derive_trade_file(scored_players)
+    trade_file  = derive_trade_file(scored_players)
     lineup_file = derive_lineup_file(scored_players)
+    drop_file   = derive_drop_file(scored_players)
 
     elapsed_vals = [p.get("_elapsed_sec", 0) for p in scored_players.values()]
     total_time = round(sum(elapsed_vals), 1)
@@ -452,12 +479,10 @@ def main():
 
     print("[Job 2] Uploading to R2...")
     r2_put("fantasai/analysis/player_scores.json", master)
-    r2_put(
-        "fantasai/analysis/waiver_wire_recommendations.json",
-        waiver_file,
-    )
+    r2_put("fantasai/analysis/waiver_wire_recommendations.json", waiver_file)
     r2_put("fantasai/analysis/trade_values.json", trade_file)
     r2_put("fantasai/analysis/lineup_recommendations.json", lineup_file)
+    r2_put("fantasai/analysis/drop_candidates.json", drop_file)
 
     print("[Job 2] Complete.")
 

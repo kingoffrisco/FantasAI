@@ -1,6 +1,6 @@
 import React from 'react';
 import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster } from '../lib/data.js';
-import { findPlayer } from '../lib/playerStore.js';
+import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { getSubscriptionState, subscribeToPush, unsubscribeFromPush, showLocalNotification } from '../lib/pushNotifications.js';
 
 function getDraftStatus() {
@@ -30,15 +30,6 @@ function getH2HWeek() {
   return Math.min(Math.max(Math.floor((today - H2H_SEASON_START) / msPerWeek) + 1, 1), H2H_WEEKS);
 }
 
-function h2hSeed(teamId, week) {
-  return Math.sin(teamId * 7.3 + week * 3.1) * 18 + Math.cos(teamId * 2.1 + week * 5.7) * 8;
-}
-
-function h2hProj(teamId, week) {
-  const starters = (TEAM_ROSTERS[teamId] || []).filter(r => r.slot !== 'BENCH' && r.playerId);
-  const base = starters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
-  return Math.max(0, base + h2hSeed(teamId, week));
-}
 
 export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showChat, onToggleChat, user, onLogout, onExport, draftInProgress, draftMeta }) => {
   const isComplete = draftInProgress && draftMeta?.draftComplete;
@@ -190,6 +181,7 @@ function SidebarPushButton({ teamId }) {
 
 export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds, cookieAlert = false }) => {
   const isAdmin = user?.isAdmin;
+  usePlayers(); // subscribe so h2hInfo recomputes when player projections load
 
   const h2hInfo = React.useMemo(() => {
     const teamId = user?.teamId;
@@ -222,23 +214,26 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     const oppId = pair[0] === teamId ? pair[1] : pair[0];
     const oppTeam = LEAGUE_TEAMS.find(t => t.id === oppId);
 
-    // Compute user's projection from live roster (myRosterIds prop) for accuracy.
-    // TEAM_ROSTERS[teamId] may be missing if the team has no draft history.
-    let myProj;
-    if (myRosterIds && myRosterIds.size > 0) {
+    // Use slot-aware assignRoster for both sides — same logic as the H2H page's WinProbabilityBar
+    function rosterStarterProj(rosterIds) {
       try {
         const settings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
         const slotFrame = buildRosterFrame(settings);
-        const liveRoster = assignRoster(slotFrame, myRosterIds, {}, findPlayer);
-        const starters = liveRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
-        const base = starters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
-        myProj = Math.max(0, base + h2hSeed(teamId, week));
-      } catch { myProj = h2hProj(teamId, week); }
-    } else {
-      myProj = h2hProj(teamId, week);
+        const roster = assignRoster(slotFrame, rosterIds, {}, findPlayer);
+        return roster
+          .filter(r => r.slot !== 'BENCH' && r.playerId)
+          .reduce((s, e) => { const p = findPlayer(e.playerId); return s + (p?.proj || p?.avg || 0); }, 0);
+      } catch { return 0; }
     }
 
-    const oppProj = h2hProj(oppId, week);
+    const myIds = myRosterIds && myRosterIds.size > 0
+      ? myRosterIds
+      : new Set((TEAM_ROSTERS[teamId] || []).map(e => e.playerId).filter(Boolean));
+
+    const oppIds = new Set((TEAM_ROSTERS[oppId] || []).map(e => e.playerId).filter(Boolean));
+
+    const myProj  = rosterStarterProj(myIds);
+    const oppProj = rosterStarterProj(oppIds);
     const isWinning = myProj >= oppProj;
     const winPct = myProj + oppProj > 0 ? Math.round((myProj / (myProj + oppProj)) * 100) : 50;
 
@@ -251,8 +246,8 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     { id: 'roster',    label: 'Current Roster',  icon: '📋' },
     { id: 'h2h',       label: 'Head to Head',    icon: '⚔' },
     { id: 'power',     label: 'Power Rankings',  icon: '⚡' },
-    { id: 'players',   label: 'Players',          icon: '👥', badge: 'All' },
-    { id: 'news',      label: 'News & Updates',   icon: '📰', badge: '9', live: true },
+    { id: 'players',   label: 'Players',          icon: '👥' },
+    { id: 'news',      label: 'News & Updates',   icon: '📰' },
     { id: 'transactions',  label: 'Transactions',      icon: '📒' },
     { group: 'Tools' },
     { id: 'account',   label: 'My Account / Team', icon: '⊙' },
@@ -260,8 +255,8 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     { id: 'trade',     label: 'Trade Analyzer',    icon: '↔' },
     { group: 'Draft' },
     { id: 'draft',      label: 'Draft Room',        icon: '●', ...(() => { const ds = getDraftStatus(); return { badge: ds.badge, live: ds.live }; })() },
-    { id: 'owners',     label: 'Owner Intel',       icon: '◉', badge: '12' },
-    { id: 'cbs',        label: 'Player Draft Rankings',     icon: '▦', badge: '432' },
+    { id: 'owners',     label: 'Owner Intel',       icon: '◉' },
+    { id: 'cbs',        label: 'Player Draft Rankings',     icon: '▦' },
     { group: 'Setup' },
     { id: 'sources',  label: 'Sources',          icon: '⌁', ...(cookieAlert ? { badge: '!', alert: true } : {}) },
     { id: 'settings', label: 'Rules & Settings',  icon: '📋' },
@@ -281,19 +276,20 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
             <div className="label">My Team</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
               {myTeam.logoImg ? (
-                <img src={myTeam.logoImg} alt="logo" style={{ width: 52, height: 52, borderRadius: 10, objectFit: 'cover', flexShrink: 0, boxShadow: '0 2px 10px rgba(0,0,0,.35)' }} />
+                <img src={myTeam.logoImg} alt="logo" style={{ width: 80, height: 80, borderRadius: 14, objectFit: 'cover', flexShrink: 0, boxShadow: '0 4px 16px rgba(0,0,0,.45)' }} />
               ) : (
-                <span style={{ width: 52, height: 52, borderRadius: 10, background: myTeam.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900, color: '#000', flexShrink: 0, boxShadow: '0 2px 10px rgba(0,0,0,.35)' }}>
+                <span style={{ width: 80, height: 80, borderRadius: 14, background: myTeam.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 900, color: '#000', flexShrink: 0, boxShadow: '0 4px 16px rgba(0,0,0,.45)' }}>
                   {myTeam.logo}
                 </span>
               )}
               <div className="name" style={{ margin: 0, lineHeight: 1.2 }}>{myTeam.name}</div>
             </div>
+            {new Date() >= H2H_SEASON_START && (
             <div className="stats">
               <div><div className="k">Rec</div><div className="v">{myTeam.record || '0–0'}</div></div>
               <div><div className="k">PF</div><div className="v">{(myTeam.pf || 0).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</div></div>
-              <div><div className="k">Rank</div><div className="v">#3</div></div>
             </div>
+            )}
           </div>
         );
       })()}
@@ -308,7 +304,7 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
           <div style={{ flex: 1, minWidth: 0 }}>
             <span>Head to Head</span>
             {h2hInfo && (() => {
-              const color = h2hInfo.isWinning ? '#4caf82' : '#ff9500';
+              const color = h2hInfo.isWinning ? '#4caf82' : '#e05e5e';
               const verb  = h2hInfo.isWinning ? 'Beating' : 'Losing to';
               const opp   = h2hInfo.oppTeam?.logo || '??';
               return (
@@ -316,9 +312,9 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
                   <span>Wk{h2hInfo.week} · {verb} {opp}</span>
                   <span style={{
                     fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 800,
-                    background: h2hInfo.isWinning ? 'rgba(76,175,130,.25)' : 'rgba(255,149,0,.2)',
-                    color: h2hInfo.isWinning ? '#4caf82' : '#ff9500',
-                    border: `1px solid ${h2hInfo.isWinning ? 'rgba(76,175,130,.4)' : 'rgba(255,149,0,.35)'}`,
+                    background: h2hInfo.isWinning ? 'rgba(76,175,130,.25)' : 'rgba(224,94,94,.2)',
+                    color: h2hInfo.isWinning ? '#4caf82' : '#e05e5e',
+                    border: `1px solid ${h2hInfo.isWinning ? 'rgba(76,175,130,.4)' : 'rgba(224,94,94,.4)'}`,
                     borderRadius: 4, padding: '1px 5px', flexShrink: 0,
                   }}>{h2hInfo.winPct}%</span>
                 </div>
@@ -356,8 +352,8 @@ const BASE_SECTIONS = [
       { id: 'dashboard', label: 'Dashboard',       icon: '🏈' },
       { id: 'roster',    label: 'Current Roster',  icon: '📋' },
       { id: 'power',     label: 'Power Rankings',  icon: '⚡' },
-        { id: 'players',   label: 'Players',          icon: '👥', badge: 'All' },
-      { id: 'news',      label: 'News & Updates',   icon: '📰', badge: '9', live: true },
+        { id: 'players',   label: 'Players',          icon: '👥' },
+      { id: 'news',      label: 'News & Updates',   icon: '📰' },
     ],
   },
   {
@@ -370,9 +366,9 @@ const BASE_SECTIONS = [
   {
     group: 'Draft',
     items: [
-      { id: 'draft',      label: 'Draft Room',      icon: '●',  badge: 'LIVE', live: true },
-      { id: 'owners',     label: 'Owner Intel',    icon: '◉',  badge: '12' },
-      { id: 'cbs',        label: 'Player Draft Rankings',   icon: '▦',  badge: '432' },
+      { id: 'draft',      label: 'Draft Room',      icon: '●',  ...(() => { const ds = getDraftStatus(); return { badge: ds.badge, live: ds.live }; })() },
+      { id: 'owners',     label: 'Owner Intel',    icon: '◉' },
+      { id: 'cbs',        label: 'Player Draft Rankings',   icon: '▦' },
     ],
   },
   {

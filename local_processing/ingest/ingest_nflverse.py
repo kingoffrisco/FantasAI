@@ -119,9 +119,11 @@ def import_yac(conn, seasons: list[int], dry_run: bool):
         return
 
     yac_df = pd.concat(yac_parts, ignore_index=True)
+    # Group by player_id only (not name) to avoid dupes when name varies across plays
     weekly = (
-        yac_df.groupby(["season", "week", "receiver_player_id", "receiver_player_name"])
+        yac_df.groupby(["season", "week", "receiver_player_id"])
         .agg(
+            player_name       = ("receiver_player_name", "first"),
             total_yac         = ("yards_after_catch", "sum"),
             yac_per_reception = ("yards_after_catch", "mean"),
             receptions        = ("yards_after_catch", "count"),
@@ -129,7 +131,7 @@ def import_yac(conn, seasons: list[int], dry_run: bool):
             air_yards         = ("air_yards",         "sum"),
         )
         .reset_index()
-        .rename(columns={"receiver_player_id": "gsis_id", "receiver_player_name": "player_name"})
+        .rename(columns={"receiver_player_id": "gsis_id"})
     )
     weekly["yac_percentage"] = (weekly["total_yac"] / weekly["receiving_yards"] * 100).fillna(0).clip(0, 100).round(1)
     weekly["yac_per_reception"] = weekly["yac_per_reception"].round(2)
@@ -206,11 +208,17 @@ def import_depth_charts(conn, seasons: list[int], dry_run: bool):
         return
 
     depth_df = pd.concat(depth_parts, ignore_index=True)
-    depth_clean = depth_df.rename(columns={"full_name": "player_name"})[[
-        "season", "week", "game_type", "team", "position",
-        "depth_team", "formation", "gsis_id", "player_name",
-        "first_name", "last_name", "jersey_number"
-    ]].copy()
+    # nflverse renamed 'team' → 'club_code' in 2024+; handle both
+    col_renames = {"full_name": "player_name", "club_code": "team"}
+    depth_df = depth_df.rename(columns={k: v for k, v in col_renames.items() if k in depth_df.columns})
+    want_cols = ["season", "week", "game_type", "team", "position",
+                 "depth_team", "formation", "gsis_id", "player_name",
+                 "first_name", "last_name", "jersey_number"]
+    have_cols = [c for c in want_cols if c in depth_df.columns]
+    if len(have_cols) < len(want_cols):
+        missing = set(want_cols) - set(have_cols)
+        print(f"   ⚠️  Depth chart columns missing (skipping): {missing}")
+    depth_clean = depth_df[have_cols].copy()
     depth_clean["imported_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
 
     print(f"   ✅ {len(depth_clean):,} depth chart records")
@@ -225,6 +233,21 @@ def import_depth_charts(conn, seasons: list[int], dry_run: bool):
 
 # ── nflverse weekly stats (for silver_weekly_stats) ───────────────────────────
 
+def _fetch_weekly_stats_direct(season: int) -> "pd.DataFrame":
+    """Fallback for seasons where nfl_data_py's URL no longer works.
+    nflverse renamed the file from player_stats_{y}.parquet to
+    stats_player_week_{y}.parquet starting with the 2025 season.
+    """
+    import io, urllib.request
+    url = (
+        f"https://github.com/nflverse/nflverse-data/releases/download/"
+        f"player_stats/stats_player_week_{season}.parquet"
+    )
+    print(f"     Trying new URL pattern: stats_player_week_{season}.parquet")
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        return pd.read_parquet(io.BytesIO(resp.read()))
+
+
 def import_weekly_stats(conn, seasons: list[int], dry_run: bool):
     print("\n📈 Section 5: nflverse Weekly Stats")
     import json
@@ -236,7 +259,13 @@ def import_weekly_stats(conn, seasons: list[int], dry_run: bool):
             print(f"     ✅ {len(stats):,} player-week records")
             stats_parts.append(stats)
         except Exception as e:
-            print(f"     ⚠️  {season}: {e}")
+            print(f"     ⚠️  {season}: {e} — trying direct URL fallback")
+            try:
+                stats = _fetch_weekly_stats_direct(season)
+                print(f"     ✅ {len(stats):,} player-week records (direct URL)")
+                stats_parts.append(stats)
+            except Exception as e2:
+                print(f"     ⚠️  {season}: direct URL also failed — {e2}")
 
     if not stats_parts:
         print("   ⚠️  No weekly stats imported")

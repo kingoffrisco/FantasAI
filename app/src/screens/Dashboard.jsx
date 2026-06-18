@@ -1,5 +1,6 @@
 import React from 'react';
 import { TEAM_ROSTERS, findTeam, NEWS, LEAGUE_TEAMS, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { computeOptimal } from './LineupDecisions.jsx';
 import { buildPowerData } from '../lib/powerUtils.js';
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { PlayerCell, StatusDot, Sparkline, PosBadge, SourceBadge } from '../components/ui.jsx';
@@ -557,6 +558,14 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const rosterIds  = new Set(fullRoster.map(r => r.playerId).filter(Boolean));
   const starterIds = new Set(starters.map(r => r.playerId).filter(Boolean));
   const totalProj  = starters.reduce((s, r) => s + (findPlayer(r.playerId)?.proj || 0), 0);
+  const rosterPlayers = allPlayersList.filter(p => rosterIds.has(p.id));
+  const optimalSlots  = React.useMemo(
+    () => computeOptimal(starters, rosterPlayers, p => p?.proj ?? 0, currentWeek.num || 0),
+    [starters, rosterPlayers, currentWeek.num],
+  );
+  const optimalTotal  = optimalSlots.reduce((s, e) => s + (findPlayer(e.playerId)?.proj ?? 0), 0);
+  const optimalGain   = Math.max(0, optimalTotal - totalProj);
+  const isOptimal     = optimalGain <= 0.05;
 
   // Valid only when every starter slot has a player — no empty starters allowed.
   const starterSlots = fullRoster.filter(r => r.slot !== 'BENCH');
@@ -993,7 +1002,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
       <div style={{ padding: isMobile ? '12px 14px' : 24, display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 8 : 12, flexShrink: 0 }}>
         <div className="stat">
           <div className="k">Starters Projected</div>
-          <div className="v accent">{totalProj.toFixed(1)}</div>
+          <div className="v" style={{ color: isOptimal ? '#1affa0' : '#ffd700' }}>{totalProj.toFixed(1)}</div>
           <div className="sub">{weekLabel} · {starters.length} of 8 slots</div>
         </div>
         {h2hWinData ? (

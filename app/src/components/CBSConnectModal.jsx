@@ -766,7 +766,6 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
       )}
       <div className="page-head" style={{ flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <TeamLogoBadge team={null} size={40} />
           <div>
             <h1>Player Draft Rankings</h1>
             <div className="sub">CBS expert rankings + your personal cheat sheet</div>
@@ -976,7 +975,7 @@ function Movement({ value, prev }) {
   );
 }
 
-export function WorkerConfig() {
+export function WorkerConfig({ openCookieTrigger = 0, onCookieSaved }) {
   const [url, setUrl] = React.useState(() => localStorage.getItem('fantasai.workerUrl') || 'https://api.fantasai.net');
   const [key, setKey] = React.useState(() => localStorage.getItem('fantasai.workerKey') || '');
   const [status, setStatus] = React.useState(null);
@@ -1007,6 +1006,7 @@ export function WorkerConfig() {
     setCookieStatus(ok ? 'ok' : 'expired');
     setCookieSavedAt(now);
     setCookieSaved(true);
+    if (ok) onCookieSaved?.();
     setTimeout(() => { setCookieSaved(false); setShowCookieModal(false); }, 1200);
   }
 
@@ -1080,6 +1080,11 @@ export function WorkerConfig() {
   React.useEffect(() => {
     if (url && status === null) test();
   }, []);
+
+  // Open the cookie modal whenever the parent increments openCookieTrigger
+  React.useEffect(() => {
+    if (openCookieTrigger > 0) setShowCookieModal(true);
+  }, [openCookieTrigger]);
 
   const dotColor = status === 'ok' ? 'var(--good)'
     : status === 'warn' ? 'var(--warn)'

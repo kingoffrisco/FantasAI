@@ -1,27 +1,30 @@
 # FantasAI
 
-AI-powered fantasy football platform. Full production app — React frontend, Cloudflare Worker API, Databricks Delta Lake, local GPU inference pipeline.
+AI-powered fantasy football platform. React frontend, Cloudflare Worker API, local DuckDB pipeline, local GPU inference.
 
-**Last Updated:** June 13, 2026 | **Unity Catalog:** `main.fantasai` (79 tables)
+**Last Updated:** June 15, 2026 | **Data Warehouse:** `local_processing/db/fantasai.duckdb` (17 tables)
+
+> **Migration (June 15, 2026):** Databricks infrastructure decommissioned. ETL now runs entirely on the local RTX 4080 server using DuckDB. R2 exports and the frontend are unchanged.
 
 ---
 
 ## Architecture
 
 ```
-Sleeper / ESPN / CBS / WWO APIs
+Sleeper / ESPN / Google News / API-Sports / nflverse
         │
         ▼
-Databricks (main.fantasai.*)     ◄── Local Qwen GPU Pipeline
-  Bronze → Silver → Gold → Export
+Local DuckDB Pipeline  (RTX 4080 server)
+  Bronze → Silver → Gold
+  local_processing/orchestrator_daily.py   — 7:00 AM daily
+  local_processing/orchestrator_weekly.py  — Tue 3:00 AM
+        │
+        ▼  export_to_r2.py  →  PUT api.fantasai.net/api/v1/r2/{key}
         │
         ▼
-  r2_export job (daily 08:00 UTC)
-        │
-        ▼
-  Cloudflare R2 (gzipped JSON)
-        │
-        ▼
+  Cloudflare R2 (gzipped JSON)    ◄── Local Qwen GPU Pipeline
+        │                              job1_news_processor.py (Qwen 8B)
+        ▼                              job2_fantasy_analyzer.py (Qwen 14B)
   Cloudflare Worker  api.fantasai.net
         │
         ▼
@@ -36,9 +39,9 @@ Databricks (main.fantasai.*)     ◄── Local Qwen GPU Pipeline
 | **Worker API** | Cloudflare Worker | `worker-api/src/index.js` at `api.fantasai.net` |
 | **Ghost Worker** | Cloudflare Worker | `worker/` — secondary worker project |
 | **Storage** | Cloudflare R2 | Primary data store; Worker binds as `env.BUCKET` |
-| **Data Warehouse** | Databricks Unity Catalog | `main.fantasai` on AWS, Serverless Spark |
-| **ETL** | AWS S3 + GitHub Actions | `aws-kingoffrisco-s3-bucket`, runs via `.github/workflows/` |
-| **Local AI** | Qwen3 8B + 14B via Ollama | `local_processing/` — GPU pipeline on local machine |
+| **Data Warehouse** | DuckDB | `local_processing/db/fantasai.duckdb` — 17 tables, Bronze/Silver/Gold |
+| **ETL Scheduler** | Windows Task Scheduler | 2 tasks: `FantasAI - Daily Pipeline`, `FantasAI - Weekly Pipeline` |
+| **Local AI** | Qwen3 8B + 14B via Ollama | `local_processing/` — GPU pipeline on RTX 4080 |
 
 ## Key Directories
 
@@ -50,69 +53,103 @@ app/                    React + Vite frontend
     hooks.js            R2 data hooks
     lib/                Stores, API client, data helpers
 worker-api/             Primary Cloudflare Worker
-  src/index.js          All API routes (~1800 lines)
+  src/index.js          All API routes
 worker/                 Ghost Cloudflare Worker
-local_processing/       Local Qwen AI pipeline
+local_processing/       Local ETL + AI pipeline
+  db.py                       DuckDB connection + schema (17 tables)
+  db/fantasai.duckdb          Data warehouse file
+  orchestrator_daily.py       Daily pipeline (7AM)
+  orchestrator_weekly.py      Weekly pipeline (Tue 3AM)
+  ingest/
+    ingest_sleeper_players.py   Sleeper API + ESPN IDs
+    ingest_espn_news.py         ESPN News API
+    ingest_google_news.py       Google News RSS
+    ingest_nfl_transactions.py  ESPN Transactions
+    ingest_apisports.py         API-Sports.io game stats
+    ingest_nflverse.py          nfl_data_py stats/depth/NGS
+  gold/
+    gold_player_consolidation.py  master_player_id + gold tables
+  export/
+    export_to_r2.py             Uploads 11 JSON keys to R2
   job1_news_processor.py      Bulk news (Qwen3 8B)
   job2_fantasy_analyzer.py    Fantasy analysis (Qwen3 14B)
-  pipeline_runner.py          Orchestrator
-  pipeline_watcher.py         R2 trigger watcher
-databricks/             Notebook + SQL backups
+  job3_player_writeups.py     Player writeups (Qwen3 14B)
+  pipeline_runner.py          Watcher/sequencer for Jobs 1-2
+  requirements-local.txt      pip dependencies
+notebooks/              Reference notebooks (Databricks source logic)
+databricks/             SQL + archived notebook backups
 docs/                   Documentation
+```
+
+## Local Pipeline Setup
+
+```bash
+# Install dependencies
+pip install -r local_processing/requirements-local.txt
+
+# Initialize DuckDB schema
+python -c "from local_processing.db import get_conn, init_schema; init_schema(get_conn())"
+
+# Set environment variables (.env file)
+FANTASAI_KEY=<worker api key>
+API_SPORTS_KEY=<api-sports.io key>
+
+# Run daily pipeline manually
+python local_processing/orchestrator_daily.py
+
+# Register Windows Task Scheduler tasks (see docstrings in each orchestrator)
+# Get-ScheduledTask -TaskPath "\FantasAI\"
 ```
 
 ## Data Flow
 
-The frontend **never queries Databricks directly**. All data goes through R2:
+The frontend **never queries DuckDB directly**. All data goes through R2:
 
-1. Databricks notebooks ingest raw data (Bronze)
-2. Silver/Gold layers clean and enrich
-3. `r2_export.py` jobs write gzipped JSON snapshots to R2 (daily 08:00 UTC)
-4. Worker API reads R2 via `env.BUCKET` and serves to frontend
-5. Frontend hooks (`useR2Analysis`, etc.) consume via `api.fantasai.net`
+1. `orchestrator_daily.py` ingests Sleeper → ESPN → Google News → Transactions → DuckDB Bronze/Silver/Gold
+2. `export_to_r2.py` uploads 11 JSON snapshots to R2 via Worker API (`PUT api.fantasai.net/api/v1/r2/{key}`)
+3. Worker API reads R2 via `env.BUCKET` and serves to frontend
+4. Frontend hooks (`useR2Analysis`, etc.) consume via `api.fantasai.net`
 
-Local Qwen pipeline classifies and scores articles, writes enrichments back to R2, then ingests to Databricks Gold tables.
+Local Qwen pipeline reads enriched news from R2, scores players, writes results back to R2.
 
-## Export Tables (Frontend Data Sources)
+## R2 Data Keys (Frontend Data Sources)
 
-| Table | Records | Purpose |
-|---|---|---|
-| `export_players_2026_draft` | 997 | Draft board — all active 2026 players (all draftable) |
-| `export_player_news` | ~86 articles | AI-enriched news with fantasy insights |
-| `export_defense_performance` | 606 | Weekly matchup rankings |
-| `export_breakout_candidates` | ~7 | ML-powered sleeper picks |
-| `export_sleeper_picks` | ~24 | High-value waiver targets |
+| R2 Key | Purpose |
+|---|---|
+| `fantasai/news/player_notes.json` | AI-enriched player notes |
+| `fantasai/news/injury_report.json` | Current injury statuses |
+| `fantasai/news/critical_alerts.json` | High-priority news alerts |
+| `fantasai/news/enriched_news.json` | Full enriched news feed |
+| `fantasai/news/player_news.json` | Combined ESPN + Google news |
+| `fantasai/analysis/breakout_candidates.json` | ML-powered sleeper picks |
+| `fantasai/analysis/nfl_transactions.json` | Transaction wire |
+| `fantasai/analysis/trending_players.json` | Trending players |
+| `fantasai/analysis/injury_overlay.json` | Injury overlay data |
+| `fantasai/players/export_players_2026_draft.json` | Draft board (997 players) |
+| `fantasai/stats/gold_weekly_stats.json` | Weekly stats |
 
 ## Worker API Routes (Selected)
 
 | Route | Handler | Description |
 |---|---|---|
 | `GET /api/v1/players` | `handlePlayers` | Sleeper player pool (1h cache) |
-| `GET /api/v1/db/players` | `handleDbPlayers` | Databricks `export_players_2026_draft` direct |
-| `GET /api/v1/news/latest` | `handleDbNews` | Latest news from Databricks Gold |
 | `GET /api/v1/r2/get` | `handleR2Proxy` | Raw R2 access (auth required) |
+| `PUT /api/v1/r2/{key}` | — | R2 write (used by local pipeline) |
+| `GET /api/v1/news/latest` | `handleDbNews` | Latest news from R2 |
 
 **Auth:** `X-FantasAI-Key` header must match `env.FANTASAI_KEY` secret.
 
 ## Local AI Pipeline
 
-Two Qwen jobs running on local GPU via Ollama — both incremental by default:
+Three Qwen jobs on local GPU via Ollama — all incremental by default:
 
-| Job | Model | Purpose |
-|---|---|---|
-| `job1_news_processor.py` | Qwen3 8B | Classify articles → `player_notes.json`, `ai_summaries.json` |
-| `job2_fantasy_analyzer.py` | Qwen3 14B | Score players (9 dimensions) → waiver/trade/lineup outputs |
-| `pipeline_runner.py` | Both | Orchestrator — `python pipeline_runner.py` |
-
-Scheduled daily via Windows Task Scheduler at **7:15 AM UTC** (2-3 min buffer after Databricks R2 export at ~7:12 UTC).
-
-## Databricks Jobs
-
-| Job | ID | Schedule |
-|---|---|---|
-| News Export | [533461232082366](https://dbc-60fb4a1c-8bce.cloud.databricks.com/jobs/533461232082366) | Daily 08:00 UTC |
-| Analysis Export | [848536035023585](https://dbc-60fb4a1c-8bce.cloud.databricks.com/jobs/848536035023585) | Daily 08:30 UTC |
-| ML Training Orchestrator | [763487314454311](https://dbc-60fb4a1c-8bce.cloud.databricks.com/jobs/763487314454311) | Weekly |
+| Job | Model | Schedule | Purpose |
+|---|---|---|---|
+| `job1_news_processor.py` | Qwen3 8B | Triggered by pipeline watcher | Classify articles → `player_notes.json`, `ai_summaries.json` |
+| `job2_fantasy_analyzer.py` | Qwen3 14B | After Job 1 | Score players (9 dimensions) → waiver/trade/lineup |
+| `job3_player_writeups.py --mode rostered` | Qwen3 14B | Nightly 2:00 AM | Narrative writeups for ~180 rostered players |
+| `job3_player_writeups.py --mode all` | Qwen3 14B | Sunday 3:00 AM | Writeups for ~977 skill position players |
+| `pipeline_runner.py` | Both | Continuous | Watcher/sequencer — `python pipeline_runner.py` |
 
 ## Frontend Screens
 
@@ -122,10 +159,10 @@ Dashboard · DraftRoom · CurrentRoster · Players · Waivers · News · Trade �
 
 | Secret | Location | Purpose |
 |---|---|---|
-| `FANTASAI_KEY` | Cloudflare Worker secret | API auth header |
-| `WWO_API_KEY` | Cloudflare Worker secret + Databricks secret `fantasai/wwo_api_key` | Weather API — never hardcode |
-| `DATABRICKS_TOKEN` | Cloudflare Worker secret | Direct Databricks queries |
+| `FANTASAI_KEY` | Cloudflare Worker secret + `.env` | API auth header |
+| `WWO_API_KEY` | Cloudflare Worker secret | Weather API — never hardcode |
+| `API_SPORTS_KEY` | `.env` only | API-Sports.io stats — never hardcode |
 
 ---
 
-**Contact:** kingoffrisco@yahoo.com | **Workspace:** https://dbc-60fb4a1c-8bce.cloud.databricks.com | **API:** https://api.fantasai.net
+**Contact:** kingoffrisco@yahoo.com | **API:** https://api.fantasai.net

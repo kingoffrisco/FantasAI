@@ -4,7 +4,7 @@ import { findPlayer, getPlayers, setPlayers, patchPlayers, normalizePlayerList, 
 import { api } from './api.js';
 import { getPlayerMap, fetchBulkProjections } from './lib/sleeper.js';
 import { registerServiceWorker, getSubscriptionState, requestNotificationPermission, showLocalNotification } from './lib/pushNotifications.js';
-import { applyLeagueData, clearLeagueData } from './lib/leagueStore.js';
+import { applyLeagueData, clearLeagueData, getScoringFormat } from './lib/leagueStore.js';
 import { loadUserPrefs, patchPrefs, getPrefs, clearPrefs } from './lib/remotePrefs.js';
 import { loadRemoteState, getTradeOffers, getWaivers, saveTradeOffers, saveWaivers, clearRemoteState } from './lib/remoteState.js';
 import { Sidebar, TopBar, MobileNav } from './components/layout.jsx';
@@ -469,6 +469,9 @@ export default function App() {
 
   // Stable ref so callbacks don't need user in their dep array
   const userRef = React.useRef(user);
+  // Cache the ADP/ECR byName maps so they can be re-applied if players load after the patch
+  const adpByNameRef = React.useRef(null);
+  const ecrByNameRef = React.useRef(null);
   React.useEffect(() => { userRef.current = user; }, [user]);
 
   const [rosterSlotOverrides, setRosterSlotOverrides] = React.useState({});
@@ -640,7 +643,25 @@ export default function App() {
     api.r2.players2026()
       .then(rows => {
         const arr = Array.isArray(rows) ? rows : [];
-        if (arr.length > 0) setPlayers(normalizePlayerList(arr));
+        if (arr.length > 0) {
+          setPlayers(normalizePlayerList(arr));
+          // Re-apply ADP/ECR if those fetches already completed before players loaded
+          if (adpByNameRef.current) {
+            const byName = adpByNameRef.current;
+            patchPlayers(p => {
+              const adp = byName.get(p.name?.toLowerCase().trim());
+              if (adp != null && p.pos !== 'DST' && p.pos !== 'K') return { ...p, adp };
+              return p;
+            });
+          }
+          if (ecrByNameRef.current) {
+            const byName = ecrByNameRef.current;
+            patchPlayers(p => {
+              const ecr = byName.get(p.name?.toLowerCase().trim());
+              return ecr != null ? { ...p, ecr } : p;
+            });
+          }
+        }
       })
       .catch(() => {})
       // After players are loaded (regardless of source), backfill bye weeks from Sleeper.
@@ -689,6 +710,35 @@ export default function App() {
             localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), updates }));
           } catch {}
         }).catch(() => {});
+      })
+      // export_players_2026_draft.json has no DSTs — add them from the defense ADP file.
+      .then(async () => {
+        if (getPlayers().some(p => p.pos === 'DST')) return;
+        const clean = await api.r2.defenseAdp().catch(() => null);
+        const cleanArr = clean?.data || (Array.isArray(clean) ? clean : []);
+        if (!cleanArr.length) return;
+        const sorted = [...cleanArr].sort((a, b) => (a.adp_rank || 999) - (b.adp_rank || 999));
+        const dsts = sorted.map((row, i) => ({
+          id: 90000 + i,
+          name: `${row.team.toUpperCase()} D/ST`,
+          pos: 'DST', team: row.team.toUpperCase(),
+          ecr: 999, adp: row.adp_rank || (i + 1),
+          proj: parseFloat(Math.max(4, 15 - (row.adp_rank || i + 1) * 0.6).toFixed(1)),
+          last: row.avg_last_4_weeks || 0, avg: row.avg_last_4_weeks || 0,
+          bye: 0, opp: '', owned: 0, tier: 0, num: 0, age: 0, pts2025: 0,
+          trend: [], depth: 1, targetShare: 0, routes: 0, yac: 0,
+          photoUrl: null, news: '', status: '', seasonTier: null,
+          sleeperId: null, masterId: null, oppRank: 0,
+        }));
+        setPlayers([...getPlayers(), ...dsts]);
+        // Re-apply ECR for newly-added DSTs if ECR patch already completed
+        if (ecrByNameRef.current) {
+          const byName = ecrByNameRef.current;
+          patchPlayers(p => {
+            const ecr = byName.get(p.name?.toLowerCase().trim());
+            return ecr != null ? { ...p, ecr } : p;
+          });
+        }
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -709,26 +759,113 @@ export default function App() {
     return () => clearTimeout(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Background DB Players refresh — fires 5 s after mount so fast sources (R2 → Sleeper)
-  // always paint first. Silently enriches the player pool if Databricks returns a valid set.
+  // Patch ADP from dedicated scoring-format ADP file (top ~425 players) — fires after main player load.
+  // Standard scoring uses adp_standard.json; PPR and Half-PPR both use adp_ppr.json.
   React.useEffect(() => {
-    const t = setTimeout(() => {
-      api.dbPlayers().then(data => {
-        const raw = data?.players || [];
-        const seenRaw = new Map();
-        const rows = raw.filter(p => {
-          const key = `${(p.full_name || p.name || '').toLowerCase().trim()}|${(p.team || '').toLowerCase()}`;
-          if (seenRaw.has(key)) return false;
-          seenRaw.set(key, true);
-          return true;
-        });
-        const hasK   = rows.some(p => (p.position || p.pos) === 'K');
-        const hasDST = rows.some(p => ['DEF', 'DST'].includes(p.position || p.pos));
-        if (rows.length >= 200 && hasK && hasDST) setPlayers(normalizePlayerList(rows));
-      }).catch(() => {});
-    }, 5000);
-    return () => clearTimeout(t);
+    const format = getScoringFormat();
+    const fetcher = format === 'standard' ? api.r2.adpStandard : api.r2.adpPPR;
+    fetcher().then(raw => {
+      const arr = Array.isArray(raw) ? raw : Array.isArray(raw?.players) ? raw.players : Array.isArray(raw?.data) ? raw.data : [];
+      if (!arr.length) return;
+      const byName = new Map();
+      for (const r of arr) {
+        const name = (r.full_name || r.player_name || r.name || '').toLowerCase().trim();
+        // R2 file uses adp_value (float pick#) or adp_rank (int); fall back to bare adp
+        const adpVal = r.adp_value ?? r.adp_rank ?? r.adp;
+        if (name && adpVal != null) byName.set(name, Number(adpVal));
+      }
+      if (byName.size === 0) return;
+      adpByNameRef.current = byName;
+      patchPlayers(p => {
+        const adp = byName.get(p.name?.toLowerCase().trim());
+        // Only patch skill positions — DST/K are not in the ADP file and default to 999
+        if (adp != null && p.pos !== 'DST' && p.pos !== 'K') return { ...p, adp };
+        return p;
+      });
+    }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Patch ECR from FantasyPros consensus rankings (ecr_ppr.json / ecr_std.json).
+  // Replaces the weak Sleeper search_rank that playerStore uses as a fallback ECR.
+  React.useEffect(() => {
+    const format = getScoringFormat();
+    const fetcher = format === 'standard' ? api.r2.ecrStandard : api.r2.ecrPPR;
+    fetcher().then(raw => {
+      const arr = Array.isArray(raw) ? raw : Array.isArray(raw?.players) ? raw.players : [];
+      if (!arr.length) return;
+      const byName = new Map();
+      for (const r of arr) {
+        const name = (r.player_name || r.full_name || r.name || '').toLowerCase().trim();
+        const ecr = r.ecr_rank ?? r.ecr_avg ?? r.rank;
+        if (name && ecr != null) byName.set(name, Math.round(Number(ecr)));
+      }
+      if (byName.size === 0) return;
+      ecrByNameRef.current = byName;
+      patchPlayers(p => {
+        const ecr = byName.get(p.name?.toLowerCase().trim());
+        return ecr != null ? { ...p, ecr } : p;
+      });
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Patch DST ECR + ADP from defense ranking data (2025 stats until 2026 games begin).
+  // Primary: gold_adp_defense.json — clean 32-row table from main.fantasai.gold_adp_defense.
+  //   Fields: team, adp_rank (pre-computed 1-32), avg_last_4_weeks. No duplicates.
+  // Fallback: defense_performance.json — weekly DST fantasy scores; has duplicate rows per team
+  //   (export ran multiple times). We deduplicate by taking latest week and averaging dupes.
+  React.useEffect(() => {
+    async function patchDstRanks() {
+      // ── Try the clean gold_adp_defense table first ──────────────────────────
+      const clean = await api.r2.defenseAdp().catch(() => null);
+      const cleanArr = clean?.data || (Array.isArray(clean) ? clean : []);
+      if (cleanArr.length > 0) {
+        const rankByTeam = {};
+        // gold_adp_defense has adp_rank pre-computed; fall back to array position if missing
+        const sorted = [...cleanArr].sort((a, b) => (a.adp_rank || 999) - (b.adp_rank || 999));
+        sorted.forEach((row, i) => {
+          if (row.team) rankByTeam[row.team.toUpperCase()] = row.adp_rank || (i + 1);
+        });
+        patchPlayers(p => {
+          if (p.pos !== 'DST') return p;
+          const rank = rankByTeam[p.team?.toUpperCase()];
+          return rank ? { ...p, ecr: rank, adp: rank } : p;
+        });
+        return;
+      }
+
+      // ── Fallback: defense_performance.json (has duplicate rows per team) ────
+      const perf = await api.r2.defensePerformance().catch(() => null);
+      const perfArr = perf?.data || (Array.isArray(perf) ? perf : []);
+      if (!perfArr.length) return;
+      const byTeam = {};
+      for (const row of perfArr) {
+        const t = row.team;
+        if (!t) continue;
+        const wk = row.week || 0;
+        if (!byTeam[t] || wk > byTeam[t].maxWeek) {
+          byTeam[t] = { maxWeek: wk, rows: [row] };
+        } else if (wk === byTeam[t].maxWeek) {
+          byTeam[t].rows.push(row);
+        }
+      }
+      const scored = Object.entries(byTeam).map(([team, { rows }]) => ({
+        team,
+        score: rows.reduce((s, r) => s + (r.avg_last_4_weeks || 0), 0) / rows.length,
+      }));
+      scored.sort((a, b) => b.score - a.score);
+      const rankByTeam = {};
+      scored.forEach(({ team }, i) => { rankByTeam[team] = i + 1; });
+      patchPlayers(p => {
+        if (p.pos !== 'DST') return p;
+        const rank = rankByTeam[p.team?.toUpperCase()];
+        return rank ? { ...p, ecr: rank, adp: rank } : p;
+      });
+    }
+    patchDstRanks();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Player source: R2 export_players_2026_draft.json only (loaded above).
+  // The Databricks background refresh has been disabled — R2 is the authoritative 2026 player list.
 
   function handlePasswordChanged() {
     setNeedsPasswordChange(false);
@@ -1089,7 +1226,7 @@ export default function App() {
           draftInProgress={active !== 'draft' ? draftInProgress : null}
           draftMeta={draftMeta}
         />
-        <Sidebar active={active} onNav={id => { if (id === 'sources') setCookieAlert(false); setActive(id); }} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} cookieAlert={cookieAlert} />
+        <Sidebar active={active} onNav={id => setActive(id)} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} cookieAlert={cookieAlert} />
 
         <div className="main">
           {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} tradeOffers={tradeOffers} />}
@@ -1137,7 +1274,7 @@ export default function App() {
           })()}
           {active === 'owners'    && <OwnerIntelScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'cbs'       && <PlayerDraftRankingsScreen onOpenPlayer={setOpenPlayer} />}
-          {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} user={user} myRosterIds={myRosterIds} />}
+          {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} user={user} myRosterIds={myRosterIds} cookieAlert={cookieAlert} onCookieAlertDismiss={() => setCookieAlert(false)} />}
           {active === 'admin-owners'  && <AdminOwners />}
           {active === 'admin-scoring'  && <ScoringTestScreen user={user} />}
           {active === 'transactions'  && <TransactionsScreen />}

@@ -69,7 +69,6 @@ export default function CompareScreen() {
     <div className="col" style={{ height: '100%', overflow: 'auto' }}>
       <div className="page-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <TeamLogoBadge team={null} size={40} />
           <div><h1>Compare Players</h1><div className="sub">Side-by-side · projections, matchup, season trend</div></div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

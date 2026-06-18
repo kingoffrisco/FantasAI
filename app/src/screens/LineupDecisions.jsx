@@ -6,6 +6,12 @@ import { useR2Lineup, useR2Injuries } from '../hooks.js';
 
 const API_BASE = 'https://api.fantasai.net';
 
+const _H2H_START = new Date('2026-09-09');
+const _MS_WEEK   = 7 * 24 * 60 * 60 * 1000;
+function getNFLWeek() {
+  return Math.min(Math.max(Math.floor((Date.now() - _H2H_START) / _MS_WEEK) + 1, 1), 18);
+}
+
 const SLOT_ELIGIBLE = {
   QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
   K: ['K'], DST: ['DST'], FLEX: ['RB', 'WR'],
@@ -149,14 +155,34 @@ function DatabricksAIPanel({ myRosterIds }) {
   );
 }
 
+// Status priority: Active=0, Q=1, D=2, Out/bye/IR=3
+// Handles Sleeper full strings ('Active','Questionable','Doubtful','Out') and short codes ('OK','Q','D','O').
+// Lower tier = preferred. Within same tier, higher proj wins.
+function statusTier(p, currentWeek) {
+  if (!p) return 3;
+  if (currentWeek > 0 && p.bye === currentWeek) return 3;
+  const s = (p.status || 'Active').toLowerCase();
+  if (s === 'active' || s === 'ok' || s === '') return 0;
+  if (s === 'questionable' || s === 'q')        return 1;
+  if (s === 'doubtful' || s === 'd')            return 2;
+  return 3; // out, ir, sus, pup, nfi, ps, etc.
+}
+
 // Greedy optimal lineup: fill dedicated slots first, then FLEX.
-function computeOptimal(startingSlots, allPlayers, getProj) {
+// Ranks players by availability (Active > Q > D > Out/bye) then by projection.
+export function computeOptimal(startingSlots, allPlayers, getProj, currentWeek = 0) {
+  const rankSort = (a, b) => {
+    const ta = statusTier(a, currentWeek), tb = statusTier(b, currentWeek);
+    if (ta !== tb) return ta - tb;
+    return getProj(b) - getProj(a);
+  };
+
   const byPos = {};
   for (const p of allPlayers) {
     if (!byPos[p.pos]) byPos[p.pos] = [];
     byPos[p.pos].push(p);
   }
-  for (const pos in byPos) byPos[pos].sort((a, b) => getProj(b) - getProj(a));
+  for (const pos in byPos) byPos[pos].sort(rankSort);
 
   const assigned = new Set();
   const result = [];
@@ -166,7 +192,7 @@ function computeOptimal(startingSlots, allPlayers, getProj) {
     const eligible = (SLOT_ELIGIBLE[slot] || [slot])
       .flatMap(pos => byPos[pos] || [])
       .filter(p => !assigned.has(p.id))
-      .sort((a, b) => getProj(b) - getProj(a));
+      .sort(rankSort);
     const best = eligible[0] ?? null;
     result.push({ slot, playerId: best?.id ?? null });
     if (best) assigned.add(best.id);
@@ -177,7 +203,7 @@ function computeOptimal(startingSlots, allPlayers, getProj) {
     const eligible = ['RB', 'WR']
       .flatMap(pos => byPos[pos] || [])
       .filter(p => !assigned.has(p.id))
-      .sort((a, b) => getProj(b) - getProj(a));
+      .sort(rankSort);
     const best = eligible[0] ?? null;
     result.push({ slot, playerId: best?.id ?? null });
     if (best) assigned.add(best.id);
@@ -190,6 +216,7 @@ export default function LineupDecisions({
   myRosterIds = new Set(),
   slotOverrides = {},
   onSlotOverridesChange,
+  compact = false,   // hides slot cards — use when roster table is already visible
   onOpenPlayer,
 }) {
   const [injuryMap, setInjuryMap]       = React.useState({});
@@ -244,9 +271,10 @@ export default function LineupDecisions({
     [rosterEntries],
   );
 
+  const nflWeek = React.useMemo(getNFLWeek, []);
   const optimalSlots = React.useMemo(
-    () => computeOptimal(startingSlots, allRosterPlayers, getProj),
-    [startingSlots, allRosterPlayers],
+    () => computeOptimal(startingSlots, allRosterPlayers, getProj, nflWeek),
+    [startingSlots, allRosterPlayers, nflWeek],
   );
 
   // Map slot+typeIndex → optimal playerId
@@ -305,10 +333,10 @@ export default function LineupDecisions({
 
       <DatabricksAIPanel myRosterIds={myRosterIds} />
 
+      {!compact && <>
       {/* ── Summary header ── */}
       <div className="card" style={{ marginBottom: 16, padding: '18px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, flexWrap: 'wrap' }}>
-          <TeamLogoBadge team={null} size={40} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10 }}>
               Lineup Optimizer · {startingSlots.length} starters
@@ -561,6 +589,7 @@ export default function LineupDecisions({
           </div>
         </>
       )}
+      </>}
     </div>
   );
 }

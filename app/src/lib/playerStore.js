@@ -99,15 +99,23 @@ export function normalizePlayerList(rawArr) {
   const seenIds   = new Set(); // keyed by Sleeper player_id string
   const result    = [];
 
-  for (const p of rawArr) {
+  // Process real-team entries before teamless/corrupt ones so a valid NFL entry always wins
+  // the name-based dedup over a corrupt duplicate with an invalid team abbreviation.
+  const sortedArr = [
+    ...rawArr.filter(p => BYE_WEEKS_2026[p.team]),
+    ...rawArr.filter(p => !BYE_WEEKS_2026[p.team]),
+  ];
+
+  for (const p of sortedArr) {
     // Support both camelCase (new export) and snake_case (old schema)
     const isDraftable = p.isDraftable ?? p.is_draftable;
     if (isDraftable === false || isDraftable === 'false') continue;
 
     const rawPos  = p.position || p.pos;
     const rawTeam = p.team;
-    // 'UNK' is the Databricks export sentinel for "team not resolved" — treat same as FA
-    const isTeamless = !rawTeam || rawTeam === 'FA' || rawTeam === 'UNK';
+    // Only accept the 32 real NFL team abbreviations. Anything else (FA, UNK, corrupt values
+    // like "TEPHI") is treated as teamless. BYE_WEEKS_2026 keys are exactly the 32 teams.
+    const isTeamless = !rawTeam || !BYE_WEEKS_2026[rawTeam];
     if (isTeamless) {
       // Keep free agents / unknowns only if they have evidence of NFL relevance
       const hasRank  = Number(p.positionRank || p.position_rank || p.search_rank || p.ecr) > 0;
@@ -169,11 +177,20 @@ export function normalizePlayerList(rawArr) {
     // proj: R2 export uses season_avg_points_2025; older schemas use proj / projected_avg_points
     const projRaw    = Number(p.proj) || Number(p.projected_avg_points)
                     || Number(p.season_avg_points_2025) || Number(p.career_ppg) || 0;
-    // ECR: new schema has positionRank; old has position_rank / search_rank
+    // ECR: use positionRank → p.ecr → 999. Never use search_rank (Sleeper popularity index, not a rank).
     const posRank    = Number(p.positionRank || p.position_rank) || null;
-    const searchRank = Number(p.search_rank || p.ecr) || null;
+    const searchRank = Number(p.ecr) || null;
     const ecr        = posRank ?? searchRank ?? 999;
-    const adp        = Number(p.adp) || searchRank || 999;
+    // Accept any ADP field name used across our data sources:
+    //   adp           — legacy/Sleeper field
+    //   adp_ppr       — export_players_2026_draft / player_profiles (PPR value)
+    //   adp_rank_ppr  — integer rank from same tables
+    //   adp_value     — adp_ppr.json / adp_standard.json dedicated files
+    //   adp_rank      — integer rank from same files
+    const adpRaw = Number(p.adp) || Number(p.adp_ppr) || Number(p.adp_rank_ppr)
+                 || Number(p.adp_value) || Number(p.adp_rank) || 0;
+    // search_rank is Sleeper's popularity rank, NOT a draft position — never use it as ADP
+    const adp    = adpRaw || 999;
     const owned      = Number(p.owned) || (ecr < 999
       ? Math.max(0, parseFloat((100 - ecr * 0.28).toFixed(1)))
       : 0);
@@ -216,8 +233,10 @@ export function normalizePlayerList(rawArr) {
       opp:         p.opp                  || '',
       oppRank:     Number(p.oppRank)      || 0,
       proj,
-      last:        Number(p.last)         || 0,
-      avg:         Number(p.avg)          || proj || 0,
+      last:        Number(p.last) || Number(p.avg_fantasy_points_per_game_2025) || Number(p.season_avg_points_2025) || 0,
+      avg:         Number(p.avg) || Number(p.career_ppg) || proj || 0,
+      pts2025:     Number(p.total_fantasy_points_2025) || Number(p.season_total_points_2025) || 0,
+      rookie:      p.is_rookie === true || p.is_rookie === 'true' || Number(p.years_exp) === 0,
       trend,
       depth:       Number(p.depth)        || 1,
       targetShare: Number(p.targetShare)  || 0,
@@ -234,27 +253,10 @@ export function normalizePlayerList(rawArr) {
     });
   }
 
-  // If the source had no ranking data (all ECR = 999), derive ECR and ADP from proj values.
-  // This applies when loading from the R2 export which has stats but no pre-computed ranks.
-  const hasRanks = result.some(p => p.ecr < 999);
-  if (!hasRanks) {
-    // Positional ECR: rank each position group by proj descending
-    const byPos = {};
-    for (const p of result) {
-      if (!byPos[p.pos]) byPos[p.pos] = [];
-      byPos[p.pos].push(p);
-    }
-    for (const group of Object.values(byPos)) {
-      group.sort((a, b) => b.proj - a.proj);
-      group.forEach((p, i) => { p.ecr = i + 1; });
-    }
-    // Overall ADP: sort all players by proj, assign overall rank
-    const sorted = [...result].sort((a, b) => b.proj - a.proj);
-    sorted.forEach((p, i) => {
-      p.adp   = i + 1;
-      p.owned = Math.max(0, parseFloat((100 - (i + 1) * 0.045).toFixed(1)));
-    });
-  }
+  // ECR starts at 999 for all players; the async ECR patch (ecr_ppr.json / ecr_std.json)
+  // sets real FantasyPros ranks after normalizePlayerList returns. Never derive fake ranks
+  // from proj here — that produced duplicate #1s when players without stats sorted
+  // alphabetically and collided with the real #1 from the ECR patch.
 
   return result;
 }

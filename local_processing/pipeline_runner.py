@@ -1,9 +1,11 @@
 """
-Pipeline runner — orchestrates Job 1 → Job 2 in sequence.
+Pipeline runner — orchestrates Job 1 → Job 2 → Job 3 in sequence.
 
 Jobs:
   Job 1 (qwen3:8b):  Classify articles → player_notes + ai_summaries → R2
   Job 2 (qwen3:14b): Analyze player data → waiver/lineup/trade → R2
+  Job 3 (qwen3:14b): Generate player writeups → player_writeups.json → R2
+                     Requires players/player_profiles.json from Databricks export.
 
 Both jobs run incrementally by default — only new/changed articles and
 players are processed. Use --full to force a complete rerun.
@@ -13,9 +15,11 @@ Usage:
   python pipeline_runner.py --full        # reprocess everything
   python pipeline_runner.py --job 1       # job 1 only
   python pipeline_runner.py --job 2       # job 2 only (requires job 1 to have run)
+  python pipeline_runner.py --job 3       # job 3 only (requires player_profiles.json)
   python pipeline_runner.py --limit 50    # cap articles (fast test)
   python pipeline_runner.py --dry-run     # run models but don't upload to R2
   python pipeline_runner.py --task waiver # job 2 single task only
+  python pipeline_runner.py --pos QB,RB   # job 3 position filter
 """
 
 import argparse
@@ -44,22 +48,26 @@ def run_job(script: str, extra_args: list[str]) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="FantasAI GPU processing pipeline")
-    parser.add_argument("--job",     choices=["1", "2", "all"], default="all")
+    parser.add_argument("--job",     choices=["1", "2", "3", "all"], default="all")
     parser.add_argument("--limit",   type=int, default=None, help="Cap articles for Job 1")
     parser.add_argument("--dry-run", action="store_true", help="Don't upload to R2")
     parser.add_argument("--full",    action="store_true",
                         help="Reprocess all articles/players (ignore cache)")
     parser.add_argument("--task",    choices=["waiver", "lineup", "trade"], default=None,
                         help="Run only this task in Job 2")
+    parser.add_argument("--pos",     type=str, default=None,
+                        help="Job 3 position filter, e.g. QB,RB")
     args = parser.parse_args()
 
     run_all = args.job == "all"
     run1    = run_all or args.job == "1"
     run2    = run_all or args.job == "2"
+    run3    = run_all or args.job == "3"
 
     start_time = time.time()
     print(f"\n[pipeline] Starting — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"[pipeline] Jobs: {'1+2' if run_all else args.job} | "
+    jobs_label = "1+2+3" if run_all else args.job
+    print(f"[pipeline] Jobs: {jobs_label} | "
           f"Limit: {args.limit or 'all'} | Dry-run: {args.dry_run}")
 
     job1_args = []
@@ -78,6 +86,14 @@ def main():
     if args.full:
         job2_args.append("--full")
 
+    job3_args = []
+    if args.dry_run:
+        job3_args.append("--dry-run")
+    if args.full:
+        job3_args.append("--full")
+    if args.pos:
+        job3_args += ["--pos", args.pos]
+
     failed = []
 
     if run1:
@@ -92,6 +108,11 @@ def main():
         rc = run_job("job2_fantasy_analyzer.py", job2_args)
         if rc != 0:
             failed.append("job2")
+
+    if run3:
+        rc = run_job("job3_player_writeups.py", job3_args)
+        if rc != 0:
+            failed.append("job3")
 
     total = round(time.time() - start_time, 1)
     print(f"\n{'='*60}")

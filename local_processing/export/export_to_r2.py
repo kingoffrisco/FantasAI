@@ -295,26 +295,93 @@ def export_analysis(conn, dry_run: bool):
     """)
     r2_put("fantasai/analysis/breakout_candidates.json", breakout, dry_run)
 
-    # 2. Player profiles from Sleeper (export_players_2026_draft equivalent)
+    # 2. Player profiles from Sleeper + DSTs from ADP rankings
+    # Kickers (K) are in bronze_player_news_raw (Sleeper tracks them as players).
+    # DSTs are NOT — Sleeper stores teams separately, so we pull them from
+    # bronze_adp_rankings where format='DST' (populated by ingest_adp.py).
     players_draft = q(conn, """
+        WITH stats_2025 AS (
+            SELECT
+                LOWER(TRIM(player_name))              AS name_key,
+                ROUND(SUM(fantasy_points), 1)         AS season_total_points_2025,
+                ROUND(AVG(CASE WHEN fantasy_points > 0 THEN fantasy_points END), 1)
+                                                      AS season_avg_points_2025,
+                COUNT(CASE WHEN fantasy_points > 0 THEN 1 END)
+                                                      AS games_played_2025
+            FROM silver_weekly_stats
+            WHERE season = 2025
+            GROUP BY LOWER(TRIM(player_name))
+        )
         SELECT
-            player_id AS master_player_id,
-            player_name AS full_name,
-            position,
-            team,
-            years_exp,
-            CASE WHEN years_exp = 0 THEN TRUE ELSE FALSE END AS is_rookie,
-            age,
-            depth_chart_order,
-            depth_chart_position,
-            NULL AS season_total_points_2025,
-            NULL AS season_avg_points_2025,
-            NULL AS games_played_2025
-        FROM bronze_player_news_raw
-        WHERE position IN ('QB','RB','WR','TE','K')
-          AND team IS NOT NULL
-          AND active = TRUE
-        ORDER BY position, player_name
+            p.player_id       AS master_player_id,
+            p.player_name     AS full_name,
+            p.position,
+            p.team,
+            p.years_exp,
+            CASE WHEN p.years_exp = 0 THEN TRUE ELSE FALSE END AS is_rookie,
+            p.age,
+            p.depth_chart_order,
+            p.depth_chart_position,
+            s.season_total_points_2025,
+            s.season_avg_points_2025,
+            s.games_played_2025,
+            NULL              AS adp_rank
+        FROM bronze_player_news_raw p
+        LEFT JOIN stats_2025 s ON LOWER(TRIM(p.player_name)) = s.name_key
+        WHERE p.position IN ('QB','RB','WR','TE','K')
+          AND p.team IS NOT NULL
+          AND p.active = TRUE
+
+        UNION ALL
+
+        SELECT
+            dst_team        AS master_player_id,
+            dst_team || ' D/ST' AS full_name,
+            'DST'           AS position,
+            dst_team        AS team,
+            NULL            AS years_exp,
+            FALSE           AS is_rookie,
+            NULL            AS age,
+            NULL            AS depth_chart_order,
+            NULL            AS depth_chart_position,
+            NULL            AS season_total_points_2025,
+            NULL            AS season_avg_points_2025,
+            NULL            AS games_played_2025,
+            adp_rank
+        FROM (
+            WITH team_name_map(full_name, abbr) AS (
+                VALUES
+                    ('Arizona Cardinals','ARI'),('Atlanta Falcons','ATL'),
+                    ('Baltimore Ravens','BAL'),('Buffalo Bills','BUF'),
+                    ('Carolina Panthers','CAR'),('Chicago Bears','CHI'),
+                    ('Cincinnati Bengals','CIN'),('Cleveland Browns','CLE'),
+                    ('Dallas Cowboys','DAL'),('Denver Broncos','DEN'),
+                    ('Detroit Lions','DET'),('Green Bay Packers','GB'),
+                    ('Houston Texans','HOU'),('Indianapolis Colts','IND'),
+                    ('Jacksonville Jaguars','JAX'),('Kansas City Chiefs','KC'),
+                    ('Las Vegas Raiders','LV'),('Los Angeles Chargers','LAC'),
+                    ('Los Angeles Rams','LAR'),('Miami Dolphins','MIA'),
+                    ('Minnesota Vikings','MIN'),('New England Patriots','NE'),
+                    ('New Orleans Saints','NO'),('New York Giants','NYG'),
+                    ('New York Jets','NYJ'),('Philadelphia Eagles','PHI'),
+                    ('Pittsburgh Steelers','PIT'),('San Francisco 49ers','SF'),
+                    ('Seattle Seahawks','SEA'),('Tampa Bay Buccaneers','TB'),
+                    ('Tennessee Titans','TEN'),('Washington Commanders','WAS')
+            )
+            SELECT
+                CASE
+                    WHEN b.team != '' AND b.team IS NOT NULL THEN b.team
+                    ELSE m.abbr
+                END AS dst_team,
+                MIN(b.adp_rank) AS adp_rank
+            FROM bronze_adp_rankings b
+            LEFT JOIN team_name_map m ON LOWER(b.player_name) = LOWER(m.full_name)
+            WHERE b.format = 'DST'
+            GROUP BY dst_team
+            HAVING dst_team IS NOT NULL AND dst_team != ''
+        ) dst
+
+        ORDER BY position, full_name
     """)
     players_draft_payload = wrap(players_draft, "bronze_player_news_raw", season=2026)
     r2_put("fantasai/players/export_players_2026_draft.json", players_draft_payload, dry_run)

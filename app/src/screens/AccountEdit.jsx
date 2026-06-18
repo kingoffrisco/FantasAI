@@ -449,7 +449,6 @@ export default function AccountEditScreen({ user }) {
     <div className="col" style={{ height: '100%' }}>
       <div className="page-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <TeamLogoBadge team={findTeam(teamId)} size={40} />
           <div>
             <h1>My Account &amp; Team</h1>
             <div className="sub">Customize how your team appears in the league</div>

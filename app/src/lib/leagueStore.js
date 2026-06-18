@@ -20,6 +20,17 @@ export function getLiveTeams()        { return _store?.teams    ?? null; }
 export function getLiveSettings()     { return _store?.settings ?? null; }
 export function getLeagueId()         { return _store?.leagueId ?? 'tau'; }
 
+// Reads the scoring format set by the commissioner ('ppr' | 'half-ppr' | 'standard').
+// Falls back to 'half-ppr' when not yet configured.
+export function getScoringFormat() {
+  const fromS3 = _store?.settings?.scoringFormat;
+  if (fromS3) return fromS3;
+  try {
+    const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+    return saved?.scoringFormat || 'half-ppr';
+  } catch { return 'half-ppr'; }
+}
+
 // Per-user team customizations stored locally (logo, color, name overrides).
 export function getMyTeamPrefs() {
   try { return JSON.parse(localStorage.getItem('fantasai_team_prefs') || 'null'); } catch { return null; }

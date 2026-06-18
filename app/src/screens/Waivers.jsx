@@ -1,8 +1,8 @@
 import React from 'react';
-import { TEAM_ROSTERS, TEAMS_ORDER, findTeam, GAME_WEATHER } from '../lib/data.js';
+import { TEAM_ROSTERS, TEAMS_ORDER, findTeam } from '../lib/data.js';
 import { usePlayers, findPlayerByName } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
-import { useR2Waivers } from '../hooks.js';
+import { useR2Waivers, useR2WeatherForecast } from '../hooks.js';
 import { getWaivers, saveWaivers } from '../lib/remoteState.js';
 
 const DEFAULT_WAIVER_ORDER = [...TEAMS_ORDER].reverse();
@@ -39,15 +39,21 @@ function fmtDate(d) {
 }
 
 function WeatherCell({ opp }) {
-  const w = GAME_WEATHER[opp];
-  if (!w) return null;
-  if (w.cond === 'Dome') {
-    return <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 2 }}>🏟️ Dome</div>;
-  }
-  const isAlert = w.wind >= 15 || w.temp <= 32;
+  const { data: r2Weather } = useR2WeatherForecast();
+  const entry = r2Weather?.teams?.[opp?.toUpperCase()];
+  if (!entry) return null;
+  if (entry.is_dome) return <div style={{ fontSize: 10, color: '#1affa0', marginTop: 2 }}>🏟️ Dome</div>;
+  if (!entry.forecast?.length) return null;
+  const day = entry.forecast[0];
+  const hour = day?.hourly?.find(h => h.time === '1300') || day?.hourly?.[0];
+  if (!hour) return null;
+  const temp = Math.round(hour.temp_f || day.max_temp_f || 0);
+  const wind = Math.round(hour.wind_mph || 0);
+  const isAlert = wind >= 15 || temp <= 32;
+  const icon = wind >= 20 ? '🌬️' : temp <= 32 ? '❄️' : temp >= 80 ? '☀️' : '⛅';
   return (
     <div style={{ fontSize: 10, marginTop: 2, color: isAlert ? 'var(--warn)' : 'var(--text-faint)' }}>
-      {w.icon} {w.temp}°F{w.wind > 0 ? ` · ${w.wind}mph` : ''}
+      {icon} {temp}°F{wind > 0 ? ` · ${wind}mph` : ''}
     </div>
   );
 }
@@ -286,7 +292,6 @@ export default function WaiversScreen({ user, myRosterIds = new Set(), onAddPlay
       {/* ── Header ── */}
       <div className="page-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {user && <TeamLogoBadge team={user.teamId ? findTeam(user.teamId) : null} size={40} />}
           <div>
             <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               Waivers

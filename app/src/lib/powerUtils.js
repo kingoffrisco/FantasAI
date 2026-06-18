@@ -42,9 +42,8 @@ export function buildPowerData(currentWeek, rosterOverrides = {}, slotOverridesB
       ?? new Set((TEAM_ROSTERS[team.id] || []).filter(r => r.playerId).map(r => r.playerId));
     const teamSlotOv     = slotOverridesByTeam[team.id] ?? {};
     const rosterEntries  = assignRoster(rosterFrame, playerIdSet, teamSlotOv, findPlayer);
-    const starters = rosterEntries.filter(e => e.slot !== 'BENCH');
-    const projPts  = starters.reduce((s, e) => {
-      const p = findPlayer(e.playerId);
+    const projPts = rosterEntries.reduce((s, e) => {
+      const p = e.playerId ? findPlayer(e.playerId) : null;
       return s + (p ? (p.proj || 0) : 0);
     }, 0);
 

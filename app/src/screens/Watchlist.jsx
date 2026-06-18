@@ -131,7 +131,7 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
       {/* ── 2. Breakouts ── */}
       <div className="wl-group" style={{ marginTop: 8 }}>
         <div className="head">
-          <div className="name" style={{ color: 'var(--accent)' }}>
+          <div className="name" style={{ color: 'var(--accent-2)' }}>
             Breakouts
             {useBreakoutsR2 && AI_BADGE}
           </div>
@@ -233,7 +233,7 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
       {/* ── 5. Sleepers ── */}
       <div className="wl-group" style={{ marginTop: 8 }}>
         <div className="head">
-          <div className="name" style={{ color: 'var(--accent-2)' }}>
+          <div className="name" style={{ color: '#ffd700' }}>
             Sleepers
             {useSleepersR2 && AI_BADGE}
           </div>

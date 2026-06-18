@@ -91,7 +91,6 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
     <div className="col" style={{ height: '100%', overflow: 'auto' }}>
       <div className="page-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <TeamLogoBadge team={myTeamObj} size={40} />
           <div>
             <h1>Trade Analyzer</h1>
             <div className="sub">Build a multi-player offer · FantasAI grades the deal</div>

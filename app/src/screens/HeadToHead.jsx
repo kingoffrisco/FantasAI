@@ -162,7 +162,6 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     <div style={{ padding: '20px 24px', maxWidth: 1100, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="page-head" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <TeamLogoBadge team={findTeam(myTeamId)} size={40} />
           <div>
             <h1 style={{ marginBottom: 2 }}>Head to Head</h1>
             <div className="sub">Weekly matchup results · rosters pulled from Current Roster settings</div>
@@ -754,8 +753,11 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
         const statLine = formatStatLine(p, lockedEntry?.stats || null);
         const dispScore = actual ?? proj;
         const actColor = actual != null ? (dispScore >= 20 ? 'var(--accent)' : dispScore >= 10 ? '#4ea8ff' : 'var(--text)') : 'var(--text-faint)';
-        const delta = p ? proj - (p.avg || 0) : 0;
-        const mover = delta >= 3 ? '🔥' : delta <= -3 ? '❄️' : '';
+        let mover = '';
+        if (actual != null && proj > 0) {
+          if (actual >= proj * 1.25) mover = '🔥';
+          else if (actual < proj * 0.5) mover = '❄️';
+        }
         return (
           <div key={i}
             style={{ padding: '5px 16px', display: 'grid', gridTemplateColumns: '32px 1fr 22px 44px 48px', alignItems: 'center', gap: 6, fontSize: 11, cursor: p && onOpenPlayer ? 'pointer' : 'default' }}

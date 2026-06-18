@@ -200,14 +200,29 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     if (!raw.length) return [];
     const players = getPlayers();
     const bySleeperMap = new Map();
-    players.forEach(p => { if (p.sleeperId) bySleeperMap.set(String(p.sleeperId), p); });
+    const byNameMap    = new Map();
+    players.forEach(p => {
+      if (p.sleeperId) bySleeperMap.set(String(p.sleeperId), p);
+      if (p.name)      byNameMap.set(p.name.toLowerCase(), p);
+    });
     return raw.map(a => {
       const headline    = a.headline || a.title || '';
       const article_url = a.source_url || a.article_url || a.url || '';
       const published_at= a.published_at || null;
       const description = a.full_text || a.description || a.summary || '';
       if (!headline) return null;
-      const pl = a.primary_player_id ? bySleeperMap.get(String(a.primary_player_id)) : null;
+
+      // Resolve player: primary_player_id → mentioned_players[0] name → raw fields
+      let pl = a.primary_player_id ? bySleeperMap.get(String(a.primary_player_id)) : null;
+      if (!pl) {
+        let mentioned = a.mentioned_players;
+        if (typeof mentioned === 'string') {
+          try { mentioned = JSON.parse(mentioned); } catch { mentioned = []; }
+        }
+        const first = Array.isArray(mentioned) ? mentioned[0] : null;
+        if (first) pl = byNameMap.get(first.toLowerCase());
+      }
+
       return {
         headline,
         article_url,
@@ -277,8 +292,12 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     const arr = Array.isArray(r2PlayerNotes) ? r2PlayerNotes : [];
     const items = [];
     for (const pn of arr) {
-      if (!pn.notes?.length) continue;
-      const note   = pn.notes[0];
+      // notes may arrive as a JSON-encoded string from Spark serialization
+      const notes = Array.isArray(pn.notes) ? pn.notes
+        : typeof pn.notes === 'string' ? (() => { try { return JSON.parse(pn.notes); } catch { return []; } })()
+        : [];
+      if (!notes.length) continue;
+      const note   = notes[0];
       const player = matchPlayer(pn.player_name || '');
       if (!player) continue;
       const impact = pn.has_critical_news || note.priority === 'critical' ? 'high'
@@ -296,11 +315,14 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
         source:          'FantasAI',
         sourceId:        'fantasai-notes',
         color:           '#c6ff3a',
-        title:           note.note_text ? note.note_text.slice(0, 120) : '',
-        body:            pn.notes.slice(0, 3).map(n => n.note_text).filter(Boolean).join(' · '),
+        title:           note.note_text || '',
+        body:            notes.slice(1, 5).map(n => n.note_text).filter(Boolean).join('\n'),
+        notesList:       notes.slice(0, 5).map(n => ({ text: n.note_text, priority: n.priority, direction: n.impact_direction })).filter(n => n.text),
         impactScore:     pn.overall_impact_score,
         sentiment:       pn.sentiment || null,
         waiverRelevance: pn.waiver_relevance || null,
+        dynastyRelevance: pn.dynasty_relevance || null,
+        articleCount:    pn.article_count || notes.length,
       });
     }
     setLiveItems(prev => ({ ...prev, 'fantasai-notes': items }));
@@ -342,7 +364,7 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
         mins:        0,
         fetchedAt:   s.generated_at ? new Date(s.generated_at).getTime() : Date.now(),
         publishedAt: s.generated_at ? new Date(s.generated_at).getTime() : null,
-        source:      'FantasAI AI',
+        source:      'FantasAI',
         sourceId:    'fantasai-ai',
         color:       '#c6ff3a',
         title,
@@ -614,11 +636,18 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
   // Merge all sources into one entry per player.
   // CBS replaces static Beat Writer entries; all live sources are combined under the same player card.
   const IMPACT_RANK = { high: 3, med: 2, good: 1, low: 0 };
+  // fantasai-notes and fantasai-ai both originate from our own pipeline — treat as one slot.
+  // fantasai-ai wins (richer: full summary + ripple); fantasai-notes is kept only if ai is absent.
+  const FANTASAI_IDS = new Set(['fantasai-notes', 'fantasai-ai']);
   const allNews = React.useMemo(() => {
     const allLive = Object.values(liveItems).flat();
     const cbsIds  = new Set((liveItems['cbs-news'] || []).map(i => i.playerId));
     const base    = NEWS.filter(n => !cbsIds.has(n.playerId));
-    const raw     = [...base, ...allLive];
+    // Put fantasai-ai before fantasai-notes so the richer source wins the first-seen slot
+    const aiItems    = allLive.filter(i => i.sourceId === 'fantasai-ai');
+    const notesItems = allLive.filter(i => i.sourceId === 'fantasai-notes');
+    const otherItems = allLive.filter(i => !FANTASAI_IDS.has(i.sourceId));
+    const raw = [...base, ...aiItems, ...notesItems, ...otherItems];
 
     // Group by player — one card per player, sources[] accumulates each entry
     const byPlayer = new Map();
@@ -627,9 +656,9 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
         byPlayer.set(item.playerId, { ...item, sources: [item] });
       } else {
         const merged = byPlayer.get(item.playerId);
-        // One entry per (source, player): injury/status sources produce exactly one
-        // update per player so any second entry from the same source is a duplicate.
-        const isDup = merged.sources.some(s => s.sourceId === item.sourceId);
+        // Treat both FantasAI sourceIds as one slot — skip if any FantasAI entry already present
+        const isFantasAIDup = FANTASAI_IDS.has(item.sourceId) && merged.sources.some(s => FANTASAI_IDS.has(s.sourceId));
+        const isDup = merged.sources.some(s => s.sourceId === item.sourceId) || isFantasAIDup;
         if (isDup) continue;
         merged.sources.push(item);
         // Escalate impact to worst seen
@@ -699,6 +728,15 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
              (n.body  || '').toLowerCase().includes(q);
     });
   }
+  if (impact !== 'all') {
+    news = news.filter(n => {
+      const imp = n.impact || '';
+      if (impact === 'high') return imp === 'high';
+      if (impact === 'med')  return imp === 'med';
+      if (impact === 'low')  return imp === 'low' || imp === 'good';
+      return true;
+    });
+  }
 
   const uniqueSrcCount = new Set(news.flatMap(n => n.sources?.map(s => s.sourceId || s.source) || [])).size;
 
@@ -725,7 +763,6 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
       {/* ── Header ── */}
       <div className="page-head" style={{ paddingBottom: 0, borderBottom: 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
-          {user && <TeamLogoBadge team={user.teamId ? findTeam(user.teamId) : null} size={40} />}
           <div><h1>News &amp; Updates</h1></div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -775,69 +812,105 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
         ))}
       </div>
 
-      {/* ── Filters row ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 20px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', flexShrink: 0 }}>
-        {/* Position pills */}
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-faint)', marginRight: 2 }}>Position</span>
-          {['All', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => {
-            const val = p === 'All' ? 'ALL' : p;
-            return (
-              <button key={p} onClick={() => setPos(val)} style={{
-                background: pos === val ? 'var(--accent)' : 'var(--panel-3)',
-                color: pos === val ? '#0a1300' : 'var(--text-dim)',
-                border: 'none', borderRadius: 4, padding: '3px 9px', fontSize: 11,
-                fontWeight: pos === val ? 700 : 500, cursor: 'pointer',
-              }}>{p}</button>
-            );
-          })}
+      {/* ── Filters ── */}
+      <div style={{ flexShrink: 0, borderBottom: '1px solid var(--border)' }}>
+        {/* Row 1: position + team + priority controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 20px', flexWrap: 'wrap' }}>
+          {/* Position pills */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-faint)', marginRight: 2 }}>Position</span>
+            {['All', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => {
+              const val = p === 'All' ? 'ALL' : p;
+              return (
+                <button key={p} onClick={() => setPos(val)} style={{
+                  background: pos === val ? 'var(--accent)' : 'var(--panel-3)',
+                  color: pos === val ? '#0a1300' : 'var(--text-dim)',
+                  border: 'none', borderRadius: 4, padding: '3px 9px', fontSize: 11,
+                  fontWeight: pos === val ? 700 : 500, cursor: 'pointer',
+                }}>{p}</button>
+              );
+            })}
+          </div>
+
+          <div style={{ width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }} />
+
+          {/* NFL team filter */}
+          <select value={teamFilter} onChange={e => setTeamFilter(e.target.value)} style={{
+            fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)',
+            border: `1px solid ${teamFilter !== 'ALL' ? 'var(--accent)' : 'var(--border)'}`,
+            borderRadius: 4, padding: '3px 7px', cursor: 'pointer',
+          }}>
+            <option value="ALL">All NFL Teams</option>
+            {NFL_TEAMS_FULL.map(t => <option key={t.abbr} value={t.abbr}>{t.abbr} — {t.city} {t.name}</option>)}
+          </select>
+
+          <div style={{ width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }} />
+
+          {/* Fantasy team filter */}
+          <select value={fantasyTeam} onChange={e => setFantasyTeam(e.target.value)} style={{
+            fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)',
+            border: `1px solid ${fantasyTeam !== 'ALL' ? 'var(--accent)' : 'var(--border)'}`,
+            borderRadius: 4, padding: '3px 7px', cursor: 'pointer',
+          }}>
+            <option value="ALL">All Fantasy Teams</option>
+            {LEAGUE_TEAMS.map(t => (
+              <option key={t.id} value={t.id}>{t.name}{t.me ? ' (Me)' : ''}</option>
+            ))}
+          </select>
+
+          {/* Priority pills — right after fantasy team, news tab only */}
+          {mainTab === 'news' && (
+            <>
+              <div style={{ width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }} />
+              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                {[['all', 'All'], ['high', 'High'], ['med', 'Med'], ['low', 'Low']].map(([val, label]) => {
+                  const active = impact === val;
+                  const color = val === 'all' ? 'var(--text-dim)' : ARTICLE_PRIORITY_COLOR[val] || 'var(--text-faint)';
+                  return (
+                    <button key={val} onClick={() => setImpact(val)} style={{
+                      fontSize: 9, padding: '2px 8px', borderRadius: 3, cursor: 'pointer',
+                      fontFamily: 'var(--font-mono)', fontWeight: 700,
+                      border:     `1px solid ${active ? color + '88' : 'var(--border)'}`,
+                      background: active ? color + '18' : 'var(--panel-3)',
+                      color:      active ? color : 'var(--text-faint)',
+                    }}>{label}</button>
+                  );
+                })}
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+                {news.length} story{news.length !== 1 ? 's' : ''}
+              </span>
+            </>
+          )}
+
+          {(pos !== 'ALL' || search || teamFilter !== 'ALL' || fantasyTeam !== 'ALL' || (mainTab === 'news' && impact !== 'all')) && (
+            <button className="btn sm ghost" onClick={() => { setPos('ALL'); setSearch(''); setTeamFilter('ALL'); setFantasyTeam('ALL'); setImpact('all'); }} style={{ fontSize: 11, marginLeft: 'auto' }}>✕ Clear</button>
+          )}
         </div>
 
-        <div style={{ width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }} />
-
-        {/* NFL team filter */}
-        <select value={teamFilter} onChange={e => setTeamFilter(e.target.value)} style={{
-          fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)',
-          border: `1px solid ${teamFilter !== 'ALL' ? 'var(--accent)' : 'var(--border)'}`,
-          borderRadius: 4, padding: '3px 7px', cursor: 'pointer',
-        }}>
-          <option value="ALL">All NFL Teams</option>
-          {NFL_TEAMS_FULL.map(t => <option key={t.abbr} value={t.abbr}>{t.abbr} — {t.city} {t.name}</option>)}
-        </select>
-
-        <div style={{ width: 1, height: 18, background: 'var(--border)', flexShrink: 0 }} />
-
-        {/* Fantasy team filter */}
-        <select value={fantasyTeam} onChange={e => setFantasyTeam(e.target.value)} style={{
-          fontSize: 11, background: 'var(--panel-2)', color: 'var(--text)',
-          border: `1px solid ${fantasyTeam !== 'ALL' ? 'var(--accent)' : 'var(--border)'}`,
-          borderRadius: 4, padding: '3px 7px', cursor: 'pointer',
-        }}>
-          <option value="ALL">All Fantasy Teams</option>
-          {LEAGUE_TEAMS.map(t => (
-            <option key={t.id} value={t.id}>{t.name}{t.me ? ' (Me)' : ''}</option>
-          ))}
-        </select>
-
-        <div style={{ flex: 1 }} />
-
-        {/* Search */}
-        <input
-          className="input search"
-          placeholder="Search player or headline…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{ width: 220, fontSize: 12 }}
-        />
-
-        {(pos !== 'ALL' || search || teamFilter !== 'ALL' || fantasyTeam !== 'ALL') && (
-          <button className="btn sm ghost" onClick={() => { setPos('ALL'); setSearch(''); setTeamFilter('ALL'); setFantasyTeam('ALL'); }} style={{ fontSize: 11 }}>✕</button>
-        )}
-        {mainTab === 'news' && (
-          <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
-            {news.length} story{news.length !== 1 ? 's' : ''}
-          </span>
-        )}
+        {/* Row 2: prominent search bar */}
+        <div style={{ padding: '0 20px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ position: 'relative', flex: 1, maxWidth: 480 }}>
+            <span style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: search ? 'var(--accent)' : 'var(--text-faint)', pointerEvents: 'none', lineHeight: 1 }}>⌕</span>
+            <input
+              className="input"
+              placeholder="Search player or headline…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{
+                width: '100%', fontSize: 13, paddingLeft: 32, paddingTop: 7, paddingBottom: 7,
+                background: search ? 'rgba(198,255,58,.06)' : 'var(--panel-2)',
+                border: `1px solid ${search ? 'rgba(198,255,58,.5)' : 'var(--border)'}`,
+                borderRadius: 6, color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
+              }}
+              onFocus={e => { e.target.style.border = '1px solid rgba(198,255,58,.6)'; e.target.style.background = 'rgba(198,255,58,.06)'; }}
+              onBlur={e => { e.target.style.border = `1px solid ${search ? 'rgba(198,255,58,.5)' : 'var(--border)'}`;  e.target.style.background = search ? 'rgba(198,255,58,.06)' : 'var(--panel-2)'; }}
+            />
+            {search && (
+              <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', fontSize: 13, lineHeight: 1, padding: '2px 4px' }}>✕</button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* ── Feed ── */}
@@ -885,6 +958,9 @@ function ArticleCard({ a, onSelect, selected, score }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3, flexWrap: 'wrap' }}>
           <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--text)' }}>{a.player_name}</span>
           {a.team && <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{a.team}</span>}
+          {a._manualLabel && (
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,.1)', border: '1px solid rgba(74,222,128,.3)', borderRadius: 3, padding: '1px 5px' }}>🏷 labeled</span>
+          )}
           {isBreaking(a.published_at) && (
             <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#ff4d4d', background: 'rgba(255,77,77,.12)', border: '1px solid rgba(255,77,77,.3)', borderRadius: 3, padding: '1px 5px', letterSpacing: '.06em' }}>⚡ BREAKING</span>
           )}
@@ -1010,17 +1086,32 @@ function ArticleInlineDetail({ article, onClose, user, existingScore, onVote }) 
 }
 
 /* ── Articles tab — two columns with inline expansion ────────────────────────── */
+const ARTICLE_PRIORITY_COLOR = { high: '#ff9800', med: '#4ea8ff', low: 'var(--text-faint)' };
+
 function ArticlesFeedTab({ articles, loading, dbSource, user, posFilter = 'ALL', search = '', teamFilter = 'ALL', fantasyRosterNames = null }) {
   const [selectedArticle, setSelectedArticle] = React.useState(null);
   const [articleScores,   setArticleScores]   = React.useState({});
   const [freshAiOnly,     setFreshAiOnly]     = React.useState(false);
   const [votedOnly,       setVotedOnly]       = React.useState(false);
   const [sortBy,          setSortBy]          = React.useState('published'); // 'published' | 'ai_analyzed'
+  const [labelByUrl,      setLabelByUrl]      = React.useState(new Map());
 
   React.useEffect(() => {
     fetch(`${API_BASE}/api/v1/feedback/scores`, { signal: AbortSignal.timeout(10000) })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.scores) setArticleScores(d.scores); })
+      .catch(() => {});
+  }, []);
+
+  React.useEffect(() => {
+    fetch(`${API_BASE}/api/v1/labels/article`, { signal: AbortSignal.timeout(15000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!Array.isArray(d)) return;
+        const m = new Map();
+        for (const l of d) if (l.article_url) m.set(l.article_url, l);
+        setLabelByUrl(m);
+      })
       .catch(() => {});
   }, []);
 
@@ -1073,8 +1164,15 @@ function ArticlesFeedTab({ articles, loading, dbSource, user, posFilter = 'ALL',
     </div>
   );
 
-  const labeled   = filtered.filter(a => a.player_name && a.position);
-  const unlabeled = filtered.filter(a => !a.player_name || !a.position);
+  // Merge manual labels from the Labels tab into articles so labeled ones move left
+  const mergedFiltered = filtered.map(a => {
+    if (a.player_name && a.position) return a;
+    const lbl = labelByUrl.get(a.article_url);
+    if (!lbl?.labeled_position) return a;
+    return { ...a, player_name: lbl.labeled_player_name || a.player_name || '', position: lbl.labeled_position, team: lbl.labeled_team || a.team || '', _manualLabel: true };
+  });
+  const labeled   = mergedFiltered.filter(a => a.player_name && a.position);
+  const unlabeled = mergedFiltered.filter(a => !a.player_name || !a.position);
 
   function renderList(list, emptyMsg) {
     if (list.length === 0) return <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-faint)', fontSize: 12 }}>{emptyMsg}</div>;
@@ -1358,7 +1456,9 @@ function PlayerNotesTab({ data }) {
       <div style={{ flex: 1, overflow: 'auto' }}>
         <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
           {items.map((pn, i) => {
-            const notes = Array.isArray(pn.notes) ? pn.notes : [];
+            const notes = Array.isArray(pn.notes) ? pn.notes
+              : typeof pn.notes === 'string' ? (() => { try { return JSON.parse(pn.notes); } catch { return []; } })()
+              : [];
             const isCrit = pn.has_critical_news;
             const isInj  = pn.has_injury_concern;
             return (
@@ -1491,21 +1591,26 @@ function ArticleLinks({ articles }) {
 function FeedView({ news, onOpenPlayer, rosteredIds, playerNewsMap }) {
   const IMPACT_COLOR = { high: 'var(--danger)', med: 'var(--warn)', good: 'var(--good)', low: 'var(--text-faint)' };
   return (
-    <div style={{ maxWidth: 820, margin: '0 auto', padding: '0 0 40px' }}>
+    <div style={{ padding: '0 0 40px' }}>
       {news.map(n => {
         const player = findPlayer(n.playerId);
         if (!player) return null;
 
         const sources   = n.sources || [n];
         const best      = sources.find(s => s.sourceId === 'fantasai-notes') || sources.find(s => s.sourceId === 'fantasai-ai') || sources[0];
-        const title     = best?.title || n.title || '';
+        const rawTitle  = best?.title || n.title || '';
         const body      = best?.body  || n.body  || '';
+        const notesList = best?.notesList || null;
+        const bodyIsExpansion = rawTitle.endsWith('…') && body.startsWith(rawTitle.slice(0, -1));
+        const title     = bodyIsExpansion ? body : rawTitle;
         const rawSrcLabel = best?.source || best?.sourceId || '';
         const srcLabel  = (rawSrcLabel === 'Sleeper' || rawSrcLabel === 'sleeper-api') ? '' : rawSrcLabel;
         const pubStr    = best?.publishedAt ? fmtNewsDate(best.publishedAt) : null;
         const fetchStr  = best?.fetchedAt  ? fmtNewsDate(best.fetchedAt)  : null;
         // Only show fetched date if there's no published date, or they differ by >5 min
         const showFetch = !pubStr || (best?.fetchedAt && best?.publishedAt && Math.abs(best.fetchedAt - best.publishedAt) > 5 * 60 * 1000);
+        // Secondary sources — exclude the lead (best) from the breakdown to avoid duplication
+        const secondarySources = sources.filter(s => s !== best);
         const isFA      = !rosteredIds?.has(n.playerId);
         const impColor  = IMPACT_COLOR[n.impact] || 'var(--text-faint)';
         const articles  = playerNewsMap?.get(player.name.toLowerCase().trim()) || [];
@@ -1574,10 +1679,10 @@ function FeedView({ news, onOpenPlayer, rosteredIds, playerNewsMap }) {
               )}
             </div>
 
-            {/* Multi-source status breakdown — when multiple sources have data on this player */}
-            {sources.length > 1 && (
+            {/* Multi-source status breakdown — secondary sources only (lead shown in headline) */}
+            {secondarySources.length > 0 && (
               <div style={{ marginBottom: body && body !== title ? 8 : 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {sources.map((s, si) => {
+                {secondarySources.map((s, si) => {
                   const sPub   = s.publishedAt ? fmtNewsDate(s.publishedAt) : null;
                   const sFetch = s.fetchedAt   ? fmtNewsDate(s.fetchedAt)   : null;
                   const sDate  = sPub || sFetch;
@@ -1599,10 +1704,33 @@ function FeedView({ news, onOpenPlayer, rosteredIds, playerNewsMap }) {
               </div>
             )}
 
-            {/* Full article body */}
-            {body && body !== title && (
+            {/* AI notes list — additional article summaries beyond the headline */}
+            {notesList && notesList.length > 1 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 8 }}>
+                {notesList.slice(1).map((note, ni) => {
+                  const dirColor = note.direction === 'positive' ? 'var(--good)' : note.direction === 'negative' ? 'var(--danger)' : 'var(--accent)';
+                  return (
+                    <div key={ni} style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                      <span style={{ color: dirColor, fontSize: 10, marginTop: 2, flexShrink: 0 }}>
+                        {note.direction === 'positive' ? '▲' : note.direction === 'negative' ? '▼' : '◆'}
+                      </span>
+                      <span>{note.text}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* Full article body — only shown for non-FantasAI sources or when body adds new info */}
+            {!notesList && body && body !== title && !bodyIsExpansion && (
               <div style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.65, marginBottom: 8 }}>
                 {body}
+              </div>
+            )}
+            {/* Waiver/dynasty signals */}
+            {((best?.waiverRelevance >= 6) || (best?.dynastyRelevance >= 6)) && (
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                {best.waiverRelevance >= 6 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--warn)', background: 'rgba(255,181,71,.1)', border: '1px solid rgba(255,181,71,.3)', borderRadius: 3, padding: '1px 6px' }}>W {best.waiverRelevance.toFixed(1)}</span>}
+                {best.dynastyRelevance >= 6 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b4a0ff', background: 'rgba(180,160,255,.1)', border: '1px solid rgba(180,160,255,.3)', borderRadius: 3, padding: '1px 6px' }}>DYN {best.dynastyRelevance.toFixed(1)}</span>}
               </div>
             )}
 

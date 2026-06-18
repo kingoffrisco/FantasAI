@@ -59,7 +59,7 @@ const TIER_STYLE = {
   Low:   { color: 'var(--text-faint)', bg: 'transparent', border: 'rgba(255,255,255,.1)' },
 };
 
-export const PlayerCell = ({ player, showStatus = true, watched = false }) => {
+export const PlayerCell = ({ player, showStatus = true, watched = false, ownerTeam = null, isOnMyRoster = false }) => {
   const tierKey = player.seasonTier ? player.seasonTier.charAt(0).toUpperCase() + player.seasonTier.slice(1).toLowerCase() : null;
   const ts = tierKey && TIER_STYLE[tierKey] ? TIER_STYLE[tierKey] : null;
   return (
@@ -69,6 +69,13 @@ export const PlayerCell = ({ player, showStatus = true, watched = false }) => {
         <div className={`player-name${watched ? ' watched' : ''}`}>
           {watched && <span style={{ marginRight: 4, fontSize: 11 }}>★</span>}
           {showStatus && <StatusDot status={player.status} />} {player.name}
+          {player.rookie && <span style={{ marginLeft: 4, fontSize: 8, fontWeight: 800, color: '#4ea8ff', background: 'rgba(78,168,255,.15)', border: '1px solid rgba(78,168,255,.3)', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>R</span>}
+          {ownerTeam && (
+            <span style={{ marginLeft: 6, display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)', color: isOnMyRoster ? 'var(--accent)' : ownerTeam.color || 'var(--text-dim)', verticalAlign: 'middle' }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOnMyRoster ? 'var(--accent)' : (ownerTeam.color || '#666'), display: 'inline-block', flexShrink: 0 }} />
+              {isOnMyRoster ? 'My Team' : ownerTeam.name}
+            </span>
+          )}
           {ts && tierKey !== 'Low' && (
             <span style={{ marginLeft: 5, fontSize: 8, fontWeight: 800, fontFamily: 'var(--font-mono)', letterSpacing: '.04em', color: ts.color, background: ts.bg, border: `1px solid ${ts.border}`, borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>{tierKey.toUpperCase()}</span>
           )}

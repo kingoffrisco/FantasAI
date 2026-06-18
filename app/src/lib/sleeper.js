@@ -74,6 +74,37 @@ export async function fetchBulkWeekStats(season = 2025, week = 18) {
   );
 }
 
+// ── League-wide season totals for a position ──────────────────────────────────
+// Week payloads are already in _cache after fetchSleeperPlayerStats runs,
+// so this is essentially a free in-memory aggregation.
+const _leagueTotalsCache = {};
+export async function fetchLeagueSeasonTotals(pos, season = 2025) {
+  const cacheKey = `league:${pos}:${season}`;
+  if (_leagueTotalsCache[cacheKey]) return _leagueTotalsCache[cacheKey];
+
+  const weeks = await Promise.all(
+    Array.from({ length: 18 }, (_, i) =>
+      fetchCached(`${SLEEPER}/stats/nfl/regular/${season}/${i + 1}`, `stats:${season}:${i + 1}`)
+    )
+  );
+
+  const map = await getPlayerMap();
+  const result = {}; // sleeperId → { name, totals }
+
+  for (const [sid, player] of Object.entries(map)) {
+    if (player.position !== pos) continue;
+    const statsList = weeks.map(w => w?.[sid]).filter(Boolean);
+    if (!statsList.length) continue;
+    const totals = aggregate(statsList);
+    if (Object.values(totals).some(v => v > 0)) {
+      result[sid] = { name: player.full_name, totals };
+    }
+  }
+
+  _leagueTotalsCache[cacheKey] = result;
+  return result;
+}
+
 // ── NFL State ────────────────────────────────────────────────────────────────
 let _nflState = null;
 let _nflStateAt = 0;
@@ -133,8 +164,8 @@ export async function fetchSleeperPlayerStats(name, pos, season = 2025) {
   if (!entry) return { found: false, searched: name, pos };
   const [sleeperId, player] = entry;
 
-  // Fetch last 8 completed weeks of stats (deduped via cache)
-  const weeksWanted = Array.from({ length: 8 }, (_, i) => maxWeek - i).filter(w => w >= 1);
+  // Fetch all completed regular-season weeks (cached, so repeat opens are instant)
+  const weeksWanted = Array.from({ length: maxWeek }, (_, i) => i + 1);
   const weekData = await Promise.all(
     weeksWanted.map(wk =>
       fetchCached(`${SLEEPER}/stats/nfl/regular/${season}/${wk}`, `stats:${season}:${wk}`)
@@ -163,6 +194,7 @@ export async function fetchSleeperPlayerStats(name, pos, season = 2025) {
     pos:           player.position || pos,
     status:        player.injury_status || player.status || 'Active',
     injuryBodyPart: player.injury_body_part || '',
+    currentSeason: Number(state.season) || season,
     currentWeek,
     gamesPlayed:   Object.keys(weeklyStats).length,
     weeklyStats,

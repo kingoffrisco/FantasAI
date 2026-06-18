@@ -382,7 +382,20 @@ function normalize(fs) {
   return scaled;
 }
 
-export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, user, myRosterIds = new Set() }) {
+export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, user, myRosterIds = new Set(), cookieAlert = false, onCookieAlertDismiss }) {
+  const [openCookieTrigger, setOpenCookieTrigger] = React.useState(0);
+  const [cookieFixed, setCookieFixed] = React.useState(false);
+  const fixTimerRef = React.useRef(null);
+
+  function handleCookieSaved() {
+    setCookieFixed(true);
+    clearTimeout(fixTimerRef.current);
+    fixTimerRef.current = setTimeout(() => {
+      setCookieFixed(false);
+      onCookieAlertDismiss?.();
+    }, 5000);
+  }
+
   const [feeds, setFeeds] = React.useState(() => {
     const raw = RANKING_SOURCES.map(s => ({
       ...s,
@@ -464,7 +477,6 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
     <div className="col" style={{ height: '100%', overflow: 'auto' }}>
       <div className="page-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <TeamLogoBadge team={null} size={40} />
           <div>
             <h1>Sources &amp; Connections</h1>
             <div className="sub">Plug FantasAI into your league + tune which expert feeds drive recommendations.</div>
@@ -482,9 +494,43 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
           <div className="section-sub">Where your league lives. We mirror rosters, scoring, transactions, and 5 years of draft history.</div>
         </div>
 
+        {(cookieAlert || cookieFixed) && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            background: cookieFixed ? 'rgba(76,175,130,.1)' : 'rgba(255,77,79,.08)',
+            border: `1px solid ${cookieFixed ? 'rgba(76,175,130,.4)' : 'rgba(255,77,79,.35)'}`,
+            borderRadius: 8, padding: '10px 16px', marginBottom: 12,
+            transition: 'background .5s, border-color .5s',
+          }}>
+            <span style={{ fontSize: 18, flexShrink: 0 }}>{cookieFixed ? '✓' : '⚠'}</span>
+            <div style={{ flex: 1 }}>
+              {cookieFixed ? (
+                <>
+                  <span style={{ fontWeight: 800, fontSize: 13, color: '#4caf82' }}>Cookie Updated</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-dim)', marginLeft: 8 }}>CBS Sports is now connected. Syncing roster data…</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontWeight: 800, fontSize: 13, color: 'var(--danger)' }}>CBS Cookie Expired</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-dim)', marginLeft: 8 }}>Your session has expired — rosters and scoring won't sync.</span>
+                </>
+              )}
+            </div>
+            {!cookieFixed && (
+              <button
+                className="btn sm"
+                style={{ flexShrink: 0, fontWeight: 700, background: 'rgba(255,77,79,.15)', borderColor: 'rgba(255,77,79,.4)', color: 'var(--danger)' }}
+                onClick={() => setOpenCookieTrigger(t => t + 1)}
+              >
+                🍪 Get Cookie
+              </button>
+            )}
+          </div>
+        )}
+
         {connected ? (
           <React.Fragment>
-            <div className="src-hero">
+            <div className="src-hero" style={cookieFixed ? { border: '1px solid rgba(76,175,130,.5)', boxShadow: '0 0 0 3px rgba(76,175,130,.08)', transition: 'all .5s' } : cookieAlert ? { border: '1px solid var(--danger)', boxShadow: '0 0 0 3px rgba(255,77,79,.08)' } : undefined}>
               <div className="src-hero-left">
                 <div className="src-platform-tag" style={{ background: cbs.color }}>CBS</div>
                 <div>
@@ -562,10 +608,12 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
               The hub everything routes through. Proxies R2 player exports, Databricks analysis, ESPN live scores, and CBS league data. Configure its URL and shared secret in the form below.
             </div>
           </div>
-          <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', background: 'var(--panel)' }}>
+          <div style={{ border: `1px solid ${cookieFixed ? 'rgba(76,175,130,.5)' : cookieAlert ? 'var(--danger)' : 'var(--border)'}`, borderRadius: 10, padding: '14px 16px', background: cookieFixed ? 'rgba(76,175,130,.07)' : cookieAlert ? 'rgba(255,77,79,.05)' : 'var(--panel)', transition: 'all .5s' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span style={{ fontSize: 16 }}>🍪</span>
               <span style={{ fontWeight: 800, fontSize: 12, letterSpacing: '.04em' }}>CBS COOKIE WORKER</span>
+              {cookieFixed && <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 800, color: '#4caf82', background: 'rgba(76,175,130,.12)', border: '1px solid rgba(76,175,130,.35)', borderRadius: 3, padding: '1px 6px', letterSpacing: '.06em' }}>CONNECTED</span>}
+              {!cookieFixed && cookieAlert && <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 800, color: 'var(--danger)', background: 'rgba(255,77,79,.12)', border: '1px solid rgba(255,77,79,.35)', borderRadius: 3, padding: '1px 6px', letterSpacing: '.06em' }}>NEEDS ATTENTION</span>}
               <code style={{ fontSize: 10, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px', color: 'var(--text-faint)', marginLeft: 'auto' }}>fantasai-cbs</code>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6 }}>
@@ -574,7 +622,7 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
           </div>
         </div>
 
-        <WorkerConfig />
+        <WorkerConfig openCookieTrigger={openCookieTrigger} onCookieSaved={handleCookieSaved} />
 
         <div className="src-other-grid">
           {INTEGRATIONS.filter(i => i.id !== 'cbs').map(i => {

@@ -270,7 +270,6 @@ export default function OwnerIntelScreen({ onOpenPlayer, user, myRosterIds, slot
     <div className="col" style={{ height: '100%', overflow: 'hidden' }}>
       <div className="page-head">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <TeamLogoBadge team={null} size={40} />
           <div>
             <h1>Owner Intel · Draft DNA</h1>
             <div className="sub">

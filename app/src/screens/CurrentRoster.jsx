@@ -3,8 +3,8 @@ import { TEAM_ROSTERS, findTeam, NEWS, SLOT_ELIGIBILITY, ROSTER_CONFIG, LEAGUE_T
 import { usePlayers, findPlayer, findPlayerByName, getPlayers, patchPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge, Sparkline } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
-import { useR2Drops, useR2Injuries, useR2PlayerNotes, useR2EnrichedNews, useR2WeatherForecast, useR2BreakoutCandidates, useR2PlayerNewsLinks } from '../hooks.js';
-import LineupDecisions from './LineupDecisions.jsx';
+import { useR2Drops, useR2Injuries, useR2PlayerNotes, useR2EnrichedNews, useR2WeatherForecast, useR2BreakoutCandidates, useR2PlayerNewsLinks, useR2DefensePerformance } from '../hooks.js';
+import LineupDecisions, { computeOptimal } from './LineupDecisions.jsx';
 
 const H2H_WEEKS   = 14;
 const H2H_SEASON_START = new Date('2026-09-09');
@@ -46,6 +46,43 @@ function buildH2HSchedule(ids, weeks) {
 }
 
 const H2H_SCHEDULE = buildH2HSchedule(LEAGUE_TEAMS.map(t => t.id), H2H_WEEKS);
+
+// Week 1 2026 NFL schedule — { opp, time, isAway }
+// isAway=true → this team travels (show "@" prefix on opponent)
+const WEEK1_2026 = {
+  PHI: { opp: 'KC',  time: 'Thu 7:20pm CT', isAway: false },
+  KC:  { opp: 'PHI', time: 'Thu 7:20pm CT', isAway: true  },
+  ATL: { opp: 'PIT', time: 'Sun 12:00pm CT', isAway: true  },
+  PIT: { opp: 'ATL', time: 'Sun 12:00pm CT', isAway: false },
+  BUF: { opp: 'NE',  time: 'Sun 12:00pm CT', isAway: false },
+  NE:  { opp: 'BUF', time: 'Sun 12:00pm CT', isAway: true  },
+  MIA: { opp: 'NYJ', time: 'Sun 12:00pm CT', isAway: false },
+  NYJ: { opp: 'MIA', time: 'Sun 12:00pm CT', isAway: true  },
+  CIN: { opp: 'BAL', time: 'Sun 12:00pm CT', isAway: true  },
+  BAL: { opp: 'CIN', time: 'Sun 12:00pm CT', isAway: false },
+  HOU: { opp: 'CLE', time: 'Sun 12:00pm CT', isAway: false },
+  CLE: { opp: 'HOU', time: 'Sun 12:00pm CT', isAway: true  },
+  IND: { opp: 'JAX', time: 'Sun 12:00pm CT', isAway: false },
+  JAX: { opp: 'IND', time: 'Sun 12:00pm CT', isAway: true  },
+  LV:  { opp: 'TEN', time: 'Sun 12:00pm CT', isAway: false },
+  TEN: { opp: 'LV',  time: 'Sun 12:00pm CT', isAway: true  },
+  CHI: { opp: 'GB',  time: 'Sun 12:00pm CT', isAway: false },
+  GB:  { opp: 'CHI', time: 'Sun 12:00pm CT', isAway: true  },
+  ARI: { opp: 'NO',  time: 'Sun 3:25pm CT',  isAway: false },
+  NO:  { opp: 'ARI', time: 'Sun 3:25pm CT',  isAway: true  },
+  LAR: { opp: 'SF',  time: 'Sun 3:25pm CT',  isAway: false },
+  SF:  { opp: 'LAR', time: 'Sun 3:25pm CT',  isAway: true  },
+  DEN: { opp: 'SEA', time: 'Sun 3:25pm CT',  isAway: false },
+  SEA: { opp: 'DEN', time: 'Sun 3:25pm CT',  isAway: true  },
+  LAC: { opp: 'MIN', time: 'Sun 3:25pm CT',  isAway: false },
+  MIN: { opp: 'LAC', time: 'Sun 3:25pm CT',  isAway: true  },
+  TB:  { opp: 'CAR', time: 'Sun 3:25pm CT',  isAway: false },
+  CAR: { opp: 'TB',  time: 'Sun 3:25pm CT',  isAway: true  },
+  NYG: { opp: 'DAL', time: 'Sun 7:20pm CT',  isAway: false },
+  DAL: { opp: 'NYG', time: 'Sun 7:20pm CT',  isAway: true  },
+  DET: { opp: 'WAS', time: 'Mon 7:15pm CT',  isAway: false },
+  WAS: { opp: 'DET', time: 'Mon 7:15pm CT',  isAway: true  },
+};
 
 // Normalize a player name for fuzzy matching: lowercase, strip Jr/Sr/II/III/IV suffixes, collapse whitespace
 function normalizeName(name) {
@@ -281,14 +318,13 @@ function DropCandidatesPanel({ myRosterIds, onOpenPlayer }) {
 export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPlayer, onDropPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange, tradeOffers = [], onRespondTradeOffer, rosterSyncBadge, rosterLoading }) {
   const allPlayers = usePlayers();
   const [dropConfirm, setDropConfirm] = React.useState(null);
-  const [addFilter, setAddFilter] = React.useState('ALL');
-  const [addSearch, setAddSearch] = React.useState('');
   const [tab, setTab] = React.useState('roster');
   const [dragId, setDragId] = React.useState(null);
   const [dragOver, setDragOver] = React.useState(null);
   const [swapTarget, setSwapTarget] = React.useState(null);      // { playerId, slot }
   const [addDropPending, setAddDropPending] = React.useState(null); // { addPlayer, dropPlayerId }
   const [expandedNews, setExpandedNews] = React.useState(new Set()); // playerIds with expanded news
+  const [expandedArts, setExpandedArts] = React.useState(new Set()); // playerIds with expanded article list
   const [matchupExpanded, setMatchupExpanded] = React.useState(false);
 
   // Schedule loaded from S3 (set by Admin/Commissioner in League Settings)
@@ -328,6 +364,24 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   const { data: r2WeatherData }  = useR2WeatherForecast();
   const { data: r2Breakouts }    = useR2BreakoutCandidates();
   const { data: r2PlayerNewsData } = useR2PlayerNewsLinks();
+  const { data: r2DefenseData }  = useR2DefensePerformance();
+
+  // Defense rank lookup: team abbrev → rank 1-32 (1=toughest, 32=easiest matchup)
+  const defRankByTeam = React.useMemo(() => {
+    const arr = r2DefenseData?.data || (Array.isArray(r2DefenseData) ? r2DefenseData : []);
+    if (!arr.length) return {};
+    const latestByTeam = {};
+    for (const row of arr) {
+      const t = row.team;
+      if (t && (!latestByTeam[t] || row.week > latestByTeam[t].week))
+        latestByTeam[t] = row;
+    }
+    const sorted = Object.values(latestByTeam)
+      .sort((a, b) => (b.avg_last_4_weeks || 0) - (a.avg_last_4_weeks || 0));
+    const ranks = {};
+    sorted.forEach((row, i) => { ranks[row.team] = i + 1; });
+    return ranks;
+  }, [r2DefenseData]);
 
   // Parse R2 player_news.json (unified pipeline, highest priority)
   // Normalize player_news.json — handles multiple field name conventions from pipeline
@@ -418,6 +472,16 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     }
     return m;
   }, [mergedArticles]);
+
+  // Map player name → FantasAI Job 1 notes entry for per-player news cell display
+  const r2NotesLookup = React.useMemo(() => {
+    const m = new Map();
+    const arr = Array.isArray(r2PlayerNotes) ? r2PlayerNotes : [];
+    for (const pn of arr) {
+      if (pn.player_name) m.set(pn.player_name.toLowerCase().trim(), pn);
+    }
+    return m;
+  }, [r2PlayerNotes]);
 
   const breakoutByName = React.useMemo(() => {
     if (!Array.isArray(r2Breakouts)) return new Map();
@@ -871,22 +935,12 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     []
   );
 
-  // Available players for Add tab
-  const rosterIds = new Set(fullRoster.map(r => r.playerId).filter(Boolean));
-  const available = allPlayers.filter(p => {
-    if (rosterIds.has(p.id)) return false;
-    if (addFilter === 'FLEX' && !['RB', 'WR'].includes(p.pos)) return false;
-    if (addFilter !== 'ALL' && addFilter !== 'FLEX' && p.pos !== addFilter) return false;
-    if (addSearch && !p.name.toLowerCase().includes(addSearch.toLowerCase())) return false;
-    return true;
-  }).sort((a, b) => b.proj - a.proj);
-
   // Swap-picker options (bench moves + top free agents for the targeted slot)
   const swapBenchOpts = swapTarget
     ? fullRoster.filter(r => r.slot === 'BENCH' && r.playerId && r.playerId !== swapTarget.playerId && canFillSlot(findPlayer(r.playerId)?.pos, swapTarget.slot))
     : [];
   const swapFAOpts = swapTarget
-    ? allPlayers.filter(p => !allRosteredIds.has(p.id) && canFillSlot(p.pos, swapTarget.slot)).sort((a, b) => (a.ecr || 999) - (b.ecr || 999)).slice(0, 15)
+    ? allPlayers.filter(p => !allRosteredIds.has(p.id) && canFillSlot(p.pos, swapTarget.slot)).sort((a, b) => (b.proj || 0) - (a.proj || 0)).slice(0, 20)
     : [];
 
   // Build news feed for this roster
@@ -966,10 +1020,14 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     // 2. player_notes — per-player intelligence (skip players already covered above)
     const notesArr = Array.isArray(r2PlayerNotes) ? r2PlayerNotes : [];
     for (const pn of notesArr) {
-      if (!pn.notes?.length) continue;
+      // notes may arrive as a JSON-encoded string from Spark serialization
+      const notes = Array.isArray(pn.notes) ? pn.notes
+        : typeof pn.notes === 'string' ? (() => { try { return JSON.parse(pn.notes); } catch { return []; } })()
+        : [];
+      if (!notes.length) continue;
       const p = matchRosterPlayer(pn.player_name || '');
       if (!p || !rosterPlayerIds.has(p.id) || coveredByEnriched.has(p.id)) continue;
-      const note   = pn.notes[0];
+      const note   = notes[0];
       const impact = pn.has_critical_news || note.priority === 'critical' ? 'high'
                    : pn.has_injury_concern || note.priority === 'high'    ? 'med'
                    : note.impact_direction === 'positive'                  ? 'good'
@@ -983,7 +1041,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
         playerId:  p.id,
         impact,
         title:     note.note_text || `${p.name} Update`,
-        body:      pn.notes.map(n => n.note_text).filter(Boolean).join('\n\n'),
+        body:      notes.map(n => n.note_text).filter(Boolean).join('\n\n'),
         mins:      minsAgo,
         source:    'FantasAI',
         publishedAt: publishedAt?.toISOString() || pn.last_updated || null,
@@ -1031,6 +1089,53 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     return { oppId, myProj, oppProj, winPct };
   }, [teamId]);
 
+  // Live matchup win/loss for row highlight color
+  const matchupWinning = React.useMemo(() => {
+    if (!myMatchup) return null;
+    const myAcc  = starters.reduce((s, e) => {
+      const p = e.playerId ? findPlayer(e.playerId) : null;
+      return s + (p ? buildScoringBreakdown(p, H2H_WEEK).accumulated : 0);
+    }, 0);
+    const oppSt  = (TEAM_ROSTERS[myMatchup.oppId] || []).filter(r => r.slot !== 'BENCH' && r.playerId);
+    const oppAcc = oppSt.reduce((s, e) => {
+      const p = e.playerId ? findPlayer(e.playerId) : null;
+      return s + (p ? buildScoringBreakdown(p, H2H_WEEK).accumulated : 0);
+    }, 0);
+    return myAcc >= oppAcc;
+  }, [myMatchup, starters]);
+
+  // Optimal lineup projection for header display
+  const optimalSlots = React.useMemo(
+    () => computeOptimal(starters, rosterPlayers, p => p?.proj ?? 0, H2H_WEEK),
+    [starters, rosterPlayers],
+  );
+  const optimalTotal = optimalSlots.reduce((s, e) => s + (findPlayer(e.playerId)?.proj ?? 0), 0);
+  const optimalGain  = Math.max(0, optimalTotal - totalProj);
+  const [appliedOptimal, setAppliedOptimal] = React.useState(false);
+
+  // Highlight intensity slider — 0 (off) to 100 (max), default 50
+  const [hlIntensity, setHlIntensity] = React.useState(
+    () => Number(localStorage.getItem('fantasai_hl_intensity') ?? 50)
+  );
+  function handleHlChange(v) {
+    setHlIntensity(v);
+    localStorage.setItem('fantasai_hl_intensity', v);
+  }
+  // Scale base opacity values by intensity (50 = 1×, 0 = off, 100 = ~2×)
+  const hlMult = hlIntensity / 50;
+  function hla(r, g, b, base) {
+    return `rgba(${r},${g},${b},${Math.min(0.85, base * hlMult).toFixed(3)})`;
+  }
+  function handleApplyOptimal() {
+    const overrides = {};
+    for (const { slot, playerId } of optimalSlots) {
+      if (playerId) overrides[playerId] = slot;
+    }
+    onSlotOverridesChange?.(overrides);
+    setAppliedOptimal(true);
+    setTimeout(() => setAppliedOptimal(false), 3000);
+  }
+
   function confirmDrop(entry) {
     setDropConfirm(entry);
   }
@@ -1047,7 +1152,6 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
       <div className="page-head">
         {/* Left — logo + title + projected scores */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <TeamLogoBadge team={team} size={48} />
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
               <h1 style={{ margin: 0 }}>Current Roster</h1>
@@ -1089,20 +1193,29 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                   <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', flexShrink: 0 }}>Wk {H2H_WEEK}</span>
                   <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)' }}>vs {_opp?.name}</span>
                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)' }}>{_myAcc.toFixed(1)} – {_oppAcc.toFixed(1)}</span>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: _isWin ? '#4caf82' : 'var(--danger)' }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: _isWin ? '#1affa0' : 'var(--danger)' }}>
                     {_isWin ? '▲' : '▼'} {_liveWin}% live · Proj {_projWin}%
                   </span>
                   <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{matchupExpanded ? '▲' : '▼'}</span>
                 </div>
               );
             })()}
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20 }}>
               <div>
-                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 1 }}>Base Proj</div>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 22, color: 'var(--accent)', lineHeight: 1 }}>
+                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 1 }}>Current Proj</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 22, color: (appliedOptimal || optimalGain <= 0.05) ? '#1affa0' : '#ffd700', lineHeight: 1 }}>
                   {totalProj.toFixed(1)}
                 </div>
               </div>
+              {optimalGain > 0.05 && (
+                <div>
+                  <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 1 }}>Optimal Proj</div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 22, color: '#1affa0', lineHeight: 1 }}>
+                    {optimalTotal.toFixed(1)}
+                  </div>
+                  <div style={{ fontSize: 9, color: '#1affa0', marginTop: 1 }}>+{optimalGain.toFixed(1)} pts</div>
+                </div>
+              )}
               {cbsNewsCount > 0 && (
                 <div>
                   <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: cbsNewsColor, marginBottom: 1 }}>CBS News</div>
@@ -1115,47 +1228,28 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+          <button
+            className={`btn sm ${(appliedOptimal || optimalGain <= 0.05) ? 'success' : 'primary'}`}
+            style={{ fontSize: 11, whiteSpace: 'nowrap', fontWeight: 700, padding: '6px 14px' }}
+            onClick={handleApplyOptimal}
+            disabled={appliedOptimal || optimalGain <= 0.05}
+          >
+            {(appliedOptimal || optimalGain <= 0.05)
+              ? '✓ Optimal Lineup'
+              : `⚡ Apply Optimal Lineup (+${optimalGain.toFixed(1)} pts)`}
+          </button>
           {activatedSources.length > 0 && (
             <>
               <button
                 className="btn sm"
-                style={{ fontSize: 11, whiteSpace: 'nowrap', background: 'rgba(198,255,58,.08)', borderColor: 'rgba(198,255,58,.35)', color: 'var(--accent)', fontWeight: 700, padding: '6px 14px' }}
+                style={{ fontSize: 11, whiteSpace: 'nowrap', background: 'rgba(78,168,255,.15)', borderColor: 'rgba(78,168,255,.5)', color: '#4ea8ff', fontWeight: 700, padding: '6px 14px' }}
                 disabled={fetchingSourceIds.size > 0}
                 onClick={() => activatedSources.forEach(src => handleRefreshSource(src))}
               >
                 {fetchingSourceIds.size > 0
-                  ? `⟳ Refreshing (${fetchingSourceIds.size}/${activatedSources.length} sources)…`
-                  : '↻ Refresh My Roster News'}
+                  ? `⟳ Refreshing…`
+                  : '↻ Refresh News'}
               </button>
-              {Object.keys(refreshResults).length > 0 && (
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  {activatedSources.filter(src => refreshResults[src.id]).map(src => {
-                    const { updated, total } = refreshResults[src.id];
-                    return (
-                      <span key={src.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                        <span style={{ color: updated > 0 ? src.color : 'var(--text-faint)', fontWeight: 700 }}>{src.name}</span>
-                        <span style={{ color: updated > 0 ? src.color : 'var(--text-faint)', opacity: 0.85 }}>{updated}/{total}</span>
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              <button
-                className="btn sm"
-                style={{ fontSize: 11, whiteSpace: 'nowrap', background: 'rgba(78,168,255,.08)', borderColor: 'rgba(78,168,255,.35)', color: '#4ea8ff', fontWeight: 700, padding: '6px 14px' }}
-                disabled={weatherRefreshing}
-                onClick={handleWeatherRefresh}
-              >
-                {weatherRefreshing ? '⟳ Fetching weather…' : '⛅ Refresh Weather'}
-              </button>
-              {weatherRateMsg && (
-                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textAlign: 'right' }}>{weatherRateMsg}</div>
-              )}
-              {weatherRefreshedAt && !weatherRateMsg && (
-                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#4ea8ff', opacity: 0.75, textAlign: 'right' }}>
-                  Weather updated {fmtTs(weatherRefreshedAt)}
-                </div>
-              )}
             </>
           )}
         </div>
@@ -1164,22 +1258,11 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
       {/* Tabs */}
       <div className="tabs" style={{ padding: '0 18px' }}>
         <div className={`tab ${tab === 'roster' ? 'active' : ''}`} onClick={() => setTab('roster')}>My Roster</div>
-        <div className={`tab ${tab === 'lineup' ? 'active' : ''}`} onClick={() => setTab('lineup')}>🎯 Lineup Decisions</div>
-        <div className={`tab ${tab === 'add' ? 'active' : ''}`} onClick={() => setTab('add')}>Add Player</div>
         <div className={`tab ${tab === 'news' ? 'active' : ''}`} onClick={() => setTab('news')}>
           News &amp; Updates
           {injuryCount > 0 && (
             <span style={{ marginLeft: 6, background: 'var(--danger)', color: '#fff', fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 10, fontFamily: 'var(--font-mono)' }}>
               {injuryCount}
-            </span>
-          )}
-        </div>
-        <div className={`tab ${tab === 'defense' ? 'active' : ''}`} onClick={() => setTab('defense')}>🛡 Defense Rankings</div>
-        <div className={`tab ${tab === 'watchlist' ? 'active' : ''}`} onClick={() => setTab('watchlist')}>
-          Watchlist
-          {watchlistIds.size > 0 && (
-            <span style={{ marginLeft: 6, background: '#ffd700', color: '#1a1200', fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 10, fontFamily: 'var(--font-mono)' }}>
-              {watchlistIds.size}
             </span>
           )}
         </div>
@@ -1220,7 +1303,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                           <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--good)', marginBottom: 4 }}>You Receive</div>
                           {givePlayers.map(p => (
                             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 3 }}>
-                              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'rgba(76,175,130,.15)', color: 'var(--good)', border: '1px solid rgba(76,175,130,.3)', borderRadius: 3, padding: '0 4px' }}>{p.pos}</span>
+                              <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'rgba(26,255,160,.20)', color: 'var(--good)', border: '1px solid rgba(26,255,160,.45)', borderRadius: 3, padding: '0 4px' }}>{p.pos}</span>
                               <span style={{ fontWeight: 600 }}>{p.name}</span>
                               <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>{p.team} · {p.avg.toFixed(1)}</span>
                             </div>
@@ -1349,7 +1432,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
               if (!p) return null;
               const { items: breakdown, accumulated } = buildScoringBreakdown(p, H2H_WEEK);
               const ahead = accumulated >= p.proj;
-              const arrowColor = ahead ? '#4caf82' : 'var(--danger)';
+              const arrowColor = ahead ? '#1affa0' : 'var(--danger)';
               return (
                 <div style={{ background: 'rgba(255,255,255,.04)', borderRadius: 6, overflow: 'hidden', marginBottom: 5 }}>
                   {/* Player header */}
@@ -1413,8 +1496,8 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 6px', borderRadius: 3, marginBottom: 2, background: 'rgba(255,255,255,.02)' }}>
                   <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', background: 'rgba(255,255,255,.06)', padding: '1px 4px', borderRadius: 2, flexShrink: 0 }}>BN</span>
                   <span style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{p.name}</span>
-                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: ahead ? '#4caf82' : 'var(--danger)', fontWeight: 700 }}>{accumulated.toFixed(1)}</span>
-                  <span style={{ fontSize: 9, color: ahead ? '#4caf82' : 'var(--danger)' }}>{ahead ? '▲' : '▼'}</span>
+                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: ahead ? '#1affa0' : 'var(--danger)', fontWeight: 700 }}>{accumulated.toFixed(1)}</span>
+                  <span style={{ fontSize: 9, color: ahead ? '#1affa0' : 'var(--danger)' }}>{ahead ? '▲' : '▼'}</span>
                   <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>/{p.proj.toFixed(1)}</span>
                 </div>
               );
@@ -1434,11 +1517,11 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
                           <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{myTeam?.name}</span>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: 16, color: isWinning ? '#4caf82' : 'var(--text)' }}>{myAccum.toFixed(1)}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: 16, color: isWinning ? '#1affa0' : 'var(--text)' }}>{myAccum.toFixed(1)}</span>
                           <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>pts</span>
                         </div>
                         <div style={{ textAlign: 'center' }}>
-                          <div style={{ fontSize: 12, fontWeight: 900, fontFamily: 'var(--font-display)', color: isWinning ? '#4caf82' : 'var(--danger)', letterSpacing: '.04em' }}>
+                          <div style={{ fontSize: 12, fontWeight: 900, fontFamily: 'var(--font-display)', color: isWinning ? '#1affa0' : 'var(--danger)', letterSpacing: '.04em' }}>
                             {isWinning ? '▲ LEADING' : '▼ TRAILING'} {Math.abs(myAccum - oppAccum).toFixed(1)} pts
                           </div>
                           <div style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
@@ -1451,7 +1534,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: 16, color: !isWinning ? '#4caf82' : 'var(--text)' }}>{oppAccum.toFixed(1)}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: 16, color: !isWinning ? '#1affa0' : 'var(--text)' }}>{oppAccum.toFixed(1)}</span>
                           <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>pts</span>
                           <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{opp?.name}</span>
                         </div>
@@ -1508,39 +1591,98 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
             ) : null;
           })()}
 
+          {/* ── Highlight intensity slider ── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>Row Highlights</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, maxWidth: 220 }}>
+              <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>Off</span>
+              <input
+                type="range" min={0} max={100} value={hlIntensity}
+                onChange={e => handleHlChange(Number(e.target.value))}
+                style={{ flex: 1, accentColor: hlIntensity === 0 ? 'var(--text-faint)' : hlIntensity < 40 ? '#4ea8ff' : hlIntensity < 70 ? '#1affa0' : '#ffd700', cursor: 'pointer', height: 3 }}
+              />
+              <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>Max</span>
+            </div>
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: hlIntensity === 0 ? 'var(--text-faint)' : 'var(--accent)', minWidth: 28, textAlign: 'right' }}>{hlIntensity}%</span>
+            {hlIntensity !== 50 && (
+              <button onClick={() => handleHlChange(50)} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', textDecoration: 'underline' }}>reset</button>
+            )}
+          </div>
+
           <table className="data-table">
             <thead>
-              <tr>
-                <th style={{ paddingRight: 4, width: 1, whiteSpace: 'nowrap' }}>Slot</th>
-                <th>Player</th>
-                <th className="num">Proj</th>
-                <th className="num">Last</th>
-                <th className="num">Avg</th>
-                <th className="num">Trend</th>
-                <th className="num">Opp Sc</th>
-                <th>Opp</th>
-                <th className="num">Bye</th>
-                <th>Status</th>
-                <th style={{ whiteSpace: 'nowrap' }}>
-                  Weather
-                  {weatherRefreshedAt && (
-                    <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: '#4ea8ff', fontWeight: 400, marginTop: 2 }}>
-                      {fmtTs(weatherRefreshedAt)}
-                    </div>
-                  )}
-                </th>
-                <th style={{ maxWidth: 220 }}>
-                  News
-                  {r2InjuryFetchedAt && (
-                    <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', fontWeight: 400, marginTop: 2 }}>
-                      As of – {fmtTs(r2InjuryFetchedAt)}
-                    </div>
-                  )}
-                </th>
-                <th style={{ maxWidth: 300 }}>News Articles</th>
-                <th style={{ fontSize: 9, color: 'var(--text-faint)' }}>▶</th>
-                <th></th>
-              </tr>
+              {/* ── Column group labels (row 1) ── */}
+              {(() => {
+                const grpBox = { padding: '5px 6px 4px', textAlign: 'center', fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.1em', color: 'rgba(255,255,255,.7)', border: '1px solid rgba(255,255,255,.18)', borderBottom: 'none', background: 'rgba(255,255,255,.04)', borderRadius: '3px 3px 0 0' };
+                const grpBlue = { ...grpBox, background: 'rgba(78,168,255,.12)', border: '1px solid rgba(78,168,255,.3)', borderBottom: 'none', color: '#4ea8ff' };
+                const blank   = { padding: '5px 0 4px', border: 'none', background: 'transparent' };
+                return (
+                  <tr>
+                    <th colSpan={2} style={blank} />
+                    <th colSpan={1} style={grpBlue}>STATUS</th>
+                    <th colSpan={3} style={grpBlue}>SCHEDULE</th>
+                    <th colSpan={1} style={grpBlue}>WEATHER</th>
+                    <th colSpan={1} style={grpBlue}>TRENDS</th>
+                    <th colSpan={3} style={grpBlue}>FANTASY POINTS</th>
+                    <th colSpan={1} style={grpBlue}>NEWS</th>
+                    <th colSpan={2} style={blank} />
+                  </tr>
+                );
+              })()}
+              {/* ── Column headers (row 2) ── */}
+              {(() => {
+                const side  = '1px solid rgba(255,255,255,.18)';
+                const sideL = { borderLeft: side };
+                const sideR = { borderRight: side };
+                const sideLR = { borderLeft: side, borderRight: side };
+                return (
+                  <tr>
+                    <th style={{ paddingRight: 4, width: 1, whiteSpace: 'nowrap', fontWeight: 800, color: '#fff' }}>Slot</th>
+                    <th style={{ fontWeight: 800, color: '#fff' }}>Player</th>
+                    {/* STATUS */}
+                    <th style={{ whiteSpace: 'nowrap' }}>Status</th>
+                    {/* SCHEDULE: Bye · Opp · Game Time */}
+                    <th className="num" style={sideL}>Bye</th>
+                    <th>Opp</th>
+                    <th style={{ whiteSpace: 'nowrap', ...sideR }}>Game Time</th>
+                    {/* WEATHER */}
+                    <th style={{ whiteSpace: 'nowrap', ...sideLR }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'center' }}>
+                        <span>Weather</span>
+                        <button
+                          className="btn sm"
+                          style={{ fontSize: 9, padding: '1px 6px', background: 'rgba(78,168,255,.1)', borderColor: 'rgba(78,168,255,.3)', color: '#4ea8ff', fontWeight: 700, lineHeight: 1.4 }}
+                          disabled={weatherRefreshing}
+                          onClick={handleWeatherRefresh}
+                        >
+                          {weatherRefreshing ? '⟳' : 'Refresh'}
+                        </button>
+                      </div>
+                      {weatherRefreshedAt && (
+                        <div style={{ fontSize: 7, fontFamily: 'var(--font-mono)', color: '#4ea8ff', fontWeight: 400, marginTop: 1, textAlign: 'center' }}>
+                          {fmtTs(weatherRefreshedAt)}
+                        </div>
+                      )}
+                    </th>
+                    {/* TRENDS */}
+                    <th className="num" style={sideLR}>Trend</th>
+                    {/* FANTASY POINTS */}
+                    <th className="num" style={sideL}>2025 Pts</th>
+                    <th className="num">2025 PPG</th>
+                    <th className="num" style={sideR}>Proj</th>
+                    <th style={{ maxWidth: 420 }}>
+                      News &amp; Articles
+                      {r2InjuryFetchedAt && (
+                        <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', fontWeight: 400, marginTop: 2 }}>
+                          As of – {fmtTs(r2InjuryFetchedAt)}
+                        </div>
+                      )}
+                    </th>
+                    <th style={{ fontSize: 9, color: 'var(--text-faint)' }}>▶</th>
+                    <th></th>
+                  </tr>
+                );
+              })()}
             </thead>
             <tbody>
               {fullRoster.map((entry, i) => {
@@ -1550,7 +1692,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                 const isFirstBench = isBench && prevEntry && prevEntry.slot !== 'BENCH';
                 const benchDivider = isFirstBench ? (
                   <tr key={`bench-divider-${i}`} style={{ pointerEvents: 'none' }}>
-                    <td colSpan={15} style={{ padding: '6px 14px 4px', background: 'rgba(255,255,255,.03)', borderTop: '2px solid var(--border)' }}>
+                    <td colSpan={14} style={{ padding: '6px 14px 4px', background: 'rgba(255,255,255,.03)', borderTop: '2px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.1em', color: 'var(--text-faint)', textTransform: 'uppercase' }}>Bench</span>
                         <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>— drag any player above this line to put them in the starting lineup</span>
@@ -1593,7 +1735,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                           {entry.slot}
                         </span>
                       </td>
-                      <td colSpan={14} style={{ fontSize: 12 }}>
+                      <td colSpan={13} style={{ fontSize: 12 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <span className="dim">{isBench ? 'Empty bench slot · drop here' : `Empty ${entry.slot} slot · drop ${entry.slot === 'FLEX' ? 'RB/WR' : entry.slot} here`}</span>
                           <button
@@ -1628,8 +1770,8 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                     style={{
                       opacity: isDragging ? 0.4 : isBench ? 0.78 : 1,
                       cursor: 'grab',
-                      background: isDragTarget ? 'rgba(198,255,58,.07)' : isOnBye ? 'rgba(255,40,40,.22)' : effectiveStatus === 'Q' ? 'rgba(255,140,0,.13)' : (effectiveStatus === 'O' || effectiveStatus === 'IR') ? 'rgba(255,40,40,.18)' : isInjured ? 'rgba(255,59,48,.10)' : (!isBench && effectiveStatus === 'OK') ? 'rgba(76,175,130,.18)' : undefined,
-                      outline: isDragTarget ? '1px solid rgba(198,255,58,.3)' : undefined,
+                      background: isDragTarget ? 'rgba(198,255,58,.10)' : isOnBye ? hla(255,40,40,.32) : (p.pos === 'DST' && !isBench) ? (matchupWinning === false ? hla(255,40,40,.18) : hla(26,255,160,.22)) : (p.pos !== 'DST' && effectiveStatus === 'Q') ? hla(255,160,0,.24) : (p.pos !== 'DST' && (effectiveStatus === 'O' || effectiveStatus === 'IR')) ? hla(255,40,40,.28) : (p.pos !== 'DST' && isInjured) ? hla(255,59,48,.22) : (!isBench && effectiveStatus === 'OK') ? (matchupWinning === false ? hla(255,40,40,.18) : hla(26,255,160,.22)) : undefined,
+                      outline: isDragTarget ? '1px solid rgba(198,255,58,.5)' : undefined,
                     }}
                   >
                     <td style={{ paddingRight: 4, width: 1, whiteSpace: 'nowrap' }}>
@@ -1645,11 +1787,11 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                       onClick={() => onOpenPlayer?.(p.id)}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <PlayerAvatar player={p} />
                         <div>
                           <div style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 }}>
                             {isWatched && <span style={{ color: '#ffd700', fontSize: 11 }}>★</span>}
-                            <span style={{ color: isWatched ? '#ffd700' : isOnBye ? 'var(--danger)' : effectiveStatus === 'Q' ? '#ff8c00' : isInjured ? 'var(--danger)' : undefined }}>{p.name}</span>
+                            <span style={{ color: isWatched ? '#ffd700' : isOnBye ? 'var(--danger)' : undefined }}>{p.name}</span>
+                            {p.rookie && <span style={{ fontSize: 9, fontWeight: 800, color: '#4ea8ff', background: 'rgba(78,168,255,.15)', border: '1px solid rgba(78,168,255,.3)', borderRadius: 3, padding: '1px 4px', letterSpacing: '.04em' }}>R</span>}
                             {(() => {
                               const allArticles = playerNewsMap.get(p.name.toLowerCase().trim()) || [];
                               const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -1709,93 +1851,103 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                         </div>
                       </div>
                     </td>
-                    <td className="num" style={{ fontWeight: 600 }}>
-                      {(() => {
-                        const liveProj = (liveData[p.id] || []).find(e => e.proj != null);
-                        return liveProj ? (
-                          <span style={{ color: 'var(--accent-2)' }}>{liveProj.proj.toFixed(1)}</span>
-                        ) : (
-                          <span style={{ color: 'var(--accent)' }}>{p.proj.toFixed(1)}</span>
-                        );
-                      })()}
-                    </td>
-                    <td className="num">{(() => {
-                      const slEntry = (liveData[p.id] || []).find(e => e.sourceId === 'sleeper-api' && e.lastPts != null);
-                      const val = slEntry?.lastPts ?? (p.last > 0 ? p.last : null);
-                      return val != null ? <span style={{ color: slEntry ? 'var(--accent-2)' : undefined }}>{val.toFixed(1)}</span> : <span className="faint">—</span>;
-                    })()}</td>
-                    <td className="num">{(() => { const v = p.avg > 0 ? p.avg : p.proj; return v > 0 ? v.toFixed(1) : <span className="faint">—</span>; })()}</td>
-                    <td className="num" style={{ paddingRight: 6 }}>
-                      {(() => { const td = getTrendData(p); return td.length ? <Sparkline data={td} width={70} height={20} /> : <span className="faint">—</span>; })()}
-                    </td>
-                    <td className="num">
-                      {(() => {
-                        const r = p.oppRank;
-                        if (!r) return <span className="faint">—</span>;
-                        // 1 = toughest defense, 32 = easiest → color accordingly
-                        const color = r <= 8  ? 'var(--danger)'
-                                    : r <= 16 ? 'var(--warn)'
-                                    : r <= 24 ? '#4caf82'
-                                    :           'var(--good)';
-                        const label = r <= 8  ? 'Tough'
-                                    : r <= 16 ? 'Avg'
-                                    : r <= 24 ? 'Good'
-                                    :           'Easy';
-                        return (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 13, color }}>#{r}</span>
-                            <span style={{ fontSize: 8, color, opacity: 0.75, fontFamily: 'var(--font-mono)', letterSpacing: '.04em' }}>{label}</span>
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td>
-                      <span className="mono dim" style={{ fontSize: 11 }}>vs {p.opp}</span>
-                    </td>
-                    <td className="num">
-                      {p.bye ? (
-                        <span style={{
-                          fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12,
-                          color: isOnBye ? 'var(--danger)' : 'var(--text-faint)',
-                        }}>
-                          {isOnBye ? '🔴' : ''} {p.bye}
-                        </span>
-                      ) : <span className="faint">—</span>}
-                    </td>
+                    {/* STATUS */}
                     <td>
                       {isOnBye ? (
                         <span className="status-pill" style={{ color: 'var(--danger)', borderColor: 'rgba(255,40,40,.35)', background: 'rgba(255,40,40,.1)' }}>
                           <StatusDot status="O" /> O · BYE
                         </span>
-                      ) : effectiveStatus !== 'OK' && (
-                        <span className="status-pill"><StatusDot status={effectiveStatus} /> {effectiveStatus}</span>
+                      ) : (p.pos !== 'DST' && effectiveStatus !== 'OK') ? (() => {
+                        const statusLabel = effectiveStatus === 'Q' ? 'Questionable'
+                          : effectiveStatus === 'O' ? 'Out'
+                          : effectiveStatus === 'D' ? 'Doubtful'
+                          : effectiveStatus === 'IR' ? 'IR'
+                          : effectiveStatus;
+                        const statusColor = effectiveStatus === 'Q' ? '#ff9800'
+                          : (effectiveStatus === 'O' || effectiveStatus === 'D' || effectiveStatus === 'IR') ? 'var(--danger)'
+                          : 'var(--text-dim)';
+                        return (
+                          <span className="status-pill" style={{ color: statusColor, borderColor: `${statusColor}55`, background: `${statusColor}18` }}>
+                            <StatusDot status={effectiveStatus} /> {statusLabel}
+                          </span>
+                        );
+                      })() : (
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0', letterSpacing: '.04em' }}>Active</span>
                       )}
                     </td>
+                    {/* SCHEDULE — Bye · Opp · Game Time */}
+                    <td className="num">
+                      {p.bye ? (
+                        <span style={{
+                          fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12,
+                          color: isOnBye ? 'var(--danger)' : 'var(--text)',
+                        }}>
+                          {isOnBye ? '🔴 ' : ''}{p.bye}
+                        </span>
+                      ) : <span className="faint">—</span>}
+                    </td>
+                    <td>
+                      {(() => {
+                        const sched = WEEK1_2026[p.team];
+                        const oppTeam = sched?.opp || p.opp;
+                        if (!oppTeam) return <span className="faint">—</span>;
+                        const r = defRankByTeam[oppTeam] || p.oppRank;
+                        const oppColor = !r ? 'var(--text)'
+                          : r <= 5  ? '#ff4f4f'
+                          : r <= 10 ? '#ff9800'
+                          : r <= 20 ? '#ffd700'
+                          : '#1affa0';
+                        return (
+                          <span className="mono" style={{ fontSize: 12, whiteSpace: 'nowrap', fontWeight: 700 }}>
+                            {sched?.isAway ? <span style={{ color: 'var(--text-dim)' }}>@</span> : null}
+                            <span style={{ color: oppColor }}>{oppTeam}</span>
+                            {r ? <span style={{ color: oppColor, fontSize: 9, marginLeft: 3, opacity: .85 }}>#{r}</span> : null}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap', paddingRight: 10 }}>
+                      {(() => {
+                        const sched = WEEK1_2026[p.team];
+                        if (!sched?.time) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
+                        const [day, ...rest] = sched.time.split(' ');
+                        return (
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, lineHeight: 1.4 }}>
+                            <span style={{ color: 'var(--text)', fontWeight: 800, fontSize: 10, letterSpacing: '.04em' }}>{day}</span>
+                            <span style={{ color: 'var(--text-dim)', display: 'block' }}>{rest.join(' ')}</span>
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    {/* WEATHER */}
                     <td style={{ whiteSpace: 'nowrap', minWidth: 80 }}>
                       {(() => {
                         const wx = getGameWeather(p.team);
                         if (!wx) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
                         if (wx.dome) return (
-                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#666', background: 'rgba(255,255,255,.06)', border: '1px solid #333', borderRadius: 3, padding: '1px 5px' }}>
-                            DOME
+                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0', letterSpacing: '.04em' }}>
+                            Dome
                           </span>
                         );
                         if (wx.noData) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
                         const h = wx.hour;
                         if (!h) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
                         const windMph  = h.wind_mph || 0;
+                        const gustMph  = h.wind_gust_mph || h.gust_mph || h.windgust_mph || 0;
                         const tempF    = h.temp_f   || wx.maxTempF || 0;
                         const precipIn = h.precip_in || 0;
                         const cond     = (h.condition || '').toLowerCase();
                         const isSnow   = cond.includes('snow') || cond.includes('blizzard') || cond.includes('sleet');
                         const isRain   = precipIn > 0.05 || cond.includes('rain') || cond.includes('drizzle') || cond.includes('shower');
-                        // Wind thresholds per fantasy impact:
-                        // <10 minimal · 10-15 slight · 15-20 noticeable · 20+ significant · 25+ major
                         const windColor = windMph >= 20 ? 'var(--danger)'
                                         : windMph >= 15 ? '#ff8c00'
                                         : windMph >= 10 ? '#ffd700'
                                         : 'var(--text)';
-                        const tempColor = tempF <= 20 ? '#4ea8ff' : tempF <= 32 ? '#7ecff5' : tempF >= 95 ? 'var(--danger)' : 'var(--text-dim)';
+                        const tempColor = tempF >= 90 ? '#ff4f4f'
+                                       : tempF >= 75 ? '#ff9800'
+                                       : tempF >= 50 ? '#1affa0'
+                                       : tempF >= 32 ? '#7ecff5'
+                                       : '#ffffff';
                         return (
                           <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>
                             <span style={{ fontWeight: 700, color: tempColor }}>{tempF}°F</span>
@@ -1806,121 +1958,145 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                             {!isSnow && isRain && <div style={{ color: '#ffd700', fontSize: 11 }}>🌧 Rain</div>}
                             {windMph >= 25 && <div style={{ color: 'var(--danger)', fontSize: 11, fontWeight: 700 }}>⚠ Major wind</div>}
                             {windMph >= 20 && windMph < 25 && <div style={{ color: 'var(--danger)', fontSize: 11 }}>⚠ Sig. wind</div>}
+                            {gustMph >= 20 && <div style={{ color: 'var(--danger)', fontSize: 11, fontWeight: 700 }}>💨 Gusts {gustMph}mph</div>}
                           </div>
                         );
                       })()}
                     </td>
-                    <td style={{ maxWidth: 320, verticalAlign: 'top', paddingTop: 8 }}>
+                    {/* TRENDS */}
+                    <td className="num" style={{ paddingRight: 6 }}>
+                      {(() => { const td = getTrendData(p); return td.length ? <Sparkline data={td} width={70} height={20} /> : <span className="faint">—</span>; })()}
+                    </td>
+                    {/* FANTASY POINTS */}
+                    <td className="num">{(() => {
+                      const total = p.pts2025 > 0 ? p.pts2025 : (p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null);
+                      return total != null ? <span style={{ color: 'var(--text)', fontWeight: 600 }}>{Number(total).toFixed(1)}</span> : <span className="faint">—</span>;
+                    })()}</td>
+                    <td className="num">{p.last > 0 ? <span>{p.last.toFixed(1)}</span> : <span className="faint">—</span>}</td>
+                    <td className="num" style={{ fontWeight: 600 }}>
+                      {(() => {
+                        const liveProj = (liveData[p.id] || []).find(e => e.proj != null);
+                        return liveProj ? (
+                          <span style={{ color: 'var(--accent-2)' }}>{liveProj.proj.toFixed(1)}</span>
+                        ) : (
+                          <span style={{ color: 'var(--accent)' }}>{p.proj.toFixed(1)}</span>
+                        );
+                      })()}
+                    </td>
+                    <td style={{ maxWidth: 420, verticalAlign: 'top', paddingTop: 8 }}>
                       {(() => {
                         const liveNotes = (liveData[p.id] || []).filter(e => e.note);
                         const r2 = r2InjuryByName[p.name.toLowerCase()];
                         const r2InjSt = r2?.injury_status;
                         const hasR2 = r2 && r2InjSt && r2InjSt !== 'Active';
-                        if (!liveNotes.length && !hasR2 && !p.news) return null;
-                        return (
-                          <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'normal', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {p.news && (
-                              <div>
-                                <span style={{ color: '#ffd700' }}>{p.news}</span>
-                                <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', color: 'var(--text-faint)' }}>BEAT WRITER</span>
-                              </div>
-                            )}
-                            {hasR2 && (
-                              <div>
-                                <span style={{ color: r2InjSt === 'Out' ? 'var(--danger)' : r2InjSt === 'Questionable' ? '#ff8c00' : r2InjSt === 'Doubtful' ? '#ffb547' : 'var(--accent-2)' }}>
-                                  {r2InjSt}{r2.injury_notes ? ` · ${r2.injury_notes}` : ''}{r2.depth_chart_order ? ` (DC: ${r2.depth_chart_order})` : ''}
-                                </span>
-                                <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', color: 'var(--accent-2)', opacity: 0.75 }}>DATABRICKS</span>
-                                {r2InjuryFetchedAt && (
-                                  <span style={{ marginLeft: 4, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-faint)' }}>{fmtTs(r2InjuryFetchedAt)}</span>
-                                )}
-                              </div>
-                            )}
-                            {liveNotes.map((entry, i) => {
-                              const srcColor = activatedSources.find(s => s.id === entry.sourceId)?.color || 'var(--accent-2)';
-                              const ts = lastFetched[entry.sourceId];
-                              const isLong = entry.note && entry.note.length > 200;
-                              const isExpanded = expandedNews.has(p.id);
-                              const displayNote = isLong && !isExpanded ? entry.note.slice(0, 200) + '…' : entry.note;
-                              return (
-                                <div key={i}>
-                                  <span style={{ color: srcColor }}>{displayNote}</span>
-                                  {isLong && (
-                                    <button
-                                      className="btn ghost sm"
-                                      style={{ marginLeft: 6, fontSize: 9, padding: '1px 5px', verticalAlign: 'middle', color: srcColor, opacity: 0.8 }}
-                                      onClick={e => {
-                                        e.stopPropagation();
-                                        setExpandedNews(prev => {
-                                          const next = new Set(prev);
-                                          if (next.has(p.id)) next.delete(p.id);
-                                          else next.add(p.id);
-                                          return next;
-                                        });
-                                      }}
-                                    >{isExpanded ? 'less ↑' : 'more ↓'}</button>
-                                  )}
-                                  <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', color: srcColor, opacity: 0.75 }}>
-                                    {(entry.source || 'LIVE').toUpperCase()}
-                                  </span>
-                                  {ts && (
-                                    <span style={{ marginLeft: 4, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-faint)' }}>{fmtTs(ts)}</span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td style={{ maxWidth: 300, verticalAlign: 'top', paddingTop: 8 }}>
-                      {(() => {
+                        const aiNotes = r2NotesLookup.get(p.name.toLowerCase().trim()) || null;
+                        const hasNews = liveNotes.length || hasR2 || p.news || aiNotes;
                         const arts = (playerNewsMap.get(normalizeName(p.name)) || playerNewsMap.get(p.name.toLowerCase().trim()) || [])
                           .slice().sort((a, b) => {
                             const ta = a.published_at ? new Date(a.published_at).getTime() : 0;
                             const tb = b.published_at ? new Date(b.published_at).getTime() : 0;
                             return tb - ta;
                           });
-                        const latest = arts[0];
-                        if (!latest) return <span className="faint" style={{ fontSize: 11 }}>—</span>;
-                        const diff = latest.published_at ? Date.now() - new Date(latest.published_at).getTime() : null;
-                        const ago = diff == null ? '' : diff < 3600000 ? `${Math.round(diff / 60000)}m ago`
-                          : diff < 86400000 ? `${Math.round(diff / 3600000)}h ago`
-                          : `${Math.round(diff / 86400000)}d ago`;
-                        const insight = latest.fantasy_insight || latest.summary_text || '';
-                        const headline = latest.headline || '';
+                        if (!hasNews) return <span className="faint" style={{ fontSize: 11 }}>—</span>;
                         return (
-                          <div style={{ fontSize: 11, lineHeight: 1.5, whiteSpace: 'normal' }} onClick={e => e.stopPropagation()}>
-                            {latest.article_url ? (
-                              <a
-                                href={latest.article_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ fontWeight: 600, color: 'var(--text)', textDecoration: 'none', display: 'block', marginBottom: 3, lineHeight: 1.4 }}
-                                onMouseEnter={e => e.currentTarget.style.color = '#4ea8ff'}
-                                onMouseLeave={e => e.currentTarget.style.color = 'var(--text)'}
-                              >
-                                {headline.slice(0, 90)}{headline.length > 90 ? '…' : ''}
-                              </a>
-                            ) : (
-                              <div style={{ fontWeight: 600, marginBottom: 3, lineHeight: 1.4 }}>
-                                {headline.slice(0, 90)}{headline.length > 90 ? '…' : ''}
+                          <div style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'normal', display: 'flex', flexDirection: 'column', gap: 4 }} onClick={e => e.stopPropagation()}>
+                            {/* ── News section ── */}
+                            {hasNews && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                {p.news && (
+                                  <div>
+                                    <span style={{ color: '#ffd700' }}>{p.news}</span>
+                                    <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', color: 'var(--text-faint)' }}>BEAT WRITER</span>
+                                  </div>
+                                )}
+                                {hasR2 && (
+                                  <div>
+                                    <span style={{ color: r2InjSt === 'Out' ? 'var(--danger)' : r2InjSt === 'Questionable' ? '#ff8c00' : r2InjSt === 'Doubtful' ? '#ffb547' : 'var(--accent-2)' }}>
+                                      {r2InjSt}{r2.injury_notes ? ` · ${r2.injury_notes}` : ''}{r2.depth_chart_order ? ` (DC: ${r2.depth_chart_order})` : ''}
+                                    </span>
+                                    <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', color: 'var(--accent-2)', opacity: 0.75 }}>DATABRICKS</span>
+                                    {r2InjuryFetchedAt && (
+                                      <span style={{ marginLeft: 4, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-faint)' }}>{fmtTs(r2InjuryFetchedAt)}</span>
+                                    )}
+                                  </div>
+                                )}
+                                {liveNotes.map((entry, i) => {
+                                  const srcColor = activatedSources.find(s => s.id === entry.sourceId)?.color || 'var(--accent-2)';
+                                  const ts = lastFetched[entry.sourceId];
+                                  const isLong = entry.note && entry.note.length > 200;
+                                  const isExpanded = expandedNews.has(p.id);
+                                  const displayNote = isLong && !isExpanded ? entry.note.slice(0, 200) + '…' : entry.note;
+                                  return (
+                                    <div key={i}>
+                                      <span style={{ color: 'var(--text)' }}>{displayNote}</span>
+                                      {isLong && (
+                                        <button
+                                          className="btn ghost sm"
+                                          style={{ marginLeft: 6, fontSize: 9, padding: '1px 5px', verticalAlign: 'middle', color: srcColor, opacity: 0.8 }}
+                                          onClick={e => {
+                                            e.stopPropagation();
+                                            setExpandedNews(prev => {
+                                              const next = new Set(prev);
+                                              if (next.has(p.id)) next.delete(p.id);
+                                              else next.add(p.id);
+                                              return next;
+                                            });
+                                          }}
+                                        >{isExpanded ? 'less ↑' : 'more ↓'}</button>
+                                      )}
+                                      <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.05em', color: srcColor, opacity: 0.85 }}>
+                                        {(entry.source || 'LIVE').toUpperCase()}
+                                      </span>
+                                      {ts && (
+                                        <span style={{ marginLeft: 4, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-faint)' }}>{fmtTs(ts)}</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
-                            {insight && (
-                              <div style={{ fontSize: 10, color: 'var(--accent)', fontStyle: 'italic', lineHeight: 1.4, marginBottom: 3 }}>
-                                {insight.slice(0, 130)}{insight.length > 130 ? '…' : ''}
-                              </div>
-                            )}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                              {latest.publisher && <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-dim)' }}>{latest.publisher}</span>}
-                              {ago && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{ago}</span>}
-                              {arts.length > 1 && (
-                                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
-                                  +{arts.length - 1} more
-                                </span>
-                              )}
-                            </div>
+                            {/* ── FantasAI notes section ── */}
+                            {aiNotes?.notes?.length > 0 && (() => {
+                              const notesList = aiNotes.notes.slice(0, 5);
+                              const fetchTs = aiNotes.last_updated ? new Date(aiNotes.last_updated).getTime() : null;
+                              function fmtFetchTs(ts) {
+                                if (!ts) return null;
+                                const d = new Date(ts);
+                                const now = new Date();
+                                const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                                if (d.toDateString() === now.toDateString()) return `Today ${time}`;
+                                const y = new Date(now); y.setDate(y.getDate() - 1);
+                                if (d.toDateString() === y.toDateString()) return `Yesterday ${time}`;
+                                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ` ${time}`;
+                              }
+                              return (
+                                <div style={{ borderTop: (liveNotes.length || hasR2 || p.news) ? '1px solid rgba(255,255,255,.06)' : 'none', paddingTop: (liveNotes.length || hasR2 || p.news) ? 5 : 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  {/* Lead note */}
+                                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5 }}>
+                                    <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, padding: '1px 5px', borderRadius: 3, background: 'rgba(198,255,58,.12)', color: '#c6ff3a', border: '1px solid rgba(198,255,58,.25)', whiteSpace: 'nowrap', marginTop: 1 }}>FantasAI</span>
+                                    <span style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.45, flex: 1 }}>{notesList[0].note_text}</span>
+                                    {fetchTs && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', whiteSpace: 'nowrap', marginTop: 1 }}>{fmtFetchTs(fetchTs)}</span>}
+                                  </div>
+                                  {/* Additional notes */}
+                                  {notesList.slice(1).map((note, ni) => {
+                                    const dirColor = note.impact_direction === 'positive' ? 'var(--good)' : note.impact_direction === 'negative' ? 'var(--danger)' : '#c6ff3a';
+                                    return (
+                                      <div key={ni} style={{ display: 'flex', gap: 5, alignItems: 'flex-start', paddingLeft: 4 }}>
+                                        <span style={{ color: dirColor, fontSize: 9, marginTop: 2, flexShrink: 0 }}>{note.impact_direction === 'positive' ? '▲' : note.impact_direction === 'negative' ? '▼' : '◆'}</span>
+                                        <span style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.45 }}>{note.note_text}</span>
+                                      </div>
+                                    );
+                                  })}
+                                  {/* Waiver / dynasty signals */}
+                                  {((aiNotes.waiver_relevance >= 6) || (aiNotes.dynasty_relevance >= 6)) && (
+                                    <div style={{ display: 'flex', gap: 5, marginTop: 1 }}>
+                                      {aiNotes.waiver_relevance >= 6 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--warn)', background: 'rgba(255,181,71,.1)', border: '1px solid rgba(255,181,71,.3)', borderRadius: 3, padding: '1px 5px' }}>W {Number(aiNotes.waiver_relevance).toFixed(1)}</span>}
+                                      {aiNotes.dynasty_relevance >= 6 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b4a0ff', background: 'rgba(180,160,255,.1)', border: '1px solid rgba(180,160,255,.3)', borderRadius: 3, padding: '1px 5px' }}>DYN {Number(aiNotes.dynasty_relevance).toFixed(1)}</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })()}
@@ -1932,8 +2108,14 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                         rel="noopener noreferrer"
                         title={`Watch ${p.name} highlights on YouTube`}
                         onClick={e => e.stopPropagation()}
-                        style={{ fontSize: 14, color: '#ff0000', opacity: 0.75, textDecoration: 'none', display: 'block', textAlign: 'center' }}
-                      >▶</a>
+                        style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 8px', borderRadius: 5, background: 'rgba(26,255,160,.08)', border: '1px solid rgba(26,255,160,.35)', color: '#1affa0', fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '.04em', whiteSpace: 'nowrap' }}
+                      >
+                        <svg width="13" height="10" viewBox="0 0 18 13" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+                          <path d="M17.6 2.03C17.4 1.29 16.83.72 16.09.52 14.67.14 9 .14 9 .14S3.33.14 1.91.52C1.17.72.6 1.29.4 2.03 0 3.47 0 6.5 0 6.5s0 3.03.4 4.47c.2.74.77 1.31 1.51 1.51C3.33 12.86 9 12.86 9 12.86s5.67 0 7.09-.38c.74-.2 1.31-.77 1.51-1.51C18 9.53 18 6.5 18 6.5s0-3.03-.4-4.47z" fill="#1affa0"/>
+                          <path d="M7.2 9.29l4.73-2.79L7.2 3.71v5.58z" fill="black"/>
+                        </svg>
+                        Highlights
+                      </a>
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -1965,7 +2147,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                   </tr>
                   {swapTarget?.playerId === p.id && (
                     <tr style={{ background: 'rgba(78,168,255,.04)', borderLeft: '3px solid #4ea8ff' }}>
-                      <td colSpan={14} style={{ padding: 0 }}>
+                      <td colSpan={13} style={{ padding: 0 }}>
                         <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(78,168,255,.18)' }}>
 
                           {/* ── Add/Drop confirmation ── */}
@@ -1976,7 +2158,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                               </div>
                               <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', marginBottom: 14, flexWrap: 'wrap' }}>
                                 {/* ADD card */}
-                                <div style={{ flex: 1, minWidth: 160, padding: '10px 14px', background: 'rgba(76,175,130,.1)', border: '1px solid rgba(76,175,130,.35)', borderRadius: 8 }}>
+                                <div style={{ flex: 1, minWidth: 160, padding: '10px 14px', background: 'rgba(26,255,160,.15)', border: '1px solid rgba(26,255,160,.50)', borderRadius: 8 }}>
                                   <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, color: 'var(--good)', letterSpacing: '.1em', marginBottom: 6 }}>ADD</div>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                     <PlayerAvatar player={addDropPending.addPlayer} size="sm" />
@@ -2073,7 +2255,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                                         <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 14, color: 'var(--accent)' }}>{fp.proj.toFixed(1)}</span>
                                         <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>proj</span>
                                       </div>
-                                      <span style={{ fontSize: 11, fontWeight: 700, color: '#4caf82', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>+ Add →</span>
+                                      <span style={{ fontSize: 11, fontWeight: 700, color: '#1affa0', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>+ Add →</span>
                                     </button>
                                   ))}
                                 </div>
@@ -2091,96 +2273,14 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
               })}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {/* Add Player tab */}
-      {tab === 'add' && (
-        <div className="col" style={{ flex: 1, overflow: 'hidden' }}>
-          <div className="toolbar">
-            <div className="chips">
-              {['ALL', 'QB', 'RB', 'WR', 'TE', 'FLEX', 'K', 'DST'].map(p => (
-                <div
-                  key={p}
-                  className={`chip ${addFilter === p ? 'accent active' : ''}`}
-                  onClick={() => setAddFilter(p)}
-                >
-                  {p}
-                </div>
-              ))}
-            </div>
-            <input
-              className="input search"
-              placeholder="Search players…"
-              value={addSearch}
-              onChange={e => setAddSearch(e.target.value)}
-              style={{ width: 220 }}
-            />
-            <span className="faint mono" style={{ fontSize: 11, marginLeft: 'auto' }}>
-              {available.length} available
-            </span>
-          </div>
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Player</th>
-                  <th className="num">Proj</th>
-                  <th className="num">Last</th>
-                  <th className="num">Avg</th>
-                  <th className="num">%Own</th>
-                  <th>Opp</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(addFilter === 'ALL' ? available.slice(0, 100) : available).map(p => (
-                  <tr key={p.id}>
-                    <td style={{ cursor: 'pointer' }} onClick={() => onOpenPlayer?.(p.id)}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <PlayerAvatar player={p} />
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                            <PosBadge pos={p.pos} /> {p.team}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="num" style={{ fontWeight: 600 }}>{p.proj.toFixed(1)}</td>
-                    <td className="num">{p.last.toFixed(1)}</td>
-                    <td className="num">{p.avg.toFixed(1)}</td>
-                    <td className="num">{p.owned.toFixed(1)}%</td>
-                    <td>
-                      <span className="mono dim" style={{ fontSize: 11 }}>vs {p.opp}</span>
-                      <div className="mono faint" style={{ fontSize: 10 }}>D #{p.oppRank}</div>
-                    </td>
-                    <td>
-                      {p.status !== 'OK' && (
-                        <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>
-                      )}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button
-                          className={`btn sm icon${watchlistIds.has(p.id) ? ' watch-active' : ''}`}
-                          title={watchlistIds.has(p.id) ? 'Remove from watchlist' : 'Watch'}
-                          onClick={() => onToggleWatch?.(p.id)}
-                        >{watchlistIds.has(p.id) ? '★' : '☆'}</button>
-                        <button
-                          className="btn sm primary"
-                          onClick={() => onAddPlayer?.(p.id)}
-                        >
-                          + Add
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {/* ── Lineup Optimizer ── */}
+          <LineupDecisions
+            compact
+            myRosterIds={myRosterIds}
+            slotOverrides={slotOverrides}
+            onSlotOverridesChange={onSlotOverridesChange}
+            onOpenPlayer={onOpenPlayer}
+          />
         </div>
       )}
 
@@ -2197,262 +2297,12 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
         />
       )}
 
-      {/* Lineup Decisions tab */}
-      {tab === 'lineup' && (
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          <LineupDecisions
-            myRosterIds={myRosterIds}
-            slotOverrides={slotOverrides}
-            onSlotOverridesChange={onSlotOverridesChange}
-            onOpenPlayer={onOpenPlayer}
-          />
-        </div>
-      )}
-
-      {/* Defense Rankings tab */}
-      {tab === 'defense' && (
-        <DefenseRankingsTab allPlayers={allPlayers} rosterPlayers={rosterPlayers} onOpenPlayer={onOpenPlayer} />
-      )}
-
-      {/* Watchlist tab */}
-      {tab === 'watchlist' && (
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          {watchlistIds.size === 0 ? (
-            <div style={{ padding: '60px 24px', textAlign: 'center' }}>
-              <div style={{ fontSize: 32, marginBottom: 12, color: '#ffd700' }}>☆</div>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>No players on your watchlist</div>
-              <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-                Tap ☆ on any player in the Players tab or Add Player tab to start tracking them here.
-              </div>
-            </div>
-          ) : (
-            <>
-              <div style={{ padding: '8px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span className="faint mono" style={{ fontSize: 11 }}>{watchlistIds.size} player{watchlistIds.size !== 1 ? 's' : ''} watched</span>
-                <button
-                  className="btn ghost sm"
-                  style={{ fontSize: 11, color: 'var(--danger)' }}
-                  onClick={() => [...watchlistIds].forEach(id => onToggleWatch?.(id))}
-                >
-                  Clear All
-                </button>
-              </div>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Player</th>
-                    <th className="num">Proj</th>
-                    <th className="num">Last</th>
-                    <th className="num">Avg</th>
-                    <th>Opp</th>
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...watchlistIds].map(id => {
-                    const p = findPlayer(id);
-                    if (!p) return null;
-                    const onRoster = myRosterIds?.has(p.id);
-                    return (
-                      <tr key={p.id}>
-                        <td style={{ cursor: 'pointer' }} onClick={() => onOpenPlayer?.(p.id)}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <PlayerAvatar player={p} />
-                            <div>
-                              <div style={{ fontWeight: 700, fontSize: 13, color: '#ffd700', display: 'flex', alignItems: 'center', gap: 5 }}>
-                                <span>★</span> {p.name}
-                              </div>
-                              <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                                <PosBadge pos={p.pos} /> {p.team} · #{p.num}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="num" style={{ fontWeight: 600, color: 'var(--accent)' }}>{p.proj.toFixed(1)}</td>
-                        <td className="num">{p.last.toFixed(1)}</td>
-                        <td className="num">{p.avg.toFixed(1)}</td>
-                        <td>
-                          <span className="mono dim" style={{ fontSize: 11 }}>vs {p.opp}</span>
-                          <div className="mono faint" style={{ fontSize: 10 }}>D #{p.oppRank}</div>
-                        </td>
-                        <td>
-                          {p.status !== 'OK' && (
-                            <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>
-                          )}
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            {!onRoster && (
-                              <button className="btn sm primary" onClick={() => onAddPlayer?.(p.id)}>+ Add</button>
-                            )}
-                            <button
-                              className="btn sm icon watch-active"
-                              title="Remove from watchlist"
-                              onClick={() => onToggleWatch?.(p.id)}
-                            >★</button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </>
-          )}
-        </div>
-      )}
 
     </div>
   );
 }
 
 // ─── LiveRosterNews ────────────────────────────────────────────────────────────
-// ── Defense Rankings tab ──────────────────────────────────────────────────
-
-function DefenseRankingsTab({ allPlayers, rosterPlayers, onOpenPlayer }) {
-  const [posFilter, setPosFilter] = React.useState('ALL');
-
-  // Build defRankings: { teamAbbr: { QB, RB, WR, TE } }
-  // Source: each player's opp → oppRank (position-specific defensive rank)
-  const defRankings = React.useMemo(() => {
-    const map = {};
-    for (const p of allPlayers) {
-      if (!p.opp || !p.oppRank) continue;
-      const pos = p.pos === 'DST' ? null : p.pos;
-      if (!pos || !['QB', 'RB', 'WR', 'TE', 'K'].includes(pos)) continue;
-      if (!map[p.opp]) map[p.opp] = {};
-      // First player per position per team wins (most prominent player's rank)
-      if (!map[p.opp][pos]) map[p.opp][pos] = p.oppRank;
-    }
-    return map;
-  }, [allPlayers]);
-
-  // Compute per-team average rank across QB/RB/WR/TE for overall sort
-  const teams = React.useMemo(() => {
-    const POSITIONS = ['QB', 'RB', 'WR', 'TE'];
-    return Object.entries(defRankings).map(([abbr, ranks]) => {
-      const vals = POSITIONS.map(p => ranks[p]).filter(Boolean);
-      const avg = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 99;
-      return { abbr, ranks, avg };
-    }).sort((a, b) => {
-      if (posFilter === 'ALL') return a.avg - b.avg;
-      const ra = a.ranks[posFilter] ?? 99;
-      const rb = b.ranks[posFilter] ?? 99;
-      return ra - rb;
-    });
-  }, [defRankings, posFilter]);
-
-  // Set of opponent teams for my rostered players (highlight these rows)
-  const myOpps = React.useMemo(
-    () => new Set(rosterPlayers.map(p => p.opp).filter(Boolean)),
-    [rosterPlayers]
-  );
-
-  function rankCell(rank) {
-    if (!rank) return <td className="num"><span style={{ color: 'var(--text-faint)' }}>—</span></td>;
-    const color = rank <= 8  ? 'var(--danger)'
-                : rank <= 16 ? 'var(--warn)'
-                : rank <= 24 ? '#4caf82'
-                :               'var(--good)';
-    const label = rank <= 8  ? 'Tough' : rank <= 16 ? 'Avg' : rank <= 24 ? 'Good' : 'Easy';
-    return (
-      <td className="num">
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 13, color }}>#{rank}</span>
-          <span style={{ fontSize: 8, color, opacity: 0.75, fontFamily: 'var(--font-mono)' }}>{label}</span>
-        </div>
-      </td>
-    );
-  }
-
-  return (
-    <div style={{ flex: 1, overflow: 'auto' }}>
-      {/* Header + filter */}
-      <div style={{ padding: '10px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>NFL Defense Rankings vs Position</div>
-          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-            Rank 1 = toughest defense · Rank 32 = most points allowed · <span style={{ color: '#c6ff3a', fontWeight: 700 }}>Highlighted</span> = your this-week matchups
-          </div>
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-          {['ALL', 'QB', 'RB', 'WR', 'TE', 'K'].map(p => (
-            <button key={p} onClick={() => setPosFilter(p)} style={{
-              background: posFilter === p ? 'var(--accent)' : 'var(--panel-3)',
-              color: posFilter === p ? '#0a1300' : 'var(--text-dim)',
-              border: 'none', borderRadius: 4, padding: '3px 9px', fontSize: 11,
-              fontWeight: posFilter === p ? 700 : 500, cursor: 'pointer',
-            }}>{p}</button>
-          ))}
-        </div>
-      </div>
-
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Rank</th>
-            <th>Defense</th>
-            <th className="num">vs QB</th>
-            <th className="num">vs RB</th>
-            <th className="num">vs WR</th>
-            <th className="num">vs TE</th>
-            <th className="num">vs K</th>
-          </tr>
-        </thead>
-        <tbody>
-          {teams.map((t, i) => {
-            const isMyOpp = myOpps.has(t.abbr);
-            // Find which of my players faces this defense
-            const myPlayers = rosterPlayers.filter(p => p.opp === t.abbr);
-            return (
-              <tr
-                key={t.abbr}
-                style={{
-                  background: isMyOpp ? 'rgba(198,255,58,.06)' : undefined,
-                  borderLeft: isMyOpp ? '3px solid var(--accent)' : undefined,
-                }}
-              >
-                <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-faint)', fontSize: 11, width: 36 }}>
-                  {i + 1}
-                </td>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13 }}>{t.abbr}</span>
-                    {isMyOpp && myPlayers.length > 0 && (
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        {myPlayers.map(p => (
-                          <button
-                            key={p.id}
-                            onClick={() => onOpenPlayer?.(p.id)}
-                            style={{ background: 'rgba(198,255,58,.15)', border: '1px solid rgba(198,255,58,.3)', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700, color: 'var(--accent)', cursor: 'pointer' }}
-                          >
-                            {p.name.split(' ').slice(-1)[0]}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </td>
-                {rankCell(t.ranks.QB)}
-                {rankCell(t.ranks.RB)}
-                {rankCell(t.ranks.WR)}
-                {rankCell(t.ranks.TE)}
-                {rankCell(t.ranks.K)}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      {teams.length === 0 && (
-        <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-faint)', fontSize: 13 }}>
-          Defense rankings load with player data — check back once the roster is populated.
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Roster Google News feed ───────────────────────────────────────────────
 
@@ -2465,7 +2315,7 @@ function newsCategory(headline = '') {
   if (/depth chart|practice|camp|ota|snap|starter|backup|listed|53-man|roster move/.test(h))
     return { icon: '📊', label: 'Depth/Practice', color: 'var(--warn)', bg: 'rgba(255,149,0,.1)' };
   if (/fantasy|start|sit|ranking|waiver|pickup|draft|sleeper|breakout|must-add|target/.test(h))
-    return { icon: '🏈', label: 'Fantasy', color: 'var(--good)', bg: 'rgba(76,175,130,.1)' };
+    return { icon: '🏈', label: 'Fantasy', color: 'var(--good)', bg: 'rgba(26,255,160,.15)' };
   return { icon: '📰', label: 'News', color: 'var(--text-faint)', bg: 'var(--panel-2)' };
 }
 

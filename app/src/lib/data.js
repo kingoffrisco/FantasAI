@@ -1,4 +1,4 @@
-// Mock data — converted from vanilla prototype to ES module exports
+﻿// Mock data â€” converted from vanilla prototype to ES module exports
 import { getLiveTeams, getMyTeamPrefs } from './leagueStore.js';
 
 export const NFL_TEAMS = [
@@ -20,211 +20,26 @@ export const NFL_TEAMS = [
   { abbr: "TB",  color: "#D50A0A" }, { abbr: "WAS", color: "#5A1414" },
 ];
 
-// Private — used only by buildCBSRankings below. All player data shown in the UI
-// comes from live Databricks / Sleeper data via playerStore.js.
-const PLAYERS = [
-  // QBs
-  { id: 1, name: "Josh Allen", pos: "QB", team: "BUF", num: 17, age: 28, status: "OK", bye: 12, adp: 18.2, ecr: 16, tier: 1, proj: 24.8, last: 28.4, avg: 23.6, owned: 99.7, trend: [22,18,28,24,31,28], news: "", opp: "MIA", oppRank: 22 },
-  { id: 2, name: "Jalen Hurts", pos: "QB", team: "PHI", num: 1, age: 26, status: "OK", bye: 10, adp: 22.4, ecr: 21, tier: 1, proj: 23.9, last: 19.7, avg: 22.1, owned: 99.4, trend: [19,24,22,18,26,20], news: "", opp: "DAL", oppRank: 14 },
-  { id: 3, name: "Lamar Jackson", pos: "QB", team: "BAL", num: 8, age: 28, status: "OK", bye: 14, adp: 28.7, ecr: 26, tier: 1, proj: 23.2, last: 26.8, avg: 22.4, owned: 99.5, trend: [20,25,28,22,18,27], news: "", opp: "CIN", oppRank: 28 },
-  { id: 4, name: "Patrick Mahomes", pos: "QB", team: "KC", num: 15, age: 30, status: "OK", bye: 10, adp: 42.1, ecr: 38, tier: 2, proj: 21.4, last: 18.2, avg: 20.8, owned: 99.6, trend: [24,17,22,19,16,18], news: "", opp: "LAC", oppRank: 11 },
-  { id: 5, name: "Joe Burrow", pos: "QB", team: "CIN", num: 9, age: 29, status: "OK", bye: 12, adp: 48.3, ecr: 44, tier: 2, proj: 20.8, last: 16.4, avg: 19.6, owned: 96.2, trend: [18,21,15,19,12,18], news: "", opp: "BAL", oppRank: 8 },
-  { id: 6, name: "Caleb Williams", pos: "QB", team: "CHI", num: 18, age: 24, status: "OK", bye: 7, adp: 84.6, ecr: 82, tier: 4, proj: 18.4, last: 22.1, avg: 17.8, owned: 78.4, trend: [15,18,12,22,20,22], news: "", opp: "ARI", oppRank: 26 },
-  { id: 7, name: "C.J. Stroud", pos: "QB", team: "HOU", num: 7, age: 24, status: "OK", bye: 6, adp: 56.2, ecr: 54, tier: 3, proj: 19.6, last: 14.2, avg: 18.4, owned: 88.4, trend: [21,18,14,16,12,14], news: "", opp: "JAX", oppRank: 12 },
-  { id: 8, name: "Jayden Daniels", pos: "QB", team: "WAS", num: 5, age: 24, status: "OK", bye: 14, adp: 58.0, ecr: 56, tier: 3, proj: 20.2, last: 22.4, avg: 19.8, owned: 88.4, trend: [18,22,24,20,18,22], news: "", opp: "PHI", oppRank: 16 },
-  // RBs
-  { id: 20, name: "Christian McCaffrey", pos: "RB", team: "SF", num: 23, age: 29, status: "OK", bye: 9, adp: 1.2, ecr: 1, tier: 1, proj: 22.8, last: 26.1, avg: 21.4, owned: 99.9, trend: [18,24,22,28,19,26], news: "", opp: "SEA", oppRank: 18 },
-  { id: 21, name: "Bijan Robinson", pos: "RB", team: "ATL", num: 7, age: 24, status: "OK", bye: 12, adp: 2.4, ecr: 2, tier: 1, proj: 21.6, last: 24.3, avg: 20.8, owned: 99.8, trend: [18,22,16,24,20,24], news: "", opp: "CAR", oppRank: 4 },
-  { id: 22, name: "Saquon Barkley", pos: "RB", team: "PHI", num: 26, age: 28, status: "OK", bye: 10, adp: 3.6, ecr: 3, tier: 1, proj: 20.4, last: 28.7, avg: 22.1, owned: 99.8, trend: [26,18,22,32,18,28], news: "", opp: "DAL", oppRank: 25 },
-  { id: 23, name: "Jahmyr Gibbs", pos: "RB", team: "DET", num: 26, age: 23, status: "OK", bye: 5, adp: 4.8, ecr: 4, tier: 1, proj: 19.8, last: 22.4, avg: 19.2, owned: 99.7, trend: [16,19,14,22,18,22], news: "", opp: "GB", oppRank: 10 },
-  { id: 24, name: "De'Von Achane", pos: "RB", team: "MIA", num: 28, age: 24, status: "OK", bye: 6, adp: 6.2, ecr: 6, tier: 1, proj: 18.2, last: 14.1, avg: 17.6, owned: 99.4, trend: [22,14,18,20,12,14], news: "", opp: "BUF", oppRank: 7 },
-  { id: 25, name: "Derrick Henry", pos: "RB", team: "BAL", num: 22, age: 31, status: "OK", bye: 14, adp: 8.1, ecr: 8, tier: 2, proj: 17.4, last: 19.8, avg: 18.2, owned: 99.6, trend: [24,12,18,15,22,20], news: "", opp: "CIN", oppRank: 30 },
-  { id: 26, name: "Breece Hall", pos: "RB", team: "NYJ", num: 20, age: 24, status: "OK", bye: 12, adp: 12.4, ecr: 11, tier: 2, proj: 16.8, last: 11.2, avg: 15.4, owned: 98.8, trend: [14,16,11,18,9,11], news: "", opp: "NE", oppRank: 5 },
-  { id: 27, name: "Josh Jacobs", pos: "RB", team: "GB", num: 8, age: 27, status: "OK", bye: 5, adp: 14.6, ecr: 14, tier: 2, proj: 16.4, last: 18.9, avg: 16.2, owned: 98.4, trend: [14,17,12,18,15,19], news: "", opp: "DET", oppRank: 17 },
-  { id: 28, name: "Kyren Williams", pos: "RB", team: "LAR", num: 23, age: 25, status: "OK", bye: 6, adp: 16.8, ecr: 15, tier: 2, proj: 15.8, last: 14.6, avg: 15.2, owned: 97.6, trend: [18,12,16,11,14,15], news: "", opp: "SF", oppRank: 19 },
-  { id: 29, name: "Joe Mixon", pos: "RB", team: "HOU", num: 28, age: 28, status: "OK", bye: 6, adp: 24.2, ecr: 22, tier: 3, proj: 14.6, last: 8.2, avg: 13.4, owned: 96.1, trend: [16,18,8,12,6,8], news: "", opp: "JAX", oppRank: 13 },
-  { id: 30, name: "James Cook", pos: "RB", team: "BUF", num: 4, age: 26, status: "OK", bye: 12, adp: 32.4, ecr: 28, tier: 3, proj: 13.8, last: 16.4, avg: 13.6, owned: 95.4, trend: [12,15,10,14,16,16], news: "", opp: "MIA", oppRank: 24 },
-  { id: 31, name: "Aaron Jones", pos: "RB", team: "MIN", num: 33, age: 31, status: "OK", bye: 6, adp: 38.6, ecr: 36, tier: 3, proj: 13.4, last: 11.8, avg: 12.8, owned: 92.3, trend: [14,10,13,9,11,12], news: "", opp: "GB", oppRank: 16 },
-  { id: 32, name: "Alvin Kamara", pos: "RB", team: "NO", num: 41, age: 30, status: "OK", bye: 11, adp: 36.2, ecr: 32, tier: 3, proj: 13.6, last: 17.4, avg: 14.4, owned: 96.8, trend: [12,16,18,11,14,17], news: "", opp: "TB", oppRank: 23 },
-  { id: 33, name: "Jonathan Taylor", pos: "RB", team: "IND", num: 28, age: 27, status: "OK", bye: 14, adp: 13.4, ecr: 12, tier: 2, proj: 16.6, last: 14.2, avg: 16.2, owned: 97.4, trend: [16,14,18,12,16,14], news: "", opp: "HOU", oppRank: 20 },
-  { id: 34, name: "Ashton Jeanty", pos: "RB", team: "LV", num: 2, age: 21, status: "OK", bye: 10, adp: 9.6, ecr: 9, tier: 1, proj: 17.8, last: 16.2, avg: 16.4, owned: 98.6, trend: [14,18,16,20,14,16], news: "", opp: "DEN", oppRank: 18 },
-  // WRs
-  { id: 50, name: "Ja'Marr Chase", pos: "WR", team: "CIN", num: 1, age: 26, status: "OK", bye: 12, adp: 1.8, ecr: 2, tier: 1, proj: 19.4, last: 22.6, avg: 20.1, owned: 99.9, trend: [18,22,16,24,28,23], news: "", opp: "BAL", oppRank: 19 },
-  { id: 51, name: "Justin Jefferson", pos: "WR", team: "MIN", num: 18, age: 26, status: "OK", bye: 6, adp: 5.4, ecr: 5, tier: 1, proj: 18.8, last: 15.2, avg: 18.4, owned: 99.8, trend: [22,14,21,12,18,15], news: "", opp: "GB", oppRank: 6 },
-  { id: 52, name: "CeeDee Lamb", pos: "WR", team: "DAL", num: 88, age: 27, status: "OK", bye: 7, adp: 6.8, ecr: 7, tier: 1, proj: 17.6, last: 14.4, avg: 16.8, owned: 99.6, trend: [19,12,18,16,11,14], news: "", opp: "PHI", oppRank: 9 },
-  { id: 53, name: "Tyreek Hill", pos: "WR", team: "MIA", num: 10, age: 31, status: "OK", bye: 6, adp: 9.2, ecr: 9, tier: 1, proj: 16.4, last: 11.8, avg: 14.6, owned: 99.7, trend: [22,8,16,11,14,12], news: "", opp: "BUF", oppRank: 15 },
-  { id: 54, name: "Amon-Ra St. Brown", pos: "WR", team: "DET", num: 14, age: 26, status: "OK", bye: 5, adp: 7.4, ecr: 8, tier: 1, proj: 17.2, last: 18.9, avg: 17.4, owned: 99.7, trend: [15,18,14,21,16,19], news: "", opp: "GB", oppRank: 11 },
-  { id: 55, name: "Puka Nacua", pos: "WR", team: "LAR", num: 17, age: 24, status: "OK", bye: 6, adp: 11.4, ecr: 10, tier: 1, proj: 16.8, last: 20.4, avg: 18.2, owned: 99.4, trend: [14,22,16,20,18,20], news: "", opp: "SF", oppRank: 21 },
-  { id: 56, name: "A.J. Brown", pos: "WR", team: "PHI", num: 11, age: 28, status: "OK", bye: 10, adp: 13.6, ecr: 12, tier: 2, proj: 15.8, last: 22.1, avg: 16.4, owned: 99.3, trend: [14,11,16,20,12,22], news: "", opp: "DAL", oppRank: 20 },
-  { id: 57, name: "Drake London", pos: "WR", team: "ATL", num: 5, age: 24, status: "OK", bye: 12, adp: 18.4, ecr: 17, tier: 2, proj: 15.2, last: 17.6, avg: 15.1, owned: 98.6, trend: [14,12,16,18,15,18], news: "", opp: "CAR", oppRank: 27 },
-  { id: 58, name: "Garrett Wilson", pos: "WR", team: "NYJ", num: 5, age: 25, status: "OK", bye: 12, adp: 22.2, ecr: 20, tier: 2, proj: 14.6, last: 10.2, avg: 13.8, owned: 98.4, trend: [16,18,10,14,8,10], news: "", opp: "NE", oppRank: 16 },
-  { id: 59, name: "Nico Collins", pos: "WR", team: "HOU", num: 12, age: 26, status: "OK", bye: 6, adp: 26.4, ecr: 22, tier: 2, proj: 15.4, last: 18.6, avg: 16.2, owned: 97.8, trend: [14,16,18,11,14,19], news: "", opp: "JAX", oppRank: 12 },
-  { id: 60, name: "Mike Evans", pos: "WR", team: "TB", num: 13, age: 32, status: "OK", bye: 11, adp: 28.6, ecr: 26, tier: 2, proj: 14.2, last: 19.4, avg: 15.6, owned: 97.4, trend: [12,18,14,21,11,19], news: "", opp: "NO", oppRank: 18 },
-  { id: 61, name: "DK Metcalf", pos: "WR", team: "PIT", num: 14, age: 28, status: "OK", bye: 9, adp: 34.2, ecr: 32, tier: 3, proj: 13.4, last: 11.8, avg: 12.6, owned: 96.4, trend: [14,10,16,8,11,12], news: "", opp: "CLE", oppRank: 8 },
-  { id: 62, name: "Marvin Harrison Jr.", pos: "WR", team: "ARI", num: 18, age: 24, status: "OK", bye: 11, adp: 36.8, ecr: 34, tier: 3, proj: 13.6, last: 9.2, avg: 12.4, owned: 96.2, trend: [12,15,7,14,8,9], news: "", opp: "CHI", oppRank: 22 },
-  { id: 63, name: "Brian Thomas Jr.", pos: "WR", team: "JAX", num: 7, age: 23, status: "OK", bye: 12, adp: 38.4, ecr: 36, tier: 3, proj: 13.2, last: 14.8, avg: 12.8, owned: 95.4, trend: [10,12,15,9,12,15], news: "", opp: "HOU", oppRank: 14 },
-  { id: 64, name: "Davante Adams", pos: "WR", team: "LAR", num: 17, age: 33, status: "OK", bye: 6, adp: 42.2, ecr: 40, tier: 3, proj: 12.6, last: 13.4, avg: 12.4, owned: 94.6, trend: [14,10,13,12,11,13], news: "", opp: "SF", oppRank: 19 },
-  { id: 65, name: "DJ Moore", pos: "WR", team: "CHI", num: 2, age: 28, status: "OK", bye: 7, adp: 46.4, ecr: 42, tier: 4, proj: 12.4, last: 8.2, avg: 11.6, owned: 93.4, trend: [14,12,8,11,6,8], news: "", opp: "ARI", oppRank: 24 },
-  { id: 66, name: "Calvin Ridley", pos: "WR", team: "TEN", num: 0, age: 31, status: "OK", bye: 5, adp: 58.2, ecr: 54, tier: 4, proj: 11.8, last: 14.6, avg: 11.2, owned: 88.6, trend: [10,12,14,9,11,15], news: "", opp: "IND", oppRank: 11 },
-  { id: 67, name: "Malik Nabers", pos: "WR", team: "NYG", num: 9, age: 23, status: "OK", bye: 11, adp: 24.6, ecr: 22, tier: 2, proj: 15.6, last: 18.2, avg: 14.8, owned: 97.2, trend: [12,18,14,20,16,18], news: "", opp: "DAL", oppRank: 21 },
-  // TEs
-  { id: 80, name: "Brock Bowers", pos: "TE", team: "LV", num: 89, age: 23, status: "OK", bye: 10, adp: 14.4, ecr: 13, tier: 1, proj: 13.6, last: 16.4, avg: 14.2, owned: 99.4, trend: [14,12,16,11,18,16], news: "", opp: "DEN", oppRank: 14 },
-  { id: 81, name: "Trey McBride", pos: "TE", team: "ARI", num: 85, age: 26, status: "OK", bye: 11, adp: 22.8, ecr: 19, tier: 1, proj: 12.4, last: 14.8, avg: 12.8, owned: 98.6, trend: [12,15,11,13,10,15], news: "", opp: "CHI", oppRank: 9 },
-  { id: 82, name: "George Kittle", pos: "TE", team: "SF", num: 85, age: 32, status: "OK", bye: 9, adp: 32.6, ecr: 30, tier: 2, proj: 11.8, last: 9.2, avg: 11.4, owned: 97.8, trend: [14,8,16,11,7,9], news: "", opp: "SEA", oppRank: 18 },
-  { id: 83, name: "Sam LaPorta", pos: "TE", team: "DET", num: 87, age: 24, status: "OK", bye: 5, adp: 38.2, ecr: 34, tier: 2, proj: 10.6, last: 12.8, avg: 10.4, owned: 96.4, trend: [8,11,9,14,8,13], news: "", opp: "GB", oppRank: 22 },
-  { id: 84, name: "Travis Kelce", pos: "TE", team: "KC", num: 87, age: 36, status: "OK", bye: 10, adp: 48.4, ecr: 44, tier: 2, proj: 10.2, last: 8.4, avg: 9.8, owned: 95.6, trend: [12,7,11,8,9,8], news: "", opp: "LAC", oppRank: 14 },
-  { id: 85, name: "Mark Andrews", pos: "TE", team: "BAL", num: 89, age: 30, status: "OK", bye: 14, adp: 64.2, ecr: 58, tier: 3, proj: 9.4, last: 13.2, avg: 9.6, owned: 92.4, trend: [6,8,13,4,7,13], news: "", opp: "CIN", oppRank: 8 },
-  // K
-  { id: 100, name: "Justin Tucker", pos: "K", team: "BAL", num: 9, age: 36, status: "OK", bye: 14, adp: 138.4, ecr: 136, tier: 1, proj: 9.2, last: 10.0, avg: 8.8, owned: 84.2, trend: [8,7,11,9,12,10], news: "", opp: "CIN", oppRank: 18 },
-  { id: 101, name: "Brandon Aubrey", pos: "K", team: "DAL", num: 17, age: 31, status: "OK", bye: 7, adp: 124.6, ecr: 122, tier: 1, proj: 9.6, last: 12.0, avg: 9.4, owned: 91.4, trend: [10,8,12,9,12,12], news: "", opp: "PHI", oppRank: 6 },
-  { id: 102, name: "Harrison Butker", pos: "K", team: "KC", num: 7, age: 30, status: "OK", bye: 10, adp: 132.2, ecr: 130, tier: 1, proj: 8.8, last: 9.0, avg: 8.6, owned: 88.2, trend: [9,7,10,8,7,9], news: "", opp: "LAC", oppRank: 12 },
-  // DST
-  { id: 120, name: "PIT D/ST", pos: "DST", team: "PIT", num: 0, age: 0, status: "OK", bye: 9, adp: 122.4, ecr: 118, tier: 1, proj: 9.4, last: 14.0, avg: 9.6, owned: 89.4, trend: [8,12,6,11,5,14], news: "", opp: "CLE", oppRank: 3 },
-  { id: 121, name: "PHI D/ST",          pos: "DST", team: "PHI", num: 0, age: 0,  status: "OK", bye: 10, adp: 134.6, ecr: 130, tier: 1, proj: 8.6,  last: 7.0,  avg: 8.4,  owned: 82.4, trend: [9,6,8,10,5,7],    news: "Top sack rate",                              opp: "DAL", oppRank: 8  },
-  // QBs (continued)
-  { id: 9,  name: "Jordan Love",        pos: "QB",  team: "GB",  num: 10, age: 26, status: "OK", bye: 5,  adp: 62.4,  ecr: 60,  tier: 3, proj: 19.2, last: 21.4, avg: 18.6, owned: 86.2, trend: [18,22,14,20,18,21], news: "",                   opp: "DET", oppRank: 17 },
-  { id: 10, name: "Sam Darnold",        pos: "QB",  team: "MIN", num: 14, age: 27, status: "OK", bye: 6,  adp: 88.6,  ecr: 86,  tier: 4, proj: 17.8, last: 16.2, avg: 16.8, owned: 72.4, trend: [16,14,18,12,16,16], news: "",                opp: "GB",  oppRank: 24 },
-  { id: 11, name: "Brock Purdy",        pos: "QB",  team: "SF",  num: 13, age: 25, status: "OK", bye: 9,  adp: 52.4,  ecr: 50,  tier: 3, proj: 20.4, last: 18.2, avg: 19.6, owned: 90.4, trend: [20,18,22,16,20,18], news: "",                           opp: "SEA", oppRank: 20 },
-  { id: 12, name: "Dak Prescott",       pos: "QB",  team: "DAL", num: 4,  age: 31, status: "OK", bye: 7,  adp: 72.2,  ecr: 70,  tier: 3, proj: 18.6, last: 20.4, avg: 18.2, owned: 88.6, trend: [18,20,16,22,14,20], news: "",                    opp: "PHI", oppRank: 10 },
-  { id: 13, name: "Trevor Lawrence",    pos: "QB",  team: "JAX", num: 16, age: 25, status: "OK", bye: 12, adp: 96.4,  ecr: 92,  tier: 4, proj: 17.4, last: 14.8, avg: 16.6, owned: 78.2, trend: [16,12,18,14,10,15], news: "",                   opp: "HOU", oppRank: 14 },
-  { id: 14, name: "Tua Tagovailoa",     pos: "QB",  team: "MIA", num: 1,  age: 27, status: "OK", bye: 6,  adp: 78.6,  ecr: 74,  tier: 3, proj: 18.2, last: 15.6, avg: 17.4, owned: 82.4, trend: [18,14,20,16,12,16], news: "",                     opp: "BUF", oppRank: 9  },
-  { id: 15, name: "Kyler Murray",       pos: "QB",  team: "ARI", num: 1,  age: 27, status: "OK", bye: 11, adp: 92.4,  ecr: 88,  tier: 4, proj: 17.6, last: 19.2, avg: 17.0, owned: 80.6, trend: [16,20,14,18,20,19], news: "",                       opp: "CHI", oppRank: 22 },
-  { id: 16, name: "Anthony Richardson", pos: "QB",  team: "IND", num: 5,  age: 23, status: "OK", bye: 14, adp: 104.2, ecr: 100, tier: 4, proj: 17.0, last: 22.6, avg: 16.4, owned: 74.2, trend: [12,24,16,18,14,23], news: "",                         opp: "HOU", oppRank: 19 },
-  { id: 17, name: "Bo Nix",             pos: "QB",  team: "DEN", num: 10, age: 25, status: "OK", bye: 9,  adp: 118.4, ecr: 114, tier: 5, proj: 16.2, last: 17.4, avg: 15.8, owned: 62.4, trend: [14,16,18,14,16,17], news: "",             opp: "LV",  oppRank: 28 },
-  { id: 18, name: "Drake Maye",         pos: "QB",  team: "NE",  num: 10, age: 23, status: "OK", bye: 14, adp: 128.6, ecr: 124, tier: 5, proj: 15.8, last: 18.8, avg: 15.2, owned: 58.4, trend: [12,16,20,14,12,19], news: "",                       opp: "NYJ", oppRank: 30 },
-  { id: 19, name: "Geno Smith",         pos: "QB",  team: "SEA", num: 7,  age: 34, status: "OK", bye: 5,  adp: 136.2, ecr: 132, tier: 5, proj: 15.4, last: 12.4, avg: 14.8, owned: 48.6, trend: [16,10,14,12,8,12],  news: "Streaming depth option",                     opp: "SF",  oppRank: 15 },
-  // RBs (continued)
-  { id: 35, name: "Tony Pollard",       pos: "RB",  team: "TEN", num: 20, age: 27, status: "OK", bye: 5,  adp: 42.6,  ecr: 40,  tier: 3, proj: 13.2, last: 10.4, avg: 12.8, owned: 94.2, trend: [12,10,14,11,9,10],  news: "Carry share concern in Tennessee",          opp: "IND", oppRank: 12 },
-  { id: 36, name: "Raheem Mostert",     pos: "RB",  team: "MIA", num: 31, age: 32, status: "OK",  bye: 6,  adp: 52.4,  ecr: 48,  tier: 3, proj: 12.6, last: 14.2, avg: 12.4, owned: 91.6, trend: [10,14,12,8,11,14],  news: "Limited (hamstring) — monitor",            opp: "BUF", oppRank: 8  },
-  { id: 37, name: "David Montgomery",   pos: "RB",  team: "DET", num: 5,  age: 27, status: "OK", bye: 5,  adp: 56.2,  ecr: 52,  tier: 3, proj: 12.4, last: 11.8, avg: 12.0, owned: 90.4, trend: [14,10,12,9,11,12],  news: "Thunder to Gibbs' lightning",              opp: "GB",  oppRank: 17 },
-  { id: 38, name: "Rhamondre Stevenson", pos:"RB",  team: "NE",  num: 38, age: 26, status: "OK", bye: 14, adp: 60.4,  ecr: 56,  tier: 3, proj: 12.0, last: 9.6,  avg: 11.4, owned: 89.2, trend: [12,8,10,11,6,10],   news: "Three-down back in transition offense",   opp: "NYJ", oppRank: 18 },
-  { id: 39, name: "Isiah Pacheco",      pos: "RB",  team: "KC",  num: 10, age: 25, status: "OK", bye: 10, adp: 62.6,  ecr: 58,  tier: 3, proj: 11.8, last: 14.6, avg: 12.2, owned: 88.4, trend: [10,12,14,11,10,15], news: "",                  opp: "LAC", oppRank: 14 },
-  { id: 40, name: "Chuba Hubbard",      pos: "RB",  team: "CAR", num: 30, age: 26, status: "OK", bye: 11, adp: 76.4,  ecr: 72,  tier: 4, proj: 11.2, last: 13.4, avg: 11.8, owned: 82.6, trend: [8,12,14,10,10,13],  news: "Starter by default in Carolina",          opp: "ATL", oppRank: 6  },
-  { id: 41, name: "Najee Harris",       pos: "RB",  team: "PIT", num: 22, age: 27, status: "OK", bye: 9,  adp: 72.6,  ecr: 68,  tier: 4, proj: 11.6, last: 10.2, avg: 11.2, owned: 84.4, trend: [12,10,11,9,8,10],  news: "Volume but low efficiency",                opp: "CLE", oppRank: 8  },
-  { id: 42, name: "D'Andre Swift",      pos: "RB",  team: "CHI", num: 29, age: 26, status: "OK", bye: 7,  adp: 68.4,  ecr: 64,  tier: 4, proj: 11.8, last: 12.6, avg: 11.4, owned: 85.6, trend: [10,12,14,8,12,13],  news: "Inconsistent behind porous OL",           opp: "ARI", oppRank: 20 },
-  { id: 43, name: "Javonte Williams",   pos: "RB",  team: "DEN", num: 23, age: 25, status: "OK", bye: 9,  adp: 80.6,  ecr: 76,  tier: 4, proj: 11.0, last: 8.4,  avg: 10.6, owned: 80.2, trend: [10,8,12,6,8,8],   news: "Recovering form after ACL year",          opp: "LV",  oppRank: 22 },
-  { id: 44, name: "Gus Edwards",        pos: "RB",  team: "LAC", num: 35, age: 29, status: "OK", bye: 5,  adp: 86.4,  ecr: 82,  tier: 4, proj: 10.8, last: 12.2, avg: 11.2, owned: 78.4, trend: [8,12,10,11,8,12],  news: "Reliable early-down back",                opp: "KC",  oppRank: 16 },
-  { id: 45, name: "Brian Robinson Jr.", pos: "RB",  team: "WAS", num: 8,  age: 26, status: "OK", bye: 14, adp: 82.2,  ecr: 78,  tier: 4, proj: 11.2, last: 9.8,  avg: 10.8, owned: 79.6, trend: [12,8,10,9,7,10],   news: "Shared backfield limiting ceiling",       opp: "PHI", oppRank: 12 },
-  { id: 46, name: "Tyjae Spears",       pos: "RB",  team: "TEN", num: 22, age: 23, status: "OK", bye: 5,  adp: 88.4,  ecr: 84,  tier: 4, proj: 10.6, last: 11.8, avg: 10.2, owned: 76.2, trend: [10,12,8,12,10,12],  news: "Explosive but rotational",               opp: "IND", oppRank: 10 },
-  // WRs (continued)
-  { id: 68, name: "Tee Higgins",        pos: "WR",  team: "CIN", num: 85, age: 26, status: "OK", bye: 12, adp: 32.4,  ecr: 30,  tier: 2, proj: 14.8, last: 17.2, avg: 14.4, owned: 96.4, trend: [14,16,18,12,10,17], news: "",                  opp: "BAL", oppRank: 16 },
-  { id: 69, name: "Chris Olave",        pos: "WR",  team: "NO",  num: 12, age: 25, status: "OK", bye: 11, adp: 38.6,  ecr: 36,  tier: 3, proj: 13.8, last: 11.6, avg: 13.2, owned: 94.6, trend: [14,10,16,8,12,12],  news: "Big-play threat with new QB",             opp: "TB",  oppRank: 24 },
-  { id: 70, name: "Stefon Diggs",       pos: "WR",  team: "HOU", num: 14, age: 31, status: "OK", bye: 6,  adp: 44.2,  ecr: 40,  tier: 3, proj: 13.2, last: 14.8, avg: 13.6, owned: 93.2, trend: [10,16,12,14,12,15], news: "",               opp: "JAX", oppRank: 14 },
-  { id: 71, name: "Cooper Kupp",        pos: "WR",  team: "LAR", num: 10, age: 32, status: "OK",  bye: 6,  adp: 48.6,  ecr: 44,  tier: 3, proj: 13.0, last: 10.4, avg: 12.4, owned: 92.4, trend: [12,8,14,11,8,10],   news: "Achilles — cautious but working",         opp: "SF",  oppRank: 19 },
-  { id: 72, name: "Jordan Addison",     pos: "WR",  team: "MIN", num: 3,  age: 23, status: "OK", bye: 6,  adp: 44.8,  ecr: 42,  tier: 3, proj: 13.4, last: 15.6, avg: 13.8, owned: 93.8, trend: [12,16,14,10,14,16], news: "",               opp: "GB",  oppRank: 10 },
-  { id: 73, name: "Keenan Allen",       pos: "WR",  team: "CHI", num: 13, age: 32, status: "OK", bye: 7,  adp: 52.4,  ecr: 50,  tier: 3, proj: 12.8, last: 14.6, avg: 13.0, owned: 91.6, trend: [12,14,12,16,10,15], news: "",          opp: "ARI", oppRank: 22 },
-  { id: 74, name: "DeVonta Smith",      pos: "WR",  team: "PHI", num: 6,  age: 28, status: "OK", bye: 10, adp: 36.4,  ecr: 34,  tier: 2, proj: 14.2, last: 16.4, avg: 14.6, owned: 95.4, trend: [14,16,12,18,14,16], news: "",               opp: "DAL", oppRank: 18 },
-  { id: 75, name: "Hollywood Brown",    pos: "WR",  team: "KC",  num: 17, age: 28, status: "OK", bye: 10, adp: 62.4,  ecr: 58,  tier: 4, proj: 12.2, last: 10.6, avg: 11.8, owned: 88.2, trend: [10,12,8,14,10,11],  news: "Speed threat in Mahomes system",          opp: "LAC", oppRank: 20 },
-  { id: 76, name: "Christian Kirk",     pos: "WR",  team: "JAX", num: 13, age: 29, status: "OK", bye: 12, adp: 66.4,  ecr: 62,  tier: 4, proj: 11.8, last: 9.4,  avg: 11.2, owned: 86.4, trend: [12,8,10,9,8,9],   news: "Team chemistry improving",                 opp: "HOU", oppRank: 14 },
-  { id: 77, name: "Christian Watson",   pos: "WR",  team: "GB",  num: 9,  age: 25, status: "OK", bye: 5,  adp: 72.6,  ecr: 68,  tier: 4, proj: 11.4, last: 13.2, avg: 11.0, owned: 84.6, trend: [10,12,14,8,10,13],  news: "Speed specialist — TD dependent",         opp: "DET", oppRank: 11 },
-  { id: 78, name: "Diontae Johnson",    pos: "WR",  team: "CAR", num: 5,  age: 28, status: "OK", bye: 11, adp: 76.4,  ecr: 72,  tier: 4, proj: 11.2, last: 8.2,  avg: 10.8, owned: 82.4, trend: [10,8,12,6,8,8],   news: "Solid floor, limited ceiling",            opp: "ATL", oppRank: 8  },
-  { id: 79, name: "Romeo Doubs",        pos: "WR",  team: "GB",  num: 18, age: 24, status: "OK", bye: 5,  adp: 88.4,  ecr: 84,  tier: 4, proj: 10.8, last: 11.6, avg: 10.4, owned: 78.6, trend: [8,12,10,11,8,12],  news: "Sneaky volume in Love's system",          opp: "DET", oppRank: 14 },
-  // TEs (continued)
-  { id: 86, name: "Kyle Pitts",         pos: "TE",  team: "ATL", num: 8,  age: 24, status: "OK", bye: 12, adp: 52.4,  ecr: 48,  tier: 2, proj: 9.8,  last: 11.4, avg: 9.4,  owned: 91.4, trend: [8,12,10,11,6,11],  news: "Penix chemistry building",                 opp: "CAR", oppRank: 12 },
-  { id: 87, name: "David Njoku",        pos: "TE",  team: "CLE", num: 85, age: 28, status: "OK", bye: 10, adp: 56.4,  ecr: 52,  tier: 2, proj: 9.4,  last: 13.6, avg: 9.8,  owned: 90.2, trend: [6,14,10,9,12,14],  news: "Volume if Watson plays",                   opp: "PIT", oppRank: 6  },
-  { id: 88, name: "Pat Freiermuth",     pos: "TE",  team: "PIT", num: 88, age: 26, status: "OK", bye: 9,  adp: 72.6,  ecr: 68,  tier: 3, proj: 8.8,  last: 9.6,  avg: 8.4,  owned: 84.6, trend: [8,10,9,8,7,10],   news: "Steady volume in short routes",           opp: "CLE", oppRank: 10 },
-  { id: 89, name: "Dalton Kincaid",     pos: "TE",  team: "BUF", num: 86, age: 25, status: "OK", bye: 12, adp: 78.2,  ecr: 74,  tier: 3, proj: 8.6,  last: 7.8,  avg: 8.2,  owned: 82.4, trend: [8,6,10,8,6,8],   news: "Competing for targets with Harty",        opp: "MIA", oppRank: 14 },
-  { id: 90, name: "Tucker Kraft",       pos: "TE",  team: "GB",  num: 85, age: 24, status: "OK", bye: 5,  adp: 86.4,  ecr: 82,  tier: 3, proj: 8.2,  last: 9.4,  avg: 7.8,  owned: 78.4, trend: [6,10,8,9,6,9],   news: "Rising TE2 in Love's offense",            opp: "DET", oppRank: 18 },
-  { id: 91, name: "Isaiah Likely",      pos: "TE",  team: "BAL", num: 80, age: 25, status: "OK", bye: 14, adp: 94.2,  ecr: 90,  tier: 3, proj: 7.8,  last: 10.2, avg: 7.6,  owned: 74.6, trend: [6,8,10,7,6,10],  news: "Fringe TE1 if Andrews misses time",       opp: "CIN", oppRank: 16 },
-  // DSTs (continued)
-  { id: 122, name: "DAL D/ST",           pos: "DST", team: "DAL", num: 0, age: 0,  status: "OK", bye: 7,  adp: 122.4, ecr: 118, tier: 2, proj: 8.4,  last: 9.0,  avg: 8.2,  owned: 82.4, trend: [8,9,7,10,7,9],   news: "Top pass-rush unit",                      opp: "PHI", oppRank: 8  },
-  { id: 123, name: "BUF D/ST",           pos: "DST", team: "BUF", num: 0, age: 0,  status: "OK", bye: 12, adp: 126.4, ecr: 122, tier: 2, proj: 8.2,  last: 8.0,  avg: 8.4,  owned: 80.6, trend: [8,8,10,7,8,8],   news: "Consistent pressure unit",                opp: "MIA", oppRank: 14 },
-  { id: 124, name: "TB D/ST",            pos: "DST", team: "TB",  num: 0, age: 0,  status: "OK", bye: 11, adp: 128.6, ecr: 124, tier: 2, proj: 7.8,  last: 10.0, avg: 8.0,  owned: 78.2, trend: [6,10,8,9,8,10],  news: "Todd Bowles scheme effective",            opp: "NO",  oppRank: 18 },
-  { id: 125, name: "BAL D/ST",           pos: "DST", team: "BAL", num: 0, age: 0,  status: "OK", bye: 14, adp: 124.4, ecr: 120, tier: 2, proj: 8.6,  last: 11.0, avg: 8.8,  owned: 83.4, trend: [8,11,9,10,8,11],  news: "Elite unit with Roquan Smith",            opp: "CIN", oppRank: 10 },
-  { id: 126, name: "KC D/ST",            pos: "DST", team: "KC",  num: 0, age: 0,  status: "OK", bye: 10, adp: 130.4, ecr: 126, tier: 2, proj: 7.6,  last: 8.0,  avg: 7.8,  owned: 76.4, trend: [8,8,6,9,7,8],   news: "Spagnuolo D consistent",                  opp: "LAC", oppRank: 12 },
-  { id: 127, name: "CLE D/ST",           pos: "DST", team: "CLE", num: 0, age: 0,  status: "OK", bye: 10, adp: 136.2, ecr: 132, tier: 3, proj: 7.2,  last: 6.0,  avg: 7.4,  owned: 68.4, trend: [6,6,8,7,5,6],   news: "Myles Garrett carries the load",          opp: "PIT", oppRank: 6  },
-  { id: 128, name: "NE D/ST",            pos: "DST", team: "NE",  num: 0, age: 0,  status: "OK", bye: 14, adp: 142.4, ecr: 138, tier: 3, proj: 6.8,  last: 5.0,  avg: 7.0,  owned: 62.4, trend: [6,4,8,6,4,5],   news: "Rebuilding — upside in matchups",         opp: "NYJ", oppRank: 22 },
-  { id: 129, name: "NO D/ST",            pos: "DST", team: "NO",  num: 0, age: 0,  status: "OK", bye: 11, adp: 138.6, ecr: 134, tier: 3, proj: 7.0,  last: 7.0,  avg: 7.2,  owned: 64.6, trend: [6,7,8,6,7,7],   news: "Strong defensive line",                   opp: "TB",  oppRank: 16 },
-  { id: 130, name: "CIN D/ST",           pos: "DST", team: "CIN", num: 0, age: 0,  status: "OK", bye: 12, adp: 140.2, ecr: 136, tier: 3, proj: 6.6,  last: 7.0,  avg: 7.0,  owned: 60.4, trend: [4,8,6,7,6,7],   news: "Average unit — situational play",         opp: "BAL", oppRank: 12 },
-  { id: 131, name: "NYJ D/ST",           pos: "DST", team: "NYJ", num: 0, age: 0,  status: "OK", bye: 12, adp: 144.6, ecr: 140, tier: 3, proj: 6.4,  last: 8.0,  avg: 6.8,  owned: 58.4, trend: [4,8,6,8,4,8],   news: "Good front — QB play drags down value",   opp: "NE",  oppRank: 20 },
-  { id: 132, name: "LAC D/ST",           pos: "DST", team: "LAC", num: 0, age: 0,  status: "OK", bye: 5,  adp: 132.4, ecr: 128, tier: 2, proj: 7.4,  last: 9.0,  avg: 7.6,  owned: 70.4, trend: [6,8,10,7,6,9],   news: "Harmon bringing pressure",                opp: "KC",  oppRank: 14 },
-  { id: 133, name: "DET D/ST",           pos: "DST", team: "DET", num: 0, age: 0,  status: "OK", bye: 5,  adp: 134.4, ecr: 130, tier: 2, proj: 7.2,  last: 7.0,  avg: 7.4,  owned: 68.2, trend: [6,6,8,8,6,7],   news: "Schoen's D improving each week",          opp: "GB",  oppRank: 14 },
-  { id: 134, name: "CHI D/ST",           pos: "DST", team: "CHI", num: 0, age: 0,  status: "OK", bye: 7,  adp: 138.4, ecr: 134, tier: 3, proj: 6.8,  last: 5.0,  avg: 7.0,  owned: 62.4, trend: [6,4,8,6,4,5],   news: "Rebuilding — matchup dependent",          opp: "ARI", oppRank: 20 },
-  // Waiver-wire depth RBs
-  { id: 47,  name: "Travis Etienne Jr.", pos: "RB", team: "JAX", num: 1,  age: 25, status: "OK", bye: 12, adp: 92.4,  ecr: 88,  tier: 4, proj: 11.2, last: 13.4, avg: 11.8, owned: 82.4, trend: [10,14,12,9,11,13],  news: "Volume back — lead role secured",         opp: "HOU", oppRank: 14 },
-  { id: 48,  name: "Zach Charbonnet",    pos: "RB", team: "SEA", num: 26, age: 24, status: "OK", bye: 5,  adp: 96.2,  ecr: 92,  tier: 4, proj: 10.8, last: 11.6, avg: 10.4, owned: 78.6, trend: [8,12,10,11,8,12],   news: "Emerging with Walker banged up",           opp: "SF",  oppRank: 16 },
-  { id: 49,  name: "Jaylen Warren",      pos: "RB", team: "PIT", num: 30, age: 25, status: "OK", bye: 9,  adp: 98.4,  ecr: 94,  tier: 4, proj: 8.6,  last: 10.2, avg: 8.4,  owned: 74.2, trend: [6,10,8,9,6,10],    news: "Strong pass-catcher behind Harris",        opp: "CLE", oppRank: 8  },
-  { id: 155, name: "Dameon Pierce",      pos: "RB", team: "HOU", num: 31, age: 24, status: "OK", bye: 6,  adp: 102.4, ecr: 98,  tier: 4, proj: 8.4,  last: 7.6,  avg: 8.0,  owned: 70.4, trend: [8,6,10,7,6,8],    news: "Handcuff — spot value if Mixon sits",     opp: "IND", oppRank: 20 },
-  { id: 156, name: "Roschon Johnson",    pos: "RB", team: "CHI", num: 23, age: 23, status: "OK", bye: 7,  adp: 108.6, ecr: 104, tier: 5, proj: 7.8,  last: 9.4,  avg: 7.6,  owned: 66.2, trend: [6,10,8,9,6,9],    news: "Limited role — TD upside only",           opp: "ARI", oppRank: 22 },
-  { id: 157, name: "Miles Sanders",      pos: "RB", team: "CAR", num: 4,  age: 27, status: "OK",  bye: 11, adp: 112.2, ecr: 108, tier: 5, proj: 7.6,  last: 6.4,  avg: 7.2,  owned: 62.4, trend: [6,8,8,6,4,6],    news: "Hamstring (LP) — gametime call",          opp: "ATL", oppRank: 10 },
-  { id: 158, name: "Patrick Taylor",     pos: "RB", team: "GB",  num: 42, age: 27, status: "OK", bye: 5,  adp: 116.4, ecr: 112, tier: 5, proj: 7.2,  last: 8.8,  avg: 7.0,  owned: 58.4, trend: [4,8,6,9,4,9],    news: "Jacobs handcuff worth a roster spot",     opp: "DET", oppRank: 20 },
-  { id: 159, name: "Ty Chandler",        pos: "RB", team: "MIN", num: 32, age: 25, status: "OK", bye: 6,  adp: 118.6, ecr: 114, tier: 5, proj: 7.4,  last: 8.2,  avg: 7.0,  owned: 56.2, trend: [6,8,8,8,6,8],    news: "Flashed upside in preseason",             opp: "GB",  oppRank: 14 },
-  { id: 160, name: "Elijah Mitchell",    pos: "RB", team: "SF",  num: 25, age: 26, status: "OK",  bye: 9,  adp: 120.4, ecr: 116, tier: 5, proj: 8.8,  last: 10.4, avg: 8.4,  owned: 72.4, trend: [6,10,8,10,6,10],  news: "CMC handcuff — spot starter upside",      opp: "SEA", oppRank: 16 },
-  { id: 161, name: "Chris Rodriguez Jr.",pos: "RB", team: "WAS", num: 23, age: 24, status: "OK", bye: 14, adp: 122.4, ecr: 118, tier: 5, proj: 7.6,  last: 6.8,  avg: 7.2,  owned: 54.6, trend: [6,6,8,6,6,7],    news: "No-frills early-down back in WAS",        opp: "PHI", oppRank: 15 },
-  { id: 162, name: "Ameer Abdullah",     pos: "RB", team: "LV",  num: 22, age: 32, status: "OK", bye: 10, adp: 148.6, ecr: 144, tier: 6, proj: 6.4,  last: 4.8,  avg: 6.2,  owned: 42.4, trend: [4,6,6,6,4,5],    news: "Veteran committee role",                  opp: "DEN", oppRank: 20 },
-  { id: 163, name: "Craig Reynolds",     pos: "RB", team: "DET", num: 46, age: 26, status: "OK", bye: 5,  adp: 152.4, ecr: 148, tier: 6, proj: 6.8,  last: 7.2,  avg: 6.4,  owned: 44.6, trend: [4,6,8,6,4,7],    news: "Depth piece in Lions loaded backfield",   opp: "GB",  oppRank: 21 },
-  { id: 164, name: "Eric Gray",          pos: "RB", team: "NYG", num: 20, age: 24, status: "OK", bye: 11, adp: 144.6, ecr: 140, tier: 6, proj: 7.0,  last: 8.4,  avg: 6.8,  owned: 46.4, trend: [6,8,8,8,6,8],    news: "Sneaky upside with Giants improving",     opp: "DAL", oppRank: 16 },
-  { id: 165, name: "Zamir White",        pos: "RB", team: "LV",  num: 35, age: 24, status: "OK",  bye: 10, adp: 126.4, ecr: 122, tier: 5, proj: 8.2,  last: 7.6,  avg: 7.8,  owned: 68.4, trend: [8,8,8,8,6,8],    news: "Ankle (LP) — Jeanty's handcuff",          opp: "DEN", oppRank: 18 },
-  { id: 166, name: "Kareem Hunt",        pos: "RB", team: "KC",  num: 29, age: 30, status: "OK", bye: 10, adp: 104.2, ecr: 100, tier: 4, proj: 8.6,  last: 9.8,  avg: 8.2,  owned: 74.6, trend: [8,10,8,9,8,10],  news: "Veteran depth — TD vulture role",         opp: "LAC", oppRank: 12 },
-  // Waiver-wire WRs
-  { id: 167, name: "Tyler Boyd",         pos: "WR", team: "TEN", num: 83, age: 30, status: "OK", bye: 5,  adp: 98.4,  ecr: 94,  tier: 4, proj: 10.2, last: 8.4,  avg: 9.8,  owned: 72.6, trend: [10,8,10,8,8,8],  news: "Reliable slot — volume floor",            opp: "IND", oppRank: 10 },
-  { id: 168, name: "Quentin Johnston",   pos: "WR", team: "LAC", num: 1,  age: 23, status: "OK", bye: 5,  adp: 104.2, ecr: 100, tier: 4, proj: 9.6,  last: 11.2, avg: 9.4,  owned: 68.4, trend: [8,12,10,9,8,11],  news: "Year-2 breakout building steam",          opp: "KC",  oppRank: 14 },
-  { id: 169, name: "Khalil Shakir",      pos: "WR", team: "BUF", num: 10, age: 25, status: "OK", bye: 12, adp: 108.6, ecr: 104, tier: 5, proj: 9.8,  last: 10.4, avg: 9.6,  owned: 70.2, trend: [8,10,10,10,8,10], news: "",             opp: "MIA", oppRank: 18 },
-  { id: 170, name: "Dontayvion Wicks",  pos: "WR", team: "GB",  num: 13, age: 23, status: "OK", bye: 5,  adp: 114.4, ecr: 110, tier: 5, proj: 9.2,  last: 11.8, avg: 9.0,  owned: 64.4, trend: [6,12,8,12,6,12],  news: "Boom-bust upside in GB offense",          opp: "DET", oppRank: 12 },
-  // Waiver-wire TEs
-  { id: 171, name: "Cole Kmet",          pos: "TE", team: "CHI", num: 85, age: 25, status: "OK", bye: 7,  adp: 98.4,  ecr: 94,  tier: 3, proj: 7.6,  last: 9.2,  avg: 7.4,  owned: 68.4, trend: [6,10,8,9,6,9],   news: "Safe floor with Williams system",         opp: "ARI", oppRank: 16 },
-  { id: 172, name: "Cade Otton",         pos: "TE", team: "TB",  num: 88, age: 25, status: "OK", bye: 11, adp: 104.6, ecr: 100, tier: 3, proj: 7.2,  last: 8.4,  avg: 7.0,  owned: 64.6, trend: [6,8,8,8,6,8],   news: "Consistent role in Tampa offense",        opp: "NO",  oppRank: 14 },
-];
-
-// Compact name→id map exported for playerStore ID-preservation only.
-// All player stats shown in the UI come from live Databricks / Sleeper data.
-export const PLAYER_ID_MAP = PLAYERS.map(p => ({ id: p.id, name: p.name }));
-
-// Private lookup used only by assignRoster for slot assignment by position.
-// Not exported — use findPlayer() from playerStore for live data lookups.
-const _findPlayerLocal = (id) => PLAYERS.find(p => p.id === id);
-
-// Game weather keyed by opponent team abbr (mock data for current week).
-// Dome = indoor stadium; wind 0. Cold/Rain affects K/DST/passing game.
-export const GAME_WEATHER = {
-  BUF: { cond: 'Cold/Windy', temp: 31, wind: 18, icon: '🌬️' },
-  MIA: { cond: 'Clear',      temp: 80, wind: 8,  icon: '☀️'  },
-  NE:  { cond: 'Cold',       temp: 38, wind: 12, icon: '🌥️' },
-  NYJ: { cond: 'Cold',       temp: 40, wind: 15, icon: '🌥️' },
-  BAL: { cond: 'Clear',      temp: 50, wind: 9,  icon: '⛅'  },
-  CIN: { cond: 'Cloudy',     temp: 48, wind: 8,  icon: '🌥️' },
-  CLE: { cond: 'Cold',       temp: 35, wind: 12, icon: '🌬️' },
-  PIT: { cond: 'Cold',       temp: 36, wind: 10, icon: '🌥️' },
-  HOU: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  IND: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  JAX: { cond: 'Clear',      temp: 72, wind: 6,  icon: '☀️'  },
-  TEN: { cond: 'Clear',      temp: 54, wind: 7,  icon: '⛅'  },
-  KC:  { cond: 'Clear',      temp: 45, wind: 12, icon: '⛅'  },
-  LAC: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  LV:  { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  DEN: { cond: 'Clear',      temp: 52, wind: 6,  icon: '☀️'  },
-  DAL: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  NYG: { cond: 'Cloudy',     temp: 44, wind: 16, icon: '🌥️' },
-  PHI: { cond: 'Cloudy',     temp: 46, wind: 11, icon: '🌥️' },
-  WAS: { cond: 'Cloudy',     temp: 46, wind: 10, icon: '🌥️' },
-  CHI: { cond: 'Cold',       temp: 40, wind: 14, icon: '🌬️' },
-  DET: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  GB:  { cond: 'Cold',       temp: 29, wind: 14, icon: '🌬️' },
-  MIN: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  ATL: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  CAR: { cond: 'Cloudy',     temp: 52, wind: 9,  icon: '⛅'  },
-  NO:  { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  TB:  { cond: 'Clear',      temp: 76, wind: 8,  icon: '☀️'  },
-  ARI: { cond: 'Dome',       temp: 72, wind: 0,  icon: '🏟️' },
-  LAR: { cond: 'Clear',      temp: 68, wind: 7,  icon: '☀️'  },
-  SF:  { cond: 'Foggy',      temp: 56, wind: 14, icon: '🌫️' },
-  SEA: { cond: 'Rain',       temp: 48, wind: 14, icon: '🌧️' },
-};
+// All player data comes from live R2 / Sleeper via playerStore.js.
+export const PLAYER_ID_MAP = [];
+const _findPlayerLocal = () => null;
+export const CBS_RANKINGS = [];
 
 // Real CBS team names (id maps directly to CBS team id; id 8 = Armed Rodgery = user's team)
+// record/pf/pa reset for 2026 season — populated from live standings once season begins
 export const LEAGUE_TEAMS = [
-  { id: 1,  cbsId: "8",  name: "Armed Rodgery",            owner: "Shane Olsen",              email: "kingoffrisco@yahoo.com",    logo: "AR", color: "#c6ff3a", record: "7-3",  pf: 1284.6, pa: 1100.2, me: true },
-  { id: 2,  cbsId: "1",  name: "Bourbon is a Vegetable",   owner: "Joseph Blalock",           email: "jnbii@att.net",             logo: "BV", color: "#ff5a6e", record: "6-4",  pf: 1198.4, pa: 1145.8 },
-  { id: 3,  cbsId: "2",  name: "Howdy Hut",                owner: "David Gray & Gary Remy",   email: "david@dlgog.com",           logo: "HH", color: "#4ea8ff", record: "5-5",  pf: 1102.2, pa: 1189.6 },
-  { id: 4,  cbsId: "3",  name: "Start Pulling Out",        owner: "Nathan Jekel",             email: "njekel04@yahoo.com",        logo: "SP", color: "#36d39a", record: "4-6",  pf: 1088.0, pa: 1210.4 },
-  { id: 5,  cbsId: "4",  name: "The Epstein Islanders",    owner: "Chendo Gonzalez",          email: "chendogonz@gmail.com",      logo: "EI", color: "#ffa83a", record: "8-2",  pf: 1320.8, pa: 1044.6 },
-  { id: 6,  cbsId: "5",  name: "Penn State Shower Power",  owner: "Eric Sam",                 email: "ericsam@live.com",          logo: "PS", color: "#b48cff", record: "3-7",  pf: 1044.6, pa: 1288.2 },
-  { id: 7,  cbsId: "6",  name: "Vick's Hushpuppies",       owner: "Wayne Hardcastle",         email: "whardcastle@llroberts.com", logo: "VH", color: "#ffd84a", record: "7-3",  pf: 1266.4, pa: 1122.0 },
-  { id: 8,  cbsId: "7",  name: "Gecko Barflies",           owner: "Kenneth Beerwinkle & Will Henderson", email: "ken@kbrl.me",  logo: "GB", color: "#59c8ff", record: "6-4",  pf: 1188.6, pa: 1154.2 },
-  { id: 9,  cbsId: "9",  name: "Swingin' Flamingos",       owner: "Joseph Dunn",              email: "josephdunntx22@gmail.com",  logo: "SF", color: "#ff7a3a", record: "5-5",  pf: 1144.2, pa: 1166.8 },
-  { id: 10, cbsId: "10", name: "Gringo Pendejo",           owner: "Jeff Innmon",              email: "jeff.innmon@kdc.com",       logo: "GP", color: "#36d39a", record: "4-6",  pf: 1066.8, pa: 1232.4 },
-  { id: 11, cbsId: "11", name: "Fat, Drunk & Stupid",      owner: "William Dunn",             email: "ddunn@dunnsheehan.com",     logo: "FD", color: "#c6ff3a", record: "9-1",  pf: 1388.2, pa: 988.4  },
-  { id: 12, cbsId: "12", name: "DJ 8 Trak",                owner: "Kirk King & Kyle King",    email: "kirkkingre@yahoo.com",      logo: "DJ", color: "#ff5a6e", record: "2-8",  pf: 988.4,  pa: 1344.6 },
+  { id: 1,  cbsId: "8",  name: "Armed Rodgery",            owner: "Shane Olsen",              email: "kingoffrisco@yahoo.com",    logo: "AR", color: "#c6ff3a", record: "0-0", pf: 0, pa: 0, me: true },
+  { id: 2,  cbsId: "1",  name: "Bourbon is a Vegetable",   owner: "Joseph Blalock",           email: "jnbii@att.net",             logo: "BV", color: "#ff5a6e", record: "0-0", pf: 0, pa: 0 },
+  { id: 3,  cbsId: "2",  name: "Howdy Hut",                owner: "David Gray & Gary Remy",   email: "david@dlgog.com",           logo: "HH", color: "#4ea8ff", record: "0-0", pf: 0, pa: 0 },
+  { id: 4,  cbsId: "3",  name: "Start Pulling Out",        owner: "Nathan Jekel",             email: "njekel04@yahoo.com",        logo: "SP", color: "#36d39a", record: "0-0", pf: 0, pa: 0 },
+  { id: 5,  cbsId: "4",  name: "The Epstein Islanders",    owner: "Chendo Gonzalez",          email: "chendogonz@gmail.com",      logo: "EI", color: "#ffa83a", record: "0-0", pf: 0, pa: 0 },
+  { id: 6,  cbsId: "5",  name: "Penn State Shower Power",  owner: "Eric Sam",                 email: "ericsam@live.com",          logo: "PS", color: "#b48cff", record: "0-0", pf: 0, pa: 0 },
+  { id: 7,  cbsId: "6",  name: "Vick's Hushpuppies",       owner: "Wayne Hardcastle",         email: "whardcastle@llroberts.com", logo: "VH", color: "#ffd84a", record: "0-0", pf: 0, pa: 0 },
+  { id: 8,  cbsId: "7",  name: "Gecko Barflies",           owner: "Kenneth Beerwinkle & Will Henderson", email: "ken@kbrl.me",  logo: "GB", color: "#59c8ff", record: "0-0", pf: 0, pa: 0 },
+  { id: 9,  cbsId: "9",  name: "Swingin' Flamingos",       owner: "Joseph Dunn",              email: "josephdunntx22@gmail.com",  logo: "SF", color: "#ff7a3a", record: "0-0", pf: 0, pa: 0 },
+  { id: 10, cbsId: "10", name: "Gringo Pendejo",           owner: "Jeff Innmon",              email: "jeff.innmon@kdc.com",       logo: "GP", color: "#36d39a", record: "0-0", pf: 0, pa: 0 },
+  { id: 11, cbsId: "11", name: "Fat, Drunk & Stupid",      owner: "William Dunn",             email: "ddunn@dunnsheehan.com",     logo: "FD", color: "#c6ff3a", record: "0-0", pf: 0, pa: 0 },
+  { id: 12, cbsId: "12", name: "DJ 8 Trak",                owner: "Kirk King & Kyle King",    email: "kirkkingre@yahoo.com",      logo: "DJ", color: "#ff5a6e", record: "0-0", pf: 0, pa: 0 },
 ];
 
 export function findTeam(id) {
@@ -243,7 +58,7 @@ export function findTeam(id) {
   return base;
 }
 
-// Rosters are populated only by the draft and subsequent waivers — never pre-seeded.
+// Rosters are populated only by the draft and subsequent waivers â€” never pre-seeded.
 export const MY_ROSTER = [];
 
 export const WATCHLIST = {
@@ -290,7 +105,7 @@ export const BEAT_WRITERS = [
   { handle: 'colton_pouncy',   name: 'Colton Pouncy',       category: 'beat', team: 'DET' },
 ];
 
-// Source metadata — color used for badges across News, Players, etc.
+// Source metadata â€” color used for badges across News, Players, etc.
 export const SOURCE_META = {
   'Rotoworld':         { color: '#ff7a3a' },
   'Adam Schefter':     { color: '#4ea8ff' },
@@ -312,12 +127,12 @@ export const QUEUE = [];
 
 export const CHAT_MESSAGES = [
   { who: "Marcus", color: "#ff5a6e", ts: "7:14", msg: "lol that pick was a reach" },
-  { who: "Tess", color: "#ffd84a", ts: "7:14", msg: "🎯 I had him next" },
+  { who: "Tess", color: "#ffd84a", ts: "7:14", msg: "ðŸŽ¯ I had him next" },
   { who: "Devon", color: "#4ea8ff", ts: "7:15", msg: "auto-draft about to make Sam look smart" },
-  { who: "Sam", color: "#ffa83a", ts: "7:15", msg: "Hey — I'm here. Tea, not coffee, that's the difference" },
-  { who: "FantasAI", color: "#c6ff3a", ts: "7:16", msg: "⚡ Tier break at RB coming after this pick — 4 candidates left.", ai: true },
+  { who: "Sam", color: "#ffa83a", ts: "7:15", msg: "Hey â€” I'm here. Tea, not coffee, that's the difference" },
+  { who: "FantasAI", color: "#c6ff3a", ts: "7:16", msg: "âš¡ Tier break at RB coming after this pick â€” 4 candidates left.", ai: true },
   { who: "Jordan", color: "#b48cff", ts: "7:16", msg: "queue is mine, AI" },
-  { who: "Priya", color: "#36d39a", ts: "7:17", msg: "armed rogery is cooking 🔥" },
+  { who: "Priya", color: "#36d39a", ts: "7:17", msg: "armed rogery is cooking ðŸ”¥" },
 ];
 
 export const INTEGRATIONS = [
@@ -354,7 +169,7 @@ export const FREE_DATA_SOURCES = [
     url: "https://fantasysports.yahooapis.com/fantasy/v2",
     rank: 2,
     auth: "oauth2",
-    authNote: "OAuth2 · free Yahoo Developer account",
+    authNote: "OAuth2 Â· free Yahoo Developer account",
     provides: ["Live scoring & rosters", "Draft results", "Waiver transactions", "Player stats & news"],
     docUrl: "https://developer.yahoo.com/fantasysports/guide",
     color: "#6e1f87",
@@ -367,7 +182,7 @@ export const FREE_DATA_SOURCES = [
     url: "https://www.leaguelogs.com",
     rank: 3,
     auth: "account",
-    authNote: "Free account required — sign up at leaguelogs.com, then use your API token",
+    authNote: "Free account required â€” sign up at leaguelogs.com, then use your API token",
     provides: ["Historical NFL player stats", "Season-by-season fantasy scoring", "Cross-platform league history"],
     docUrl: "https://www.leaguelogs.com/resources/api",
     color: "#2a9d8f",
@@ -380,7 +195,7 @@ export const FREE_DATA_SOURCES = [
     url: "https://github.com/nflverse/nflverse-data",
     rank: 4,
     auth: "none",
-    authNote: "No auth required — open GitHub data releases",
+    authNote: "No auth required â€” open GitHub data releases",
     provides: ["Weekly player stats (CSV)", "Rosters & depth charts", "Next-gen stats", "Play-by-play data"],
     docUrl: "https://nflverse.nflverse.com",
     color: "#1a6b3c",
@@ -393,7 +208,7 @@ export const FREE_DATA_SOURCES = [
     url: "https://site.api.espn.com/apis/site/v2/sports/football/nfl",
     rank: 5,
     auth: "none",
-    authNote: "No auth required — public ESPN endpoints",
+    authNote: "No auth required â€” public ESPN endpoints",
     provides: ["Team rosters & schedules", "Player injury reports", "Game scores & stats", "Standings"],
     docUrl: "https://gist.github.com/nntrn/ee26cb2a0716de0947a0a4e9a157bc1c",
     color: "#d00",
@@ -406,7 +221,7 @@ export const FREE_DATA_SOURCES = [
     url: "https://twitter.com",
     rank: 7,
     auth: "none",
-    authNote: "No API key required — scrapes public X/Twitter posts via Nitter RSS",
+    authNote: "No API key required â€” scrapes public X/Twitter posts via Nitter RSS",
     provides: ["Breaking NFL transactions", "Injury reports from beat reporters", "Fantasy-focused analysis", "32 team beat writers"],
     docUrl: null,
     color: "#1da1f2",
@@ -428,14 +243,14 @@ export const FREE_DATA_SOURCES = [
   },
 ];
 
-// Limited-free APIs: free tier with API key — used for targeted per-roster updates
+// Limited-free APIs: free tier with API key â€” used for targeted per-roster updates
 export const LIMITED_FREE_SOURCES = [
   {
     id: "apifootball",
     name: "API-Football",
     url: "https://v1.american-football.api-sports.io",
     keyHeader: "x-apisports-key",
-    authNote: "100 req/day free · api-sports.io account",
+    authNote: "100 req/day free Â· api-sports.io account",
     provides: ["Live game scores", "Player game stats", "Team rosters", "Season standings"],
     docUrl: "https://www.api-football.com/documentation-american-football",
     signupUrl: "https://dashboard.api-football.com/register",
@@ -447,7 +262,7 @@ export const LIMITED_FREE_SOURCES = [
     url: "https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com",
     keyHeader: "x-rapidapi-key",
     keyHost: "tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com",
-    authNote: "100 req/day free · RapidAPI account",
+    authNote: "100 req/day free Â· RapidAPI account",
     provides: ["NFL fantasy news", "Player injury articles"],
     docUrl: "https://rapidapi.com/tank01/api/tank01-nfl-live-in-game-real-time-statistics-nfl",
     signupUrl: "https://rapidapi.com/auth/sign-up",
@@ -461,7 +276,7 @@ export const LIMITED_FREE_SOURCES = [
     keyHeader: null,
     keyInUrl: true,
     defaultKey: "123",
-    authNote: "Free key '123' — no signup needed · 30 free req/min",
+    authNote: "Free key '123' â€” no signup needed Â· 30 free req/min",
     provides: ["Player bios & photos", "Team info", "Event results", "Venue data"],
     docUrl: "https://www.thesportsdb.com/api.php",
     signupUrl: "https://www.thesportsdb.com/register.php",
@@ -472,7 +287,7 @@ export const LIMITED_FREE_SOURCES = [
     name: "MySportsFeeds",
     url: "https://api.mysportsfeeds.com/v2.1",
     keyHeader: "Authorization",
-    authNote: "Rookie plan free — 1,000 req/month for historical seasons · mysportsfeeds.com",
+    authNote: "Rookie plan free â€” 1,000 req/month for historical seasons Â· mysportsfeeds.com",
     provides: ["Historical game logs", "Player season stats", "Injury reports", "Season standings"],
     docUrl: "https://www.mysportsfeeds.com/data-feeds/api-docs/",
     signupUrl: "https://www.mysportsfeeds.com/",
@@ -491,7 +306,7 @@ export const RANKING_SOURCES = [
   { id: "nfl-r",     name: "NFL.com Rankings",             type: "site",      contributors: 3,   weight: 4,  enabled: false, updated: "6 hr ago",   note: "Off by default. Stale most weeks." },
   { id: "sharp",     name: "Sharp Football Analysis",      type: "site",      contributors: 2,   weight: 6,  enabled: true,  updated: "Daily",      note: "Matchup & scheme edge." },
   { id: "boris",     name: "Borischen Tiers",              type: "tiers",     contributors: 1,   weight: 6,  enabled: true,  updated: "30 min ago", note: "Tier breaks drive draft strategy." },
-  { id: "custom",    name: "Your Custom Cheat Sheet",      type: "you",       contributors: 1,   weight: 0,  enabled: false, updated: "—",          note: "Upload a CSV or rank in-app to override." },
+  { id: "custom",    name: "Your Custom Cheat Sheet",      type: "you",       contributors: 1,   weight: 0,  enabled: false, updated: "â€”",          note: "Upload a CSV or rank in-app to override." },
 ];
 
 const _r = (qb,rb,wr,te,k,dst) => ({QB:qb, RB:rb, WR:wr, TE:te, K:k, DST:dst});
@@ -514,7 +329,7 @@ export const OWNER_PROFILES = [
     history: [
       { year: 2024, place: "3rd", roundPick: 6, picks: [22, 50, 56, 30, 80], notes: "Aggressive RB-RB-WR; nailed Bowers in R4." },
       { year: 2023, place: "5th", roundPick: 9, picks: [22, 23, 53, 56, 80], notes: "Hero RB worked early; Tyreek fell apart late." },
-      { year: 2022, place: "🏆 Champion", roundPick: 4, picks: [21, 52, 1, 25, 81], notes: "Early Allen paid off; McBride was the steal." },
+      { year: 2022, place: "ðŸ† Champion", roundPick: 4, picks: [21, 52, 1, 25, 81], notes: "Early Allen paid off; McBride was the steal." },
       { year: 2021, place: "7th", roundPick: 11, picks: [], notes: "Auto-drafted half the team. Don't talk about it." },
       { year: 2020, place: "2nd", roundPick: 2, picks: [], notes: "Lost the chip on a Sunday night Henry stat correction." },
     ],
@@ -536,10 +351,10 @@ export const OWNER_PROFILES = [
       _r(10,20,30,20,10,10), _r(0,20,30,20,20,10), _r(0,10,20,20,30,20), _r(0,10,20,10,40,20),
     ],
     history: [
-      { year: 2024, place: "🏆 Champion", roundPick: 12, picks: [20, 25, 53, 81, 26], notes: "Got CMC at 1.12 turn — pure value." },
+      { year: 2024, place: "ðŸ† Champion", roundPick: 12, picks: [20, 25, 53, 81, 26], notes: "Got CMC at 1.12 turn â€” pure value." },
       { year: 2023, place: "2nd", roundPick: 5, picks: [], notes: "Textbook draft. Boring. Effective." },
       { year: 2022, place: "4th", roundPick: 8, picks: [], notes: "Bingo card draft." },
-      { year: 2021, place: "🏆 Champion", roundPick: 1, picks: [], notes: "Took Taylor 1.01 — the obvious move that won the league." },
+      { year: 2021, place: "ðŸ† Champion", roundPick: 1, picks: [], notes: "Took Taylor 1.01 â€” the obvious move that won the league." },
       { year: 2020, place: "6th", roundPick: 7, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 5 },
@@ -560,8 +375,8 @@ export const OWNER_PROFILES = [
       _r(0,50,30,10,10,0), _r(0,40,30,10,10,10), _r(0,30,20,10,20,20), _r(0,20,20,10,30,20),
     ],
     history: [
-      { year: 2024, place: "8th", roundPick: 2, picks: [50, 51, 80, 56, 27], notes: "Zero RB blew up — Hall got hurt, Cook never broke out." },
-      { year: 2023, place: "2nd", roundPick: 10, picks: [], notes: "Zero RB hit — championship game appearance." },
+      { year: 2024, place: "8th", roundPick: 2, picks: [50, 51, 80, 56, 27], notes: "Zero RB blew up â€” Hall got hurt, Cook never broke out." },
+      { year: 2023, place: "2nd", roundPick: 10, picks: [], notes: "Zero RB hit â€” championship game appearance." },
       { year: 2022, place: "9th", roundPick: 6, picks: [], notes: "" },
       { year: 2021, place: "4th", roundPick: 3, picks: [], notes: "" },
       { year: 2020, place: "3rd", roundPick: 12, picks: [], notes: "" },
@@ -591,7 +406,7 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "4th", roundPick: 10, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 7 },
-    predictedNext: { topTargets: [6, 5, 65], reasoning: "Caleb Williams is a Priya pick — young QB hype + preseason buzz." },
+    predictedNext: { topTargets: [6, 5, 65], reasoning: "Caleb Williams is a Priya pick â€” young QB hype + preseason buzz." },
   },
   {
     teamId: 5, archetype: "Late-Round QB",
@@ -612,7 +427,7 @@ export const OWNER_PROFILES = [
       { year: 2023, place: "6th", roundPick: 4, picks: [], notes: "" },
       { year: 2022, place: "3rd", roundPick: 11, picks: [], notes: "" },
       { year: 2021, place: "9th", roundPick: 2, picks: [], notes: "" },
-      { year: 2020, place: "🏆 Champion", roundPick: 6, picks: [], notes: "Late Herbert was the league-winner." },
+      { year: 2020, place: "ðŸ† Champion", roundPick: 6, picks: [], notes: "Late Herbert was the league-winner." },
     ],
     upcomingPick: { round: 4, slot: 8 },
     predictedNext: { topTargets: [28, 64, 24], reasoning: "Another RB or volume WR. QB still 6 rounds away." },
@@ -657,7 +472,7 @@ export const OWNER_PROFILES = [
     ],
     history: [
       { year: 2024, place: "2nd", roundPick: 5, picks: [], notes: "BPA all the way down. Took TE in R2 nobody saw coming." },
-      { year: 2023, place: "🏆 Champion", roundPick: 12, picks: [], notes: "Bowers R8 won her the league." },
+      { year: 2023, place: "ðŸ† Champion", roundPick: 12, picks: [], notes: "Bowers R8 won her the league." },
       { year: 2022, place: "7th", roundPick: 2, picks: [], notes: "" },
       { year: 2021, place: "5th", roundPick: 10, picks: [], notes: "" },
       { year: 2020, place: "9th", roundPick: 3, picks: [], notes: "" },
@@ -687,11 +502,11 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "11th", roundPick: 11, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 11 },
-    predictedNext: { topTargets: [83, 31, 65], reasoning: "Will auto. CBS default ranks at slot 4.11 → LaPorta or Aaron Jones." },
+    predictedNext: { topTargets: [83, 31, 65], reasoning: "Will auto. CBS default ranks at slot 4.11 â†’ LaPorta or Aaron Jones." },
   },
   {
     teamId: 9, archetype: "Stack & Pray",
-    archetypeDesc: "Builds offensive stacks — QB+WR+TE from same team. Aggressive, ceiling-chaser.",
+    archetypeDesc: "Builds offensive stacks â€” QB+WR+TE from same team. Aggressive, ceiling-chaser.",
     confidence: 82,
     tool: { name: "Underdog ADP + Stack Targets", inferred: true, signal: "3+ same-team stacks per draft" },
     tools: ["Underdog ADP", "FantasyPros Stack Builder"],
@@ -711,7 +526,7 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "7th", roundPick: 4, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 12 },
-    predictedNext: { topTargets: [83, 85, 61], reasoning: "Has Hurts QB. Targeting stack WRs — Metcalf or Evans as next receiver." },
+    predictedNext: { topTargets: [83, 85, 61], reasoning: "Has Hurts QB. Targeting stack WRs â€” Metcalf or Evans as next receiver." },
   },
   {
     teamId: 10, archetype: "Veteran Hoarder",
@@ -735,7 +550,7 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "12th", roundPick: 5, picks: [], notes: "" },
     ],
     upcomingPick: { round: 5, slot: 1 },
-    predictedNext: { topTargets: [84, 60, 64], reasoning: "Kelce, Evans, Adams — pick the one still available." },
+    predictedNext: { topTargets: [84, 60, 64], reasoning: "Kelce, Evans, Adams â€” pick the one still available." },
   },
   {
     teamId: 11, archetype: "Analytics Native",
@@ -755,11 +570,11 @@ export const OWNER_PROFILES = [
       { year: 2024, place: "7th", roundPick: 7, picks: [], notes: "Got beat by variance, not by draft." },
       { year: 2023, place: "3rd", roundPick: 1, picks: [], notes: "" },
       { year: 2022, place: "2nd", roundPick: 3, picks: [], notes: "" },
-      { year: 2021, place: "🏆 Champion", roundPick: 8, picks: [], notes: "Modeled to perfection." },
+      { year: 2021, place: "ðŸ† Champion", roundPick: 8, picks: [], notes: "Modeled to perfection." },
       { year: 2020, place: "5th", roundPick: 1, picks: [], notes: "" },
     ],
     upcomingPick: { round: 5, slot: 2 },
-    predictedNext: { topTargets: [83, 85, 6], reasoning: "Will exit at tier breaks — TE3 or RB3 tier most likely." },
+    predictedNext: { topTargets: [83, 85, 6], reasoning: "Will exit at tier breaks â€” TE3 or RB3 tier most likely." },
   },
   {
     teamId: 12, archetype: "Wild Card",
@@ -778,7 +593,7 @@ export const OWNER_PROFILES = [
     history: [
       { year: 2024, place: "11th", roundPick: 10, picks: [], notes: "Drafted a kicker in R8. Trolled the league chat." },
       { year: 2023, place: "9th", roundPick: 2, picks: [], notes: "" },
-      { year: 2022, place: "🏆 Champion", roundPick: 12, picks: [], notes: "Pure chaos win. Still talked about." },
+      { year: 2022, place: "ðŸ† Champion", roundPick: 12, picks: [], notes: "Pure chaos win. Still talked about." },
       { year: 2021, place: "8th", roundPick: 11, picks: [], notes: "" },
       { year: 2020, place: "10th", roundPick: 9, picks: [], notes: "" },
     ],
@@ -792,10 +607,10 @@ export const findOwner = (teamId) => OWNER_PROFILES.find(o => o.teamId === teamI
 // Real CBS draft history scraped from:
 //   /draft/results/2024:Pre-season:Tau League Draft/
 // Real draft pick data from CBS (2024 + 2025 seasons).
-// 2024 team names → internal id mapping:
-//   Groom of Deuce(1) · Cheeseheads(2) · Howdy Hut(3) · Cuddlebone loves Kamala!(4)
-//   Pablo Chacon(5) · Five Pound Bass(6) · My Couch Pulls Out But I Dont(7)
-//   Gecko Barflies(8) · Walton(9) · Buck Wild(10) · Fat,Drunk&Stupid(11) · DJ 8 Trak(12)
+// 2024 team names â†’ internal id mapping:
+//   Groom of Deuce(1) Â· Cheeseheads(2) Â· Howdy Hut(3) Â· Cuddlebone loves Kamala!(4)
+//   Pablo Chacon(5) Â· Five Pound Bass(6) Â· My Couch Pulls Out But I Dont(7)
+//   Gecko Barflies(8) Â· Walton(9) Â· Buck Wild(10) Â· Fat,Drunk&Stupid(11) Â· DJ 8 Trak(12)
 // rounds = 14-char string of actual pick positions in order: Q=QB R=RB W=WR T=TE K=K D=DST
 // picks = [R1..R14] player IDs; null = player not in local PLAYERS array
 export const CBS_DRAFT_HISTORY = {
@@ -806,18 +621,18 @@ export const CBS_DRAFT_HISTORY = {
   },
   // id 2 = Bourbon is a Vegetable | 2024: Cheeseheads (slot 5, Hill R1)
   2: {
-    2024: { slot: 5,  rounds: "WWWWQTWRRRQRWD", picks: [53, 56, 71, 72, 11, 81, null, null, null, null, 15, null, null, 133], notes: "Hill 1.05, A.J. Brown R2, Kupp + Addison WRs R3–R4, Purdy QB R5 — WR-stack" },
+    2024: { slot: 5,  rounds: "WWWWQTWRRRQRWD", picks: [53, 56, 71, 72, 11, 81, null, null, null, null, 15, null, null, 133], notes: "Hill 1.05, A.J. Brown R2, Kupp + Addison WRs R3â€“R4, Purdy QB R5 â€” WR-stack" },
     2025: { slot: 9,  rounds: "RRWTRWWQQWTRDW", picks: [34, 24, 56, 82, null, null, null, null, null, null, null, null, null, null], notes: "Jeanty 1.09, Achane R2, A.J. Brown R3, Kittle TE R4" },
   },
   // id 3 = Howdy Hut (same both years)
   3: {
-    2024: { slot: 12, rounds: "RQRRRTDWRRRRRR", picks: [30, 1, 46, 32, 40, 88, 122, null, null, null, null, null, null, null], notes: "BUF stack: Cook 1.12 + Allen 2.01, Spears R3, Kamara R4 — rest auto-drafted" },
+    2024: { slot: 12, rounds: "RQRRRTDWRRRRRR", picks: [30, 1, 46, 32, 40, 88, 122, null, null, null, null, null, null, null], notes: "BUF stack: Cook 1.12 + Allen 2.01, Spears R3, Kamara R4 â€” rest auto-drafted" },
     2025: { slot: 4,  rounds: "RRWWQRTWDWRQDR", picks: [25, 30, 64, null, null, null, null, null, null, null, null, null, null, null], notes: "Henry 1.04, Cook again R2, Adams WR R3" },
   },
   // id 4 = Start Pulling Out | 2024: Cuddlebone loves Kamala! (slot 3, Hall R1)
   4: {
-    2024: { slot: 3,  rounds: "RRQRRWWQTDWTRR", picks: [26, 29, 9, 38, 37, null, 76, 14, null, 125, null, null, null, null], notes: "Hall 1.03, Mixon R2, Love QB R3, Stevenson R4, Montgomery R5 — RB-RB-QB" },
-    2025: { slot: 6,  rounds: "RRQRWWWRWWTDQR", picks: [20, null, 5, 32, null, null, null, null, null, null, null, null, null, null], notes: "CMC 1.06, Burrow QB R3, Kamara R4 — RB anchor" },
+    2024: { slot: 3,  rounds: "RRQRRWWQTDWTRR", picks: [26, 29, 9, 38, 37, null, 76, 14, null, 125, null, null, null, null], notes: "Hall 1.03, Mixon R2, Love QB R3, Stevenson R4, Montgomery R5 â€” RB-RB-QB" },
+    2025: { slot: 6,  rounds: "RRQRWWWRWWTDQR", picks: [20, null, 5, 32, null, null, null, null, null, null, null, null, null, null], notes: "CMC 1.06, Burrow QB R3, Kamara R4 â€” RB anchor" },
   },
   // id 5 = The Epstein Islanders | 2024: Pablo Chacon (slot 2, Saquon R1)
   5: {
@@ -826,22 +641,22 @@ export const CBS_DRAFT_HISTORY = {
   },
   // id 6 = Penn State Shower Power | 2024: Five Pound Bass (slot 6, Amon-Ra R1)
   6: {
-    2024: { slot: 6,  rounds: "WWWRWQRTRWQWWD", picks: [54, 58, 62, 39, 57, 12, null, null, null, null, 17, null, null, 132], notes: "Amon-Ra 1.06, Wilson + MHJ + Pacheco R4, London R5, Dak QB R6 — 4 WRs in first 5" },
-    2025: { slot: 11, rounds: "WWRWWTRQRRRQRD", picks: [52, 67, null, null, 58, null, null, null, null, null, null, null, null, null], notes: "CeeDee 1.11, Nabers WR R2, Wilson WR R5 — WR every round" },
+    2024: { slot: 6,  rounds: "WWWRWQRTRWQWWD", picks: [54, 58, 62, 39, 57, 12, null, null, null, null, 17, null, null, 132], notes: "Amon-Ra 1.06, Wilson + MHJ + Pacheco R4, London R5, Dak QB R6 â€” 4 WRs in first 5" },
+    2025: { slot: 11, rounds: "WWRWWTRQRRRQRD", picks: [52, 67, null, null, 58, null, null, null, null, null, null, null, null, null], notes: "CeeDee 1.11, Nabers WR R2, Wilson WR R5 â€” WR every round" },
   },
   // id 7 = Vick's Hushpuppies | 2024: My Couch Pulls Out But I Dont (slot 7, CeeDee R1)
   7: {
-    2024: { slot: 7,  rounds: "WWTWWWQRRRWRQD", picks: [52, 51, 84, 64, 70, 65, 6, null, null, null, null, null, 18, 134], notes: "CeeDee 1.07, Jefferson R2, Kelce TE R3, Adams R4, Diggs R5 — elite WRs" },
+    2024: { slot: 7,  rounds: "WWTWWWQRRRWRQD", picks: [52, 51, 84, 64, 70, 65, 6, null, null, null, null, null, 18, 134], notes: "CeeDee 1.07, Jefferson R2, Kelce TE R3, Adams R4, Diggs R5 â€” elite WRs" },
     2025: { slot: 8,  rounds: "WWRRRWQRWTRQWD", picks: [51, 55, null, 26, null, null, null, null, null, null, null, null, null, null], notes: "Jefferson 1.08, Puka Nacua R2, Breece Hall R4" },
   },
   // id 8 = Gecko Barflies (same both years)
   8: {
-    2024: { slot: 1,  rounds: "RRWRQRWTRDWRWQ", picks: [20, 44, 60, 45, 5, null, 66, 87, null, 130, null, null, null, 19], notes: "CMC 1.01, Edwards R2, Evans R3, Robinson R4, Burrow QB R5 — value in mid-rounds" },
-    2025: { slot: 3,  rounds: "RQWRWWRDTRWQWQ", picks: [23, 1, 60, 29, 53, null, null, null, null, null, null, null, null, null], notes: "Gibbs 1.03, Josh Allen QB R2, Evans R3, Mixon + Hill R4–5" },
+    2024: { slot: 1,  rounds: "RRWRQRWTRDWRWQ", picks: [20, 44, 60, 45, 5, null, 66, 87, null, 130, null, null, null, 19], notes: "CMC 1.01, Edwards R2, Evans R3, Robinson R4, Burrow QB R5 â€” value in mid-rounds" },
+    2025: { slot: 3,  rounds: "RQWRWWRDTRWQWQ", picks: [23, 1, 60, 29, 53, null, null, null, null, null, null, null, null, null], notes: "Gibbs 1.03, Josh Allen QB R2, Evans R3, Mixon + Hill R4â€“5" },
   },
   // id 9 = Swingin' Flamingos | 2024: Walton (slot 8, Chase R1)
   9: {
-    2024: { slot: 8,  rounds: "WRTWWQWWWWWRDQ", picks: [50, 23, 83, 68, 61, 7, 77, null, null, null, 79, null, 120, null], notes: "Chase 1.08, Gibbs R2, LaPorta TE R3, Tee Higgins R4, Metcalf R5 — balanced" },
+    2024: { slot: 8,  rounds: "WRTWWQWWWWWRDQ", picks: [50, 23, 83, 68, 61, 7, 77, null, null, null, 79, null, 120, null], notes: "Chase 1.08, Gibbs R2, LaPorta TE R3, Tee Higgins R4, Metcalf R5 â€” balanced" },
     2025: { slot: 5,  rounds: "WQRWTWWWDQRRWW", picks: [50, 2, null, 61, 84, null, null, null, null, null, null, null, null, null], notes: "Chase again 1.05, Hurts QB R2, Metcalf R4, Kelce TE R5" },
   },
   // id 10 = Gringo Pendejo | 2024: Buck Wild (slot 11, Hurts R1)
@@ -852,16 +667,16 @@ export const CBS_DRAFT_HISTORY = {
   // id 11 = Fat, Drunk & Stupid (same both years)
   11: {
     2024: { slot: 9,  rounds: "RWWQWTRWWWDTRQ", picks: [33, 55, 59, 10, 67, 89, null, 78, null, null, 129, null, null, null], notes: "J.Taylor 1.09, Puka Nacua R2, Nico Collins R3, Darnold QB R4, Nabers R5" },
-    2025: { slot: 12, rounds: "WWWRQRWRTWWQWD", picks: [54, 59, null, null, null, null, null, null, null, null, null, null, null, null], notes: "Amon-Ra 1.12, Nico Collins R2 — WR-stack start again" },
+    2025: { slot: 12, rounds: "WWWRQRWRTWWQWD", picks: [54, 59, null, null, null, null, null, null, null, null, null, null, null, null], notes: "Amon-Ra 1.12, Nico Collins R2 â€” WR-stack start again" },
   },
   // id 12 = DJ 8 Trak (same both years)
   12: {
-    2024: { slot: 10, rounds: "RQRRWRTRRTWDDQ", picks: [25, 3, 27, 43, 73, null, 90, null, null, 80, 63, 127, 128, null], notes: "BAL stack: Henry 1.10 + Lamar R2 + Jacobs R3, Williams R4, Allen WR R5 — loaded" },
-    2025: { slot: 10, rounds: "RQRRRTWWRTRRQD", picks: [33, 3, null, null, null, null, null, null, null, null, null, null, null, null], notes: "J.Taylor 1.10, Lamar QB R2 again — consistent R1–R2 build" },
+    2024: { slot: 10, rounds: "RQRRWRTRRTWDDQ", picks: [25, 3, 27, 43, 73, null, 90, null, null, 80, 63, 127, 128, null], notes: "BAL stack: Henry 1.10 + Lamar R2 + Jacobs R3, Williams R4, Allen WR R5 â€” loaded" },
+    2025: { slot: 10, rounds: "RQRRRTWWRTRRQD", picks: [33, 3, null, null, null, null, null, null, null, null, null, null, null, null], notes: "J.Taylor 1.10, Lamar QB R2 again â€” consistent R1â€“R2 build" },
   },
 };
 
-// Draft picks — 14 rounds × 12 teams = 168 picks, all null (rosters populated only by draft).
+// Draft picks â€” 14 rounds Ã— 12 teams = 168 picks, all null (rosters populated only by draft).
 // 14 matches the league roster max: 8 starters + 6 bench.
 const TEAMS_ORDER = [2, 5, 11, 7, 12, 1, 8, 3, 10, 4, 9, 6];
 export const DRAFT_ROUNDS = 14;
@@ -878,9 +693,9 @@ function buildDraftPicks() {
 export const DRAFT_PICKS = buildDraftPicks();
 export { TEAMS_ORDER };
 
-// ─── Roster & Scoring Config ─────────────────────────────────────────────────
+// â”€â”€â”€ Roster & Scoring Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Source: https://atotauleague.football.cbssports.com/rules
-// 8 starters: QB×1, RB×1, WR×1, TE×1, RB-WR FLEX×3, DST×1  |  6 bench  = 14 total
+// 8 starters: QBÃ—1, RBÃ—1, WRÃ—1, TEÃ—1, RB-WR FLEXÃ—3, DSTÃ—1  |  6 bench  = 14 total
 export const ROSTER_CONFIG = {
   starters: 8,
   bench:    6,
@@ -895,7 +710,7 @@ export const ROSTER_CONFIG = {
   rosterLimits: { QB: 2 },   // all other positions: no limit
 };
 
-// Map: slot name → allowed positions
+// Map: slot name â†’ allowed positions
 export const SLOT_ELIGIBILITY = Object.fromEntries([
   ...ROSTER_CONFIG.slots.map(s => [s.slot, s.eligible]),
   ['BENCH', ['QB', 'RB', 'WR', 'TE', 'K', 'DST']],
@@ -903,7 +718,7 @@ export const SLOT_ELIGIBILITY = Object.fromEntries([
   ['DST',   ['DST']],  // explicit override (also set by ROSTER_CONFIG above)
 ]);
 
-// Half PPR scoring (CBS Atotau League defaults — fetch live via /api/cbs/scoring when worker is running)
+// Half PPR scoring (CBS Atotau League defaults â€” fetch live via /api/cbs/scoring when worker is running)
 export const SCORING_RULES = {
   format: 'Half PPR',
   source: 'defaults',
@@ -915,7 +730,7 @@ export const SCORING_RULES = {
                pts0: 10, pts1_6: 7, pts7_13: 4, pts14_20: 1, pts21_27: 0, pts28_34: -1, pts35plus: -4 },
 };
 
-// All team rosters start empty — populated only by the 2026 draft, then waivers.
+// All team rosters start empty â€” populated only by the 2026 draft, then waivers.
 function buildTeamRosters() {
   const rosters = {};
   for (const t of LEAGUE_TEAMS) rosters[t.id] = [];
@@ -976,7 +791,7 @@ export function refreshTeamRosters() {
 // Auto-refresh on module load so first render already sees draft data
 refreshTeamRosters();
 
-// ─── Settings-based roster frame helpers ──────────────────────────────────────
+// â”€â”€â”€ Settings-based roster frame helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const _KEY_TO_SLOT = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', RBWR: 'FLEX', DST: 'DST', K: 'K' };
 const _DEFAULT_POSITIONS = [
   { key: 'QB',   activeMax: 1 },
@@ -1018,7 +833,7 @@ export function assignRoster(frame, playerIds, slotOverrides = {}, playerLookup 
     unplaced.push(pid);
   }
 
-  // Second pass: auto-assign by player position → dedicated slot → FLEX → BENCH
+  // Second pass: auto-assign by player position â†’ dedicated slot â†’ FLEX â†’ BENCH
   for (const pid of unplaced) {
     const p = _findPlayerLocal(pid) ?? (playerLookup ? playerLookup(pid) : null);
     if (!p) continue;
@@ -1032,33 +847,3 @@ export function assignRoster(frame, playerIds, slotOverrides = {}, playerLookup 
   return entries;
 }
 
-// CBS rankings (computed from player data)
-function buildCBSRankings() {
-  const seed = (n) => ((n * 9301 + 49297) % 233280) / 233280;
-  const ranked = PLAYERS.map(p => {
-    const ageAdj = p.age >= 31 ? -3 : p.age >= 29 ? -1 : p.age <= 23 ? 2 : 0;
-    const noise = Math.floor(seed(p.id * 13) * 11) - 5;
-    return { playerId: p.id, raw: Math.max(1, p.ecr + ageAdj + noise) };
-  }).sort((a, b) => a.raw - b.raw);
-
-  const note = (p, rank) => {
-    if (p.age >= 31) return "Floor option — track record matters in our model";
-    if (p.tier === 1) return "Elite tier — start without thinking";
-    if (rank <= 24) return "Round 1-2 lock";
-    if (p.tier === 2) return "RB2/WR2 range";
-    if (rank >= 100) return "Late-round dart";
-    return "Solid value at current ADP";
-  };
-
-  return ranked.map((r, i) => {
-    const movement = Math.floor(seed(r.playerId * 17) * 13) - 6;
-    const p = PLAYERS.find(x => x.id === r.playerId);
-    return {
-      playerId: r.playerId, cbsRank: i + 1,
-      cbsTier: Math.max(1, Math.min(8, Math.ceil((i + 1) / 14))),
-      prevRank: Math.max(1, i + 1 + movement), movement,
-      ecrDelta: p.ecr - (i + 1), cbsNotes: note(p, i + 1),
-    };
-  });
-}
-export const CBS_RANKINGS = buildCBSRankings();

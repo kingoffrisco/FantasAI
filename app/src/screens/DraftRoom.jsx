@@ -376,19 +376,31 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
   // ── Ranking sources ──────────────────────────────────────────────────────
   const RANK_SOURCES = [
-    { id: 'sleeper', label: 'Sleeper ADP',     color: '#1c8eaf' },
-    { id: 'cbs',     label: 'CBS Expert',       color: '#0d4ea2' },
-    { id: 'fp',      label: 'FantasyPros ECR',  color: '#ee4c2e' },
-    { id: 'owner',   label: 'My Rankings',      color: '#c6ff3a' },
+    { id: 'fantasai', label: 'FantasAI',       color: '#c6ff3a' },
+    { id: 'sleeper',  label: 'Sleeper ADP',    color: '#1c8eaf' },
+    { id: 'cbs',      label: 'CBS Expert',     color: '#0d4ea2' },
+    { id: 'fp',       label: 'FantasyPros ECR', color: '#ee4c2e' },
+    { id: 'owner',    label: 'My Rankings',    color: '#a78bfa' },
   ];
-  const [rankSource,    setRankSource]    = React.useState('sleeper');
-  const [cbsRanks,      setCbsRanks]      = React.useState(null);   // [{ name, pos, team, rank }]
+  const [rankSource,    setRankSource]    = React.useState('fantasai');
+  const [cbsRanks,      setCbsRanks]      = React.useState(null);
   const [cbsRankLoad,   setCbsRankLoad]   = React.useState(false);
   const [cbsRankErr,    setCbsRankErr]    = React.useState(null);
-  const [fpRanks,       setFpRanks]       = React.useState(null);   // [{ player_name, player_positions, rank_ecr }]
+  const [fpRanks,       setFpRanks]       = React.useState(null);
   const [fpRankLoad,    setFpRankLoad]    = React.useState(false);
   const [fpRankErr,     setFpRankErr]     = React.useState(null);
   const [ownerRanks,    setOwnerRanks]    = React.useState(() => getPrefs().draftOwnerRanks || {});
+
+  // FantasAI ranks: sorted by proj PPG desc, ADP asc as tiebreaker — no fetch needed
+  const fantasaiRankMap = React.useMemo(() => {
+    const pool = storePlayerList.length > 0 ? storePlayerList : getPlayers();
+    const sorted = [...pool]
+      .filter(p => p.proj > 0 || p.adp < 999)
+      .sort((a, b) => (b.proj - a.proj) || (a.adp - b.adp));
+    const m = new Map();
+    sorted.forEach((p, i) => m.set(p.id, i + 1));
+    return m;
+  }, [storePlayerList]);
 
   async function fetchCbsRankings() {
     if (cbsRanks || cbsRankLoad) return;
@@ -408,7 +420,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     setFpRankLoad(true);
     setFpRankErr(null);
     try {
-      const fpUrl   = 'https://www.fantasypros.com/nfl/rankings/overall.json';
+      const fpUrl    = 'https://www.fantasypros.com/nfl/rankings/overall.json';
       const proxyUrl = `https://api.fantasai.net/api/v1/proxy?url=${encodeURIComponent(fpUrl)}`;
       const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -434,6 +446,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
   // Returns sort rank for a player under the active ranking source
   function getRank(p) {
+    if (rankSource === 'fantasai') return fantasaiRankMap.get(p.id) ?? 9999;
     if (rankSource === 'cbs' && cbsRanks) {
       const n = p.name?.toLowerCase();
       const r = cbsRanks.find(x => x.name?.toLowerCase() === n && x.pos === p.pos);
@@ -445,7 +458,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
       return r ? (r.rank_ecr ?? r.rank_avg ?? 9999) : 9999;
     }
     if (rankSource === 'owner') return ownerRanks[p.id] ?? 9999;
-    return p.ecr ?? 9999; // sleeper (default)
+    return p.ecr ?? 9999; // sleeper ADP
   }
 
   function logCommish(type, message) {
@@ -1611,7 +1624,8 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             const isActive = rankSource === src.id;
             const isLoading = (src.id === 'cbs' && cbsRankLoad) || (src.id === 'fp' && fpRankLoad);
             const hasErr    = (src.id === 'cbs' && cbsRankErr)  || (src.id === 'fp' && fpRankErr);
-            const hasData   = (src.id === 'cbs' && cbsRanks)    || (src.id === 'fp' && fpRanks) || src.id === 'sleeper' || src.id === 'owner';
+            const hasData   = (src.id === 'cbs' && cbsRanks)    || (src.id === 'fp' && fpRanks)
+                           || src.id === 'sleeper' || src.id === 'owner' || src.id === 'fantasai';
             return (
               <button
                 key={src.id}
@@ -1631,7 +1645,12 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
           })}
           {rankSource === 'owner' && (
             <span style={{ fontSize: 10, color: 'var(--text-faint)', fontStyle: 'italic' }}>
-              · {Object.keys(ownerRanks).length} ranked · type a rank # in each row
+              · {Object.keys(ownerRanks).length} ranked · type a rank # in the My # column
+            </span>
+          )}
+          {rankSource === 'fantasai' && (
+            <span style={{ fontSize: 10, color: 'var(--text-faint)', fontStyle: 'italic' }}>
+              · ranked by projected PPG from our pipeline
             </span>
           )}
         </div>
@@ -1813,7 +1832,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                   style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
                   title="Sort by ADP"
                 >
-                  {rankSource === 'sleeper' ? 'ADP' : rankSource === 'cbs' ? 'CBS' : rankSource === 'fp' ? 'FP ECR' : 'ADP'} {boardSortCol === 'adp' ? (boardSortDir === 'asc' ? '▲' : '▼') : ''}
+                  {rankSource === 'fantasai' ? 'AI Rank' : rankSource === 'sleeper' ? 'ADP' : rankSource === 'cbs' ? 'CBS' : rankSource === 'fp' ? 'FP ECR' : rankSource === 'owner' ? 'My #' : 'Rank'} {boardSortCol === 'adp' ? (boardSortDir === 'asc' ? '▲' : '▼') : ''}
                 </th>
                 {activeNgCols.map(s => (
                   <th key={s.id} className="num" title={s.tip} style={{ fontSize: 10, color: '#c6ff3a', whiteSpace: 'nowrap', opacity: 0.85, cursor: 'default', letterSpacing: '.02em' }}>

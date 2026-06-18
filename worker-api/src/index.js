@@ -1904,10 +1904,11 @@ async function handleDbArticles(url, env) {
           team:            r.team             || '',
           published_at:    r.published_at     || null,
           publisher:       'FantasAI',
-          description:     r.full_text        || r.summary_text || '',
+          description:     r.summary_text     || r.full_text || '',
           summary_text:    r.summary_text     || '',
           fantasy_insight: r.fantasy_insight  || '',
           article_rank:    r.impact_score     ?? null,
+          ai_processed:    !!(r.summary_text  || r.fantasy_insight),
         };
       }).filter(Boolean);
       source = 'export_player_news';

@@ -23,20 +23,20 @@ const ADP_OVERRIDES = {
 };
 
 const POS_CELL_BG = {
-  QB:  'rgba(15,65,180,.62)',
-  RB:  'rgba(5,105,60,.60)',
-  WR:  'rgba(155,88,0,.62)',
-  TE:  'rgba(130,40,210,.58)',
-  K:   'rgba(160,70,0,.62)',
-  DST: 'rgba(180,30,30,.58)',
+  QB:  'rgba(20,80,220,.82)',
+  RB:  'rgba(5,130,70,.80)',
+  WR:  'rgba(190,110,0,.82)',
+  TE:  'rgba(155,50,240,.80)',
+  K:   'rgba(195,85,0,.82)',
+  DST: 'rgba(210,35,35,.80)',
 };
 const POS_CELL_COLOR = {
-  QB:  '#4da6ff',
-  RB:  '#10d98a',
-  WR:  '#f5b82e',
-  TE:  '#b56ef5',
-  K:   '#f97316',
-  DST: '#f05050',
+  QB:  '#70c4ff',
+  RB:  '#1affa0',
+  WR:  '#ffd055',
+  TE:  '#cc88ff',
+  K:   '#ff9c45',
+  DST: '#ff6868',
 };
 
 function getADP(player) {
@@ -47,11 +47,11 @@ function getADP(player) {
 // Grade colors mirror H2H: win=accent, my-team=good, neutral=text-dim, danger=danger
 function gradePickVsADP(pickNum, adp) {
   const diff = adp - pickNum;
-  if (diff >= 10) return { grade: 'A+', color: 'var(--accent)',    label: 'Steal' };
-  if (diff >= 4)  return { grade: 'A',  color: '#4caf82',          label: 'Value' };
-  if (diff >= -3) return { grade: 'B',  color: 'var(--text-dim)',  label: 'Fair' };
-  if (diff >= -8) return { grade: 'C',  color: '#ff9500',          label: 'Reach' };
-  return                { grade: 'D',  color: 'var(--danger)',     label: 'Overdraft' };
+  if (diff >= 10) return { grade: 'A+', color: '#c6ff3a',  label: 'Steal' };
+  if (diff >= 4)  return { grade: 'A',  color: '#1affa0',  label: 'Value' };
+  if (diff >= -3) return { grade: 'B',  color: '#a0b4c8',  label: 'Fair' };
+  if (diff >= -8) return { grade: 'C',  color: '#ffb020',  label: 'Reach' };
+  return                { grade: 'D',  color: '#ff4f4f',   label: 'Overdraft' };
 }
 
 function gradeTeam(picks) {
@@ -65,12 +65,12 @@ function gradeTeam(picks) {
     total += gradeMap[grade] ?? 3;
   }
   const avg = total / picks.length;
-  if (avg >= 4.5) return { letter: 'A+', score: avg, color: 'var(--accent)'   };
-  if (avg >= 3.8) return { letter: 'A',  score: avg, color: '#4caf82'         };
-  if (avg >= 3.2) return { letter: 'B+', score: avg, color: '#4caf82'         };
-  if (avg >= 2.8) return { letter: 'B',  score: avg, color: 'var(--text-dim)' };
-  if (avg >= 2.2) return { letter: 'C',  score: avg, color: '#ff9500'         };
-  return                { letter: 'D',  score: avg, color: 'var(--danger)'   };
+  if (avg >= 4.5) return { letter: 'A+', score: avg, color: '#c6ff3a' };
+  if (avg >= 3.8) return { letter: 'A',  score: avg, color: '#1affa0' };
+  if (avg >= 3.2) return { letter: 'B+', score: avg, color: '#1affa0' };
+  if (avg >= 2.8) return { letter: 'B',  score: avg, color: '#a0b4c8' };
+  if (avg >= 2.2) return { letter: 'C',  score: avg, color: '#ffb020' };
+  return                { letter: 'D',  score: avg, color: '#ff4f4f'  };
 }
 
 
@@ -228,14 +228,14 @@ export default function DraftRecapScreen({ user, onNav }) {
                             </div>
                           </td>
                           <td className="num" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{Math.round(adp)}</td>
-                          <td className="num" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: diff >= 0 ? 'var(--good)' : 'var(--danger)', fontWeight: 700 }}>
+                          <td className="num" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: diff >= 0 ? '#1affa0' : '#ff4f4f', fontWeight: 700, textShadow: diff >= 0 ? '0 0 10px #1affa066' : '0 0 10px #ff4f4f66' }}>
                             {diff >= 0 ? `+${Math.round(diff)}` : Math.round(diff)}
                           </td>
                           <td className="num">
-                            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 18, color, lineHeight: 1 }}>{grade}</span>
+                            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 20, color, lineHeight: 1, textShadow: `0 0 14px ${color}bb` }}>{grade}</span>
                           </td>
                           <td>
-                            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: 4, background: color + '22', color, border: `1px solid ${color}55` }}>{label}</span>
+                            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 800, padding: '2px 8px', borderRadius: 4, background: color + '30', color, border: `1px solid ${color}cc` }}>{label}</span>
                           </td>
                         </tr>
                       );
@@ -314,11 +314,11 @@ export default function DraftRecapScreen({ user, onNav }) {
                                   <div title={`${p.name} · ${p.pos} · ${p.team} · Pick ${pk.pickNum}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                                     {/* Pos · last name · grade on one line */}
                                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, width: '100%', justifyContent: 'center' }}>
-                                      <span style={{ fontSize: 10, fontWeight: 800, color: posColor, fontFamily: 'var(--font-mono)', flexShrink: 0, letterSpacing: '.04em' }}>{p.pos}</span>
-                                      <span style={{ fontSize: 16, fontWeight: isMe ? 700 : 500, color: isMe ? '#4caf82' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      <span style={{ fontSize: 10, fontWeight: 900, color: posColor, fontFamily: 'var(--font-mono)', flexShrink: 0, letterSpacing: '.04em', textShadow: `0 0 8px ${posColor}aa` }}>{p.pos}</span>
+                                      <span style={{ fontSize: 16, fontWeight: isMe ? 800 : 500, color: isMe ? '#1affa0' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textShadow: isMe ? '0 0 10px #1affa055' : 'none' }}>
                                         {p.name.split(' ').slice(-1)[0]}
                                       </span>
-                                      {grade && <span style={{ fontSize: 12, fontWeight: 900, color: gradeColor, fontFamily: 'var(--font-display)', fontStretch: '75%', lineHeight: 1, flexShrink: 0 }}>{grade}</span>}
+                                      {grade && <span style={{ fontSize: 12, fontWeight: 900, color: gradeColor, fontFamily: 'var(--font-display)', fontStretch: '75%', lineHeight: 1, flexShrink: 0, textShadow: `0 0 10px ${gradeColor}bb` }}>{grade}</span>}
                                     </div>
                                     <div style={{ fontSize: 8, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{p.team}</div>
                                     {(isBreakout || isSleeper) && (
