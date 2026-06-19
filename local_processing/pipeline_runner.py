@@ -6,20 +6,25 @@ Jobs:
   Job 2 (qwen3:14b): Analyze player data → waiver/lineup/trade → R2
   Job 3 (qwen3:14b): Generate player writeups → player_writeups.json → R2
                      Requires players/player_profiles.json from Databricks export.
+  Job 4 (qwen3:14b): Weekly start/sit advisor → weekly_startsit.json → R2
+                     Analyzes matchup, weather, form, snap trends per rostered player.
+                     Run Thursday/Friday each week.
 
-Both jobs run incrementally by default — only new/changed articles and
-players are processed. Use --full to force a complete rerun.
+All jobs run incrementally by default — only new/changed data is processed.
+Use --full to force a complete rerun.
 
 Usage:
-  python pipeline_runner.py               # incremental pipeline (default)
+  python pipeline_runner.py               # incremental pipeline (all jobs)
   python pipeline_runner.py --full        # reprocess everything
   python pipeline_runner.py --job 1       # job 1 only
   python pipeline_runner.py --job 2       # job 2 only (requires job 1 to have run)
   python pipeline_runner.py --job 3       # job 3 only (requires player_profiles.json)
+  python pipeline_runner.py --job 4       # job 4 only — weekly start/sit
   python pipeline_runner.py --limit 50    # cap articles (fast test)
   python pipeline_runner.py --dry-run     # run models but don't upload to R2
   python pipeline_runner.py --task waiver # job 2 single task only
-  python pipeline_runner.py --pos QB,RB   # job 3 position filter
+  python pipeline_runner.py --pos QB,RB   # job 3/4 position filter
+  python pipeline_runner.py --week 3      # job 4 force NFL week
 """
 
 import argparse
@@ -48,7 +53,7 @@ def run_job(script: str, extra_args: list[str]) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="FantasAI GPU processing pipeline")
-    parser.add_argument("--job",     choices=["1", "2", "3", "all"], default="all")
+    parser.add_argument("--job",     choices=["1", "2", "3", "4", "all"], default="all")
     parser.add_argument("--limit",   type=int, default=None, help="Cap articles for Job 1")
     parser.add_argument("--dry-run", action="store_true", help="Don't upload to R2")
     parser.add_argument("--full",    action="store_true",
@@ -56,19 +61,26 @@ def main():
     parser.add_argument("--task",    choices=["waiver", "lineup", "trade"], default=None,
                         help="Run only this task in Job 2")
     parser.add_argument("--pos",     type=str, default=None,
-                        help="Job 3 position filter, e.g. QB,RB")
+                        help="Job 3/4 position filter, e.g. QB,RB")
+    parser.add_argument("--week",    type=int, default=None,
+                        help="Override NFL week for Job 4")
     args = parser.parse_args()
 
     run_all = args.job == "all"
     run1    = run_all or args.job == "1"
     run2    = run_all or args.job == "2"
     run3    = run_all or args.job == "3"
+    run4    = run_all or args.job == "4"
 
     start_time = time.time()
     print(f"\n[pipeline] Starting — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-    jobs_label = "1+2+3" if run_all else args.job
+    jobs_label = "1+2+3+4" if run_all else args.job
     print(f"[pipeline] Jobs: {jobs_label} | "
           f"Limit: {args.limit or 'all'} | Dry-run: {args.dry_run}")
+    if run_all or (run1 and run4):
+        print("[pipeline] NOTE: Jobs 1 and 4 both use Qwen — they run sequentially.")
+        print("           To allow 2 concurrent Qwen requests (needs 2x VRAM for 14B):")
+        print("           Set OLLAMA_NUM_PARALLEL=2 in the Ollama service environment.")
 
     job1_args = []
     if args.limit:
@@ -94,6 +106,16 @@ def main():
     if args.pos:
         job3_args += ["--pos", args.pos]
 
+    job4_args = []
+    if args.dry_run:
+        job4_args.append("--dry-run")
+    if args.full:
+        job4_args.append("--full")
+    if args.pos:
+        job4_args += ["--pos", args.pos]
+    if args.week:
+        job4_args += ["--week", str(args.week)]
+
     failed = []
 
     if run1:
@@ -113,6 +135,11 @@ def main():
         rc = run_job("job3_player_writeups.py", job3_args)
         if rc != 0:
             failed.append("job3")
+
+    if run4:
+        rc = run_job("job4_weekly_startsit.py", job4_args)
+        if rc != 0:
+            failed.append("job4")
 
     total = round(time.time() - start_time, 1)
     print(f"\n{'='*60}")

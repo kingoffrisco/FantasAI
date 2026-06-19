@@ -4,6 +4,53 @@ All notable changes to the FantasAI ML pipeline project.
 
 ---
 
+## [2.2.0] - 2026-06-19
+
+### Summary
+Game-day lightweight job, Job 4 weekly start/sit advisor, sleeper picks formula overhaul, draft grading fix, and multiple UI improvements.
+
+---
+
+### New: `job_gameday.py` — Game-Day Injury & News Updater
+- **No LLM** — pure ESPN + Sleeper data fetch, runs in under 2 minutes
+- Five `--window` modes: `tnf`, `sun_early`, `sun_late`, `snf`, `mnf`
+- Fetches injuries, inactives, and team news **only for teams playing** in that window
+- `sun_early` (10:45 AM CT) and `sun_late` (2:15 PM CT) flagged as inactives windows — runs 75-90 min before kickoff when NFL teams release inactives
+- Output: `fantasai/news/gameday_updates.json`
+- 5 new Task Scheduler tasks registered under `\FantasAI\` (register via elevated PowerShell — see script docstring)
+
+### New: `job4_weekly_startsit.py` — Weekly Start/Sit Advisor
+- Hybrid scoring: deterministic `start_score` (0-100) first; Qwen 14B only called for borderline cases (35-65)
+- **Scoring weights:** Projection 30%, Opportunity 20%, Matchup 20%, Injury/Weather 15%, Trend 10%, Team Environment 5%
+- `matchup_indicator`: GREEN (≥23rd-best defense), YELLOW (10-22), RED (≤9)
+- Depth chart multipliers per position — QB2 with healthy starter → 0.10× → auto-SIT, no model call
+- Uses `season_avg_points_2025` from player export as preseason projection baseline
+- ESPN public scoreboard API for 2026 Week 1 matchups (R2 fallback for stored schedule)
+- ADP-based projection for rookies with no 2025 data
+- TBD/bye opponents → deterministic path with `confidence: LOW`
+- 3-attempt retry with backoff; 300s timeout for Ollama (Job 1 concurrency)
+- Output: `fantasai/analysis/weekly_startsit.json`
+
+### Changed: Sleeper Picks Formula (Job 2)
+- **Old:** Trending players from Databricks silver (not a true sleeper signal)
+- **New:** 50% news signal (Qwen `waiver_score` + sentiment boost) + 50% value signal (`proj / max(owned, 1)` normalized 0-10)
+- Filters: `owned < 60%`, not OUT/IR, fantasy-eligible positions
+- Output includes `news_score`, `value_score`, `sleeper_score`, and Qwen `waiver_reason` as note text
+- Watchlist UI: Score column shows `sleeper_score`; hover tooltip shows breakdown (News X/10, Value Y/10, Blend Z/10)
+
+### Fixed: Draft Grading Inflation
+- **Root cause:** Fake ADP fallback `100 + |sin(id × 3.7)| × 80` gave ADP 100-180 to all unlisted players, making any early pick look like a 50-150 pick steal → everyone A+
+- **Fix:** `getADP()` now uses `player.adp` from playerStore (real R2 ADP data). Players with no real ADP default to B (neutral) — can't inflate grade
+- **Tightened thresholds:** A+ requires 15+ pick edge (was 10), A requires 8+ (was 4), B for ±6 of ADP (was ±3), C for -7 to -15 (was -4 to -8), D for <-15 (was <-8)
+- Team grade shifted down: all-B draft now earns B (not B+); A+ requires avg ≥ 4.3
+
+### UI Changes
+- **Push Alert button** moved from Dashboard top-right header → inside Commissioner Message edit form (visible only to commish/admin after clicking Edit)
+- **Mobile Scoring button** moved from top-right → top-left of Dashboard header (after Dashboard label)
+- **Player drawer** (Players page): shifted right 120px (`left: 240px → 360px`), widened to 680px max (was 560px) so clicked player row remains visible behind the drawer
+
+---
+
 ## [2.0.0] - 2026-06-15
 
 ### Summary

@@ -140,6 +140,8 @@ export const api = {
       }
       return null;
     },
+    defenseVsPos:   () => r2Get('fantasai/analysis/defense_vs_pos.json'),
+    rookieScores:   () => r2Get('fantasai/analysis/rookie_scores.json'),
     // 583K records — only use on demand, not on page load
     weeklyStats: () => r2Get('fantasai/stats/gold_weekly_stats.json'),
     adpPPR:        () => r2Get('players/adp_ppr.json'),
@@ -151,6 +153,8 @@ export const api = {
     opponentLookup:  () => r2Get('fantasai/analysis/opponent_lookup.json'),
     playerOwnership: () => r2Get('fantasai/analysis/player_ownership.json'),
     combineData:     () => r2Get('fantasai/analysis/combine_data.json'),
+    playerStats2025: () => r2Get('fantasai/analysis/player_stats_2025.json'),
+    weeklyStartSit:  () => r2Get('fantasai/analysis/weekly_startsit.json'),
   },
 
   transactions: {

@@ -875,21 +875,14 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 3 }}>{subLine}</div>
           </div>
-        </div>
-        <div className="flex gap-8" style={{ alignItems: 'center' }}>
-          {/* Commish: send push alert to all subscribers */}
-          {canEditCommish && (
-            <button
-              className="btn"
-              style={{ background: 'rgba(255,180,0,.12)', border: '1px solid rgba(255,180,0,.35)', color: 'rgba(255,180,0,.9)', fontWeight: 700 }}
-              onClick={() => { setPushTitle(''); setPushBody(''); setPushResult(null); setPushModal(true); }}
-            >📣 Push Alert</button>
-          )}
+
           <button
             className="btn"
             style={{ background: '#22c55e', border: 'none', color: '#fff', fontWeight: 700 }}
             onClick={() => setMobileScoringOpen(true)}
           >📱 Mobile Scoring</button>
+        </div>
+        <div className="flex gap-8" style={{ alignItems: 'center' }}>
           <button className="btn primary" onClick={() => onNav('draft')}>▶ Open Draft Room</button>
         </div>
       </div>
@@ -1133,6 +1126,12 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                 <button className="btn ghost sm" onClick={() => commishMediaRef.current?.click()} style={{ fontSize: 11 }}>📷 {commishMediaDraft?.url ? 'Replace File' : 'Upload Image / Video'}</button>
                 <button className="btn primary sm" onClick={saveCommishMessage}>Save</button>
                 <button className="btn ghost sm" onClick={() => setEditingCommish(false)}>Cancel</button>
+                <div style={{ flex: 1 }} />
+                <button
+                  className="btn sm"
+                  style={{ background: 'rgba(255,180,0,.12)', border: '1px solid rgba(255,180,0,.35)', color: 'rgba(255,180,0,.9)', fontWeight: 700, fontSize: 11 }}
+                  onClick={() => { setPushTitle(''); setPushBody(''); setPushResult(null); setPushModal(true); }}
+                >📣 Push Alert</button>
               </div>
             </div>
           ) : (

@@ -136,6 +136,8 @@ export const useR2WeatherForecast       = () => useR2Analysis(api.r2.weatherFore
 export const useR2PlayerWriteups        = () => useR2Analysis(api.r2.playerWriteups)
 export const useR2DefenseAdp            = () => useR2Analysis(api.r2.defenseAdp)
 export const useR2DefensePerformance    = () => useR2Analysis(api.r2.defensePerformance)
+export const useR2DefenseVsPos          = () => useR2Analysis(api.r2.defenseVsPos)
+export const useR2RookieScores          = () => useR2Analysis(api.r2.rookieScores)
 export const useR2DefensePredictions    = () => useR2Analysis(api.r2.defensePredictions)
 // Note: loads 500K+ rows — call only on demand, never on page load
 export const useR2WeeklyStats           = () => useR2Analysis(api.r2.weeklyStats)
@@ -145,3 +147,5 @@ export const useR2NflSchedule           = () => useR2Analysis(api.r2.nflSchedule
 export const useR2OpponentLookup        = () => useR2Analysis(api.r2.opponentLookup)
 export const useR2PlayerOwnership       = () => useR2Analysis(api.r2.playerOwnership)
 export const useR2CombineData           = () => useR2Analysis(api.r2.combineData)
+export const useR2WeeklyStartSit        = () => useR2Analysis(api.r2.weeklyStartSit)
+export const useR2PlayerStats2025       = () => useR2Analysis(api.r2.playerStats2025)

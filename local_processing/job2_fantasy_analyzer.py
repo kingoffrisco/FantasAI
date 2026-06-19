@@ -252,6 +252,110 @@ def derive_trade_file(scores: dict) -> dict:
     }
 
 
+def load_player_export() -> dict:
+    """Returns lowercase-name → {owned, proj, pos, team} from R2 player export."""
+    paths = [
+        "fantasai/players/players_2026_draft.json",
+        "fantasai/players/export_players_2026_draft.json",
+    ]
+    for path in paths:
+        raw = r2_get(path)
+        if not raw:
+            continue
+        arr = raw if isinstance(raw, list) else (
+            raw.get("data") or raw.get("players") or []
+        )
+        if not arr:
+            continue
+        lookup = {}
+        for p in arr:
+            name = (p.get("player_name") or p.get("full_name") or "").strip()
+            if not name:
+                continue
+            lookup[name.lower()] = {
+                "owned": float(p.get("ownership_pct") or p.get("percent_owned") or 0),
+                "proj":  float(p.get("season_avg_points_2025") or p.get("proj") or 0),
+                "pos":   p.get("position") or p.get("pos") or "",
+                "team":  p.get("team") or "",
+            }
+        print(f"[Job 2] Player export loaded: {len(lookup)} players from {path}")
+        return lookup
+    print("[Job 2] Player export not found — value signal will be zero")
+    return {}
+
+
+def derive_sleeper_file(scored_players: dict, player_export: dict) -> dict:
+    """
+    Sleeper picks: 50% news signal + 50% value signal.
+
+    News signal (0-10):  Qwen waiver_score, boosted for positive sentiment,
+                         penalized for injury flag.
+    Value signal (0-10): proj / max(owned, 1), min-max normalized across candidates.
+    Filters: owned < 60%, not OUT/IR, fantasy-eligible positions.
+    """
+    ELIGIBLE_POS = {"QB", "RB", "WR", "TE", "DST"}
+    OUT_STATUSES = {"out", "ir", "pup", "susp"}
+    MAX_OWNED = 60.0
+
+    candidates = []
+    for name, p in scored_players.items():
+        pos = p.get("position", "").upper()
+        if pos not in ELIGIBLE_POS:
+            continue
+        if p.get("injury_status", "none").lower() in OUT_STATUSES:
+            continue
+
+        export = player_export.get(name.lower().strip(), {})
+        owned = export.get("owned", 0.0)
+        proj  = export.get("proj", 0.0)
+
+        if owned > MAX_OWNED:
+            continue  # already well-known, not a sleeper
+
+        # News signal — Qwen score adjusted for sentiment and injury
+        news_raw = float(p.get("waiver_score") or 0)
+        if p.get("latest_sentiment") == "positive":
+            news_raw = min(10.0, news_raw * 1.15)
+        if p.get("injury_flag"):
+            news_raw *= 0.6
+
+        candidates.append({
+            "player_name":   name,
+            "position":      pos,
+            "team":          p.get("team") or export.get("team", ""),
+            "ownership_pct": owned,
+            "projected_pts": proj,
+            "news_score":    round(news_raw, 2),
+            "_value_raw":    proj / max(owned, 1.0),
+            "reason":        p.get("waiver_reason") or p.get("start_reason") or "",
+            "sentiment":     p.get("latest_sentiment", "neutral"),
+            "injury_flag":   p.get("injury_flag", False),
+        })
+
+    if not candidates:
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "model": MODEL,
+            "players": [],
+        }
+
+    # Normalize value_raw → 0-10 across the candidate set
+    max_val = max(c["_value_raw"] for c in candidates) or 1.0
+    for c in candidates:
+        c["value_score"]   = round(min(10.0, c["_value_raw"] / max_val * 10.0), 2)
+        c["sleeper_score"] = round(c["news_score"] * 0.5 + c["value_score"] * 0.5, 2)
+        del c["_value_raw"]
+
+    candidates.sort(key=lambda c: c["sleeper_score"], reverse=True)
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "model": MODEL,
+        "formula": "50% news (Qwen waiver_score + sentiment) + 50% value (proj/ownership normalized)",
+        "players": candidates[:25],
+    }
+
+
 def derive_drop_file(scores: dict) -> dict:
     players = sorted(
         [p for p in scores.values()
@@ -458,10 +562,12 @@ def main():
         "players": scored_players,
     }
 
-    waiver_file = derive_waiver_file(scored_players)
-    trade_file  = derive_trade_file(scored_players)
-    lineup_file = derive_lineup_file(scored_players)
-    drop_file   = derive_drop_file(scored_players)
+    waiver_file  = derive_waiver_file(scored_players)
+    trade_file   = derive_trade_file(scored_players)
+    lineup_file  = derive_lineup_file(scored_players)
+    drop_file    = derive_drop_file(scored_players)
+    player_export = load_player_export()
+    sleeper_file  = derive_sleeper_file(scored_players, player_export)
 
     elapsed_vals = [p.get("_elapsed_sec", 0) for p in scored_players.values()]
     total_time = round(sum(elapsed_vals), 1)
@@ -474,7 +580,10 @@ def main():
     if args.dry_run:
         out = Path(__file__).parent / "job2_scores_dry_run.json"
         out.write_text(json.dumps(master, indent=2))
+        sl_out = Path(__file__).parent / "job2_sleepers_dry_run.json"
+        sl_out.write_text(json.dumps(sleeper_file, indent=2))
         print(f"[Job 2] Dry run saved → {out}")
+        print(f"[Job 2] Sleepers dry run → {sl_out} ({len(sleeper_file.get('players', []))} players)")
         return
 
     print("[Job 2] Uploading to R2...")
@@ -483,6 +592,7 @@ def main():
     r2_put("fantasai/analysis/trade_values.json", trade_file)
     r2_put("fantasai/analysis/lineup_recommendations.json", lineup_file)
     r2_put("fantasai/analysis/drop_candidates.json", drop_file)
+    r2_put("analysis/sleeper_picks.json", sleeper_file)
 
     print("[Job 2] Complete.")
 

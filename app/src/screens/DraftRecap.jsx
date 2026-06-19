@@ -39,38 +39,48 @@ const POS_CELL_COLOR = {
   DST: '#ff6868',
 };
 
+// Real ADP from playerStore (populated from R2 adpPPR/adpStandard).
+// ADP_OVERRIDES covers well-known players as a final safety net.
+// Returns null for truly unknown players so we grade them as B (neutral).
 function getADP(player) {
-  if (!player) return 200;
-  return ADP_OVERRIDES[player.name] ?? (100 + Math.abs(Math.sin(player.id * 3.7) * 80));
+  if (!player) return null;
+  // player.adp is set by playerStore from real R2 ADP data (value < 999 means real data)
+  if (player.adp && player.adp < 400) return player.adp;
+  if (ADP_OVERRIDES[player.name]) return ADP_OVERRIDES[player.name];
+  return null; // no real ADP — grade as B so fake data can't inflate scores
 }
 
-// Grade colors mirror H2H: win=accent, my-team=good, neutral=text-dim, danger=danger
+// Stricter thresholds: a full round (12 picks) of edge = A+, fair = ±6
 function gradePickVsADP(pickNum, adp) {
+  if (adp === null) return { grade: 'B', color: '#a0b4c8', label: 'No ADP' };
   const diff = adp - pickNum;
-  if (diff >= 10) return { grade: 'A+', color: '#c6ff3a',  label: 'Steal' };
-  if (diff >= 4)  return { grade: 'A',  color: '#1affa0',  label: 'Value' };
-  if (diff >= -3) return { grade: 'B',  color: '#a0b4c8',  label: 'Fair' };
-  if (diff >= -8) return { grade: 'C',  color: '#ffb020',  label: 'Reach' };
-  return                { grade: 'D',  color: '#ff4f4f',   label: 'Overdraft' };
+  if (diff >= 15) return { grade: 'A+', color: '#c6ff3a',  label: 'Steal' };
+  if (diff >= 8)  return { grade: 'A',  color: '#1affa0',  label: 'Value' };
+  if (diff >= -6) return { grade: 'B',  color: '#a0b4c8',  label: 'Fair' };
+  if (diff >= -15) return { grade: 'C', color: '#ffb020',  label: 'Reach' };
+  return                  { grade: 'D', color: '#ff4f4f',  label: 'Overdraft' };
 }
 
 function gradeTeam(picks) {
   if (!picks.length) return { letter: '—', score: 0, color: 'var(--text-faint)' };
   let total = 0;
+  let graded = 0;
   const gradeMap = { 'A+': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1 };
   for (const p of picks) {
     const player = findPlayer(p.playerId);
     const adp    = getADP(player);
     const { grade } = gradePickVsADP(p.pickNum, adp);
     total += gradeMap[grade] ?? 3;
+    graded++;
   }
-  const avg = total / picks.length;
-  if (avg >= 4.5) return { letter: 'A+', score: avg, color: '#c6ff3a' };
+  const avg = total / graded;
+  // Shifted down: a team of pure B's (avg=3.0) earns B, not B+
+  if (avg >= 4.3) return { letter: 'A+', score: avg, color: '#c6ff3a' };
   if (avg >= 3.8) return { letter: 'A',  score: avg, color: '#1affa0' };
-  if (avg >= 3.2) return { letter: 'B+', score: avg, color: '#1affa0' };
-  if (avg >= 2.8) return { letter: 'B',  score: avg, color: '#a0b4c8' };
-  if (avg >= 2.2) return { letter: 'C',  score: avg, color: '#ffb020' };
-  return                { letter: 'D',  score: avg, color: '#ff4f4f'  };
+  if (avg >= 3.4) return { letter: 'B+', score: avg, color: '#7bd4a8' };
+  if (avg >= 3.0) return { letter: 'B',  score: avg, color: '#a0b4c8' };
+  if (avg >= 2.4) return { letter: 'C',  score: avg, color: '#ffb020' };
+  return                 { letter: 'D',  score: avg, color: '#ff4f4f'  };
 }
 
 

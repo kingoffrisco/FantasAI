@@ -599,7 +599,7 @@ select.input { appearance: none; padding-right: 28px; background-image: url("dat
 
 /* Drawer for player on click */
 .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 50; }
-.drawer { position: fixed; top: 56px; right: 0; bottom: 0; width: min(560px, 100%); background: var(--bg-2); border-left: 1px solid var(--border); z-index: 51; overflow-y: auto; }
+.drawer { position: fixed; top: 56px; left: 360px; bottom: 0; width: min(680px, calc(100% - 360px)); background: var(--bg-2); border-right: 1px solid var(--border); z-index: 51; overflow-y: auto; }
 
 /* Scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }

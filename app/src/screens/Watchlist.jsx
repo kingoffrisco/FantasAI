@@ -251,7 +251,7 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
               <th>Opp</th>
               <th className="num">Proj</th>
               <th className="num">%Own</th>
-              <th className="num">Value</th>
+              <th className="num" title="50% news signal + 50% proj/ownership value">Score</th>
               <th className="num">Trend</th>
               <th>Note</th>
               <th></th>
@@ -263,11 +263,16 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
                   const p    = playerByName.get((s.player_name || '').toLowerCase().trim());
                   const owned = s.ownership_pct ?? p?.owned;
                   const proj  = s.projected_pts  ?? p?.proj;
-                  const value = s.value_score != null
-                    ? Number(s.value_score).toFixed(1)
-                    : (proj != null && owned != null)
-                      ? (Number(proj) / Math.max(Number(owned), 1) * 10).toFixed(1)
-                      : '—';
+                  // prefer blended sleeper_score; fall back to value_score; then compute locally
+                  const scoreNum = s.sleeper_score ?? s.value_score ?? (
+                    proj != null && owned != null
+                      ? Number(proj) / Math.max(Number(owned), 1)
+                      : null
+                  );
+                  const value = scoreNum != null ? Number(scoreNum).toFixed(1) : '—';
+                  const scoreTitle = s.news_score != null
+                    ? `News: ${s.news_score}/10  Value: ${s.value_score}/10  Blend: ${s.sleeper_score}/10`
+                    : '';
                   return (
                     <tr key={i} onClick={() => p && onOpenPlayer?.(p.id)} style={{ cursor: p ? 'pointer' : 'default' }}>
                       <td className="rank" style={{ color: 'var(--text-faint)' }}>{i + 1}</td>
@@ -275,7 +280,7 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
                       <td className="mono dim" style={{ fontSize: 11 }}>{p ? `vs ${p.opp}` : (s.team ? `(${s.team})` : '—')}</td>
                       <td className="num"><strong>{proj != null ? Number(proj).toFixed(1) : '—'}</strong></td>
                       <td className="num" style={{ color: 'var(--good)' }}>{owned != null ? `${Number(owned).toFixed(1)}%` : '—'}</td>
-                      <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-2)' }}>{value}</td>
+                      <td className="num" title={scoreTitle} style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-2)', cursor: scoreTitle ? 'help' : 'default' }}>{value}</td>
                       <td className="num">{p ? <Sparkline data={p.trend} /> : '—'}</td>
                       <td className="dim" style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.reason || p?.news || ''}</td>
                       <td><button className="btn sm primary" onClick={e => e.stopPropagation()}>+ Add</button></td>
