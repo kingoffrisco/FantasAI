@@ -67,6 +67,15 @@ def get_players(conn, top_n: int = DEFAULT_TOP_N) -> pd.DataFrame:
         "SELECT COUNT(*) FROM bronze_adp_rankings"
     ).fetchone()[0] > 0
 
+    # Check if watchlist table exists
+    has_watchlist = conn.execute(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'watchlist'"
+    ).fetchone()[0] > 0
+    watchlist_join = """
+        LEFT JOIN watchlist w ON LOWER(w.player_name) = LOWER(p.player_name)
+    """ if has_watchlist else ""
+    watchlist_col = "w.player_name IS NOT NULL" if has_watchlist else "FALSE"
+
     if has_adp:
         df = conn.execute(f"""
             WITH adp AS (
@@ -83,20 +92,24 @@ def get_players(conn, top_n: int = DEFAULT_TOP_N) -> pd.DataFrame:
                     p.team,
                     COALESCE(p.years_exp, 1) AS years_exp,
                     a.adp_rank,
-                    CASE WHEN {no_recent_news_sql} THEN 1 ELSE 0 END AS no_recent_news
+                    CASE WHEN {no_recent_news_sql} THEN 1 ELSE 0 END AS no_recent_news,
+                    CASE WHEN {watchlist_col} THEN TRUE ELSE FALSE END AS on_watchlist
                 FROM bronze_player_news_raw p
                 LEFT JOIN adp a ON LOWER(a.player_name) = LOWER(p.player_name)
+                {watchlist_join}
                 WHERE p.position IN ('QB','RB','WR','TE')
                   AND p.player_name IS NOT NULL
                   AND p.active = TRUE
             )
             SELECT player_id, player_name, position, team,
                    adp_rank, years_exp, no_recent_news,
-                   -- Priority: 1=top200 no news, 2=rookie no news,
+                   -- Priority: 0=watchlist, 1=top200 no news, 2=rookie no news,
                    --           3=top200 with news, 4=rookie, 5=rest
                    CASE
+                     WHEN on_watchlist AND no_recent_news = 1  THEN 0
                      WHEN adp_rank <= 200 AND no_recent_news = 1 THEN 1
                      WHEN years_exp = 0   AND no_recent_news = 1 THEN 2
+                     WHEN on_watchlist                            THEN 0
                      WHEN adp_rank <= 200                        THEN 3
                      WHEN years_exp = 0                          THEN 4
                      ELSE 5
@@ -111,6 +124,7 @@ def get_players(conn, top_n: int = DEFAULT_TOP_N) -> pd.DataFrame:
         # Log tier breakdown
         if not df.empty:
             for tier, label in [
+                (0, "Watchlist (priority)"),
                 (1, "ADP top-200, no recent news"),
                 (2, "Rookies, no recent news"),
                 (3, "ADP top-200 (refresh)"),

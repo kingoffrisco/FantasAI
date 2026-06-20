@@ -106,7 +106,7 @@ export default function CompareScreen() {
                   onChange={e => setPlayerId(idx, parseInt(e.target.value))}
                   style={{ width: '100%', marginBottom: 10, fontSize: 12 }}
                 >
-                  {players.map(pl => (
+                  {[...players].sort((a, b) => (a.pos === 'DST') - (b.pos === 'DST') || a.name.localeCompare(b.name)).map(pl => (
                     <option key={pl.id} value={pl.id}>{pl.name} ({pl.pos} · {pl.team})</option>
                   ))}
                 </select>

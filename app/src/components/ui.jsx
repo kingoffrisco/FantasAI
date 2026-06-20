@@ -1,4 +1,105 @@
+import { useState } from 'react';
 import { NFL_TEAMS, SOURCE_META } from '../lib/data.js';
+import { api } from '../api.js';
+
+// ── Rookie combine tooltip ─────────────────────────────────────────────────────
+// Module-level cache — fetched once on first hover, shared across all badges
+let _combineMap = null;
+let _combinePromise = null;
+
+function loadCombineData() {
+  if (_combineMap) return Promise.resolve(_combineMap);
+  if (!_combinePromise) {
+    _combinePromise = api.r2.combineData()
+      .then(data => {
+        const players = Array.isArray(data) ? data : (data?.players || []);
+        _combineMap = new Map();
+        players.forEach(p => {
+          if (p.player_name) _combineMap.set(p.player_name.toLowerCase(), p);
+        });
+        return _combineMap;
+      })
+      .catch(() => { _combinePromise = null; return null; });
+  }
+  return _combinePromise;
+}
+
+function CombineStat({ label, value }) {
+  return (
+    <>
+      <span style={{ color: 'var(--text-faint)', fontSize: 9, whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ color: 'var(--text)', fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 10 }}>{value}</span>
+    </>
+  );
+}
+
+function RookieBadge({ player }) {
+  const [hovered, setHovered] = useState(false);
+  const [combineRow, setCombineRow] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+
+  function handleMouseEnter() {
+    setHovered(true);
+    if (!loaded) {
+      loadCombineData().then(map => {
+        if (map) setCombineRow(map.get((player.name || '').toLowerCase()) || null);
+        setLoaded(true);
+      });
+    }
+  }
+
+  const hasStats = combineRow && (
+    combineRow.forty != null || combineRow.vertical != null ||
+    combineRow.broad_jump != null || combineRow.bench != null ||
+    combineRow.cone != null || combineRow.shuttle != null
+  );
+
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-block', verticalAlign: 'middle', marginLeft: 4 }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <span style={{ fontSize: 8, fontWeight: 800, color: '#4ea8ff', background: 'rgba(78,168,255,.15)', border: '1px solid rgba(78,168,255,.3)', borderRadius: 3, padding: '1px 4px', cursor: 'default' }}>R</span>
+      {hovered && (
+        <div style={{
+          position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'var(--surface, #12141e)',
+          border: '1px solid rgba(78,168,255,.4)',
+          borderRadius: 7, padding: '10px 12px',
+          minWidth: 190, zIndex: 9999,
+          boxShadow: '0 6px 24px rgba(0,0,0,.6)',
+          pointerEvents: 'none',
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: '#4ea8ff', letterSpacing: '.06em', marginBottom: 7 }}>ROOKIE</div>
+          {!loaded && <div style={{ fontSize: 10, color: 'var(--text-faint)', fontStyle: 'italic' }}>Loading...</div>}
+          {loaded && hasStats && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', columnGap: 12, rowGap: 4 }}>
+              {combineRow.forty      != null && <CombineStat label="40-Yard"     value={`${combineRow.forty}s`} />}
+              {combineRow.vertical   != null && <CombineStat label="Vertical"    value={`${combineRow.vertical}"`} />}
+              {combineRow.broad_jump != null && <CombineStat label="Broad Jump"  value={`${combineRow.broad_jump}"`} />}
+              {combineRow.bench      != null && <CombineStat label="Bench Press" value={`${combineRow.bench} reps`} />}
+              {combineRow.cone       != null && <CombineStat label="3-Cone"      value={`${combineRow.cone}s`} />}
+              {combineRow.shuttle    != null && <CombineStat label="Shuttle"     value={`${combineRow.shuttle}s`} />}
+              {combineRow.ht         != null && <CombineStat label="Height"      value={combineRow.ht} />}
+              {combineRow.wt         != null && <CombineStat label="Weight"      value={`${combineRow.wt} lbs`} />}
+            </div>
+          )}
+          {loaded && !hasStats && (
+            <div style={{ fontSize: 10, color: 'var(--text-faint)', fontStyle: 'italic' }}>No combine data available</div>
+          )}
+          {combineRow?.school && (
+            <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid rgba(78,168,255,.2)', fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+              {combineRow.school}
+              {combineRow.draft_round != null && ` · Rd ${combineRow.draft_round}, Pick ${combineRow.draft_ovr}`}
+            </div>
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
 
 export const PosBadge = ({ pos, solid }) => (
   <span className={`pos-badge pos-${pos} ${solid ? 'solid' : ''}`}>{pos}</span>
@@ -69,7 +170,7 @@ export const PlayerCell = ({ player, showStatus = true, watched = false, ownerTe
         <div className={`player-name${watched ? ' watched' : ''}`}>
           {watched && <span style={{ marginRight: 4, fontSize: 11 }}>★</span>}
           {showStatus && <StatusDot status={player.status} />} {player.name}
-          {player.rookie && <span style={{ marginLeft: 4, fontSize: 8, fontWeight: 800, color: '#4ea8ff', background: 'rgba(78,168,255,.15)', border: '1px solid rgba(78,168,255,.3)', borderRadius: 3, padding: '1px 4px', verticalAlign: 'middle' }}>R</span>}
+          {player.rookie && <RookieBadge player={player} />}
           {ownerTeam && (
             <span style={{ marginLeft: 6, display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)', color: isOnMyRoster ? 'var(--accent)' : ownerTeam.color || 'var(--text-dim)', verticalAlign: 'middle' }}>
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOnMyRoster ? 'var(--accent)' : (ownerTeam.color || '#666'), display: 'inline-block', flexShrink: 0 }} />

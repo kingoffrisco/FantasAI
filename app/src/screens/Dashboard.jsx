@@ -185,7 +185,7 @@ function buildStandings(cbsRaw) {
     return { id: mock?.id, name: ct.name || mock?.name || '—', logo: mock?.logo || '??', logoImg: liveTeam?.logoImg || null, color: mock?.color || '#555', w, l, pf, pa, me: mock?.me };
   });
 
-  return rows.sort((a, b) => b.w - a.w || b.pf - a.pf);
+  return rows.sort((a, b) => (b.w - a.w) || (b.pf - a.pf) || (a.pa - b.pa));
 }
 
 function getScoringRules() {
@@ -409,6 +409,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     return [...standings].sort((a, b) => {
       if (b.w !== a.w) return b.w - a.w;
       if (b.pf !== a.pf) return b.pf - a.pf;
+      if (a.pa !== b.pa) return a.pa - b.pa;
       return (powerRankMap.get(a.id) ?? Infinity) - (powerRankMap.get(b.id) ?? Infinity);
     });
   }, [standings, powerRankMap]);
@@ -560,7 +561,17 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const totalProj  = starters.reduce((s, r) => s + (findPlayer(r.playerId)?.proj || 0), 0);
   const rosterPlayers = allPlayersList.filter(p => rosterIds.has(p.id));
   const optimalSlots  = React.useMemo(
-    () => computeOptimal(starters, rosterPlayers, p => p?.proj ?? 0, currentWeek.num || 0),
+    () => {
+      const wk = currentWeek.num || 0;
+      const projFn = p => {
+        if (!p) return 0;
+        const s = (p.status || '').toUpperCase();
+        if (['OUT', 'O', 'IR', 'NFI', 'PUP', 'SUSPENDED'].includes(s)) return 0;
+        if (p.bye && p.bye === wk) return 0;
+        return p.proj ?? 0;
+      };
+      return computeOptimal(starters, rosterPlayers, projFn, wk);
+    },
     [starters, rosterPlayers, currentWeek.num],
   );
   const optimalTotal  = optimalSlots.reduce((s, e) => s + (findPlayer(e.playerId)?.proj ?? 0), 0);
@@ -876,11 +887,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
             <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 3 }}>{subLine}</div>
           </div>
 
-          <button
-            className="btn"
-            style={{ background: '#22c55e', border: 'none', color: '#fff', fontWeight: 700 }}
-            onClick={() => setMobileScoringOpen(true)}
-          >📱 Mobile Scoring</button>
         </div>
         <div className="flex gap-8" style={{ alignItems: 'center' }}>
           <button className="btn primary" onClick={() => onNav('draft')}>▶ Open Draft Room</button>
@@ -936,12 +942,12 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', marginLeft: 'auto' }}>
-                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: isWinning ? 'var(--good)' : 'var(--text)', lineHeight: 1 }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: hasLive ? '#1affa0' : '#4ea8ff', lineHeight: 1 }}>
                     {myScore.toFixed(1)}
                   </div>
                   {hasLive && myLive !== myProj && (
                     <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', marginTop: 2 }}>
-                      LIVE ADJ
+                      LIVE
                     </div>
                   )}
                 </div>
@@ -974,7 +980,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
                   <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>{opp.name}</div>
                   <div style={{ fontSize: 9, color: 'var(--text-faint)' }}>{oppStarters.length} starters</div>
                 </div>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: !isWinning ? 'var(--danger)' : 'var(--text-dim)', lineHeight: 1, marginRight: 'auto' }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: hasLive ? '#1affa0' : '#4ea8ff', lineHeight: 1, marginRight: 'auto' }}>
                   {oppScore.toFixed(1)}
                 </div>
               </div>
@@ -992,10 +998,18 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         );
       })()}
 
+      {/* ── Weekly Recap Banner ─────────────────────────────────────────────── */}
+      <WeeklyRecapBanner
+        h2hWinData={h2hWinData}
+        starters={starters}
+        weekLabel={weekLabel}
+        teamName={teamName}
+      />
+
       <div style={{ padding: isMobile ? '12px 14px' : 24, display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 8 : 12, flexShrink: 0 }}>
         <div className="stat">
           <div className="k">Starters Projected</div>
-          <div className="v" style={{ color: isOptimal ? '#1affa0' : '#ffd700' }}>{totalProj.toFixed(1)}</div>
+          <div className="v" style={{ color: '#4ea8ff' }}>{totalProj.toFixed(1)}</div>
           <div className="sub">{weekLabel} · {starters.length} of 8 slots</div>
         </div>
         {h2hWinData ? (
@@ -2915,5 +2929,83 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
       </div>
     )}
     </>
+  );
+}
+
+const RECAP_API = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || 'https://api.fantasai.net';
+
+function WeeklyRecapBanner({ h2hWinData, starters, weekLabel, teamName }) {
+  const [aiRecap, setAiRecap] = React.useState(null);
+  const [aiLoading, setAiLoading] = React.useState(false);
+  const [dismissed, setDismissed] = React.useState(false);
+
+  if (!h2hWinData || dismissed) return null;
+  const { opp, myScore, oppScore, isWinning, hasLive, finalCount } = h2hWinData;
+  if (!hasLive) return null;
+
+  const mvp = starters.reduce((best, e) => {
+    const p = e.playerId ? findPlayer(e.playerId) : null;
+    if (!p) return best;
+    const pts = p.last || p.proj || 0;
+    return pts > (best?.pts || 0) ? { name: p.name, pts, pos: p.pos } : best;
+  }, null);
+
+  const dud = starters.reduce((worst, e) => {
+    const p = e.playerId ? findPlayer(e.playerId) : null;
+    if (!p) return worst;
+    const pts = p.last || p.proj || 0;
+    return pts < (worst?.pts ?? 999) ? { name: p.name, pts, pos: p.pos } : worst;
+  }, null);
+
+  async function getAIRecap() {
+    setAiLoading(true);
+    try {
+      const starterLines = starters.map(e => {
+        const p = e.playerId ? findPlayer(e.playerId) : null;
+        return p ? `${p.name} (${p.pos}): ${(p.last || p.proj || 0).toFixed(1)} pts` : null;
+      }).filter(Boolean).join(', ');
+      const question = `Write a 3-4 sentence weekly fantasy football recap for my team "${teamName}".
+My team scored ${myScore.toFixed(1)} vs ${opp?.name} ${oppScore.toFixed(1)}. ${isWinning ? 'I WON.' : 'I LOST.'}
+My starters: ${starterLines}
+MVP: ${mvp?.name} (${mvp?.pts?.toFixed(1)} pts). Dud: ${dud?.name} (${dud?.pts?.toFixed(1)} pts).
+Be fun and direct. Highlight the key performer and the biggest disappointment. End with one actionable tip for next week.`;
+      const res = await fetch(`${RECAP_API}/api/v1/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, tier: 'simple' }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (res.ok) { const data = await res.json(); setAiRecap(data.answer || ''); }
+    } catch {} finally { setAiLoading(false); }
+  }
+
+  const resultColor = isWinning ? '#1affa0' : '#ff4f4f';
+  const resultBg = isWinning ? 'rgba(26,255,160,.06)' : 'rgba(255,79,79,.06)';
+  const resultBorder = isWinning ? 'rgba(26,255,160,.3)' : 'rgba(255,79,79,.3)';
+
+  return (
+    <div style={{ margin: '0 24px 8px', background: resultBg, border: `1px solid ${resultBorder}`, borderRadius: 10, padding: '14px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: aiRecap ? 10 : 0 }}>
+        <div style={{ fontSize: 22 }}>{isWinning ? '🏆' : '😤'}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: resultColor }}>
+            {isWinning ? 'Victory!' : 'Tough Loss'} — {weekLabel}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>
+            {teamName} <strong style={{ color: resultColor }}>{myScore.toFixed(1)}</strong> vs {opp?.name} {oppScore.toFixed(1)}
+            {mvp && <span style={{ marginLeft: 8 }}>MVP: <strong>{mvp.name}</strong> ({mvp.pts.toFixed(1)})</span>}
+            {dud && <span style={{ marginLeft: 8 }}>Dud: {dud.name} ({dud.pts.toFixed(1)})</span>}
+          </div>
+        </div>
+        <button className="btn sm" style={{ background: 'rgba(198,255,58,.12)', borderColor: 'rgba(198,255,58,.3)', color: '#c6ff3a', fontWeight: 700, fontSize: 10 }} disabled={aiLoading} onClick={getAIRecap}>
+          {aiLoading ? '⟳ Writing…' : aiRecap ? '↻ Refresh' : '🤖 AI Recap'}
+        </button>
+        <button onClick={() => setDismissed(true)} style={{ background: 'none', border: 'none', color: 'var(--text-faint)', cursor: 'pointer', fontSize: 14, padding: '4px', lineHeight: 1 }}>✕</button>
+      </div>
+      {aiRecap && (
+        <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.7, whiteSpace: 'pre-wrap', borderTop: `1px solid ${resultBorder}`, paddingTop: 10 }}>
+          {aiRecap}
+        </div>
+      )}
+    </div>
   );
 }

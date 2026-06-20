@@ -241,8 +241,36 @@ def export_news(conn, dry_run: bool):
         ORDER BY published_at DESC
         LIMIT 500
     """)
-    if len(combined) < 100:
-        extra = q(conn, """
+    extra = q(conn, """
+        SELECT
+            article_id AS news_id,
+            title AS headline,
+            link AS source_url,
+            description AS full_text,
+            player_id,
+            player_name,
+            position,
+            team,
+            NULL AS summary_text,
+            NULL AS fantasy_insight,
+            NULL AS impact_score,
+            NULL AS impact_category,
+            published_at,
+            fetched_at AS enriched_at,
+            NULL AS ai_generated_at
+        FROM bronze_google_news
+        ORDER BY published_at DESC
+        LIMIT 500
+    """)
+    combined = sorted(combined + extra,
+                      key=lambda x: x.get("published_at") or "", reverse=True)
+
+    # Tier 2/3: Team RSS articles (covers deep players outside top 200)
+    has_rss = conn.execute(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'bronze_team_rss_news'"
+    ).fetchone()[0] > 0
+    if has_rss:
+        rss = q(conn, """
             SELECT
                 article_id AS news_id,
                 title AS headline,
@@ -259,12 +287,15 @@ def export_news(conn, dry_run: bool):
                 published_at,
                 fetched_at AS enriched_at,
                 NULL AS ai_generated_at
-            FROM bronze_google_news
+            FROM bronze_team_rss_news
+            WHERE player_name IS NOT NULL
             ORDER BY published_at DESC
             LIMIT 500
         """)
-        combined = sorted(combined + extra,
-                          key=lambda x: x.get("published_at") or "", reverse=True)[:1000]
+        combined = sorted(combined + rss,
+                          key=lambda x: x.get("published_at") or "", reverse=True)
+
+    combined = combined[:1000]
     r2_put("fantasai/analysis/player_news.json", wrap(combined, "bronze_player_news_espn_api"), dry_run)
 
 
@@ -295,6 +326,64 @@ def export_analysis(conn, dry_run: bool):
     """)
     r2_put("fantasai/analysis/breakout_candidates.json", breakout, dry_run)
 
+    # 1b. Defense vs Position rankings (2025 season)
+    # Cross-references silver_weekly_stats with bronze_nfl_schedules to compute
+    # how many fantasy points each defense allows per position per game.
+    has_schedules = conn.execute(
+        "SELECT COUNT(*) FROM bronze_nfl_schedules WHERE season = 2025"
+    ).fetchone()[0]
+    if has_schedules:
+        def_vs_pos = q(conn, """
+            WITH player_vs_def AS (
+                SELECT
+                    s.position,
+                    UPPER(TRIM(
+                        CASE
+                            WHEN UPPER(TRIM(s.team)) = UPPER(TRIM(g.home_team)) THEN g.away_team
+                            WHEN UPPER(TRIM(s.team)) = UPPER(TRIM(g.away_team)) THEN g.home_team
+                        END
+                    )) AS def_team,
+                    s.fantasy_points
+                FROM silver_weekly_stats s
+                JOIN bronze_nfl_schedules g
+                    ON s.week = g.week AND s.season = g.season
+                   AND (
+                       UPPER(TRIM(s.team)) = UPPER(TRIM(g.home_team))
+                    OR UPPER(TRIM(s.team)) = UPPER(TRIM(g.away_team))
+                   )
+                WHERE s.season = 2025
+                  AND s.fantasy_points > 0
+                  AND s.position IN ('QB','RB','WR','TE','K')
+            ),
+            agg AS (
+                SELECT
+                    def_team,
+                    position,
+                    ROUND(AVG(fantasy_points), 2)  AS avg_pts_allowed,
+                    COUNT(*)                        AS sample_size
+                FROM player_vs_def
+                WHERE def_team IS NOT NULL
+                GROUP BY def_team, position
+            ),
+            ranked AS (
+                SELECT
+                    def_team,
+                    position,
+                    avg_pts_allowed,
+                    sample_size,
+                    CAST(RANK() OVER (PARTITION BY position ORDER BY avg_pts_allowed ASC)  AS INTEGER) AS rank_vs_pos
+                FROM agg
+            )
+            SELECT def_team, position, avg_pts_allowed, sample_size, rank_vs_pos
+            FROM ranked
+            ORDER BY position, rank_vs_pos
+        """)
+        r2_put("fantasai/analysis/defense_vs_pos.json",
+               {"source": "silver_weekly_stats+bronze_nfl_schedules", "season": 2025,
+                "data": def_vs_pos}, dry_run)
+    else:
+        print("   ⚠️  No 2025 schedule data — skipping defense_vs_pos export")
+
     # 2. Player profiles from Sleeper + DSTs from ADP rankings
     # Kickers (K) are in bronze_player_news_raw (Sleeper tracks them as players).
     # DSTs are NOT — Sleeper stores teams separately, so we pull them from
@@ -307,10 +396,93 @@ def export_analysis(conn, dry_run: bool):
                 ROUND(AVG(CASE WHEN fantasy_points > 0 THEN fantasy_points END), 1)
                                                       AS season_avg_points_2025,
                 COUNT(CASE WHEN fantasy_points > 0 THEN 1 END)
-                                                      AS games_played_2025
+                                                      AS games_played_2025,
+                ROUND(ARG_MAX(fantasy_points, week), 1) AS last_pts,
+                list(ROUND(fantasy_points, 1) ORDER BY week ASC)
+                                                      AS trend
             FROM silver_weekly_stats
             WHERE season = 2025
             GROUP BY LOWER(TRIM(player_name))
+        ),
+        dst_stats_2025 AS (
+            SELECT
+                UPPER(TRIM(team))                     AS team_key,
+                ROUND(SUM(pts_ppr), 1)                AS season_total_points_2025,
+                ROUND(AVG(CASE WHEN pts_ppr > 0 THEN pts_ppr END), 1)
+                                                      AS season_avg_points_2025,
+                COUNT(CASE WHEN pts_ppr > 0 THEN 1 END) AS games_played_2025,
+                ROUND(ARG_MAX(pts_ppr, week), 1)      AS last_pts,
+                list(ROUND(pts_ppr, 1) ORDER BY week ASC)
+                                                      AS trend
+            FROM bronze_dst_weekly_stats
+            WHERE season = 2025
+            GROUP BY UPPER(TRIM(team))
+        ),
+        yac_2025 AS (
+            SELECT
+                y.gsis_id,
+                ROUND(SUM(y.total_yac), 1)            AS yac,
+                ROUND(SUM(y.air_yards), 1)            AS air_yards
+            FROM player_yac_stats y
+            WHERE y.season = 2025
+            GROUP BY y.gsis_id
+        ),
+        nextgen_2025 AS (
+            SELECT
+                LOWER(TRIM(ng.player_name))           AS name_key,
+                ng.gsis_id,
+                ROUND(ng.avg_intended_air_yards, 1)   AS adot,
+                ng.targets,
+                ROUND(ng.percent_share_of_intended_air_yards, 1) AS target_share,
+                COALESCE(y.yac, 0)                    AS yac,
+                COALESCE(y.air_yards, 0)              AS air_yards
+            FROM player_nextgen_stats ng
+            LEFT JOIN yac_2025 y ON ng.gsis_id = y.gsis_id
+            WHERE ng.season = 2025 AND ng.week = 0
+        ),
+        combine AS (
+            SELECT
+                LOWER(TRIM(player_name))              AS name_key,
+                forty,
+                vertical,
+                broad_jump,
+                bench,
+                wt                                    AS combine_weight,
+                cone,
+                shuttle,
+                draft_round                           AS combine_draft_round,
+                draft_ovr                             AS combine_draft_ovr
+            FROM bronze_combine_data
+            WHERE forty IS NOT NULL OR vertical IS NOT NULL
+        ),
+        team_tgt_2025 AS (
+            SELECT team, week,
+                SUM(CAST(json_extract_string(stats, '$.rec_tgt') AS DOUBLE)) AS team_targets
+            FROM gold_weekly_stats
+            WHERE season = 2025 AND stats IS NOT NULL AND position IN ('RB','WR','TE')
+            GROUP BY team, week
+        ),
+        snap_2025 AS (
+            SELECT
+                LOWER(TRIM(g.player_name))            AS name_key,
+                ROUND(AVG(CAST(json_extract_string(g.stats, '$.off_snp') AS DOUBLE)), 1) AS avg_snaps,
+                ROUND(AVG(CASE WHEN CAST(json_extract_string(g.stats, '$.tm_off_snp') AS DOUBLE) > 0
+                    THEN CAST(json_extract_string(g.stats, '$.off_snp') AS DOUBLE) / CAST(json_extract_string(g.stats, '$.tm_off_snp') AS DOUBLE) * 100
+                    ELSE NULL END), 1)                AS snap_pct,
+                ROUND(AVG(CAST(json_extract_string(g.stats, '$.rec_tgt') AS DOUBLE)), 1) AS avg_targets_g,
+                ROUND(AVG(CAST(json_extract_string(g.stats, '$.rush_att') AS DOUBLE)), 1) AS avg_carries_g,
+                ROUND(AVG(CAST(json_extract_string(g.stats, '$.rush_rz_att') AS DOUBLE)), 1) AS avg_rz_att_g,
+                ROUND(AVG(COALESCE(CAST(json_extract_string(g.stats, '$.rec_yd') AS DOUBLE), 0) + COALESCE(CAST(json_extract_string(g.stats, '$.rush_yd') AS DOUBLE), 0)), 1) AS combo_yds_g,
+                ROUND(CASE WHEN SUM(CAST(json_extract_string(g.stats, '$.rec_tgt') AS DOUBLE)) > 0
+                    THEN SUM(CAST(json_extract_string(g.stats, '$.rec_yd') AS DOUBLE)) / SUM(CAST(json_extract_string(g.stats, '$.rec_tgt') AS DOUBLE))
+                    ELSE NULL END, 1)                 AS yds_per_tgt,
+                ROUND(AVG(CASE WHEN tt.team_targets > 0
+                    THEN CAST(json_extract_string(g.stats, '$.rec_tgt') AS DOUBLE) / tt.team_targets * 100
+                    ELSE NULL END), 1)                AS real_target_share
+            FROM gold_weekly_stats g
+            LEFT JOIN team_tgt_2025 tt ON g.team = tt.team AND g.week = tt.week
+            WHERE g.season = 2025 AND g.stats IS NOT NULL
+            GROUP BY LOWER(TRIM(g.player_name))
         )
         SELECT
             p.player_id       AS master_player_id,
@@ -325,29 +497,79 @@ def export_analysis(conn, dry_run: bool):
             s.season_total_points_2025,
             s.season_avg_points_2025,
             s.games_played_2025,
-            NULL              AS adp_rank
+            s.last_pts,
+            s.trend,
+            NULL              AS adp_rank,
+            ng.yac,
+            ng.air_yards,
+            ng.adot,
+            COALESCE(sn.real_target_share, ng.target_share) AS target_share,
+            ng.targets         AS routes,
+            sn.avg_snaps,
+            sn.snap_pct,
+            sn.avg_targets_g,
+            sn.avg_carries_g,
+            sn.avg_rz_att_g,
+            sn.combo_yds_g,
+            sn.yds_per_tgt,
+            cb.forty,
+            cb.vertical,
+            cb.broad_jump,
+            cb.bench         AS bench_press,
+            cb.combine_weight,
+            cb.cone,
+            cb.shuttle,
+            cb.combine_draft_round,
+            cb.combine_draft_ovr
         FROM bronze_player_news_raw p
         LEFT JOIN stats_2025 s ON LOWER(TRIM(p.player_name)) = s.name_key
+        LEFT JOIN nextgen_2025 ng ON LOWER(TRIM(p.player_name)) = ng.name_key
+        LEFT JOIN snap_2025 sn ON LOWER(TRIM(p.player_name)) = sn.name_key
+        LEFT JOIN combine cb ON LOWER(TRIM(p.player_name)) = cb.name_key
         WHERE p.position IN ('QB','RB','WR','TE','K')
           AND p.team IS NOT NULL
           AND p.active = TRUE
+          AND (s.games_played_2025 > 0 OR p.depth_chart_order IS NOT NULL OR COALESCE(p.years_exp, 0) < 3)
 
         UNION ALL
 
         SELECT
-            dst_team        AS master_player_id,
-            dst_team || ' D/ST' AS full_name,
-            'DST'           AS position,
-            dst_team        AS team,
-            NULL            AS years_exp,
-            FALSE           AS is_rookie,
-            NULL            AS age,
-            NULL            AS depth_chart_order,
-            NULL            AS depth_chart_position,
-            NULL            AS season_total_points_2025,
-            NULL            AS season_avg_points_2025,
-            NULL            AS games_played_2025,
-            adp_rank
+            dst.dst_team     AS master_player_id,
+            dst.dst_team || ' D/ST' AS full_name,
+            'DST'            AS position,
+            dst.dst_team     AS team,
+            NULL             AS years_exp,
+            FALSE            AS is_rookie,
+            NULL             AS age,
+            NULL             AS depth_chart_order,
+            NULL             AS depth_chart_position,
+            d.season_total_points_2025,
+            d.season_avg_points_2025,
+            d.games_played_2025,
+            d.last_pts,
+            d.trend,
+            dst.adp_rank,
+            NULL AS yac,
+            NULL AS air_yards,
+            NULL AS adot,
+            NULL AS target_share,
+            NULL AS routes,
+            NULL AS avg_snaps,
+            NULL AS snap_pct,
+            NULL AS avg_targets_g,
+            NULL AS avg_carries_g,
+            NULL AS avg_rz_att_g,
+            NULL AS combo_yds_g,
+            NULL AS yds_per_tgt,
+            NULL AS forty,
+            NULL AS vertical,
+            NULL AS broad_jump,
+            NULL AS bench_press,
+            NULL AS combine_weight,
+            NULL AS cone,
+            NULL AS shuttle,
+            NULL AS combine_draft_round,
+            NULL AS combine_draft_ovr
         FROM (
             WITH team_name_map(full_name, abbr) AS (
                 VALUES
@@ -380,12 +602,45 @@ def export_analysis(conn, dry_run: bool):
             GROUP BY dst_team
             HAVING dst_team IS NOT NULL AND dst_team != ''
         ) dst
+        LEFT JOIN dst_stats_2025 d ON UPPER(dst.dst_team) = d.team_key
 
         ORDER BY position, full_name
     """)
     players_draft_payload = wrap(players_draft, "bronze_player_news_raw", season=2026)
     r2_put("fantasai/players/export_players_2026_draft.json", players_draft_payload, dry_run)
     r2_put("fantasai/players/players_2026_draft.json", players_draft_payload, dry_run)
+
+    # 2b. Per-player 2025 season totals (aggregated from silver_weekly_stats Sleeper data)
+    # Used by frontend as offline fallback for the Next Gen Stats panel
+    _STAT_FIELDS = [
+        "pass_yd","pass_td","pass_att","pass_cmp","pass_int","pass_air_yd",
+        "rush_yd","rush_td","rush_att","rush_yac","rush_ybc",
+        "rec","rec_tgt","rec_yd","rec_td","rec_air_yd","rec_yac",
+        "pts_ppr","pts_half_ppr","pts_std",
+    ]
+    _stat_sums = ",\n            ".join(
+        f"ROUND(SUM(TRY_CAST(json_extract_string(stats,'$.{f}') AS DOUBLE)),1) AS {f}"
+        for f in _STAT_FIELDS
+    )
+    player_stats_2025_rows = q(conn, f"""
+        SELECT
+            player_id,
+            player_name,
+            position,
+            team,
+            COUNT(CASE WHEN fantasy_points > 0 THEN 1 END) AS gp,
+            {_stat_sums}
+        FROM silver_weekly_stats
+        WHERE season = 2025
+        GROUP BY player_id, player_name, position, team
+        HAVING gp > 0
+        ORDER BY pts_half_ppr DESC NULLS LAST
+    """)
+    # Key by player_id for O(1) frontend lookup
+    stats_by_id = {r["player_id"]: {k: v for k, v in r.items() if k != "player_id"}
+                   for r in player_stats_2025_rows}
+    r2_put("fantasai/analysis/player_stats_2025.json",
+           {"source": "silver_weekly_stats", "season": 2025, "players": stats_by_id}, dry_run)
 
     # 3. Weekly stats
     weekly_stats = q(conn, """

@@ -54,7 +54,7 @@ function fmtNg(val, statId) {
   return String(val);
 }
 
-export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftComplete, onDraftStatusChange }) {
+export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftComplete, onDraftStatusChange, onOpenPlayer }) {
   const REAL_currentPickNum = 40;
   const isCommissioner = user?.isAdmin || user?.isCommissioner;
 
@@ -1704,6 +1704,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             inQueue={queue.includes(detailPlayer.id)}
             onToggleQueue={() => setQueue(q => q.includes(detailPlayer.id) ? q.filter(x => x !== detailPlayer.id) : [...q, detailPlayer.id])}
             breakoutByName={breakoutByName}
+            onOpenPlayer={onOpenPlayer}
           />
         )}
 
@@ -2450,7 +2451,7 @@ function CompactSeasonStats({ tot, pos }) {
 }
 
 // ── Inline player detail strip — shows inside Big Board on player click ───────
-function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissioner, onClockTeam, onDraft, inQueue, onToggleQueue, breakoutByName }) {
+function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissioner, onClockTeam, onDraft, inQueue, onToggleQueue, breakoutByName, onOpenPlayer }) {
   const [seasons, setSeasons] = React.useState({});
   const [loading, setLoading] = React.useState(true);
   const [news, setNews]       = React.useState([]);
@@ -2530,6 +2531,11 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
             style={inQueue ? { background: 'var(--accent)', color: 'var(--accent-ink)', borderColor: 'var(--accent)' } : {}}
             onClick={onToggleQueue}
           >{inQueue ? '✓ Queued' : '+ Queue'}</button>
+          {onOpenPlayer && (
+            <button className="btn ghost sm" onClick={() => { onOpenPlayer(p.id); }} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '.04em', whiteSpace: 'nowrap' }}>
+              ↗ Profile
+            </button>
+          )}
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 14, cursor: 'pointer', padding: '2px 6px', lineHeight: 1 }}>✕</button>
         </div>
       </div>
@@ -2553,7 +2559,7 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
         ? <div style={{ padding: '5px 12px 7px', color: 'var(--text-faint)', fontSize: 10, display: 'flex', alignItems: 'center', gap: 6 }}><div className="ai-orb" style={{ width: 10, height: 10 }} /> Loading stats…</div>
         : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: '1px solid var(--border)' }}>
-            {[2025, 2024, 2023].map((yr, i) => {
+            {[2023, 2024, 2025].map((yr, i) => {
               const s = seasons[yr];
               const injured = s !== null && s !== undefined && (s._gp === 0);
               return (

@@ -12,7 +12,7 @@ Scoring weights:
 
 Output per player:
   start_score      0-100  numeric ranking
-  matchup_indicator  GREEN / YELLOW / RED
+  matchup_indicator  SMASH / FAVORABLE / NEUTRAL / DIFFICULT / AVOID
   recommendation   START / FLEX / SIT
   confidence       HIGH / MEDIUM / LOW
   summary          ≤20-word sentence
@@ -28,13 +28,14 @@ Writes:
   fantasai/analysis/weekly_startsit.json
 
 Usage:
-  python job4_weekly_startsit.py                 # rostered players, auto-detect week
+  python job4_weekly_startsit.py                 # top 200 players, auto-detect week
   python job4_weekly_startsit.py --dry-run       # run models, don't upload
   python job4_weekly_startsit.py --week 3        # force specific NFL week
   python job4_weekly_startsit.py --limit 10      # cap players (fast test)
   python job4_weekly_startsit.py --pos QB,RB     # specific positions only
   python job4_weekly_startsit.py --full          # ignore cache, regenerate all
-  python job4_weekly_startsit.py --all           # all skill players (not just rostered)
+  python job4_weekly_startsit.py --top 300       # change pool size (default 200)
+  python job4_weekly_startsit.py --all           # all skill players (monthly full run)
 """
 
 import argparse
@@ -374,30 +375,23 @@ def load_player_list() -> list:
     return []
 
 
-def load_rostered_names() -> set:
-    names = set()
-    try:
-        resp = requests.get(f"{API_BASE}/api/v1/cbs/players", headers=HEADERS, timeout=20, verify=VERIFY_SSL)
-        if resp.ok:
-            data = resp.json()
-            players = data.get("players") or (data if isinstance(data, list) else [])
-            for p in players:
-                name = (p.get("name") or p.get("full_name") or "").strip()
-                if name:
-                    names.add(name.lower())
-            if names:
-                print(f"[Job 4] Rostered: {len(names)} from CBS")
-                return names
-    except Exception as e:
-        print(f"[Job 4] CBS failed: {e}")
-
+def load_rostered_names(top_n: int = 200) -> set:
+    """Top N players by ECR/ADP as the analysis pool."""
     raw = load_player_list()
+    ranked = []
     for p in raw:
-        if float(p.get("percent_owned") or 0) > 0:
-            name = (p.get("full_name") or p.get("name") or "").strip()
-            if name:
-                names.add(name.lower())
-    print(f"[Job 4] Rostered: {len(names)} from percent_owned")
+        name = (p.get("full_name") or p.get("name") or "").strip()
+        pos = (p.get("position") or p.get("pos") or "").upper()
+        if not name or pos not in SKILL_POS:
+            continue
+        ecr = float(p.get("positionRank") or p.get("position_rank")
+                     or p.get("ecr") or 9999)
+        adp = float(p.get("adp") or p.get("adp_ppr") or p.get("adp_rank_ppr") or 9999)
+        rank = min(ecr, adp)
+        ranked.append((rank, name.lower()))
+    ranked.sort()
+    names = set(n for _, n in ranked[:top_n])
+    print(f"[Job 4] Top {top_n} players selected for analysis")
     return names
 
 
@@ -477,7 +471,7 @@ POS_PROJ_MEDIANS = {"QB": 18.0, "RB": 10.0, "WR": 10.0, "TE": 8.0, "DST": 8.0}
 # questionable_mult = starter is Q/D (game-time decision)
 # healthy_mult = starter is Active (backup sits unless injury)
 DC_MULTIPLIERS = {
-    "QB":  {1: (1.00, 1.00, 1.00), 2: (0.10, 0.60, 1.00), 3: (0.02, 0.10, 0.15)},
+    "QB":  {1: (1.00, 1.00, 1.00), 2: (0.10, 0.60, 1.00), 3: (0.00, 0.00, 0.00)},
     "RB":  {1: (1.00, 1.00, 1.00), 2: (0.40, 0.70, 0.90), 3: (0.10, 0.20, 0.40)},
     "WR":  {1: (1.00, 1.00, 1.00), 2: (0.60, 0.75, 0.85), 3: (0.25, 0.35, 0.50)},
     "TE":  {1: (1.00, 1.00, 1.00), 2: (0.12, 0.55, 0.95), 3: (0.02, 0.08, 0.20)},
@@ -544,16 +538,19 @@ def depth_chart_multiplier(pos: str, depth_order: int, starter_status: str) -> t
 
 
 def matchup_indicator(def_rank) -> str:
-    """GREEN = easy matchup, RED = tough matchup."""
     try:
         r = int(def_rank)
     except (TypeError, ValueError):
-        return "YELLOW"
+        return "NEUTRAL"
+    if r >= 28:
+        return "SMASH"
     if r >= 23:
-        return "GREEN"
-    if r <= 9:
-        return "RED"
-    return "YELLOW"
+        return "FAVORABLE"
+    if r <= 5:
+        return "AVOID"
+    if r <= 10:
+        return "DIFFICULT"
+    return "NEUTRAL"
 
 
 def weather_penalty_score(player: dict, weather_by_team: dict) -> float:
@@ -600,6 +597,7 @@ def compute_start_score(
     pos: str,
     is_out: bool,
     wx_penalty: float,
+    injury_status: str = "",
 ) -> float:
     """
     Returns 0-100 start score.
@@ -648,8 +646,13 @@ def compute_start_score(
 
     # 5. Injury/Weather (15 pts — major weekly swing factor)
     # wx_penalty is 0-5 (higher = worse conditions)
-    # Injury: is_out handled at top (returns 0). Questionable = partial hit.
-    score += max(0.0, 15.0 - (wx_penalty / 5.0) * 15.0)
+    inj = injury_status.upper()
+    if inj in ("DOUBTFUL",):
+        score += 0.0  # doubtful = lose all 15 injury/weather pts
+    elif inj in ("QUESTIONABLE",):
+        score += 5.0  # questionable = keep only 5 of 15 pts
+    else:
+        score += max(0.0, 15.0 - (wx_penalty / 5.0) * 15.0)
 
     # 6. Team environment — projection vs season avg as proxy (5 pts)
     env_norm = 0.5
@@ -661,21 +664,32 @@ def compute_start_score(
     return round(min(100.0, max(0.0, score)), 1)
 
 
-def auto_recommend(start_score: float, mi: str, is_out: bool):
+def auto_recommend(start_score: float, mi: str, is_out: bool, pos: str = "",
+                   is_questionable: bool = False, is_doubtful: bool = False,
+                   proj: float = 0):
     """
     Returns (recommendation, confidence) for clear-cut cases.
     Returns (None, None) for borderline — send to model.
     """
     if is_out:
         return "SIT", "HIGH"
-    if start_score >= 75 and mi != "RED":
+    if is_doubtful:
+        return "SIT", "MEDIUM"
+    if start_score >= 75 and mi not in ("AVOID", "DIFFICULT") and not is_questionable:
         return "START", "HIGH"
-    if start_score >= 65 and mi == "GREEN":
+    if start_score >= 65 and mi in ("SMASH", "FAVORABLE") and not is_questionable:
         return "START", "MEDIUM"
+    if is_questionable:
+        return "MONITOR", "LOW"
     if start_score <= 20:
         return "SIT", "HIGH"
     if start_score <= 30:
         return "SIT", "MEDIUM"
+    if pos in ("RB", "WR", "TE") and proj >= 15 and mi in ("AVOID", "DIFFICULT"):
+        return "START - LOWER EXPECTATIONS", "MEDIUM"
+    if pos == "DST":
+        rec = "START" if start_score >= 50 else "SIT"
+        return rec, "MEDIUM"
     return None, None  # borderline — call model
 
 
@@ -845,8 +859,15 @@ def parse_recommendation(text: str) -> dict | None:
     return None
 
 
+def clamp_dst_rec(rec: dict, pos: str, start_score: float) -> dict:
+    """DST can't roster FLEX — force to START or SIT."""
+    if pos == "DST" and rec.get("recommendation") == "FLEX":
+        rec["recommendation"] = "START" if start_score >= 50 else "SIT"
+    return rec
+
+
 def validate_rec(rec: dict) -> dict:
-    valid_recs = {"START", "SIT", "FLEX"}
+    valid_recs = {"START", "SIT", "FLEX", "MONITOR", "START - LOWER EXPECTATIONS"}
     valid_conf = {"HIGH", "MEDIUM", "LOW"}
     valid_sent = {"positive", "negative", "neutral"}
 
@@ -877,6 +898,7 @@ def deterministic_factors(
     name: str, pos: str, start_score: float, mi: str, matchup_gr: str,
     opp_display: str, def_rank, def_avg, snap_data: dict, last_pts: float,
     season_avg: float, wx_label: str, is_out: bool, status: str,
+    p: dict = None,
 ) -> list:
     """Generate factor bullets without calling the LLM."""
     if is_out:
@@ -887,7 +909,7 @@ def deterministic_factors(
         ]
     facs = []
     # Matchup factor
-    mi_sent = "positive" if mi == "GREEN" else ("negative" if mi == "RED" else "neutral")
+    mi_sent = "positive" if mi in ("SMASH", "FAVORABLE") else ("negative" if mi in ("AVOID", "DIFFICULT") else "neutral")
     rank_str = f"#{def_rank}/32" if def_rank and def_rank != "?" else ""
     avg_str  = f"{def_avg} pts/game" if def_avg and def_avg != "?" else ""
     detail   = " | ".join(filter(None, [rank_str, avg_str, matchup_gr]))
@@ -896,15 +918,24 @@ def deterministic_factors(
         "text":      f"vs {opp_display}{(' -- ' + detail) if detail else ''}.",
         "sentiment": mi_sent,
     })
-    # Usage factor
+    # Usage factor — pull from Sleeper snap_data first, fall back to R2 export fields
     usage_parts = []
-    if snap_data.get("avg_snap_pct"):
-        usage_parts.append(f"{snap_data['avg_snap_pct']}% snap share")
-    if snap_data.get("avg_targets"):
-        usage_parts.append(f"{snap_data['avg_targets']} tgts/g")
-    if snap_data.get("avg_carries"):
-        usage_parts.append(f"{snap_data['avg_carries']} car/g")
-    usage_text = ", ".join(usage_parts) if usage_parts else "Snap data unavailable."
+    _snap = snap_data.get("avg_snap_pct") or float(p.get("snap_pct") or 0) if p else 0
+    _tgts = snap_data.get("avg_targets") or float(p.get("avg_targets_g") or 0) if p else 0
+    _cars = snap_data.get("avg_carries") or float(p.get("avg_carries_g") or 0) if p else 0
+    _tshare = float(p.get("target_share") or 0) if p else 0
+    _rz = float(p.get("avg_rz_att_g") or 0) if p else 0
+    if _snap:
+        usage_parts.append(f"{_snap:.0f}% snap share")
+    if _tgts:
+        usage_parts.append(f"{_tgts:.1f} tgts/g")
+    if _tshare:
+        usage_parts.append(f"{_tshare:.0f}% tgt share")
+    if _cars:
+        usage_parts.append(f"{_cars:.1f} car/g")
+    if _rz:
+        usage_parts.append(f"{_rz:.1f} RZ att/g")
+    usage_text = ", ".join(usage_parts) if usage_parts else "Usage data unavailable."
     facs.append({"label": "Usage", "text": usage_text, "sentiment": "neutral"})
     # Trend factor
     if last_pts and season_avg and season_avg > 0:
@@ -925,7 +956,14 @@ def deterministic_factors(
     return facs
 
 
-def auto_summary(name: str, rec: str, mi: str, opp_display: str, start_score: float) -> str:
+def auto_summary(name: str, rec: str, mi: str, opp_display: str, start_score: float,
+                 injury_status: str = "") -> str:
+    inj = injury_status.upper()
+    if inj == "DOUBTFUL":
+        return f"Sit {name} — listed Doubtful, unlikely to play vs {opp_display}."
+    if inj == "QUESTIONABLE":
+        tag = f"{name} is Questionable"
+        return f"{tag} vs {opp_display} — have a backup ready in case inactive (score {start_score})."
     if rec == "START":
         return f"{name} is a confident start vs {opp_display} ({mi} matchup, score {start_score})."
     if rec == "SIT":
@@ -942,7 +980,8 @@ def main():
     parser.add_argument("--pos",     type=str, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--full",    action="store_true")
-    parser.add_argument("--all",     action="store_true", help="All skill players, not just rostered")
+    parser.add_argument("--all",     action="store_true", help="All skill players, not just top N")
+    parser.add_argument("--top",     type=int, default=200, help="Pool size (default 200)")
     args = parser.parse_args()
 
     pos_filter = set(p.strip().upper() for p in args.pos.split(",")) if args.pos else None
@@ -959,9 +998,20 @@ def main():
     notes_raw    = r2_get("fantasai/news/player_notes.json")
     notes_lookup = load_notes_lookup(notes_raw)
 
+    # Injury report — cross-reference with player export (which lacks injury_status)
+    injury_raw   = r2_get("fantasai/analysis/injury_report.json")
+    injury_by_name = {}
+    if injury_raw:
+        inj_arr = injury_raw if isinstance(injury_raw, list) else (injury_raw.get("data") or [])
+        for inj in inj_arr:
+            name_key = (inj.get("player_name") or "").lower().strip()
+            if name_key and inj.get("injury_status"):
+                injury_by_name[name_key] = inj["injury_status"]
+
     print(f"  Defense matchup rows: {len(def_vs_pos)}")
     print(f"  Weather teams:        {len(weather)}")
     print(f"  News entries:         {len(notes_lookup)}")
+    print(f"  Injury reports:       {len(injury_by_name)}")
 
     # 2025 season stats (avg, last, trend) are embedded in the player export.
     # No additional API calls needed — proj is derived per-player in the loop.
@@ -981,7 +1031,7 @@ def main():
         rostered_names = set()
         print("[Job 4] --all flag: processing all skill position players")
     else:
-        rostered_names = load_rostered_names()
+        rostered_names = load_rostered_names(top_n=args.top)
 
     require_opp = not rostered_names and not args.all
 
@@ -996,7 +1046,9 @@ def main():
             continue
         if rostered_names and name.lower() not in rostered_names:
             continue
-        has_opp = bool(p.get("opp") or p.get("opponent"))
+        raw_opp = p.get("opp") or p.get("opponent") or ""
+        team    = (p.get("team") or "").upper()
+        has_opp = bool(raw_opp and raw_opp not in ("?", "BYE")) or bool(opp_lookup.get(team))
         if require_opp and not has_opp:
             continue
         if not has_opp:
@@ -1040,8 +1092,14 @@ def main():
 
         print(f"\n[{i+1}/{len(candidates)}] {name} ({pos}, {team}) vs {opp_display}")
 
-        status  = (p.get("injury_status") or p.get("status") or "Active").strip()
-        is_out  = status.upper() in ("OUT", "IR", "NFI-R", "PUP", "SUSPENDED")
+        raw_status = (p.get("injury_status") or p.get("status") or "").strip()
+        if not raw_status or raw_status.upper() in ("ACTIVE", "NA", ""):
+            raw_status = injury_by_name.get(name.lower(), "Active")
+        status = raw_status
+        status_up = status.upper()
+        is_out  = status_up in ("OUT", "IR", "NFI-R", "PUP", "SUSPENDED", "INJURED_RESERVE")
+        is_questionable = status_up in ("QUESTIONABLE", "Q")
+        is_doubtful     = status_up in ("DOUBTFUL", "D")
 
         # Player export has 2025 season stats built in — use them directly.
         # Field names from Databricks export_players_2026_draft:
@@ -1077,16 +1135,16 @@ def main():
         wx_penalty = weather_penalty_score(p, weather) if has_opp else 0.0
         wx_label   = _weather_label(p, weather, wx_penalty) if has_opp else "No game scheduled"
 
-        avg_targets = snap_data.get("avg_targets", 0) or 0
-        avg_carries = snap_data.get("avg_carries", 0) or 0
-        snap_pct    = snap_data.get("avg_snap_pct", 0) or 0
+        avg_targets = snap_data.get("avg_targets", 0) or float(p.get("avg_targets_g") or 0)
+        avg_carries = snap_data.get("avg_carries", 0) or float(p.get("avg_carries_g") or 0)
+        snap_pct    = snap_data.get("avg_snap_pct", 0) or float(p.get("snap_pct") or 0)
 
         start_score = compute_start_score(
             proj, season_avg, last_pts, def_rank,
             snap_pct, avg_targets, avg_carries, pos,
-            is_out, wx_penalty,
+            is_out, wx_penalty, status,
         )
-        mi         = matchup_indicator(def_rank) if has_opp else "YELLOW"
+        mi         = matchup_indicator(def_rank) if has_opp else "NEUTRAL"
         matchup_gr = _matchup_grade(def_rank) if has_opp else "No opponent scheduled"
 
         # Depth chart adjustment
@@ -1104,12 +1162,13 @@ def main():
         dc_mult, dc_label = depth_chart_multiplier(pos, depth_order, starter_status_dc)
         start_score = round(start_score * dc_mult, 1)
 
-        print(f"  Score: {start_score}/100 | {dc_label} | Matchup: {mi} | Proj: {proj:.1f} ({proj_source})")
+        inj_tag = f" | ⚠ {status}" if (is_questionable or is_doubtful or is_out) else ""
+        print(f"  Score: {start_score}/100 | {dc_label} | Matchup: {mi} | Proj: {proj:.1f} ({proj_source}){inj_tag}")
 
         # Auto-assign clear-cut cases — no model call needed.
         # Also skip model when opponent is TBD: matchup is the model's main value-add,
         # and without it the model hallucinates or stalls, causing empty responses.
-        auto_rec, auto_conf = auto_recommend(start_score, mi, is_out)
+        auto_rec, auto_conf = auto_recommend(start_score, mi, is_out, pos, is_questionable, is_doubtful, proj)
         if not has_opp and auto_rec is None:
             # Force deterministic for TBD opponents regardless of score
             auto_rec  = "START" if start_score >= 65 else ("SIT" if start_score <= 35 else "FLEX")
@@ -1119,11 +1178,11 @@ def main():
             rec = {
                 "recommendation": auto_rec,
                 "confidence":     auto_conf,
-                "summary":        auto_summary(name, auto_rec, mi, opp_display, start_score),
+                "summary":        auto_summary(name, auto_rec, mi, opp_display, start_score, status),
                 "factors":        deterministic_factors(
                     name, pos, start_score, mi, matchup_gr, opp_display,
                     def_rank, def_avg, snap_data, last_pts, season_avg,
-                    wx_label, is_out, status,
+                    wx_label, is_out, status, p,
                 ),
             }
             print(f"  [OK] {rec['recommendation']} ({rec['confidence']}) -- deterministic")
@@ -1152,7 +1211,7 @@ def main():
                     rec = {
                         "recommendation": "FLEX",
                         "confidence":     "LOW",
-                        "summary":        auto_summary(name, "FLEX", mi, opp_display, start_score),
+                        "summary":        auto_summary(name, "FLEX", mi, opp_display, start_score, status),
                         "factors":        deterministic_factors(
                             name, pos, start_score, mi, matchup_gr, opp_display,
                             def_rank, def_avg, snap_data, last_pts, season_avg,
@@ -1170,6 +1229,8 @@ def main():
             except Exception as e:
                 print(f"  [ERR] Model error: {e}")
                 continue
+
+        clamp_dst_rec(rec, pos, start_score)
 
         rec.update({
             "player_name":       name,
@@ -1189,6 +1250,7 @@ def main():
             "proj_avg":          season_avg,
             "proj_last":         last_pts,
             "proj_source":       proj_source,
+            "injury_status":     status if status_up not in ("ACTIVE", "ACTIVE 2025", "NA", "") else None,
         })
 
         results[name] = rec

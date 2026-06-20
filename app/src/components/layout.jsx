@@ -2,6 +2,7 @@ import React from 'react';
 import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster } from '../lib/data.js';
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { getSubscriptionState, subscribeToPush, unsubscribeFromPush, showLocalNotification } from '../lib/pushNotifications.js';
+import { getPrefs } from '../lib/remotePrefs.js';
 
 function getDraftStatus() {
   try {
@@ -31,7 +32,7 @@ function getH2HWeek() {
 }
 
 
-export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showChat, onToggleChat, user, onLogout, onExport, draftInProgress, draftMeta }) => {
+export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showChat, onToggleChat, user, onLogout, onExport, draftInProgress, draftMeta, fontSize, onFontSizeChange }) => {
   const isComplete = draftInProgress && draftMeta?.draftComplete;
   const isPaused   = draftInProgress && !isComplete && draftMeta?.draftPaused;
   const isActive   = draftInProgress && !isComplete && !isPaused;
@@ -67,6 +68,18 @@ export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showCh
     </div>
     <div className="topbar-right">
       {right}
+      {onFontSizeChange && (
+        <div className="hide-mobile" style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 8, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px' }}>
+          <span style={{ fontSize: 10, color: 'var(--text-faint)', fontWeight: 600 }}>Aa</span>
+          <input type="range" min={10} max={20} step={1} value={fontSize || 12}
+            onChange={e => onFontSizeChange(Number(e.target.value))}
+            style={{ width: 80, height: 4, accentColor: 'var(--accent-2)', cursor: 'pointer' }}
+            title={`Font size: ${fontSize}px`}
+          />
+          <span style={{ fontSize: 16, color: 'var(--text-faint)', fontWeight: 700 }}>Aa</span>
+          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', fontWeight: 700, minWidth: 22, textAlign: 'center' }}>{fontSize || 12}</span>
+        </div>
+      )}
       {onExport && (
         <button
           className="btn ghost sm hide-mobile"
@@ -181,7 +194,7 @@ function SidebarPushButton({ teamId }) {
 
 export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds, cookieAlert = false }) => {
   const isAdmin = user?.isAdmin;
-  usePlayers(); // subscribe so h2hInfo recomputes when player projections load
+  const allPlayers = usePlayers(); // subscribe so h2hInfo recomputes when player projections load
 
   const h2hInfo = React.useMemo(() => {
     const teamId = user?.teamId;
@@ -215,30 +228,31 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     const oppTeam = LEAGUE_TEAMS.find(t => t.id === oppId);
 
     // Use slot-aware assignRoster for both sides — same logic as the H2H page's WinProbabilityBar
-    function rosterStarterProj(rosterIds) {
+    function rosterStarterProj(rosterIds, slotOverrides = {}) {
       try {
         const settings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
         const slotFrame = buildRosterFrame(settings);
-        const roster = assignRoster(slotFrame, rosterIds, {}, findPlayer);
+        const roster = assignRoster(slotFrame, rosterIds, slotOverrides, findPlayer);
         return roster
           .filter(r => r.slot !== 'BENCH' && r.playerId)
-          .reduce((s, e) => { const p = findPlayer(e.playerId); return s + (p?.proj || p?.avg || 0); }, 0);
+          .reduce((s, e) => { const p = findPlayer(e.playerId); return s + Math.max(0, p?.proj || p?.avg || 0); }, 0);
       } catch { return 0; }
     }
 
     const myIds = myRosterIds && myRosterIds.size > 0
       ? myRosterIds
       : new Set((TEAM_ROSTERS[teamId] || []).map(e => e.playerId).filter(Boolean));
+    const mySlotOverrides = getPrefs().slotOverrides || {};
 
     const oppIds = new Set((TEAM_ROSTERS[oppId] || []).map(e => e.playerId).filter(Boolean));
 
-    const myProj  = rosterStarterProj(myIds);
+    const myProj  = rosterStarterProj(myIds, mySlotOverrides);
     const oppProj = rosterStarterProj(oppIds);
     const isWinning = myProj >= oppProj;
     const winPct = myProj + oppProj > 0 ? Math.round((myProj / (myProj + oppProj)) * 100) : 50;
 
     return { week, oppTeam, isWinning, winPct, myProj: Math.round(myProj * 10) / 10, oppProj: Math.round(oppProj * 10) / 10 };
-  }, [user?.teamId, myRosterIds]);
+  }, [user?.teamId, myRosterIds, allPlayers]);
 
   const items = [
     { group: 'League' },
@@ -304,17 +318,18 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
           <div style={{ flex: 1, minWidth: 0 }}>
             <span>Head to Head</span>
             {h2hInfo && (() => {
-              const color = h2hInfo.isWinning ? '#4caf82' : '#e05e5e';
-              const verb  = h2hInfo.isWinning ? 'Beating' : 'Losing to';
+              const isClose = Math.abs(h2hInfo.winPct - 50) <= 3; // matches H2H bar: |homePct - awayPct| <= 6
+              const color = isClose ? '#e0c84b' : h2hInfo.isWinning ? '#4ed87b' : '#ff5a6e';
+              const verb  = isClose ? 'vs' : h2hInfo.isWinning ? 'Beating' : 'Losing to';
               const opp   = h2hInfo.oppTeam?.logo || '??';
+              const bgAlpha   = isClose ? 'rgba(224,200,75,.2)'  : h2hInfo.isWinning ? 'rgba(78,216,123,.2)'  : 'rgba(255,90,110,.2)';
+              const bdrAlpha  = isClose ? 'rgba(224,200,75,.4)'  : h2hInfo.isWinning ? 'rgba(78,216,123,.4)'  : 'rgba(255,90,110,.4)';
               return (
                 <div style={{ fontSize: 10, fontWeight: 700, color, marginTop: 3, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span>Wk{h2hInfo.week} · {verb} {opp}</span>
                   <span style={{
                     fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 800,
-                    background: h2hInfo.isWinning ? 'rgba(76,175,130,.25)' : 'rgba(224,94,94,.2)',
-                    color: h2hInfo.isWinning ? '#4caf82' : '#e05e5e',
-                    border: `1px solid ${h2hInfo.isWinning ? 'rgba(76,175,130,.4)' : 'rgba(224,94,94,.4)'}`,
+                    background: bgAlpha, color, border: `1px solid ${bdrAlpha}`,
                     borderRadius: 4, padding: '1px 5px', flexShrink: 0,
                   }}>{h2hInfo.winPct}%</span>
                 </div>

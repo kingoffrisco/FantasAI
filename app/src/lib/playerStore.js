@@ -191,9 +191,12 @@ export function normalizePlayerList(rawArr) {
                  || Number(p.adp_value) || Number(p.adp_rank) || 0;
     // search_rank is Sleeper's popularity rank, NOT a draft position — never use it as ADP
     const adp    = adpRaw || 999;
-    const owned      = Number(p.owned) || (ecr < 999
-      ? Math.max(0, parseFloat((100 - ecr * 0.28).toFixed(1)))
-      : 0);
+    const searchRk   = Number(p.search_rank) || 0;
+    const owned      = Number(p.owned) || (searchRk > 0
+      ? Math.max(0, parseFloat((100 - searchRk * 0.15).toFixed(1)))
+      : ecr < 999
+        ? Math.max(0, parseFloat((100 - ecr * 0.28).toFixed(1)))
+        : 0);
 
     // Proj: if we have real stats data (season_avg_points_2025), use it directly.
     // Otherwise fall back to ECR-based estimate (used when only Sleeper data is available).
@@ -233,15 +236,33 @@ export function normalizePlayerList(rawArr) {
       opp:         p.opp                  || '',
       oppRank:     Number(p.oppRank)      || 0,
       proj,
-      last:        Number(p.last) || Number(p.avg_fantasy_points_per_game_2025) || Number(p.season_avg_points_2025) || 0,
-      avg:         Number(p.avg) || Number(p.career_ppg) || proj || 0,
+      last:        Number(p.last_pts) || Number(p.last) || Number(p.avg_fantasy_points_per_game_2025) || 0,
+      avg:         Number(p.season_avg_points_2025) || Number(p.avg) || Number(p.career_ppg) || 0,
       pts2025:     Number(p.total_fantasy_points_2025) || Number(p.season_total_points_2025) || 0,
-      rookie:      p.is_rookie === true || p.is_rookie === 'true' || Number(p.years_exp) === 0,
+      rookie:      p.pos !== 'DST' && (p.is_rookie === true || p.is_rookie === 'true' || (p.years_exp != null && Number(p.years_exp) === 0)),
       trend,
       depth:       Number(p.depth)        || 1,
-      targetShare: Number(p.targetShare)  || 0,
+      targetShare: Number(p.targetShare || p.target_share) || 0,
       routes:      Number(p.routes)       || 0,
       yac:         Number(p.yac)          || 0,
+      adot:        Number(p.adot)         || null,
+      airYds:      Number(p.airYds || p.air_yards) || null,
+      avgSnaps:    Number(p.avg_snaps || p.avgSnaps) || null,
+      snapPct:     Number(p.snap_pct || p.snapPct) || null,
+      avgTargetsG: Number(p.avg_targets_g || p.avgTargetsG) || null,
+      avgCarriesG: Number(p.avg_carries_g || p.avgCarriesG) || null,
+      avgRzAttG:   Number(p.avg_rz_att_g || p.avgRzAttG) || null,
+      comboYdsG:   Number(p.combo_yds_g || p.comboYdsG) || null,
+      yptgt:       Number(p.yds_per_tgt || p.yptgt) || null,
+      tgtG:        Number(p.avg_targets_g || p.tgtG) || null,
+      attG:        Number(p.avg_carries_g || p.attG) || null,
+      forty:       Number(p.forty) || null,
+      vertical:    Number(p.vertical) || null,
+      broadJump:   Number(p.broad_jump || p.broadJump) || null,
+      benchPress:  Number(p.bench_press || p.benchPress) || null,
+      combineWt:   Number(p.combine_weight || p.combineWt) || null,
+      cone:        Number(p.cone) || null,
+      shuttle:     Number(p.shuttle) || null,
       photoUrl:    p.headshot_url || p.avatar_url || p.photoUrl || null,
       owned,
       adp,

@@ -305,7 +305,7 @@ select.input { appearance: none; padding-right: 28px; background-image: url("dat
 .data-table thead th.sorted { color: var(--accent); }
 .data-table thead th.sorted::after { content: " ↓"; color: var(--accent); }
 .data-table tbody tr {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 2px solid var(--border-strong, rgba(255,255,255,.15));
   height: var(--row-h);
 }
 .data-table tbody tr:hover { background: var(--hover); }
@@ -599,7 +599,7 @@ select.input { appearance: none; padding-right: 28px; background-image: url("dat
 
 /* Drawer for player on click */
 .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 50; }
-.drawer { position: fixed; top: 56px; left: 360px; bottom: 0; width: min(680px, calc(100% - 360px)); background: var(--bg-2); border-right: 1px solid var(--border); z-index: 51; overflow-y: auto; }
+.drawer { position: fixed; top: 56px; bottom: 0; width: min(680px, calc(100% - 200px)); left: 50%; transform: translateX(-50%); background: var(--bg-2); border-left: 1px solid var(--border); border-right: 1px solid var(--border); z-index: 51; overflow-y: auto; box-shadow: 0 0 60px rgba(0,0,0,.5); border-radius: 12px 12px 0 0; }
 
 /* Scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }

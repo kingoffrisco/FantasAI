@@ -32,6 +32,10 @@ import TransactionsScreen from './screens/Transactions.jsx';
 import PowerRankingsScreen from './screens/PowerRankings.jsx';
 import DraftRecapScreen from './screens/DraftRecap.jsx';
 
+// DST positional rank (1-32) → overall draft rank (~120-244).
+// Keeps defenses in the correct draft range instead of competing with top picks.
+const dstOverallRank = (posRank) => 120 + (posRank - 1) * 4;
+
 // ── Live Score Ticker ─────────────────────────────────────────────────────────
 const TICKER_SEASON_START = new Date('2026-09-09');
 
@@ -324,6 +328,31 @@ async function loadLeagueData(leagueId) {
   } catch {}
 }
 
+function backupRoster(teamId, ids) {
+  if (!teamId || !ids || ids.size === 0) return;
+  try {
+    const key = `fantasai_roster_backup_${teamId}`;
+    const existing = JSON.parse(localStorage.getItem(key) || 'null');
+    if (existing && existing.ids.length > ids.size) {
+      const histKey = `fantasai_roster_history_${teamId}`;
+      const history = JSON.parse(localStorage.getItem(histKey) || '[]');
+      history.push({ ids: existing.ids, savedAt: existing.savedAt, reason: 'overwritten' });
+      if (history.length > 10) history.shift();
+      localStorage.setItem(histKey, JSON.stringify(history));
+    }
+    localStorage.setItem(key, JSON.stringify({ ids: [...ids], savedAt: new Date().toISOString() }));
+  } catch {}
+}
+
+function restoreRosterBackup(teamId) {
+  try {
+    const key = `fantasai_roster_backup_${teamId}`;
+    const data = JSON.parse(localStorage.getItem(key) || 'null');
+    if (data?.ids?.length) return new Set(data.ids);
+  } catch {}
+  return null;
+}
+
 async function syncRosterToS3(teamId, playerIds) {
   try {
     const res = await fetch(`${API_BASE}/api/v1/rosters/save`, {
@@ -434,6 +463,8 @@ export default function App() {
   const showMobile = tweaks.showMobile || isMobileDevice;
 
   const [active, setActive] = React.useState('dashboard');
+  const [appFontSize, setAppFontSize] = React.useState(() => Number(localStorage.getItem('fantasai_font_size') ?? 12));
+  function handleAppFontSize(v) { setAppFontSize(v); localStorage.setItem('fantasai_font_size', v); }
   const [settingsInitialTab, setSettingsInitialTab] = React.useState('general');
   const [openPlayer, setOpenPlayer] = React.useState(null);
 
@@ -537,7 +568,17 @@ export default function App() {
     if (u.teamId) {
       setRosterLoading(true);
       fetchS3Roster(u.teamId).then(s3Ids => {
-        setMyRosterIds(buildMergedRoster(u.teamId, s3Ids));
+        const merged = buildMergedRoster(u.teamId, s3Ids);
+        const backup = restoreRosterBackup(u.teamId);
+        if (merged.size >= 3) {
+          setMyRosterIds(merged);
+          backupRoster(u.teamId, merged);
+        } else if (backup && backup.size >= 3) {
+          console.warn('[Roster] Merged roster too small, restoring backup');
+          setMyRosterIds(backup);
+        } else {
+          setMyRosterIds(merged);
+        }
         setRosterLoading(false);
       });
     } else {
@@ -670,17 +711,28 @@ export default function App() {
       .then(() =>
         getPlayerMap().then(map => {
           const byeByName = {};
+          const photoByName = {};
           for (const p of Object.values(map)) {
-            if (!p.bye_week) continue;
             const full = p.full_name || `${p.first_name || ''} ${p.last_name || ''}`.trim();
-            if (full) byeByName[full.toLowerCase().trim()] = p.bye_week;
+            if (!full) continue;
+            const key = full.toLowerCase().trim();
+            if (p.bye_week) byeByName[key] = p.bye_week;
+            const url = p.headshot_url || p.avatar_url;
+            if (url) photoByName[key] = url;
           }
-          // Apply Sleeper bye_week when available; otherwise fall back to the hardcoded 2026 schedule.
           patchPlayers(player => {
-            if (player.bye > 0) return player;
-            const fromSleeper = byeByName[player.name?.toLowerCase().trim()];
-            const bye = fromSleeper || BYE_WEEKS_2026[player.team] || 0;
-            return bye ? { ...player, bye } : player;
+            let changed = false;
+            let updated = { ...player };
+            if (!player.bye || player.bye <= 0) {
+              const fromSleeper = byeByName[player.name?.toLowerCase().trim()];
+              const bye = fromSleeper || BYE_WEEKS_2026[player.team] || 0;
+              if (bye) { updated.bye = bye; changed = true; }
+            }
+            if (!player.photoUrl) {
+              const photo = photoByName[player.name?.toLowerCase().trim()];
+              if (photo) { updated.photoUrl = photo; changed = true; }
+            }
+            return changed ? updated : player;
           });
         }).catch(() => {})
       )
@@ -717,19 +769,24 @@ export default function App() {
         const clean = await api.r2.defenseAdp().catch(() => null);
         const cleanArr = clean?.data || (Array.isArray(clean) ? clean : []);
         if (!cleanArr.length) return;
+        const DST_NAME_MAP = { 'Arizona Cardinals':'ARI','Atlanta Falcons':'ATL','Baltimore Ravens':'BAL','Buffalo Bills':'BUF','Carolina Panthers':'CAR','Chicago Bears':'CHI','Cincinnati Bengals':'CIN','Cleveland Browns':'CLE','Dallas Cowboys':'DAL','Denver Broncos':'DEN','Detroit Lions':'DET','Green Bay Packers':'GB','Houston Texans':'HOU','Indianapolis Colts':'IND','Jacksonville Jaguars':'JAX','Kansas City Chiefs':'KC','Las Vegas Raiders':'LV','Los Angeles Chargers':'LAC','Los Angeles Rams':'LAR','Miami Dolphins':'MIA','Minnesota Vikings':'MIN','New England Patriots':'NE','New Orleans Saints':'NO','New York Giants':'NYG','New York Jets':'NYJ','Philadelphia Eagles':'PHI','Pittsburgh Steelers':'PIT','San Francisco 49ers':'SF','Seattle Seahawks':'SEA','Tampa Bay Buccaneers':'TB','Tennessee Titans':'TEN','Washington Commanders':'WAS' };
         const sorted = [...cleanArr].sort((a, b) => (a.adp_rank || 999) - (b.adp_rank || 999));
-        const dsts = sorted.map((row, i) => ({
+        const dsts = sorted.map((row, i) => {
+          const posRank = row.adp_rank || (i + 1);
+          const teamAbbr = (row.team && row.team.trim()) || DST_NAME_MAP[row.player_name] || '';
+          if (!teamAbbr) return null;
+          return {
           id: 90000 + i,
-          name: `${row.team.toUpperCase()} D/ST`,
-          pos: 'DST', team: row.team.toUpperCase(),
-          ecr: 999, adp: row.adp_rank || (i + 1),
-          proj: parseFloat(Math.max(4, 15 - (row.adp_rank || i + 1) * 0.6).toFixed(1)),
+          name: `${teamAbbr} D/ST`,
+          pos: 'DST', team: teamAbbr,
+          ecr: dstOverallRank(posRank), adp: dstOverallRank(posRank),
+          proj: parseFloat(Math.max(4, 15 - posRank * 0.6).toFixed(1)),
           last: row.avg_last_4_weeks || 0, avg: row.avg_last_4_weeks || 0,
           bye: 0, opp: '', owned: 0, tier: 0, num: 0, age: 0, pts2025: 0,
           trend: [], depth: 1, targetShare: 0, routes: 0, yac: 0,
           photoUrl: null, news: '', status: '', seasonTier: null,
           sleeperId: null, masterId: null, oppRank: 0,
-        }));
+        };}).filter(Boolean);
         setPlayers([...getPlayers(), ...dsts]);
         // Re-apply ECR for newly-added DSTs if ECR patch already completed
         if (ecrByNameRef.current) {
@@ -823,7 +880,8 @@ export default function App() {
         // gold_adp_defense has adp_rank pre-computed; fall back to array position if missing
         const sorted = [...cleanArr].sort((a, b) => (a.adp_rank || 999) - (b.adp_rank || 999));
         sorted.forEach((row, i) => {
-          if (row.team) rankByTeam[row.team.toUpperCase()] = row.adp_rank || (i + 1);
+          const posRank = row.adp_rank || (i + 1);
+          if (row.team) rankByTeam[row.team.toUpperCase()] = dstOverallRank(posRank);
         });
         patchPlayers(p => {
           if (p.pos !== 'DST') return p;
@@ -854,7 +912,7 @@ export default function App() {
       }));
       scored.sort((a, b) => b.score - a.score);
       const rankByTeam = {};
-      scored.forEach(({ team }, i) => { rankByTeam[team] = i + 1; });
+      scored.forEach(({ team }, i) => { rankByTeam[team] = dstOverallRank(i + 1); });
       patchPlayers(p => {
         if (p.pos !== 'DST') return p;
         const rank = rankByTeam[p.team?.toUpperCase()];
@@ -953,6 +1011,7 @@ export default function App() {
       return nextIds;
     });
     if (nextIds && userRef.current?.teamId) {
+      backupRoster(userRef.current.teamId, nextIds);
       doSync(userRef.current.teamId, nextIds);
       const p = findPlayer(id);
       if (p) {
@@ -1056,6 +1115,7 @@ export default function App() {
       return n;
     });
     if (nextIds && userRef.current?.teamId) {
+      backupRoster(userRef.current.teamId, nextIds);
       doSync(userRef.current.teamId, nextIds);
       const p = findPlayer(id);
       if (p) api.transactions.log({
@@ -1225,10 +1285,12 @@ export default function App() {
           onLogout={handleLogout}
           draftInProgress={active !== 'draft' ? draftInProgress : null}
           draftMeta={draftMeta}
+          fontSize={appFontSize}
+          onFontSizeChange={handleAppFontSize}
         />
         <Sidebar active={active} onNav={id => setActive(id)} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} cookieAlert={cookieAlert} />
 
-        <div className="main">
+        <div className="main" style={{ zoom: appFontSize / 12 }}>
           {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} tradeOffers={tradeOffers} />}
           {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onClaimPlayer={handleClaimPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} playersTab={playersTab} onPlayersTabChange={setPlayersTab} />}
           {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} user={user} />}
@@ -1249,20 +1311,20 @@ export default function App() {
                 <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
                   {/* DraftRoom kept mounted at all times — display:none hides it without unmounting */}
                   <div style={{ display: tab === 'room' ? 'flex' : 'none', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                    <DraftRoom aiMode={aiMode} user={user} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onDraftPick={id => {
+                    <DraftRoom aiMode={aiMode} user={user} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onOpenPlayer={setOpenPlayer} onDraftPick={id => {
                       let nextIds = null;
                       setMyRosterIds(prev => {
                         const next = new Set([...prev, id]);
                         nextIds = next;
                         return next;
                       });
-                      if (nextIds && userRef.current?.teamId) doSync(userRef.current.teamId, nextIds);
+                      if (nextIds && userRef.current?.teamId) { backupRoster(userRef.current.teamId, nextIds); doSync(userRef.current.teamId, nextIds); }
                     }} onDraftComplete={() => {
-                      // Rebuild TEAM_ROSTERS and myRosterIds from the just-saved draft picks
                       refreshTeamRosters();
                       if (userRef.current?.teamId) {
                         const merged = buildMergedRoster(userRef.current.teamId, null);
                         setMyRosterIds(merged);
+                        backupRoster(userRef.current.teamId, merged);
                         doSync(userRef.current.teamId, merged);
                       }
                     }} />

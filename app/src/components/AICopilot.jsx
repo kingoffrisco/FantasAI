@@ -242,6 +242,27 @@ function renderMarkdown(text, rosterNames, injuredNames, onWaiverClick) {
       continue;
     }
 
+    // Detect "Roster Grade: B+" / "Grade: A-" patterns and colorize the letter
+    const gradeMatch = line.match(/^(\*{0,2}(?:roster\s+)?grade[:\s]+)([A-Fa-f][+-]?)(\*{0,2})(.*)$/i);
+    if (gradeMatch) {
+      const letter = gradeMatch[2].toUpperCase();
+      const gradeColor = /^A/.test(letter) ? '#1affa0'
+                       : /^B/.test(letter) ? '#c6ff3a'
+                       : /^C/.test(letter) ? 'var(--warn)'
+                       : 'var(--danger)';
+      const prefix = gradeMatch[1].replace(/\*/g, '');
+      const suffix = gradeMatch[4];
+      out.push(
+        <p key={`p-${i}`} style={{ margin: '4px 0', lineHeight: 1.6 }}>
+          <span style={{ textTransform: 'capitalize' }}>{prefix}</span>
+          <span style={{ color: gradeColor, fontWeight: 900, fontFamily: 'var(--font-mono)', fontSize: 15 }}>{letter}</span>
+          {suffix && <span>{inlineMd(suffix, rosterNames, allNames, injuredNames)}</span>}
+        </p>
+      );
+      i++;
+      continue;
+    }
+
     out.push(<p key={`p-${i}`} style={{ margin: '4px 0', lineHeight: 1.6 }}>{inlineMd(line, rosterNames, allNames, injuredNames)}</p>);
     i++;
   }

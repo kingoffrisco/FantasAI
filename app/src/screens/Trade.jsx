@@ -291,6 +291,16 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
                 <div style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginBottom: 6 }}>◆ Recommendation</div>
                 <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.65 }}>{recommendation}</div>
               </div>
+
+              <TradeAIAnalysis
+                giveIds={myGive}
+                getIds={myGet}
+                grade={grade}
+                diff={diff}
+                recommendation={recommendation}
+                tradeType={tradeType}
+                needs={needs}
+              />
             </div>
           </div>
         );
@@ -509,6 +519,92 @@ function TradePanel({ title, subtitle, color, players, onRemove, total, options,
         <div className="trade-slot empty">{emptyLabel}</div>
       ) : (
         <div className="trade-slot empty" style={{ opacity: .5 }}>All players selected</div>
+      )}
+    </div>
+  );
+}
+
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || 'https://api.fantasai.net';
+
+function TradeAIAnalysis({ giveIds, getIds, grade, diff, recommendation, tradeType, needs }) {
+  const [aiLoading, setAiLoading] = React.useState(false);
+  const [aiResult, setAiResult] = React.useState(null);
+  const [aiError, setAiError] = React.useState(null);
+
+  async function askAI() {
+    setAiLoading(true);
+    setAiError(null);
+    setAiResult(null);
+    try {
+      const fmt = id => {
+        const p = findPlayer(id);
+        if (!p) return '?';
+        return `${p.name} (${p.pos}, ${p.team}) — Proj: ${p.proj?.toFixed(1)}, Avg: ${p.avg?.toFixed(1)}, ECR: #${p.ecr}, ADP: ${p.adp}, Age: ${p.age}`;
+      };
+      const giveLine = giveIds.map(fmt).join('\n');
+      const getLine = getIds.map(fmt).join('\n');
+      const question = `Analyze this fantasy football trade for my team:
+
+I GIVE:
+${giveLine}
+
+I RECEIVE:
+${getLine}
+
+Quick stats: Grade ${grade}, value delta ${diff > 0 ? '+' : ''}${diff.toFixed(1)} pts/wk, type: ${tradeType}
+${needs.length ? `Roster risk: thin at ${needs.join(', ')} after trade` : 'No major roster depth concerns.'}
+Deterministic recommendation: ${recommendation}
+
+Give me your analysis in 3-4 sentences. Who wins this trade and why? Consider positional value, age/upside, schedule, and roster construction. Be direct.`;
+
+      const res = await fetch(`${API_BASE}/api/v1/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, tier: 'medium' }),
+        signal: AbortSignal.timeout(35000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setAiResult(data.answer || 'No response from AI.');
+    } catch (e) {
+      setAiError(e.message);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 12, borderTop: '1px solid rgba(198,255,58,.15)', paddingTop: 12 }}>
+      {!aiResult && !aiLoading && (
+        <button
+          className="btn"
+          style={{ width: '100%', background: 'rgba(198,255,58,.12)', border: '1px solid rgba(198,255,58,.3)', color: '#c6ff3a', fontWeight: 700, fontSize: 12, padding: '10px 16px', borderRadius: 8, cursor: 'pointer' }}
+          onClick={askAI}
+        >
+          🤖 Ask FantasAI for a Deep Analysis (Qwen 14B)
+        </button>
+      )}
+      {aiLoading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0' }}>
+          <div className="ai-orb" style={{ width: 16, height: 16 }} />
+          <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>FantasAI is analyzing this trade…</span>
+        </div>
+      )}
+      {aiError && (
+        <div style={{ fontSize: 12, color: 'var(--danger)', padding: '8px 0' }}>
+          AI unavailable: {aiError}
+          <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={askAI}>Retry</button>
+        </div>
+      )}
+      {aiResult && (
+        <div style={{ background: 'var(--panel)', border: '1px solid rgba(198,255,58,.25)', borderRadius: 8, padding: '12px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'rgba(198,255,58,.15)', color: '#c6ff3a', padding: '1px 5px', borderRadius: 3 }}>AI</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)' }}>FantasAI Trade Analysis</span>
+            <button className="btn ghost sm" style={{ marginLeft: 'auto', fontSize: 10 }} onClick={askAI}>Re-analyze</button>
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{aiResult}</div>
+        </div>
       )}
     </div>
   );

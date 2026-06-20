@@ -48,7 +48,7 @@ R2_BASE      = "https://api.fantasai.net/api/v1/r2"
 FANTASAI_KEY = os.environ.get("FANTASAI_KEY", "")
 HEADERS_R2   = {"X-FantasAI-Key": FANTASAI_KEY, "Content-Type": "application/json"}
 
-DEFAULT_SEASONS = [2023, 2024, 2025]
+DEFAULT_SEASONS = [2024, 2025, 2026]
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS bronze_combine_data (
@@ -82,6 +82,29 @@ def ensure_schema(conn):
             conn.execute(s)
 
 
+def fetch_draft_picks(nfl, seasons: list[int]) -> pd.DataFrame:
+    """Fetch draft round/pick/team from nflverse draft picks table and normalize columns."""
+    try:
+        picks = nfl.import_draft_picks(seasons)
+        # Normalize whatever column names nflverse returns
+        picks.columns = [c.lower().strip() for c in picks.columns]
+        renames = {}
+        for c in picks.columns:
+            if c in ('round',):            renames[c] = 'draft_round'
+            elif c in ('pick', 'overall'): renames[c] = 'draft_ovr'
+            elif c in ('team', 'nfl_team', 'pfr_team', 'draft_team'): renames[c] = 'draft_team'
+            elif 'player' in c and 'name' in c: renames[c] = 'player_name'
+        picks = picks.rename(columns=renames)
+        keep = [c for c in ('season', 'player_name', 'draft_round', 'draft_ovr', 'draft_team', 'pos', 'age', 'college') if c in picks.columns]
+        picks = picks[keep].copy()
+        picks['player_name'] = picks['player_name'].astype(str).str.strip()
+        print(f"   Draft picks fetched: {len(picks)} rows")
+        return picks
+    except Exception as e:
+        print(f"   Could not fetch draft picks ({e}) — draft_ovr/round will remain NULL")
+        return pd.DataFrame()
+
+
 def fetch_seasons(seasons: list[int]) -> pd.DataFrame:
     try:
         import nfl_data_py as nfl
@@ -93,10 +116,27 @@ def fetch_seasons(seasons: list[int]) -> pd.DataFrame:
     try:
         df = nfl.import_combine_data(seasons)
         print(f"   {len(df)} combine participants fetched")
-        return df
     except Exception as e:
         print(f"   FAILED — {e}")
         return pd.DataFrame()
+
+    # Merge real draft round/pick/team from draft picks table.
+    # import_combine_data often has draft_ovr=NULL before nflverse links the draft results.
+    picks = fetch_draft_picks(nfl, seasons)
+    if not picks.empty and 'player_name' in picks.columns and 'draft_ovr' in picks.columns:
+        df['player_name'] = df['player_name'].astype(str).str.strip()
+        merge_cols = [c for c in ('season', 'player_name', 'draft_round', 'draft_ovr', 'draft_team') if c in picks.columns]
+        picks_slim = picks[merge_cols].drop_duplicates(subset=['season', 'player_name'])
+        df = df.merge(picks_slim, on=['season', 'player_name'], how='left', suffixes=('', '_pick'))
+        for col in ('draft_round', 'draft_ovr', 'draft_team'):
+            pick_col = f'{col}_pick'
+            if pick_col in df.columns:
+                df[col] = df[col].where(df[col].notna(), df[pick_col])
+                df.drop(columns=[pick_col], inplace=True)
+        filled = df['draft_ovr'].notna().sum()
+        print(f"   Draft capital merged: {filled}/{len(df)} players have pick data")
+
+    return df
 
 
 def write_bronze(conn, df: pd.DataFrame, seasons: list[int], dry_run: bool):
@@ -142,10 +182,19 @@ def write_bronze(conn, df: pd.DataFrame, seasons: list[int], dry_run: bool):
     for s in seasons:
         conn.execute("DELETE FROM bronze_combine_data WHERE season = ?", [s])
 
-    out = pd.DataFrame(rows)
+    out = pd.DataFrame(rows).drop_duplicates(subset=["player_name", "season"], keep="first")
     conn.register("_combine", out)
-    conn.execute("INSERT INTO bronze_combine_data BY NAME SELECT * FROM _combine")
-    print(f"   bronze_combine_data: {len(rows)} rows written")
+    conn.execute("""
+        INSERT INTO bronze_combine_data BY NAME SELECT * FROM _combine
+        ON CONFLICT (player_name, season) DO UPDATE SET
+            pos=excluded.pos, school=excluded.school, draft_year=excluded.draft_year,
+            draft_team=excluded.draft_team, draft_round=excluded.draft_round,
+            draft_ovr=excluded.draft_ovr, ht=excluded.ht, wt=excluded.wt,
+            forty=excluded.forty, bench=excluded.bench, vertical=excluded.vertical,
+            broad_jump=excluded.broad_jump, cone=excluded.cone, shuttle=excluded.shuttle,
+            ingested_at=excluded.ingested_at
+    """)
+    print(f"   bronze_combine_data: {len(out)} rows written")
 
 
 def export_to_r2(conn, dry_run: bool):

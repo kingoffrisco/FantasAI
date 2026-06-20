@@ -103,6 +103,10 @@ def main():
                    "NFL Transactions — last 30 days"):
             failed.append("transactions")
 
+        if not run("ingest/ingest_team_rss.py", extra,
+                   "Team RSS — beat writer coverage (Tier 2/3)"):
+            failed.append("team_rss")
+
     # ── Task 2: Gold Transformation ────────────────────────────────────────────
     print("\n\n══ TASK 2: GOLD TRANSFORMATION ══════════════════════════════════════")
     if not run("gold/gold_player_consolidation.py", extra, "Gold player consolidation"):

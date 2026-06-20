@@ -397,6 +397,30 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
     );
 
     -- =========================================================
+    -- ROOKIE SCORES TABLE
+    -- =========================================================
+    CREATE TABLE IF NOT EXISTS bronze_rookie_scores (
+        player_name          VARCHAR PRIMARY KEY,
+        pos                  VARCHAR,
+        team                 VARCHAR,
+        season               INTEGER,
+        draft_round          INTEGER,
+        draft_ovr            INTEGER,
+        depth_chart_order    INTEGER,
+        adp                  DOUBLE,
+        -- Component scores (0-100)
+        draft_capital_score  DOUBLE,
+        athleticism_score    DOUBLE,
+        opportunity_score    DOUBLE,
+        -- Composite
+        rookie_score         DOUBLE,
+        -- Projections
+        proj_season_pts      DOUBLE,
+        proj_week_pts        DOUBLE,
+        computed_at          TIMESTAMP
+    );
+
+    -- =========================================================
     -- WEATHER TABLES
     -- =========================================================
 
@@ -432,6 +456,37 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         precip_in        DOUBLE,
         condition        VARCHAR,
         ingested_at      TIMESTAMP
+    );
+
+    -- =========================================================
+    -- WATCHLIST
+    -- =========================================================
+    CREATE TABLE IF NOT EXISTS watchlist (
+        player_name          VARCHAR,
+        player_id            VARCHAR,
+        position             VARCHAR,
+        team                 VARCHAR,
+        reason               VARCHAR,
+        added_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (player_name)
+    );
+
+    -- =========================================================
+    -- TEAM RSS NEWS
+    -- =========================================================
+    CREATE TABLE IF NOT EXISTS bronze_team_rss_news (
+        article_id           VARCHAR,
+        team                 VARCHAR,
+        title                VARCHAR,
+        link                 VARCHAR,
+        description          VARCHAR,
+        player_id            VARCHAR,
+        player_name          VARCHAR,
+        position             VARCHAR,
+        published_at         TIMESTAMP,
+        fetched_at           TIMESTAMP,
+        source_feed          VARCHAR,
+        PRIMARY KEY (article_id)
     );
 
     """

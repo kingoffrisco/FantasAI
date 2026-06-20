@@ -3,7 +3,7 @@ import WatchlistScreen from './Watchlist.jsx';
 import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -39,17 +39,24 @@ function useScheduleOppMap() {
   const [map, setMap] = React.useState(new Map());
   React.useEffect(() => {
     const week = getNflScheduleWeek();
-    fetch(`${API_BASE}/api/v1/nfl/schedule?week=${week}&season=2026`)
+    const espnUrl = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week=${week}&dates=2026`;
+    fetch(espnUrl, { signal: AbortSignal.timeout(12000) })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (!data?.games?.length) return;
+        if (!data?.events?.length) return;
         const m = new Map();
-        for (const g of data.games) {
-          const home = normalizeTeamAbbr(g.home?.abbr);
-          const away = normalizeTeamAbbr(g.away?.abbr);
+        for (const ev of data.events) {
+          const comps = (ev.competitions || [{}])[0];
+          const game = {};
+          for (const t of comps.competitors || []) {
+            const abbr = normalizeTeamAbbr((t.team?.abbreviation || '').toUpperCase());
+            game[t.homeAway] = abbr;
+          }
+          const home = game.home || '';
+          const away = game.away || '';
           if (home && away) {
-            m.set(home, `@${away}`);
-            m.set(away, home);
+            m.set(home, away);
+            m.set(away, `@${home}`);
           }
         }
         setMap(m);
@@ -59,8 +66,36 @@ function useScheduleOppMap() {
   return map;
 }
 
+const DEFAULT_SCORING_WEIGHTS = {
+  QB: [
+    { key: 'proj', weight: 30 }, { key: 'avg', weight: 20 }, { key: 'ecr', weight: 20 },
+    { key: 'adp', weight: 10 }, { key: 'last', weight: 10 }, { key: 'owned', weight: 10 },
+  ],
+  RB: [
+    { key: 'proj', weight: 25 }, { key: 'avg', weight: 20 }, { key: 'ecr', weight: 15 },
+    { key: 'adp', weight: 10 }, { key: 'last', weight: 10 }, { key: 'targetShare', weight: 10 },
+    { key: 'owned', weight: 10 },
+  ],
+  WR: [
+    { key: 'proj', weight: 25 }, { key: 'avg', weight: 20 }, { key: 'ecr', weight: 15 },
+    { key: 'adp', weight: 10 }, { key: 'last', weight: 10 }, { key: 'targetShare', weight: 10 },
+    { key: 'owned', weight: 10 },
+  ],
+  TE: [
+    { key: 'proj', weight: 25 }, { key: 'avg', weight: 20 }, { key: 'ecr', weight: 15 },
+    { key: 'adp', weight: 10 }, { key: 'last', weight: 10 }, { key: 'targetShare', weight: 10 },
+    { key: 'owned', weight: 10 },
+  ],
+  K: [
+    { key: 'proj', weight: 40 }, { key: 'avg', weight: 30 }, { key: 'ecr', weight: 30 },
+  ],
+  DST: [
+    { key: 'proj', weight: 40 }, { key: 'avg', weight: 30 }, { key: 'ecr', weight: 30 },
+  ],
+};
+
 function loadScoringWeights() {
-  return getPrefs().scoringWeights ?? null;
+  return getPrefs().scoringWeights ?? DEFAULT_SCORING_WEIGHTS;
 }
 
 function computeSleeperScores(playerList, weights) {
@@ -186,22 +221,21 @@ function WeatherBadge({ opp }) {
 
 // ── Column config ─────────────────────────────────────────────────────────────
 const DEFAULT_COLUMNS = [
-  { id: 'proj',      label: 'Proj',     visible: true,  sortKey: 'proj' },
-  { id: 'last',      label: 'Last',     visible: true,  sortKey: 'last' },
-  { id: 'avg',       label: 'Avg',      visible: true,  sortKey: 'avg' },
-  { id: 'trend',     label: 'Trend',    visible: true,  sortKey: null },
-  { id: 'opp_score', label: 'Opp Sc',   visible: true,  sortKey: 'oppScore' },
-  { id: 'bye',       label: 'Bye',      visible: true,  sortKey: 'bye' },
-  { id: 'owned',     label: '%Own',     visible: true,  sortKey: 'owned' },
-  { id: 'adp',       label: 'ADP',      visible: true,  sortKey: 'adp' },
-  { id: 'ecr_rank',  label: 'Rank',     visible: true,  sortKey: 'rank' },
-  { id: 'depth',     label: 'Depth',    visible: true,  sortKey: null },
-  { id: 'snaps',     label: 'Snaps/G',  visible: true,  sortKey: null },
-  { id: 'tgt',       label: 'Tgt%',     visible: false, sortKey: 'targetShare' },
-  { id: 'routes',    label: 'Routes',   visible: false, sortKey: 'routes' },
-  { id: 'yac',       label: 'YAC',      visible: false, sortKey: 'yac' },
-  { id: 'weather',   label: 'Weather',  visible: false, sortKey: null },
-  { id: 'status',    label: 'Status',   visible: true,  sortKey: null },
+  { id: 'proj',      label: 'Proj',     visible: true,  sortKey: 'proj',         group: 'std' },
+  { id: 'last',      label: 'Last',     visible: true,  sortKey: 'last',         group: 'std' },
+  { id: 'avg',       label: 'Avg',      visible: true,  sortKey: 'avg',          group: 'std' },
+  { id: 'trend',     label: 'Trend',    visible: true,  sortKey: null,           group: 'std' },
+  { id: 'opp_score', label: 'Opp Sc',   visible: true,  sortKey: 'oppScore',     group: 'std' },
+  { id: 'bye',       label: 'Bye',      visible: true,  sortKey: 'bye',          group: 'std' },
+  { id: 'owned',     label: '%Own',     visible: true,  sortKey: 'owned',        group: 'std' },
+  { id: 'adp',       label: 'ADP',      visible: true,  sortKey: 'adp',          group: 'std' },
+  { id: 'ecr_rank',  label: 'Rank',     visible: true,  sortKey: 'rank',         group: 'std' },
+  { id: 'depth',     label: 'Depth',    visible: true,  sortKey: null,           group: 'std' },
+  { id: 'snaps',     label: 'Snaps/G',  visible: true,  sortKey: null,           group: 'std' },
+  { id: 'tgt',       label: 'Tgt%',     visible: false, sortKey: 'targetShare',  group: 'std' },
+  { id: 'routes',    label: 'Routes',   visible: false, sortKey: 'routes',       group: 'std' },
+  { id: 'yac',       label: 'YAC',      visible: false, sortKey: 'yac',          group: 'std' },
+  { id: 'weather',   label: 'Weather',  visible: true,  sortKey: null,           group: 'std' },
   // Advanced stats (from Sleeper wks 14-17, 2025 season)
   { id: 'snap_pct',  label: 'Snap%',    visible: false, sortKey: 'snapPct',  group: 'adv' },
   { id: 'tgt_g',     label: 'Tgt/G',    visible: false, sortKey: 'tgtG',     group: 'adv' },
@@ -210,6 +244,12 @@ const DEFAULT_COLUMNS = [
   { id: 'att_g',     label: 'Att/G',    visible: false, sortKey: 'attG',     group: 'adv' },
   { id: 'yptgt',     label: 'Yds/Tgt',  visible: false, sortKey: 'yptgt',    group: 'adv' },
   { id: 'combo',     label: 'Combo Yds',visible: false, sortKey: 'combo',    group: 'adv' },
+  { id: 'rz_att',    label: 'RZ Att/G', visible: false, sortKey: 'avgRzAttG', group: 'adv' },
+  // Combine measurables
+  { id: 'forty',     label: '40-Yd',    visible: false, sortKey: 'forty',    group: 'combine' },
+  { id: 'vertical',  label: 'Vert',     visible: false, sortKey: 'vertical', group: 'combine' },
+  { id: 'broad',     label: 'Broad',    visible: false, sortKey: 'broadJump',group: 'combine' },
+  { id: 'bench',     label: 'Bench',    visible: false, sortKey: 'benchPress',group: 'combine' },
 ];
 
 function loadColumns() {
@@ -294,6 +334,27 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   const scheduleOppMap = useScheduleOppMap();
 
   const { data: r2DefenseData } = useR2DefensePerformance();
+  const { data: r2DefVsPos } = useR2DefenseVsPos();
+  const { data: r2RookieScoresData } = useR2RookieScores();
+  // rookieScoreMap: player_name (lower) → { rookie_score, proj_week_pts, draft_capital_score, athleticism_score, opportunity_score, draft_ovr, draft_round }
+  const rookieScoreMap = React.useMemo(() => {
+    const arr = r2RookieScoresData?.players || [];
+    const m = new Map();
+    for (const r of arr) {
+      if (r.player_name) m.set(r.player_name.toLowerCase().trim(), r);
+    }
+    return m;
+  }, [r2RookieScoresData]);
+  // defVsPosIndex: Map of "TEAM|POS" → rank_vs_pos (1=toughest, 32=easiest)
+  const defVsPosIndex = React.useMemo(() => {
+    const arr = r2DefVsPos?.data || [];
+    const m = new Map();
+    for (const row of arr) {
+      if (row.def_team && row.position)
+        m.set(`${row.def_team.toUpperCase()}|${row.position}`, row.rank_vs_pos);
+    }
+    return m;
+  }, [r2DefVsPos]);
   const defRankByTeam = React.useMemo(() => {
     const arr = r2DefenseData?.data || (Array.isArray(r2DefenseData) ? r2DefenseData : []);
     if (!arr.length) return {};
@@ -559,8 +620,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   }, [allPlayersList, sleeperStats]);
 
   let players = allPlayersList2.filter(p => {
-    if (pos === 'FLEX' && !['RB', 'WR'].includes(p.pos)) return false;
-    if (pos !== 'ALL' && pos !== 'FLEX' && p.pos !== pos) return false;
+    if (pos === 'FLEX'   && !['RB', 'WR'].includes(p.pos)) return false;
+    if (pos === 'ROOKIE' && !p.rookie) return false;
+    if (pos !== 'ALL' && pos !== 'FLEX' && pos !== 'ROOKIE' && p.pos !== pos) return false;
     if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
     if (avail === 'free' && (draftedIds.has(p.id) || activeWaivers.has(p.id) || PLAYER_OWNER_MAP[p.id] != null || myRosterIds.has(p.id))) return false;
     if (avail === 'waivers' && !activeWaivers.has(p.id)) return false;
@@ -621,6 +683,11 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       if (sort === 'attG')        return (b.attG    ?? -1) - (a.attG    ?? -1);
       if (sort === 'yptgt')       return (b.yptgt   ?? -1) - (a.yptgt   ?? -1);
       if (sort === 'combo')       return (b.combo   ?? -1) - (a.combo   ?? -1);
+      if (sort === 'avgRzAttG')   return (b.avgRzAttG ?? -1) - (a.avgRzAttG ?? -1);
+      if (sort === 'forty')       return (a.forty   ?? 99) - (b.forty   ?? 99);
+      if (sort === 'vertical')    return (b.vertical ?? -1) - (a.vertical ?? -1);
+      if (sort === 'broadJump')   return (b.broadJump ?? -1) - (a.broadJump ?? -1);
+      if (sort === 'benchPress')  return (b.benchPress ?? -1) - (a.benchPress ?? -1);
       if (sort === 'name')        return a.name.localeCompare(b.name);
       if (sort === 'oppScore') {
         const as = breakoutSet.get(a.name.toLowerCase().trim())?.opportunity_score ?? -1;
@@ -902,7 +969,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
 
       <div className="toolbar">
         <div className="chips">
-          {['ALL', 'QB', 'RB', 'WR', 'TE', 'FLEX', 'K', 'DST'].map(p => (
+          {['ALL', 'QB', 'RB', 'WR', 'TE', 'FLEX', 'K', 'DST', 'ROOKIE'].map(p => (
             <div key={p} className={`chip ${pos === p ? 'accent active' : ''}`} onClick={() => setPos(p)}>{p}</div>
           ))}
         </div>
@@ -1005,9 +1072,36 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           </div>
         )}
         <div className="grow"></div>
+        {[
+          { group: 'std',     label: 'Standard',  color: '#4ea8ff', bg: 'rgba(78,168,255,.12)', border: 'rgba(78,168,255,.4)' },
+          { group: 'adv',     label: 'Next Gen',  color: '#ffcc44', bg: 'rgba(255,204,68,.12)', border: 'rgba(255,204,68,.4)' },
+          { group: 'combine', label: 'Combine',   color: '#c0c0c0', bg: 'rgba(192,192,192,.12)', border: 'rgba(192,192,192,.4)' },
+        ].map(g => {
+          const groupCols = columns.filter(c => c.group === g.group);
+          const anyVisible = groupCols.some(c => c.visible);
+          return (
+            <button
+              key={g.group}
+              style={{
+                fontSize: 10, padding: '4px 10px', borderRadius: 5, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+                border: `1px solid ${anyVisible ? g.border : 'var(--border)'}`,
+                background: anyVisible ? g.bg : 'transparent',
+                color: anyVisible ? g.color : 'var(--text-faint)',
+                fontFamily: 'var(--font-mono)', letterSpacing: '.04em',
+              }}
+              onClick={() => {
+                const next = columns.map(c => c.group === g.group ? { ...c, visible: !anyVisible } : c);
+                saveColumns(next);
+              }}
+              title={`${anyVisible ? 'Hide' : 'Show'} all ${g.label} columns`}
+            >
+              {anyVisible ? '✓ ' : ''}{g.label}
+            </button>
+          );
+        })}
         <button
           className="btn ghost"
-          style={{ fontSize: 11, padding: '4px 10px', flexShrink: 0 }}
+          style={{ fontSize: 11, padding: '4px 10px', flexShrink: 0, color: '#000', background: '#e6c619', borderColor: '#e6c619' }}
           onClick={() => setShowColPicker(p => !p)}
           title="Customize visible stat columns"
         >⚙ Player Stat Selector</button>
@@ -1016,6 +1110,32 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       <div style={{ flex: 1, overflow: 'auto' }}>
         <table className="data-table">
           <thead>
+            {(() => {
+              const stdCount = visibleCols.filter(c => c.group === 'std').length;
+              const advCount = visibleCols.filter(c => c.group === 'adv').length;
+              const combCount = visibleCols.filter(c => c.group === 'combine').length;
+              if (!stdCount && !advCount && !combCount) return null;
+              const cells = [];
+              cells.push(<th key="pre" colSpan={3 + (useSleeperSort ? 1 : 0)} style={{ border: 'none', background: 'transparent' }} />);
+              let run = null;
+              let runCount = 0;
+              const flush = () => {
+                if (!run) return;
+                if (run === 'std') cells.push(<th key={`g-std-${cells.length}`} colSpan={runCount} style={{ textAlign: 'center', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.1em', color: '#4ea8ff', background: 'rgba(78,168,255,.08)', border: '1px solid rgba(78,168,255,.25)', borderBottom: 'none', borderRadius: '4px 4px 0 0', padding: '3px 6px' }}>STANDARD PLAYER STATS</th>);
+                else if (run === 'adv') cells.push(<th key={`g-adv-${cells.length}`} colSpan={runCount} style={{ textAlign: 'center', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.1em', color: '#ffcc44', background: 'rgba(255,204,68,.1)', border: '1px solid rgba(255,204,68,.3)', borderBottom: 'none', borderRadius: '4px 4px 0 0', padding: '3px 6px' }}>NEXT GEN STATS</th>);
+                else if (run === 'combine') cells.push(<th key={`g-comb-${cells.length}`} colSpan={runCount} style={{ textAlign: 'center', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.1em', color: '#c0c0c0', background: 'rgba(192,192,192,.08)', border: '1px solid rgba(192,192,192,.25)', borderBottom: 'none', borderRadius: '4px 4px 0 0', padding: '3px 6px' }}>COMBINE</th>);
+                else cells.push(<th key={`g-blank-${cells.length}`} colSpan={runCount} style={{ border: 'none', background: 'transparent' }} />);
+                run = null; runCount = 0;
+              };
+              for (const col of visibleCols) {
+                const g = col.group || '';
+                if (g !== run) { flush(); run = g; }
+                runCount++;
+              }
+              flush();
+              cells.push(<th key="post" colSpan={2} style={{ border: 'none', background: 'transparent' }} />);
+              return <tr>{cells}</tr>;
+            })()}
             <tr>
               <th className={`num${sort === 'adp' || sort === 'rank' ? ' sorted' : ''}`} style={{ cursor: 'pointer' }} onClick={() => { setSort(sort === 'adp' ? 'rank' : 'adp'); setUseSleeperSort(false); }} title="Click to toggle ADP / Expert Rank">{sort === 'adp' ? 'ADP' : sort === 'rank' ? 'ECR' : '#'}</th>
               <th className={sort === 'name' ? 'sorted' : ''} style={{ cursor: 'pointer' }} onClick={() => { setSort('name'); setUseSleeperSort(false); }}>Player</th>
@@ -1024,7 +1144,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               {visibleCols.map((col, idx) => {
                 const isSorted = !useSleeperSort && sort === col.sortKey;
                 const isAdv = col.group === 'adv';
+                const isCombine = col.group === 'combine';
                 const isFirstAdv = isAdv && (idx === 0 || visibleCols[idx - 1]?.group !== 'adv');
+                const isFirstCombine = isCombine && (idx === 0 || visibleCols[idx - 1]?.group !== 'combine');
                 const isDragging = draggedColId === col.id;
                 const isDragOver = dragOverColId === col.id && draggedColId !== col.id;
                 return (
@@ -1042,12 +1164,15 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                       outlineOffset: '-2px',
                       transition: 'opacity .15s',
                       ...(isAdv ? { color: '#ffcc44', background: 'rgba(255,204,68,.08)' } : {}),
+                      ...(isCombine ? { color: '#c0c0c0', background: 'rgba(192,192,192,.06)' } : {}),
                       ...(isFirstAdv ? { borderLeft: '2px solid rgba(255,204,68,.5)' } : {}),
+                      ...(isFirstCombine ? { borderLeft: '2px solid rgba(192,192,192,.4)' } : {}),
                       ...(isDragOver && isAdv ? { background: 'rgba(255,204,68,.18)' } : {}),
-                      ...(isDragOver && !isAdv ? { background: 'rgba(255,255,255,.1)' } : {}),
+                      ...(isDragOver && isCombine ? { background: 'rgba(192,192,192,.15)' } : {}),
+                      ...(isDragOver && !isAdv && !isCombine ? { background: 'rgba(255,255,255,.1)' } : {}),
                     }}
                     onClick={col.sortKey ? () => { setSort(col.sortKey); setUseSleeperSort(false); } : undefined}
-                    title={isAdv ? `${col.label} — Advanced (NextGen) stat · 2025 wks 14-17` : `Drag to reorder · Click to sort`}
+                    title={isAdv ? `${col.label} — Next Gen stat · 2025` : isCombine ? `${col.label} — NFL Combine measurable` : `Drag to reorder · Click to sort`}
                   >{col.label}</th>
                 );
               })}
@@ -1083,35 +1208,64 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               return (
                 <tr key={p.id} className={selected === p.id ? 'selected' : ''} onClick={() => setSelected(p.id)}
                   style={
-                    isOnWaivers               ? { background: 'rgba(255,149,0,.04)' }
+                    myRosterIds.has(p.id)     ? { background: 'rgba(78,168,255,.1)', borderLeft: '2px solid rgba(78,168,255,.5)' }
+                    : isOnWaivers               ? { background: 'rgba(255,149,0,.04)' }
                     : p.status === 'Out' || p.status === 'IR' ? { background: 'rgba(255,60,60,.07)' }
                     : p.status === 'Q'        ? { background: 'rgba(255,140,0,.07)' }
                     : p.status === 'D'        ? { background: 'rgba(255,80,30,.07)' }
-                    : isAvail                 ? { background: 'rgba(26,210,130,.06)' }
+                    : isAvail                 ? { background: 'rgba(26,210,130,.18)', borderLeft: '2px solid rgba(26,210,130,.5)' }
                     : undefined
                   }>
                   <td className="rank">
                     {i + 1}
                   </td>
                   <td onClick={(e) => { e.stopPropagation(); onOpenPlayer(p.id); }} style={{ cursor: 'pointer' }}>
-                    <PlayerCell player={p} watched={watchlistIds.has(p.id)} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <PlayerCell player={p} watched={watchlistIds.has(p.id)} />
+                      {breakoutData && (
+                        <span title={`Snap Δ +${((breakoutData.snap_share_delta || 0) * 100).toFixed(0)}% · Opp Score ${(breakoutData.opportunity_score || 0).toFixed(1)}`}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 8, fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', background: 'rgba(78,168,255,.12)', border: '1px solid rgba(78,168,255,.4)', borderRadius: 4, padding: '1px 5px', letterSpacing: '.04em', whiteSpace: 'nowrap', flexShrink: 0 }}>↑ BREAKOUT</span>
+                      )}
+                      {(() => {
+                        const s = p.status;
+                        const label = s === 'Q' ? 'Questionable' : s === 'D' ? 'Doubtful' : (s === 'Out' || s === 'O') ? 'Out' : s === 'IR' ? 'IR' : null;
+                        const color = (s === 'Q' || s === 'D') ? '#ff9800' : (s === 'Out' || s === 'O' || s === 'IR') ? '#ff4f4f' : null;
+                        if (!label) return null;
+                        return <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color, letterSpacing: '.04em', flexShrink: 0 }}>{label}</span>;
+                      })()}
+                    </div>
                   </td>
                   <td>
                     {(() => {
                       const displayOpp = p.opp || scheduleOppMap.get(p.team) || '';
                       const wk = getNflScheduleWeek();
-                      const label = displayOpp
-                        ? <span className="mono dim" style={{ fontSize: 11 }}>vs {displayOpp}</span>
-                        : <span className="mono faint" style={{ fontSize: 10 }}>—</span>;
+                      const rawOpp = displayOpp.replace(/^@/, '').toUpperCase();
                       const defRank = displayOpp
                         ? (defRankByTeam[displayOpp.toUpperCase()] || defRankByTeam[displayOpp] || p.oppRank || 0)
                         : (p.oppRank || 0);
+                      // Position-specific matchup rank (1=toughest, 32=easiest)
+                      const posForMatchup = p.pos === 'DST' ? null : (p.pos === 'K' ? 'K' : p.pos);
+                      const matchupRank = posForMatchup && rawOpp
+                        ? defVsPosIndex.get(`${rawOpp}|${posForMatchup}`) ?? null
+                        : null;
+                      const matchupInfo = matchupRank == null ? null
+                        : matchupRank <= 5  ? { label: 'AVOID',     color: '#ff5a6e', bg: 'rgba(255,90,110,.15)' }
+                        : matchupRank <= 10 ? { label: 'TOUGH',     color: '#ff9f3f', bg: 'rgba(255,159,63,.12)' }
+                        : matchupRank >= 28 ? { label: 'SMASH',     color: '#4ed87b', bg: 'rgba(78,216,123,.15)' }
+                        : matchupRank >= 23 ? { label: 'FAVORABLE', color: '#4ea8ff', bg: 'rgba(78,168,255,.12)' }
+                        : null;
                       return (
-                        <>
-                          {label}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 60 }}>
+                          {displayOpp
+                            ? <span className="mono" style={{ fontSize: 11, color: matchupInfo ? matchupInfo.color : 'var(--text-dim)' }}>vs {displayOpp}</span>
+                            : <span className="mono faint" style={{ fontSize: 10 }}>—</span>}
                           {displayOpp && <div className="mono faint" style={{ fontSize: 9 }}>Wk {wk}</div>}
-                          {defRank > 0 && <div className="mono faint" style={{ fontSize: 10 }}>D #{defRank}</div>}
-                        </>
+                          {matchupInfo
+                            ? <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '.06em', color: matchupInfo.color, background: matchupInfo.bg, borderRadius: 3, padding: '1px 4px', alignSelf: 'flex-start' }}>{matchupInfo.label}</span>
+                            : defRank > 0
+                              ? <div className="mono faint" style={{ fontSize: 9 }}>D #{defRank}</div>
+                              : null}
+                        </div>
                       );
                     })()}
                   </td>
@@ -1126,24 +1280,46 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                     const isAdv = col.group === 'adv';
                     const isFirstAdv = isAdv && (idx === 0 || visibleCols[idx - 1]?.group !== 'adv');
                     const isRecvr = p.pos === 'WR' || p.pos === 'TE' || p.pos === 'RB';
+                    const noStats = p.proj <= 0 && (p.pts2025 || 0) === 0 && (p.avg || 0) === 0;
+                    const rookieRow = p.rookie ? rookieScoreMap.get(p.name.toLowerCase().trim()) : null;
                     const cell = (() => {
                     if (col.id === 'proj') {
-                      const projVal = p.proj > 0 ? p.proj : null;
+                      const rookieProjRaw = rookieRow?.proj_week_pts ?? null;
+                      const rookieFromScore = rookieRow?.rookie_score != null
+                        ? (() => {
+                            const s = rookieRow.rookie_score;
+                            const base = { QB: 8, RB: 6, WR: 5, TE: 4 }[p.pos] ?? 5;
+                            const ceil = { QB: 22, RB: 16, WR: 14, TE: 10 }[p.pos] ?? 14;
+                            return parseFloat((base + (ceil - base) * (s / 100)).toFixed(1));
+                          })()
+                        : null;
+                      const rookieProj = (rookieProjRaw && rookieProjRaw >= 1) ? rookieProjRaw : rookieFromScore;
+                      const projVal = p.proj > 0 ? p.proj : (rookieProj ?? null);
+                      const isRookieProj = projVal === rookieProj && rookieProj != null && p.proj <= 0;
                       return (
                         <td key="proj" className="num">
-                          {projVal != null
-                            ? <><span style={{ fontWeight: 600 }}>{projVal.toFixed(1)}</span><ProjBar value={projVal} /></>
-                            : <span className="faint" style={{ fontSize: 10 }}>—</span>}
+                          {projVal != null ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                              <span style={{ fontWeight: 600 }}>{parseFloat(projVal.toFixed(1))}</span>
+                              {isRookieProj && rookieRow?.rookie_score != null && (
+                                <span title={`Rookie Score: ${rookieRow.rookie_score} · Draft Capital: ${rookieRow.draft_capital_score ?? '—'} · Athleticism: ${rookieRow.athleticism_score ?? '—'} · Opportunity: ${rookieRow.opportunity_score}`}
+                                  style={{ fontSize: 8, fontWeight: 800, letterSpacing: '.05em', color: '#a78bfa', background: 'rgba(167,139,250,.15)', borderRadius: 3, padding: '1px 4px', cursor: 'default' }}>
+                                  R {Math.round(rookieRow.rookie_score)}
+                                </span>
+                              )}
+                              {!isRookieProj && <ProjBar value={projVal} />}
+                            </div>
+                          ) : <span className="faint" style={{ fontSize: 10 }}>—</span>}
                         </td>
                       );
                     }
                     if (col.id === 'last') {
                       const v = p.last > 0 ? p.last : null;
-                      return <td key="last" className="num">{v != null ? v.toFixed(1) : <span className="faint" style={{ fontSize: 10 }}>—</span>}</td>;
+                      return <td key="last" className="num">{v != null ? parseFloat(v.toFixed(1)) : <span className="faint" style={{ fontSize: 10 }}>—</span>}</td>;
                     }
                     if (col.id === 'avg') {
                       const v = p.avg > 0 ? p.avg : null;
-                      return <td key="avg" className="num">{v != null ? v.toFixed(1) : <span className="faint" style={{ fontSize: 10 }}>—</span>}</td>;
+                      return <td key="avg" className="num">{v != null ? parseFloat(v.toFixed(1)) : <span className="faint" style={{ fontSize: 10 }}>—</span>}</td>;
                     }
                     if (col.id === 'trend') {
                       const tData = p.trend?.some(v => v > 0) ? p.trend : null;
@@ -1158,14 +1334,14 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                       return (
                         <td key="opp_score" className="num">
                           {oppVal != null
-                            ? <span style={{ fontWeight: 600, color: 'var(--accent-2)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{oppVal.toFixed(1)}</span>
+                            ? <span style={{ fontWeight: 600, color: 'var(--accent-2)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{parseFloat(oppVal.toFixed(1))}</span>
                             : <span className="faint" style={{ fontSize: 10 }}>—</span>}
                         </td>
                       );
                     }
                     if (col.id === 'bye')     return <td key="bye" className="num">{p.bye > 0 ? p.bye : <span className="faint">—</span>}</td>;
                     if (col.id === 'owned')   return <td key="owned" className="num">{p.owned.toFixed(1)}%</td>;
-                    if (col.id === 'adp')     return <td key="adp" className="num faint">{p.adp < 999 ? p.adp.toFixed(1) : <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>999</span>}</td>;
+                    if (col.id === 'adp')     return <td key="adp" className="num" style={{ color: 'var(--text-dim)' }}>{p.adp < 999 ? parseFloat(p.adp.toFixed(1)) : <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>999</span>}</td>;
                     if (col.id === 'ecr_rank') return <td key="ecr_rank" className="num">{p.ecr < 999 ? <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 11 }}>{p.ecr}</span> : <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>999</span>}</td>;
                     if (col.id === 'depth')   return (
                       <td key="depth" className="num">
@@ -1208,42 +1384,61 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                         {p.yptgt != null ? p.yptgt.toFixed(1) : <span className="faint">—</span>}
                       </td>
                     );
-                    if (col.id === 'combo') return (
-                      <td key="combo" className="num mono" style={{ fontSize: 11 }}>
-                        {p.combo != null ? p.combo.toFixed(1) : <span className="faint">—</span>}
+                    if (col.id === 'combo') {
+                      const comboVal = p.combo ?? p.comboYdsG ?? null;
+                      return (
+                        <td key="combo" className="num mono" style={{ fontSize: 11 }}>
+                          {comboVal != null ? comboVal.toFixed(1) : <span className="faint">—</span>}
+                        </td>
+                      );
+                    }
+                    if (col.id === 'rz_att') return (
+                      <td key="rz_att" className="num mono" style={{ fontSize: 11, color: p.avgRzAttG >= 2 ? '#1affa0' : undefined }}>
+                        {p.avgRzAttG != null ? p.avgRzAttG.toFixed(1) : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'forty') return (
+                      <td key="forty" className="num mono" style={{ fontSize: 11, color: p.forty && p.forty <= 4.4 ? '#1affa0' : undefined }}>
+                        {p.forty != null ? p.forty.toFixed(2) : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'vertical') return (
+                      <td key="vertical" className="num mono" style={{ fontSize: 11 }}>
+                        {p.vertical != null ? p.vertical.toFixed(1) + '"' : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'broad') return (
+                      <td key="broad" className="num mono" style={{ fontSize: 11 }}>
+                        {p.broadJump != null ? p.broadJump + '"' : <span className="faint">—</span>}
+                      </td>
+                    );
+                    if (col.id === 'bench') return (
+                      <td key="bench" className="num mono" style={{ fontSize: 11 }}>
+                        {p.benchPress != null ? p.benchPress : <span className="faint">—</span>}
                       </td>
                     );
                     if (col.id === 'weather') return <td key="weather"><WeatherBadge opp={p.opp} /></td>;
-                    if (col.id === 'status')  return (
-                      <td key="status">
-                        {isOnWaivers ? (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, fontFamily: 'var(--font-mono)', color: '#ff9500', background: 'rgba(255,149,0,.12)', border: '1px solid rgba(255,149,0,.35)', borderRadius: 4, padding: '2px 7px', whiteSpace: 'nowrap' }}>
-                            ⏳ Waivers
-                          </span>
-                        ) : p.status !== 'OK' ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                            <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>
-                            {injNotes && <span style={{ fontSize: 10, color: 'var(--text-faint)', lineHeight: 1.4, maxWidth: 160 }}>{injNotes}</span>}
-                          </div>
-                        ) : null}
-                        {breakoutData && (
-                          <div title={`Snap Δ +${((breakoutData.snap_share_delta || 0) * 100).toFixed(0)}% · Opp Score ${(breakoutData.opportunity_score || 0).toFixed(1)}`}>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', background: 'rgba(78,168,255,.12)', border: '1px solid rgba(78,168,255,.4)', borderRadius: 4, padding: '2px 6px', letterSpacing: '.04em' }}>↑ BREAKOUT</span>
-                          </div>
-                        )}
-                        {aiPick && <div><AIHint>{aiPick}</AIHint></div>}
-                      </td>
-                    );
                       return null;
                     })();
-                    if (!cell || !isAdv) return cell;
-                    return React.cloneElement(cell, {
+                    if (!cell) return cell;
+                    if (isAdv) return React.cloneElement(cell, {
                       style: {
                         ...(cell.props.style || {}),
                         background: 'rgba(255,204,68,.07)',
                         ...(isFirstAdv ? { borderLeft: '2px solid rgba(255,204,68,.45)' } : {}),
                       }
                     });
+                    if (col.group === 'combine') {
+                      const isFirstComb = idx === 0 || visibleCols[idx - 1]?.group !== 'combine';
+                      return React.cloneElement(cell, {
+                        style: {
+                          ...(cell.props.style || {}),
+                          background: 'rgba(192,192,192,.05)',
+                          ...(isFirstComb ? { borderLeft: '2px solid rgba(192,192,192,.35)' } : {}),
+                        }
+                      });
+                    }
+                    return cell;
                   })}
                   <td>
                     <div className="flex gap-8" style={{ alignItems: 'center' }}>
@@ -1338,7 +1533,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
 
     {/* ── Column Picker Modal ────────────────────────────────────────────── */}
     {showColPicker && (
-      <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end', padding: '64px 16px 0' }}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '64px 0 0 0' }}
         onClick={e => { if (e.target === e.currentTarget) setShowColPicker(false); }}>
         <div style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 16, width: 240, boxShadow: '0 12px 40px rgba(0,0,0,.5)' }}
           onClick={e => e.stopPropagation()}>
@@ -1349,14 +1544,16 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 8 }}>Drag to reorder · check to show/hide</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {columns.map((col, idx) => {
-              const isFirstAdv = col.group === 'adv' && (idx === 0 || columns[idx - 1].group !== 'adv');
+              const isFirstOfGroup = col.group && (idx === 0 || columns[idx - 1].group !== col.group);
               const isDragging = draggedColId === col.id;
               const isDragOver = dragOverColId === col.id && draggedColId !== col.id;
+              const groupHeaders = { std: { label: 'Standard Player Stats', color: '#4ea8ff' }, adv: { label: 'Next Gen Stats', color: '#ffcc44' }, combine: { label: 'Combine Measurables', color: '#c0c0c0' } };
+              const gh = isFirstOfGroup ? groupHeaders[col.group] : null;
               return (
                 <React.Fragment key={col.id}>
-                  {isFirstAdv && (
-                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: '#ffcc44', paddingLeft: 6, marginTop: 8, marginBottom: 2 }}>
-                      Advanced Stats (NextGen)
+                  {gh && (
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: gh.color, paddingLeft: 6, marginTop: 8, marginBottom: 2 }}>
+                      {gh.label}
                     </div>
                   )}
                   <div
@@ -1378,7 +1575,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                   >
                     <span style={{ color: 'var(--text-faint)', fontSize: 14, lineHeight: 1, flexShrink: 0, userSelect: 'none' }}>⠿</span>
                     <input type="checkbox" checked={col.visible} onChange={() => toggleColumn(col.id)}
-                      style={{ accentColor: col.group === 'adv' ? '#ffcc44' : 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
+                      style={{ accentColor: col.group === 'adv' ? '#ffcc44' : col.group === 'combine' ? '#c0c0c0' : col.group === 'std' ? '#4ea8ff' : 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
                       onClick={e => e.stopPropagation()} />
                     <span style={{ flex: 1, fontSize: 12, color: col.group === 'adv' ? (col.visible ? '#ffcc44' : 'rgba(255,204,68,.45)') : (col.visible ? 'var(--text)' : 'var(--text-faint)') }}>{col.label}</span>
                   </div>
@@ -1591,43 +1788,33 @@ function glHigherIsBetter(pos) {
 }
 
 // Next Gen Stats — advanced metrics from season totals
-function NextGenStatsPanel({ pos, tot, gp }) {
+function NextGenStatsPanel({ pos, tot, gp, player }) {
   if (!tot || !gp) return <div className="dim" style={{ fontSize: 12, padding: 8 }}>Next Gen Stats require live Sleeper data. Enable Sleeper API in Sources.</div>;
 
-  const pct = (a, b) => (b > 0 ? `${((a/b)*100).toFixed(1)}%` : '—');
-  const rate = (a, b) => (b > 0 ? (a/b).toFixed(2) : '—');
-  const avg  = (a, b) => (b > 0 ? (a/b).toFixed(1) : '—');
-
-  const StatRow = ({ label, value, desc, highlight }) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
-        {desc && <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 1 }}>{desc}</div>}
-      </div>
-      <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 16, color: highlight ? 'var(--accent)' : 'var(--text)', flexShrink: 0 }}>{value}</div>
-    </div>
-  );
+  const v = (a, b) => (b > 0 ? parseFloat((a/b).toFixed(1)) : null);
+  const yac = tot.rec_yac > 0 ? tot.rec_yac : (player?.yac || 0);
+  const pctVal = (a, b) => (b > 0 ? parseFloat(((a/b)*100).toFixed(1)) : null);
 
   const Section = ({ title, children }) => (
     <div className="card" style={{ marginBottom: 14 }}>
       <div className="card-head"><div className="card-title" style={{ fontSize: 11, letterSpacing: '.08em' }}>{title}</div></div>
-      <div style={{ padding: '0 14px' }}>{children}</div>
+      <div className="card-body">{children}</div>
     </div>
   );
 
   if (pos === 'QB') return (
     <>
       <Section title="PASSING — ADVANCED">
-        <StatRow label="Attempts / Game"     value={avg(tot.pass_att, gp)}       desc="Volume indicator" />
-        <StatRow label="Comp %" value={pct(tot.pass_cmp, tot.pass_att)} desc="Accuracy" highlight />
-        <StatRow label="Yds / Attempt"       value={avg(tot.pass_yd, tot.pass_att)}  desc="Efficiency" />
-        <StatRow label="Air Yards / Att"     value={avg(tot.pass_air_yd || tot.pass_cmp_air_yd, tot.pass_att)}  desc="Downfield aggressiveness" />
-        <StatRow label="TD / INT Ratio"      value={tot.pass_int > 0 ? ((tot.pass_td||0)/(tot.pass_int)).toFixed(2) : '—'} desc="Ball security" highlight />
-        <StatRow label="Rush Yds / Game"     value={avg(tot.rush_yd, gp)}         desc="Scramble ability" />
+        <SeasonStatBar label="Att / Game" val={v(tot.pass_att, gp)} max={45} leagueAvg={33} />
+        <SeasonStatBar label="Comp %" val={pctVal(tot.pass_cmp, tot.pass_att) != null ? pctVal(tot.pass_cmp, tot.pass_att) + '%' : '—'} max={100} leagueAvg={65} />
+        <SeasonStatBar label="Yds / Attempt" val={v(tot.pass_yd, tot.pass_att)} max={10} leagueAvg={7.0} />
+        <SeasonStatBar label="Pass TDs" val={Math.round(tot.pass_td || 0)} max={45} leagueAvg={22} />
+        <SeasonStatBar label="TD/INT Ratio" val={tot.pass_int > 0 ? ((tot.pass_td||0)/tot.pass_int).toFixed(1) : '—'} max={6} leagueAvg={2.2} />
+        <SeasonStatBar label="Rush Yds / Game" val={v(tot.rush_yd, gp)} max={60} leagueAvg={15} />
       </Section>
       <Section title="FANTASY PRODUCTION">
-        <StatRow label="Pts / Game (Half PPR)" value={avg(tot.pts_half_ppr, gp)} highlight />
-        <StatRow label="Season Total"          value={tot.pts_half_ppr?.toFixed(1) ?? '—'} />
+        <SeasonStatBar label="Pts / Game (Half PPR)" val={v(tot.pts_half_ppr, gp)} max={30} leagueAvg={16} />
+        <SeasonStatBar label="Season Total" val={tot.pts_half_ppr ? Math.round(tot.pts_half_ppr) : '—'} max={400} leagueAvg={265} />
       </Section>
     </>
   );
@@ -1635,20 +1822,21 @@ function NextGenStatsPanel({ pos, tot, gp }) {
   if (pos === 'RB') return (
     <>
       <Section title="RUSHING — ADVANCED">
-        <StatRow label="Carries / Game"    value={avg(tot.rush_att, gp)}        desc="Workload" />
-        <StatRow label="Yards / Carry"     value={avg(tot.rush_yd, tot.rush_att)} desc="Efficiency" highlight />
-        <StatRow label="Rush TDs"          value={fmtStat(tot.rush_td)}         desc="Red-zone role" />
-        <StatRow label="Yards After Contact" value={fmtStat(tot.rush_yac || tot.rush_ybc)} desc="Elusiveness proxy" />
+        <SeasonStatBar label="Carries / Game" val={v(tot.rush_att, gp)} max={25} leagueAvg={12} />
+        <SeasonStatBar label="Yards / Carry" val={v(tot.rush_yd, tot.rush_att)} max={7} leagueAvg={4.3} />
+        <SeasonStatBar label="Rush TDs" val={Math.round(tot.rush_td || 0)} max={18} leagueAvg={6} />
+        <SeasonStatBar label="Rush Yds / Game" val={v(tot.rush_yd, gp)} max={120} leagueAvg={55} />
       </Section>
       <Section title="RECEIVING ROLE">
-        <StatRow label="Targets / Game"   value={avg(tot.rec_tgt, gp)}          desc="Pass-game involvement" highlight />
-        <StatRow label="Catch %"          value={pct(tot.rec, tot.rec_tgt)}     desc="Efficiency" />
-        <StatRow label="Rec Yds / Game"   value={avg(tot.rec_yd, gp)}           desc="Receiving production" />
-        <StatRow label="YAC / Reception"  value={avg(tot.rec_yac, tot.rec)}     desc="After-catch ability" />
+        <SeasonStatBar label="Targets / Game" val={v(tot.rec_tgt, gp)} max={8} leagueAvg={2.8} />
+        <SeasonStatBar label="Catch %" val={pctVal(tot.rec, tot.rec_tgt) != null ? pctVal(tot.rec, tot.rec_tgt) + '%' : '—'} max={100} leagueAvg={75} />
+        <SeasonStatBar label="Rec Yds / Game" val={v(tot.rec_yd, gp)} max={60} leagueAvg={16} />
+        <SeasonStatBar label="YAC Total" val={yac > 0 ? Math.round(yac) : '—'} max={600} leagueAvg={150} />
+        <SeasonStatBar label="YAC / Rec" val={yac > 0 && tot.rec > 0 ? parseFloat((yac / tot.rec).toFixed(1)) : '—'} max={10} leagueAvg={4.5} />
       </Section>
       <Section title="FANTASY PRODUCTION">
-        <StatRow label="Pts / Game (Half PPR)" value={avg(tot.pts_half_ppr, gp)} highlight />
-        <StatRow label="Touches / Game"   value={avg((tot.rush_att||0)+(tot.rec||0), gp)} desc="Total touch rate" />
+        <SeasonStatBar label="Pts / Game (Half PPR)" val={v(tot.pts_half_ppr, gp)} max={25} leagueAvg={10} />
+        <SeasonStatBar label="Touches / Game" val={v((tot.rush_att||0)+(tot.rec||0), gp)} max={30} leagueAvg={15} />
       </Section>
     </>
   );
@@ -1656,42 +1844,41 @@ function NextGenStatsPanel({ pos, tot, gp }) {
   if (pos === 'WR' || pos === 'TE') return (
     <>
       <Section title="TARGET PROFILE">
-        <StatRow label="Targets / Game"    value={avg(tot.rec_tgt, gp)}       desc="Volume" highlight />
-        <StatRow label="Catch %"           value={pct(tot.rec, tot.rec_tgt)}  desc="Efficiency" />
-        <StatRow label="Avg Depth of Target" value={avg(tot.rec_air_yd, tot.rec_tgt)} desc="Air yards per target" />
-        <StatRow label="Air Yards Total"   value={fmtStat(tot.rec_air_yd)}    desc="Routes + separation value" />
+        <SeasonStatBar label="Targets / Game" val={v(tot.rec_tgt, gp)} max={pos === 'TE' ? 10 : 12} leagueAvg={pos === 'TE' ? 4.5 : 5.5} />
+        <SeasonStatBar label="Catch %" val={pctVal(tot.rec, tot.rec_tgt) != null ? pctVal(tot.rec, tot.rec_tgt) + '%' : '—'} max={100} leagueAvg={pos === 'TE' ? 72 : 65} />
+        <SeasonStatBar label="ADOT" val={tot.rec_tgt > 0 ? v(tot.rec_air_yd, tot.rec_tgt) : (player?.adot ?? '—')} max={20} leagueAvg={pos === 'TE' ? 7.5 : 10.5} />
+        <SeasonStatBar label="Air Yards Total" val={tot.rec_air_yd > 0 ? Math.round(tot.rec_air_yd) : (player?.airYds ? Math.round(player.airYds) : '—')} max={1800} leagueAvg={pos === 'TE' ? 350 : 600} />
       </Section>
       <Section title="AFTER THE CATCH">
-        <StatRow label="YAC Total"         value={fmtStat(tot.rec_yac)}       desc="Yards after catch" highlight />
-        <StatRow label="YAC / Reception"   value={avg(tot.rec_yac, tot.rec)}  desc="Elusiveness in space" />
-        <StatRow label="Yds / Target"      value={avg(tot.rec_yd, tot.rec_tgt)}  desc="Overall efficiency" />
-        <StatRow label="Yds / Reception"   value={avg(tot.rec_yd, tot.rec)}   desc="Yards per catch" />
+        <SeasonStatBar label="YAC Total" val={yac > 0 ? Math.round(yac) : '—'} max={800} leagueAvg={pos === 'TE' ? 180 : 250} />
+        <SeasonStatBar label="YAC / Rec" val={yac > 0 && tot.rec > 0 ? parseFloat((yac / tot.rec).toFixed(1)) : '—'} max={12} leagueAvg={pos === 'TE' ? 4.5 : 5.0} />
+        <SeasonStatBar label="Yds / Target" val={v(tot.rec_yd, tot.rec_tgt)} max={15} leagueAvg={pos === 'TE' ? 6.5 : 7.5} />
+        <SeasonStatBar label="Yds / Rec" val={v(tot.rec_yd, tot.rec)} max={20} leagueAvg={pos === 'TE' ? 9.0 : 11.0} />
       </Section>
       <Section title="FANTASY PRODUCTION">
-        <StatRow label="Pts / Game (Half PPR)" value={avg(tot.pts_half_ppr, gp)} highlight />
-        <StatRow label="TD Rate"           value={pct(tot.rec_td, tot.rec_tgt)}  desc="Red-zone conversion" />
+        <SeasonStatBar label="Pts / Game (Half PPR)" val={v(tot.pts_half_ppr, gp)} max={25} leagueAvg={pos === 'TE' ? 8 : 10} />
+        <SeasonStatBar label="TD Rate" val={pctVal(tot.rec_td, tot.rec_tgt) != null ? pctVal(tot.rec_td, tot.rec_tgt) + '%' : '—'} max={15} leagueAvg={pos === 'TE' ? 5 : 4} />
       </Section>
     </>
   );
 
   if (pos === 'K') return (
     <Section title="KICKER ACCURACY">
-      <StatRow label="FG %"              value={pct(tot.fgm, tot.fga)}           highlight />
-      <StatRow label="FGM / Game"        value={avg(tot.fgm, gp)}                desc="Volume" />
-      <StatRow label="Long (season)"     value={fmtStat(tot.fg_lng)}             desc="Longest FG" />
-      <StatRow label="XP %"             value={pct(tot.xpm, tot.xpa)}            desc="Extra point accuracy" />
-      <StatRow label="Pts / Game"        value={avg(tot.pts_std, gp)}            highlight />
+      <SeasonStatBar label="FG %" val={pctVal(tot.fgm, tot.fga) != null ? pctVal(tot.fgm, tot.fga) + '%' : '—'} max={100} leagueAvg={85} />
+      <SeasonStatBar label="FGM / Game" val={v(tot.fgm, gp)} max={3} leagueAvg={1.8} />
+      <SeasonStatBar label="Long (season)" val={Math.round(tot.fg_lng || 0)} max={65} leagueAvg={52} />
+      <SeasonStatBar label="Pts / Game" val={v(tot.pts_std, gp)} max={15} leagueAvg={8} />
     </Section>
   );
 
   if (pos === 'DST') return (
     <Section title="DEFENSE METRICS">
-      <StatRow label="Sacks / Game"      value={avg(tot.sack, gp)}               highlight />
-      <StatRow label="INTs (season)"     value={fmtStat(tot.def_int)}            />
-      <StatRow label="Forced Fumbles"    value={fmtStat(tot.def_fr)}             />
-      <StatRow label="Def TDs"           value={fmtStat(tot.def_td)}             highlight />
-      <StatRow label="Pts Allowed / Game" value={avg(tot.pts_allow, gp)}         desc="Lower is better" />
-      <StatRow label="Pts / Game (Fantasy)" value={avg(tot.pts_std, gp)}         />
+      <SeasonStatBar label="Sacks / Game" val={v(tot.sack, gp)} max={5} leagueAvg={2.2} />
+      <SeasonStatBar label="INTs (season)" val={Math.round(tot.def_int || 0)} max={25} leagueAvg={12} />
+      <SeasonStatBar label="Forced Fumbles" val={Math.round(tot.def_fr || 0)} max={15} leagueAvg={8} />
+      <SeasonStatBar label="Def TDs" val={Math.round(tot.def_td || 0)} max={5} leagueAvg={2} />
+      <SeasonStatBar label="Pts Allowed / Game" val={v(tot.pts_allow, gp)} max={35} leagueAvg={22} />
+      <SeasonStatBar label="Fantasy Pts / Game" val={v(tot.pts_std, gp)} max={15} leagueAvg={7} />
     </Section>
   );
 
@@ -1879,6 +2066,13 @@ function PlayerArticlesCard({ articles = [], loading = false }) {
 
 export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPlayer, onTradePlayer, sourcesState }) {
   if (!player) return null;
+  const { data: r2DefVsPos } = useR2DefenseVsPos();
+  const { data: r2RookieScoresData } = useR2RookieScores();
+  const detailRookieData = React.useMemo(() => {
+    if (!player.rookie || !r2RookieScoresData?.players) return null;
+    const key = player.name?.toLowerCase().trim();
+    return r2RookieScoresData.players.find(r => r.player_name?.toLowerCase().trim() === key) ?? null;
+  }, [player, r2RookieScoresData]);
   const [activeTab, setTab] = React.useState('overview');
   const [added, setAdded] = React.useState(false);
   // Show 2025 stats until 2026 Week 1 is complete (~Sep 9 2026)
@@ -1990,6 +2184,37 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const isOwnedByOther = !!ownerTeamId;
   const sleeperEnabled = sourcesState?.freeApis?.['sleeper-api'] !== false;
 
+  // Position-specific matchup rating for this player
+  const detailMatchupRating = React.useMemo(() => {
+    if (!r2DefVsPos?.data?.length || !player.opp || player.pos === 'DST') return null;
+    const oppTeam = player.opp.replace(/^@/, '').toUpperCase();
+    const posKey  = player.pos;
+    const row = r2DefVsPos.data.find(
+      r => r.def_team?.toUpperCase() === oppTeam && r.position === posKey
+    );
+    if (!row) return null;
+    const rank = row.rank_vs_pos;
+    return {
+      rank,
+      avg_pts_allowed: row.avg_pts_allowed,
+      score: rank <= 5  ? -2
+           : rank <= 10 ? -1
+           : rank >= 28 ? 2
+           : rank >= 23 ? 1
+           : 0,
+      label: rank <= 5  ? 'AVOID'
+           : rank <= 10 ? 'TOUGH'
+           : rank >= 28 ? 'SMASH SPOT'
+           : rank >= 23 ? 'FAVORABLE'
+           : 'NEUTRAL',
+      color: rank <= 5  ? '#ff5a6e'
+           : rank <= 10 ? '#ff9f3f'
+           : rank >= 28 ? '#4ed87b'
+           : rank >= 23 ? '#4ea8ff'
+           : 'var(--text-faint)',
+    };
+  }, [r2DefVsPos, player.opp, player.pos]);
+
   const { data: detailBreakouts } = useR2BreakoutCandidates();
   const detailOppScore = React.useMemo(() => {
     if (!detailBreakouts?.length) return null;
@@ -2000,8 +2225,30 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const { data: allWriteups } = useR2PlayerWriteups();
   const playerWriteup = React.useMemo(() => {
     if (!allWriteups || typeof allWriteups !== 'object') return null;
-    return allWriteups[player.name] ?? null;
+    // Top-level is { generated_at, players: { "Name": {...} } }
+    const dict = allWriteups.players || allWriteups;
+    return dict[player.name] ?? null;
   }, [allWriteups, player.name]);
+
+  // Pre-baked 2025 Sleeper stats (from R2) — used as fallback when live API unavailable
+  const { data: r2Stats2025Data } = useR2PlayerStats2025();
+  const r2Stats2025 = React.useMemo(() => {
+    const players = r2Stats2025Data?.players;
+    if (!players) return null;
+    // Look up by sleeperId first, then by name match
+    if (player.sleeperId && players[String(player.sleeperId)]) return players[String(player.sleeperId)];
+    return Object.values(players).find(s =>
+      s.player_name?.toLowerCase().trim() === player.name.toLowerCase().trim()
+    ) || null;
+  }, [r2Stats2025Data, player.sleeperId, player.name]);
+
+  // Combine measurables from R2
+  const { data: combineData } = useR2CombineData();
+  const combineRow = React.useMemo(() => {
+    const players = Array.isArray(combineData) ? combineData : (combineData?.players || []);
+    const q = player.name.toLowerCase().trim();
+    return players.find(c => (c.player_name || '').toLowerCase().trim() === q) || null;
+  }, [combineData, player.name]);
 
   const { data: allR2Notes } = useR2PlayerNotes();
   const playerAiNotes = React.useMemo(() => {
@@ -2198,9 +2445,9 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     { wk: 4,  opp: '@DAL',      snaps: 60, tar: 5,  rec: 4, yds: 54,  td: 0, pts: player.trend[0] },
   ];
 
-  // Season stats derived from live totals or mock
-  const tot = hasLive ? displayLive.seasonTotals : null;
-  const gp  = hasLive ? displayLive.gamesPlayed : 10;
+  // Season stats — live Sleeper API wins; pre-baked R2 export is the fallback
+  const tot = hasLive ? displayLive.seasonTotals : (statYear === 2025 && r2Stats2025 ? r2Stats2025 : null);
+  const gp  = hasLive ? displayLive.gamesPlayed  : (statYear === 2025 && r2Stats2025?.gp ? r2Stats2025.gp : 0);
   const liveLastPts = hasLive && displayLive.currentWeek
     ? (displayLive.weeklyStats[displayLive.currentWeek] ?? displayLive.weeklyStats[displayLive.currentWeek - 1])?.pts_half_ppr
     : null;
@@ -2274,40 +2521,166 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
           {/* ── Overview ── */}
           {activeTab === 'overview' && (
             <React.Fragment>
-              <div style={{ display:'grid', gridTemplateColumns:`repeat(${detailOppScore != null ? 5 : 4},1fr)`, gap:10, marginBottom:16 }}>
+              <div style={{ display:'grid', gridTemplateColumns:`repeat(${(detailOppScore != null || detailMatchupRating != null) ? 5 : 4},1fr)`, gap:10, marginBottom:16 }}>
                 <div className="stat">
                   <div className="k">
                     Wk {displayLive?.currentWeek || '—'} Proj
                     {hasLive && <span style={{ marginLeft: 5, fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', verticalAlign: 'middle' }}>SLEEPER</span>}
                   </div>
                   <div className="v accent">
-                    {(displayLive?.projection?.pts_half_ppr ?? displayLive?.projection?.pts_std ?? player.proj).toFixed(1)}
+                    {parseFloat((displayLive?.projection?.pts_half_ppr ?? displayLive?.projection?.pts_std ?? (player.proj > 0 ? player.proj : (() => {
+                      const rr = detailRookieData;
+                      if (!rr) return 0;
+                      if (rr.proj_week_pts >= 1) return rr.proj_week_pts;
+                      if (rr.rookie_score == null) return 0;
+                      const base = { QB: 8, RB: 6, WR: 5, TE: 4 }[player.pos] ?? 5;
+                      const ceil = { QB: 22, RB: 16, WR: 14, TE: 10 }[player.pos] ?? 14;
+                      return base + (ceil - base) * (rr.rookie_score / 100);
+                    })())).toFixed(1))}
                   </div>
-                  <div className="sub">vs {player.opp} (D #{player.oppRank})</div>
+                  <div className="sub">
+                    vs {player.opp}
+                    {detailMatchupRating && detailMatchupRating.score !== 0 &&
+                      <span style={{ marginLeft: 4, color: detailMatchupRating.color, fontWeight: 700 }}>· {detailMatchupRating.label}</span>}
+                  </div>
                 </div>
                 <div className="stat">
                   <div className="k">Last Week</div>
-                  <div className="v">{(liveLastPts ?? player.last).toFixed(1)}</div>
+                  <div className="v">{parseFloat((liveLastPts ?? player.last).toFixed(1))}</div>
                   <div className="sub"><Delta from={liveAvg ?? player.avg} to={liveLastPts ?? player.last} /> vs avg</div>
                 </div>
                 <div className="stat">
                   <div className="k">Season Avg</div>
-                  <div className="v">{(liveAvg ?? player.avg).toFixed(1)}</div>
+                  <div className="v">{parseFloat((liveAvg ?? player.avg).toFixed(1))}</div>
                   <div className="sub">{gp} games {hasLive ? <LiveBadge /> : 'played'}</div>
                 </div>
                 <div className="stat">
-                  <div className="k">6-Wk Trend</div>
+                  <div className="k">Season Trend</div>
                   <div className="v"><Sparkline data={player.trend} width={80} height={28} /></div>
-                  <div className="sub mono">{player.trend.join(' · ')}</div>
+                  <div className="sub mono" style={{ fontSize: 9 }}>{(player.trend.slice(-5) || []).join(' · ')}</div>
                 </div>
-                {detailOppScore != null && (
+                {detailMatchupRating != null ? (
+                  <div className="stat">
+                    <div className="k" style={{ color: detailMatchupRating.color }}>Matchup</div>
+                    <div className="v" style={{ color: detailMatchupRating.color, fontFamily: 'var(--font-mono)', fontSize: 18 }}>
+                      {detailMatchupRating.score > 0 ? '+' : ''}{detailMatchupRating.score !== 0 ? detailMatchupRating.score : '—'}
+                    </div>
+                    <div className="sub" style={{ color: detailMatchupRating.color }}>
+                      {detailMatchupRating.label} · #{detailMatchupRating.rank}/32
+                    </div>
+                  </div>
+                ) : detailOppScore != null ? (
                   <div className="stat">
                     <div className="k" style={{ color: 'var(--accent-2)' }}>Opp Score</div>
-                    <div className="v" style={{ color: 'var(--accent-2)', fontFamily: 'var(--font-mono)' }}>{detailOppScore.toFixed(1)}</div>
+                    <div className="v" style={{ color: 'var(--accent-2)', fontFamily: 'var(--font-mono)' }}>{parseFloat(detailOppScore.toFixed(1))}</div>
                     <div className="sub">↑ Breakout signal</div>
                   </div>
-                )}
+                ) : null}
               </div>
+
+              {/* Rookie Score breakdown card */}
+              {detailRookieData && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="card-head">
+                    <div className="card-title" style={{ color: '#a78bfa' }}>Rookie Score</div>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 900, color: '#a78bfa' }}>
+                      {Math.round(detailRookieData.rookie_score)}
+                      <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-dim)', marginLeft: 4 }}>/100</span>
+                    </span>
+                  </div>
+                  <div className="card-body">
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+                      {[
+                        { label: 'Draft Capital', val: detailRookieData.draft_capital_score, note: detailRookieData.draft_ovr ? `Pick #${detailRookieData.draft_ovr}` : (detailRookieData.adp ? `ADP ${detailRookieData.adp}` : 'UDFA') },
+                        { label: 'Athleticism',   val: detailRookieData.athleticism_score,   note: 'Combine metrics' },
+                        { label: 'Opportunity',   val: detailRookieData.opportunity_score,   note: `Depth #${detailRookieData.depth_chart_order ?? '?'}` },
+                      ].map(({ label, val, note }) => {
+                        const pct = Math.min(100, Math.max(0, val ?? 0));
+                        return (
+                          <div key={label}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{label}</span>
+                              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: '#a78bfa' }}>{val != null ? Math.round(val) : '—'}</span>
+                            </div>
+                            <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-card-alt)', overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${pct}%`, background: '#a78bfa', borderRadius: 2 }} />
+                            </div>
+                            <div style={{ fontSize: 9, color: 'var(--text-faint)', marginTop: 3 }}>{note}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'flex', gap: 20, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                      <div>
+                        <span className="dim" style={{ fontSize: 10 }}>Proj Season · </span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text)' }}>{detailRookieData.proj_season_pts ? Math.round(detailRookieData.proj_season_pts) : '—'} pts</span>
+                      </div>
+                      <div>
+                        <span className="dim" style={{ fontSize: 10 }}>Proj/Week · </span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#a78bfa' }}>{detailRookieData.proj_week_pts ? parseFloat(detailRookieData.proj_week_pts.toFixed(1)) : '—'} pts</span>
+                      </div>
+                      {detailRookieData.draft_round && (
+                        <div>
+                          <span className="dim" style={{ fontSize: 10 }}>Round · </span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{detailRookieData.draft_round}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Next Gen Stats card */}
+              {player.pos !== 'DST' && player.pos !== 'K' && (player.snapPct != null || player.adot != null || player.tgtG != null || player.attG != null) && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="card-head">
+                    <div className="card-title" style={{ color: '#ffcc44' }}>Next Gen Stats</div>
+                    <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>2025 Season</span>
+                  </div>
+                  <div className="card-body">
+                    {player.snapPct != null && <SeasonStatBar label="Snap %" val={`${player.snapPct.toFixed(0)}%`} max={100} leagueAvg={player.pos === 'QB' ? 95 : 55} />}
+                    {player.tgtG != null && (player.pos === 'WR' || player.pos === 'TE' || player.pos === 'RB') && <SeasonStatBar label="Targets / Game" val={player.tgtG.toFixed(1)} max={player.pos === 'RB' ? 8 : 12} leagueAvg={player.pos === 'WR' ? 5.5 : player.pos === 'TE' ? 4.5 : 2.8} />}
+                    {player.targetShare > 0 && <SeasonStatBar label="Target Share" val={`${player.targetShare.toFixed(1)}%`} max={player.pos === 'RB' ? 20 : 35} leagueAvg={player.pos === 'WR' ? 15 : player.pos === 'TE' ? 12 : 5} />}
+                    {player.attG != null && (player.pos === 'RB' || player.pos === 'QB') && <SeasonStatBar label="Rush Att / Game" val={player.attG.toFixed(1)} max={25} leagueAvg={player.pos === 'RB' ? 12 : 4} />}
+                    {player.adot != null && (player.pos === 'WR' || player.pos === 'TE') && <SeasonStatBar label="ADOT" val={player.adot.toFixed(1)} max={20} leagueAvg={player.pos === 'WR' ? 10.5 : 7.5} />}
+                    {player.airYds != null && (player.pos === 'WR' || player.pos === 'TE') && <SeasonStatBar label="Air Yards (season)" val={Math.round(player.airYds)} max={1800} leagueAvg={player.pos === 'WR' ? 600 : 350} />}
+                    {player.yac > 0 && <SeasonStatBar label="YAC (season)" val={Math.round(player.yac)} max={800} leagueAvg={player.pos === 'WR' ? 250 : player.pos === 'RB' ? 150 : 180} />}
+                    {player.yptgt != null && (player.pos === 'WR' || player.pos === 'TE') && <SeasonStatBar label="Yards / Target" val={player.yptgt.toFixed(1)} max={15} leagueAvg={player.pos === 'WR' ? 7.5 : 6.5} />}
+                    {player.comboYdsG != null && <SeasonStatBar label="Combo Yds / Game" val={player.comboYdsG.toFixed(1)} max={150} leagueAvg={player.pos === 'RB' ? 65 : player.pos === 'WR' ? 55 : 40} />}
+                    {player.avgRzAttG != null && player.pos === 'RB' && <SeasonStatBar label="Red Zone Att / Game" val={player.avgRzAttG.toFixed(1)} max={5} leagueAvg={1.5} />}
+                  </div>
+                </div>
+              )}
+
+              {/* Combine Measurables */}
+              {player.forty != null && player.pos !== 'DST' && player.pos !== 'K' && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="card-head">
+                    <div className="card-title" style={{ color: '#ff9800' }}>Combine Measurables</div>
+                    {player.combineWt && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-dim)' }}>{player.combineWt} lbs</span>}
+                  </div>
+                  <div className="card-body">
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 10 }}>
+                      {[
+                        { label: '40-Yard', val: player.forty, fmt: v => v.toFixed(2) + 's', elite: player.pos === 'QB' ? 4.55 : player.pos === 'TE' ? 4.55 : 4.40 },
+                        { label: 'Vertical', val: player.vertical, fmt: v => v.toFixed(1) + '"', elite: 38 },
+                        { label: 'Broad Jump', val: player.broadJump, fmt: v => v + '"', elite: 125 },
+                        { label: 'Bench', val: player.benchPress, fmt: v => v + ' reps', elite: 20 },
+                        { label: '3-Cone', val: player.cone, fmt: v => v.toFixed(2) + 's', elite: 6.8, invert: true },
+                        { label: 'Shuttle', val: player.shuttle, fmt: v => v.toFixed(2) + 's', elite: 4.1, invert: true },
+                      ].filter(m => m.val != null).map(m => {
+                        const isElite = m.invert ? m.val <= m.elite : (m.label === '40-Yard' ? m.val <= m.elite : m.val >= m.elite);
+                        return (
+                          <div key={m.label} style={{ textAlign: 'center' }}>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 900, color: isElite ? '#1affa0' : 'var(--text)' }}>{m.fmt(m.val)}</div>
+                            <div style={{ fontSize: 9, color: 'var(--text-faint)', marginTop: 2 }}>{m.label}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Season Stats */}
               {loading && (
@@ -2382,14 +2755,47 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                       <SeasonStatBar label="Rec Yards"   val={Math.round(tot.rec_yd  || 0)} max={1800} leagueAvg={lAvg('rec_yd',  posAvg.rec_yd)}  {...lRank('rec_yd')}  />
                       <SeasonStatBar label="Rec TDs"     val={Math.round(tot.rec_td  || 0)} max={20}   leagueAvg={lAvg('rec_td',  posAvg.rec_td)}  {...lRank('rec_td')}  />
                       <SeasonStatBar label="Catch %"     val={tot.rec_tgt > 0 ? fmtStat((tot.rec/tot.rec_tgt)*100,1)+'%' : '—'} max={100} leagueAvg={posAvg.catch_pct} />
-                      <SeasonStatBar label="YAC Total"   val={Math.round(tot.rec_yac || player.yac || 0)} max={600} leagueAvg={lAvg('rec_yac', posAvg.rec_yac)} {...lRank('rec_yac')} />
-                      <SeasonStatBar label="YAC/Rec"     val={tot.rec > 0 && (tot.rec_yac || player.yac) ? fmtStat((tot.rec_yac || player.yac) / tot.rec, 1) : player.yac > 0 ? fmtStat(player.yac, 1) : '—'} max={12} leagueAvg={posAvg.yac_per_rec} />
+                      <SeasonStatBar label="YAC Total"   val={(() => { const v = tot.rec_yac > 0 ? tot.rec_yac : (player.yac || 0); return v > 0 ? Math.round(v) : '—'; })()} max={600} leagueAvg={lAvg('rec_yac', posAvg.rec_yac)} {...lRank('rec_yac')} />
+                      <SeasonStatBar label="YAC/Rec"     val={(() => { const yac = tot.rec_yac > 0 ? tot.rec_yac : (player.yac || 0); const rec = tot.rec > 0 ? tot.rec : (tot.receptions > 0 ? tot.receptions : null); return rec > 0 && yac > 0 ? fmtStat(yac / rec, 1) : '—'; })()} max={12} leagueAvg={posAvg.yac_per_rec} />
                       <SeasonStatBar label="Fantasy Pts" val={fmtStat(tot.pts_half_ppr,1)} max={350}   leagueAvg={lAvg('pts_half_ppr', posAvg.pts_half_ppr)} {...lRank('pts_half_ppr')} />
                     </>}
                   </div>
                 </div>
               )}
 
+
+              {/* Combine measurables */}
+              {combineRow && (() => {
+                const stats = [
+                  combineRow.forty      != null && { label: '40-Yard Dash',  value: `${combineRow.forty}s` },
+                  combineRow.vertical   != null && { label: 'Vertical Jump', value: `${combineRow.vertical}"` },
+                  combineRow.broad_jump != null && { label: 'Broad Jump',    value: `${combineRow.broad_jump}"` },
+                  combineRow.bench      != null && { label: 'Bench Press',   value: `${combineRow.bench} reps` },
+                  combineRow.cone       != null && { label: '3-Cone Drill',  value: `${combineRow.cone}s` },
+                  combineRow.shuttle    != null && { label: 'Shuttle Run',   value: `${combineRow.shuttle}s` },
+                  combineRow.ht         != null && { label: 'Height',        value: combineRow.ht },
+                  combineRow.wt         != null && { label: 'Weight',        value: `${combineRow.wt} lbs` },
+                ].filter(Boolean);
+                if (!stats.length) return null;
+                return (
+                  <div className="card" style={{ marginBottom: 16 }}>
+                    <div className="card-head">
+                      <div className="card-title">NFL Combine · {combineRow.draft_year || combineRow.season}</div>
+                      <span className="mono faint" style={{ fontSize: 9 }}>
+                        {combineRow.school}{combineRow.draft_round != null ? ` · Rd ${combineRow.draft_round}, Pick ${combineRow.draft_ovr}` : ''}
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px', padding: '4px 14px 10px' }}>
+                      {stats.map(({ label, value }) => (
+                        <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{label}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* AI insight — Qwen writeup when available, template fallback */}
               <div className="muted-card" style={{ marginBottom:16, borderLeft:'3px solid var(--accent-2)' }}>
@@ -2417,8 +2823,6 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                 )}
               </div>
 
-              <PlayerNewsCard items={playerNewsItems} loading={newsLoading || loading} playerName={player.name} />
-              <PlayerArticlesCard articles={playerArticles} loading={articlesLoading} />
             </React.Fragment>
           )}
 
@@ -2487,28 +2891,25 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                           })}
                         </tbody>
                       </table>
+                    {/* Legend */}
+                    <div style={{ display: 'flex', gap: 14, padding: '8px 0 0', alignItems: 'center' }}>
+                      <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>Key:</span>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#1affa0', fontWeight: 700 }}>■ Top 25%</span>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#ff4f4f', fontWeight: 700 }}>■ Bottom 25%</span>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>■ Average</span>
                     </div>
+                  </div>
                   : statYear === 2026
                     ? <div className="muted-card" style={{ padding: 18, textAlign: 'center' }}>
                         <div className="dim" style={{ fontSize: 12 }}>2026 season hasn't started yet — check back in September.</div>
                       </div>
-                    : <>
-                        {error && <div className="dim" style={{ fontSize:11, marginBottom:10 }}>Live data unavailable — showing sample data.</div>}
-                        <div style={{ overflowX: 'auto' }}>
-                        <table className="gamelog">
-                          <thead><tr><th>Wk</th><th>Opp</th><th>Snp</th><th>Tar</th><th>Rec</th><th>Yds</th><th>TD</th><th>Pts</th></tr></thead>
-                          <tbody>
-                            {mockGameLog.map(g => (
-                              <tr key={g.wk}>
-                                <td>{g.wk}</td><td>{g.opp}</td><td>{g.snaps}</td>
-                                <td>{g.tar}</td><td>{g.rec}</td><td>{g.yds}</td><td>{g.td}</td>
-                                <td style={{ fontWeight:600, color:'var(--accent)' }}>{typeof g.pts==='number' ? g.pts.toFixed(1) : g.pts}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                    : player.rookie
+                      ? <div style={{ padding: '24px 0', textAlign: 'center' }}>
+                          <div style={{ fontSize: 28, marginBottom: 8 }}>🏈</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#4ea8ff', marginBottom: 4 }}>2026 Rookie</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>No NFL stats — first season starts September 2026.</div>
                         </div>
-                      </>
+                      : <></>
               }
             </>
           )}
@@ -2524,9 +2925,9 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                     <span className="dim" style={{ fontSize: 11 }}>2025 Season · Advanced Metrics</span>
                     {hasLive && <LiveBadge />}
-                    <span className="mono faint" style={{ fontSize: 9 }}>Sleeper API</span>
+                    <span className="mono faint" style={{ fontSize: 9 }}>{hasLive ? 'Sleeper API · live' : (tot ? 'R2 · pre-baked' : 'Sleeper API')}</span>
                   </div>
-                  <NextGenStatsPanel pos={player.pos} tot={tot} gp={gp} />
+                  <NextGenStatsPanel pos={player.pos} tot={tot} gp={gp} player={player} />
                 </>
           )}
 
@@ -2541,30 +2942,58 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
           {/* ── Matchup ── */}
           {activeTab === 'matchup' && (
             <div>
-              <div className="muted-card" style={{ marginBottom:16 }}>
-                <div className="flex gap-16" style={{ justifyContent:'space-around', textAlign:'center' }}>
-                  <div>
-                    <div className="mono dim" style={{ fontSize:11 }}>{player.team}</div>
-                    <div style={{ fontFamily:'var(--font-display)', fontStretch:'75%', fontSize:28, fontWeight:900 }}>7-3</div>
+              {/* Matchup rating banner */}
+              {detailMatchupRating ? (
+                <div style={{ marginBottom: 16, padding: '14px 18px', borderRadius: 10, border: `1px solid ${detailMatchupRating.color}44`, background: `${detailMatchupRating.color}11`, display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 36, fontWeight: 900, color: detailMatchupRating.color, lineHeight: 1 }}>
+                    {detailMatchupRating.score > 0 ? '+' : ''}{detailMatchupRating.score}
                   </div>
-                  <div style={{ fontFamily:'var(--font-display)', fontStretch:'75%', fontSize:28, fontWeight:900, color:'var(--text-faint)', alignSelf:'center' }}>vs</div>
                   <div>
-                    <div className="mono dim" style={{ fontSize:11 }}>{player.opp}</div>
-                    <div style={{ fontFamily:'var(--font-display)', fontStretch:'75%', fontSize:28, fontWeight:900 }}>5-5</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: detailMatchupRating.color }}>{detailMatchupRating.label}</div>
+                    <div className="mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                      {player.pos} vs {player.opp} · #{detailMatchupRating.rank} of 32 defenses · {detailMatchupRating.avg_pts_allowed} pts/g allowed to {player.pos}s
+                    </div>
                   </div>
                 </div>
-                <div style={{ textAlign:'center', fontSize:11, color:'var(--text-faint)', marginTop:8 }} className="mono">SUN 1:00PM ET · O/U 47.5 · {player.team} -3.5</div>
-              </div>
-              <div className="card-title" style={{ marginBottom:8 }}>Defense vs Position ({player.pos})</div>
-              <table className="gamelog">
-                <thead><tr><th>Metric</th><th>{player.opp}</th><th>NFL Avg</th><th>Rank</th></tr></thead>
-                <tbody>
-                  <tr><td>FP Allowed/G</td><td>{(20-player.oppRank*0.3).toFixed(1)}</td><td>15.8</td><td style={{ color:player.oppRank>20?'var(--good)':'var(--danger)' }}>#{player.oppRank}</td></tr>
-                  <tr><td>Yds Allowed/G</td><td>284</td><td>241</td><td>#26</td></tr>
-                  <tr><td>TDs Allowed</td><td>18</td><td>14</td><td>#28</td></tr>
-                  <tr><td>Pressure %</td><td>22.4%</td><td>24.1%</td><td>#19</td></tr>
-                </tbody>
-              </table>
+              ) : (
+                <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 10, background: 'rgba(255,255,255,.04)', color: 'var(--text-faint)', fontSize: 12 }}>
+                  No 2026 matchup data for {player.opp}
+                </div>
+              )}
+              {/* All positions vs this defense */}
+              {r2DefVsPos?.data?.length > 0 && player.opp && (() => {
+                const oppTeam = player.opp.replace(/^@/, '').toUpperCase();
+                const rows = r2DefVsPos.data.filter(r => r.def_team?.toUpperCase() === oppTeam);
+                if (!rows.length) return null;
+                const posOrder = ['QB','RB','WR','TE','K'];
+                const sorted = posOrder.map(pos => rows.find(r => r.position === pos)).filter(Boolean);
+                return (
+                  <>
+                    <div className="card-title" style={{ marginBottom: 8 }}>2026 Defense vs Position · {oppTeam}</div>
+                    <table className="gamelog">
+                      <thead><tr><th>Pos</th><th>Pts Allowed/G</th><th>Rank</th><th>Matchup</th></tr></thead>
+                      <tbody>
+                        {sorted.map(r => {
+                          const isPlayer = r.position === player.pos;
+                          const mc = r.rank_vs_pos <= 5  ? { label: 'AVOID',     color: '#ff5a6e' }
+                                   : r.rank_vs_pos <= 10 ? { label: 'TOUGH',     color: '#ff9f3f' }
+                                   : r.rank_vs_pos >= 28 ? { label: 'SMASH',     color: '#4ed87b' }
+                                   : r.rank_vs_pos >= 23 ? { label: 'FAVORABLE', color: '#4ea8ff' }
+                                   : { label: 'NEUTRAL', color: 'var(--text-faint)' };
+                          return (
+                            <tr key={r.position} style={isPlayer ? { background: 'rgba(255,255,255,.04)', fontWeight: 700 } : {}}>
+                              <td><span style={{ color: isPlayer ? mc.color : 'var(--text-dim)' }}>{r.position}{isPlayer ? ' ★' : ''}</span></td>
+                              <td>{r.avg_pts_allowed}</td>
+                              <td style={{ color: mc.color }}>#{r.rank_vs_pos}</td>
+                              <td><span style={{ fontSize: 10, fontWeight: 700, color: mc.color }}>{mc.label}</span></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </>
+                );
+              })()}
             </div>
           )}
 

@@ -26,17 +26,12 @@ function buildSchedule(ids, weeks) {
   });
 }
 
-function weekSeed(teamId, week) {
-  return Math.sin(teamId * 7.3 + week * 3.1) * 18 + Math.cos(teamId * 2.1 + week * 5.7) * 8;
-}
-
-function computeScore(roster, teamId, week) {
+function computeScore(roster) {
   const starters = roster.filter(r => r.slot !== 'BENCH');
-  const base = starters.reduce((sum, entry) => {
+  return starters.reduce((sum, entry) => {
     const p = entry.playerId ? findPlayer(entry.playerId) : null;
     return sum + (p ? (p.proj || p.avg || 0) : 0);
   }, 0);
-  return Math.max(0, Math.round((base + weekSeed(teamId, week)) * 10) / 10);
 }
 
 function loadLockedScores(season, week) {
@@ -93,6 +88,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   const [showAll, setShowAll] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 900px)').matches);
   const [h2hMobileTab, setH2hMobileTab] = React.useState('matchups'); // 'matchups' | 'scores'
+  const [mobileScoringOpen, setMobileScoringOpen] = React.useState(false);
 
   // Sync TEAM_ROSTERS from localStorage whenever H2H is opened so drafted players appear
   const [rosterVersion, setRosterVersion] = React.useState(0);
@@ -155,7 +151,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     return LEAGUE_TEAMS.map(t => {
       const rec = parseRecord(t.record);
       return { ...t, ...rec, pf: t.pf || 0, pa: t.pa || 0 };
-    }).sort((a, b) => (b.w - a.w) || (b.pf - a.pf));
+    }).sort((a, b) => (b.w - a.w) || (b.pf - a.pf) || (a.pa - b.pa));
   }, []);
 
   return (
@@ -165,6 +161,13 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
           <div>
             <h1 style={{ marginBottom: 2 }}>Head to Head</h1>
             <div className="sub">Weekly matchup results · rosters pulled from Current Roster settings</div>
+          </div>
+          <div style={{ marginLeft: 'auto' }}>
+            <button
+              className="btn"
+              style={{ background: '#22c55e', border: 'none', color: '#fff', fontWeight: 700 }}
+              onClick={() => setMobileScoringOpen(true)}
+            >📱 Mobile Scoring</button>
           </div>
         </div>
       </div>
@@ -258,6 +261,95 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
         )}
       </div>
 
+      {mobileScoringOpen && (
+        <MobileScoringPopup
+          onClose={() => setMobileScoringOpen(false)}
+          myTeamId={myTeamId}
+          week={week}
+          matchups={allMatchups}
+        />
+      )}
+    </div>
+  );
+}
+
+function MobileScoringPopup({ onClose, myTeamId, week, matchups }) {
+  function computeTeamScore(teamId) {
+    const roster   = TEAM_ROSTERS[teamId] || [];
+    const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
+    return starters.reduce((total, r) => {
+      const p = findPlayer(r.playerId);
+      return total + (p ? (p.proj || p.avg || 0) : 0);
+    }, 0);
+  }
+
+  const TeamRow = ({ team, teamId, score, winning }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <span style={{
+        width: 44, height: 44, borderRadius: 10,
+        background: team?.color || '#555',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 18, fontWeight: 900, color: '#fff', flexShrink: 0,
+      }}>
+        {team?.logo || '??'}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{team?.name || 'Team'}</div>
+        {teamId === myTeamId && (
+          <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.06em' }}>YOU</span>
+        )}
+      </div>
+      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: '#4ea8ff', lineHeight: 1 }}>
+        {score.toFixed(1)}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: 18, letterSpacing: '-.01em' }}>Week {week ?? '—'} Scores</div>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>H2H Matchup Projections</div>
+        </div>
+        <button
+          onClick={onClose}
+          style={{ background: 'rgba(255,255,255,.08)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 20, cursor: 'pointer', borderRadius: '50%', width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, flexShrink: 0 }}
+        >✕</button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 32px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {matchups.length === 0 ? (
+          <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 14, marginTop: 48 }}>No matchups found for this week.</div>
+        ) : (
+          matchups.map(([aId, bId]) => {
+            const teamA = LEAGUE_TEAMS.find(t => t.id === aId);
+            const teamB = LEAGUE_TEAMS.find(t => t.id === bId);
+            const scoreA = computeTeamScore(aId);
+            const scoreB = computeTeamScore(bId);
+            const isMyMatch = aId === myTeamId || bId === myTeamId;
+            const aWinning = scoreA >= scoreB;
+            const diff = Math.abs(scoreA - scoreB);
+            return (
+              <div key={`${aId}-${bId}`} style={{
+                background: 'var(--panel)',
+                border: `1px solid ${isMyMatch ? 'rgba(198,255,58,.35)' : 'var(--border)'}`,
+                borderRadius: 14, padding: '16px 18px',
+                ...(isMyMatch ? { boxShadow: '0 0 0 1px rgba(198,255,58,.1)' } : {}),
+              }}>
+                <TeamRow team={teamA} teamId={aId} score={scoreA} winning={aWinning} />
+                <div style={{ margin: '12px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                  <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 800, color: aWinning ? 'var(--good)' : 'var(--danger)', background: aWinning ? 'rgba(76,175,130,.12)' : 'rgba(255,90,110,.12)', border: `1px solid ${aWinning ? 'rgba(76,175,130,.3)' : 'rgba(255,90,110,.3)'}`, borderRadius: 6, padding: '2px 10px' }}>
+                    {diff.toFixed(1)}
+                  </span>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                </div>
+                <TeamRow team={teamB} teamId={bId} score={scoreB} winning={!aWinning} />
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
@@ -270,8 +362,8 @@ function MatchupCard({ homeId, awayId, week, season, isLive, isFinal, expanded, 
   const homeRoster = homeId === myTeamId && myLiveRoster ? myLiveRoster : (allTeamRosters?.[homeId] || TEAM_ROSTERS[homeId] || []);
   const awayRoster = awayId === myTeamId && myLiveRoster ? myLiveRoster : (allTeamRosters?.[awayId] || TEAM_ROSTERS[awayId] || []);
 
-  const homeProj  = computeScore(homeRoster, homeId, week);
-  const awayProj  = computeScore(awayRoster, awayId, week);
+  const homeProj  = computeScore(homeRoster);
+  const awayProj  = computeScore(awayRoster);
 
   const locked = React.useMemo(() => loadLockedScores(season, week), [season, week]);
   const homeActual = locked ? getActualPtsFromLocked(locked, homeRoster) : null;
@@ -527,10 +619,10 @@ function TeamScore({ team, pts, projPts, win, side, showPts, isMe, rosterOk, rec
       </div>
       {showPts && (
         <div style={{ flexShrink: 0, textAlign: isRight ? 'left' : 'right' }}>
-          {/* ACT total — always green */}
-          <div style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', color: rosterOk ? 'var(--good)' : 'var(--danger)' }}>
-            <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>{rosterOk && hasActual ? pts.toFixed(1) : '—'}</div>
-            {win && rosterOk && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--good)', letterSpacing: '.06em', marginTop: 2 }}>WIN</div>}
+          <div style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', color: rosterOk ? (hasActual ? '#1affa0' : '#4ea8ff') : 'var(--danger)' }}>
+            <div style={{ fontSize: 36, fontWeight: 900, lineHeight: 1 }}>{rosterOk ? pts.toFixed(1) : '—'}</div>
+            {win && rosterOk && hasActual && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0', letterSpacing: '.06em', marginTop: 2 }}>WIN</div>}
+            {rosterOk && !hasActual && <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#4ea8ff', letterSpacing: '.06em', marginTop: 2 }}>PROJ</div>}
           </div>
           {/* Starters proj + bench proj */}
           {rosterOk && (

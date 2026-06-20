@@ -246,7 +246,23 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
     for (const a of dbArticles)         { const k = artKey(a); if (k && a.headline) byKey.set(k, a); }
     // Unified pipeline output wins — preserves ai_generated_at, enriched_at, fantasy_insight
     for (const a of r2Articles)         { const k = artKey(a); if (k && a.headline) byKey.set(k, a); }
-    return [...byKey.values()].sort((a, b) => {
+
+    // Name-lookup pass: fill position/team for articles where it's still blank
+    const byNameMap = new Map();
+    getPlayers().forEach(p => { if (p.name) byNameMap.set(p.name.toLowerCase(), p); });
+    const enriched = [...byKey.values()].map(a => {
+      if (a.position && a.team) return a;
+      const key = (a.player_name || '').toLowerCase().trim();
+      const pl  = key ? byNameMap.get(key) : null;
+      if (!pl) return a;
+      return {
+        ...a,
+        position: a.position || pl.pos  || '',
+        team:     a.team     || pl.team || '',
+      };
+    });
+
+    return enriched.sort((a, b) => {
       const ta = a.published_at ? new Date(a.published_at).getTime() : 0;
       const tb = b.published_at ? new Date(b.published_at).getTime() : 0;
       return tb - ta;
@@ -359,6 +375,9 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
       items.push({
         id:          `ai-sum-${s.summary_id || player.id}-${s.generated_at}`,
         playerId:    player.id,
+        playerName:  player.name,
+        position:    player.pos  || '',
+        team:        player.team || '',
         type:        s.impact_category === 'injury' ? 'injury' : 'analysis',
         impact,
         mins:        0,
@@ -1340,8 +1359,14 @@ function AiSummariesTab({ data, pos = 'ALL', search = '', fantasyRosterNames = n
                 {players.length > 0 && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                     {players.map((p, j) => {
-                      const name = typeof p === 'string' ? p : (p?.player_name || p?.name || JSON.stringify(p));
-                      return <span key={j} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', background: 'rgba(78,168,255,.1)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 4, padding: '1px 7px', color: '#4ea8ff' }}>{name}</span>;
+                      const name = typeof p === 'string' ? p : (p?.player_name || p?.name || '');
+                      const pl   = name ? findPlayerByName(name) : null;
+                      return (
+                        <span key={j} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontFamily: 'var(--font-mono)', background: 'rgba(78,168,255,.1)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 4, padding: '2px 7px', color: '#4ea8ff' }}>
+                          {pl?.pos && <PosBadge pos={pl.pos} />}
+                          {name || JSON.stringify(p)}
+                        </span>
+                      );
                     })}
                   </div>
                 )}
