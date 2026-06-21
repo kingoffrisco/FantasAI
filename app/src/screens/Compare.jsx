@@ -20,6 +20,7 @@ export default function CompareScreen() {
   const players = usePlayers();
   const [count, setCount] = React.useState(2);
   const [playerIds, setPlayerIds] = React.useState([50, 54, 22, 1, 80]);
+  const [posFilters, setPosFilters] = React.useState(['ALL', 'ALL', 'ALL', 'ALL', 'ALL']);
   const [aiLoading, setAiLoading] = React.useState(false);
   const [aiVerdict, setAiVerdict] = React.useState(null);
   const [aiError, setAiError] = React.useState(null);
@@ -100,14 +101,31 @@ export default function CompareScreen() {
           return (
             <div key={idx} className="muted-card" style={{ padding: 0 }}>
               <div style={{ padding: 14, borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                  {['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(pos => (
+                    <button
+                      key={pos}
+                      onClick={() => setPosFilters(prev => { const next = [...prev]; next[idx] = pos; return next; })}
+                      style={{
+                        padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: posFilters[idx] === pos ? 700 : 500,
+                        cursor: 'pointer', border: 'none',
+                        background: posFilters[idx] === pos ? 'var(--accent)' : 'var(--panel)',
+                        color: posFilters[idx] === pos ? 'var(--accent-ink)' : 'var(--text-dim)',
+                      }}
+                    >{pos}</button>
+                  ))}
+                </div>
                 <select
                   className="input"
                   value={playerIds[idx] ?? ''}
                   onChange={e => setPlayerId(idx, parseInt(e.target.value))}
                   style={{ width: '100%', marginBottom: 10, fontSize: 12 }}
                 >
-                  {[...players].sort((a, b) => (a.pos === 'DST') - (b.pos === 'DST') || a.name.localeCompare(b.name)).map(pl => (
-                    <option key={pl.id} value={pl.id}>{pl.name} ({pl.pos} · {pl.team})</option>
+                  {[...players]
+                    .filter(pl => posFilters[idx] === 'ALL' || pl.pos === posFilters[idx])
+                    .sort((a, b) => (Math.min(a.ecr || 999, a.adp || 999)) - (Math.min(b.ecr || 999, b.adp || 999)))
+                    .map(pl => (
+                      <option key={pl.id} value={pl.id}>#{Math.min(pl.ecr || 999, pl.adp || 999)} {pl.name} ({pl.pos} · {pl.team})</option>
                   ))}
                 </select>
                 {p && (

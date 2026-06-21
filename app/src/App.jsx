@@ -34,7 +34,7 @@ import DraftRecapScreen from './screens/DraftRecap.jsx';
 
 // DST positional rank (1-32) → overall draft rank (~120-244).
 // Keeps defenses in the correct draft range instead of competing with top picks.
-const dstOverallRank = (posRank) => 120 + (posRank - 1) * 4;
+const dstOverallRank = (posRank) => 150 + (posRank - 1) * 3;
 
 // ── Live Score Ticker ─────────────────────────────────────────────────────────
 const TICKER_SEASON_START = new Date('2026-09-09');
@@ -749,7 +749,13 @@ export default function App() {
           const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
           if (cached?.updates?.length && Date.now() - cached.at < CACHE_TTL) {
             const m = new Map(cached.updates);
-            patchPlayers(p => m.has(p.id) ? { ...p, proj: m.get(p.id) } : p);
+            patchPlayers(p => {
+              const sleeperProj = m.get(p.id);
+              if (sleeperProj == null) return p;
+              const baseline = Math.max(p.proj || 0, p.avg || 0, p.last || 0);
+              if (baseline > 2 && sleeperProj < baseline * 0.25) return p;
+              return { ...p, proj: sleeperProj };
+            });
           }
         } catch {}
 
@@ -757,9 +763,17 @@ export default function App() {
         fetchBulkProjections(getPlayers()).then(updates => {
           if (!updates.length) return;
           const m = new Map(updates);
-          patchPlayers(p => m.has(p.id) ? { ...p, proj: m.get(p.id) } : p);
+          const accepted = [];
+          patchPlayers(p => {
+            const sleeperProj = m.get(p.id);
+            if (sleeperProj == null) return p;
+            const baseline = Math.max(p.proj || 0, p.avg || 0, p.last || 0);
+            if (baseline > 2 && sleeperProj < baseline * 0.25) return p;
+            accepted.push([p.id, sleeperProj]);
+            return { ...p, proj: sleeperProj };
+          });
           try {
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), updates }));
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), updates: accepted }));
           } catch {}
         }).catch(() => {});
       })
@@ -878,10 +892,12 @@ export default function App() {
       if (cleanArr.length > 0) {
         const rankByTeam = {};
         // gold_adp_defense has adp_rank pre-computed; fall back to array position if missing
+        const DST_PATCH_MAP = { 'Arizona Cardinals':'ARI','Atlanta Falcons':'ATL','Baltimore Ravens':'BAL','Buffalo Bills':'BUF','Carolina Panthers':'CAR','Chicago Bears':'CHI','Cincinnati Bengals':'CIN','Cleveland Browns':'CLE','Dallas Cowboys':'DAL','Denver Broncos':'DEN','Detroit Lions':'DET','Green Bay Packers':'GB','Houston Texans':'HOU','Indianapolis Colts':'IND','Jacksonville Jaguars':'JAX','Kansas City Chiefs':'KC','Las Vegas Raiders':'LV','Los Angeles Chargers':'LAC','Los Angeles Rams':'LAR','Miami Dolphins':'MIA','Minnesota Vikings':'MIN','New England Patriots':'NE','New Orleans Saints':'NO','New York Giants':'NYG','New York Jets':'NYJ','Philadelphia Eagles':'PHI','Pittsburgh Steelers':'PIT','San Francisco 49ers':'SF','Seattle Seahawks':'SEA','Tampa Bay Buccaneers':'TB','Tennessee Titans':'TEN','Washington Commanders':'WAS' };
         const sorted = [...cleanArr].sort((a, b) => (a.adp_rank || 999) - (b.adp_rank || 999));
         sorted.forEach((row, i) => {
           const posRank = row.adp_rank || (i + 1);
-          if (row.team) rankByTeam[row.team.toUpperCase()] = dstOverallRank(posRank);
+          const teamAbbr = (row.team && row.team.trim()) || DST_PATCH_MAP[row.player_name] || '';
+          if (teamAbbr) rankByTeam[teamAbbr.toUpperCase()] = dstOverallRank(posRank);
         });
         patchPlayers(p => {
           if (p.pos !== 'DST') return p;

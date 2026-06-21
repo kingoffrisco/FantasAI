@@ -3,6 +3,7 @@ import { CBS_RANKINGS } from '../lib/data.js';
 import { getPlayers, findPlayer } from '../lib/playerStore.js';
 import { PosBadge, PlayerCell, TeamLogoBadge } from './ui.jsx';
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
+import { api } from '../api.js';
 
 export function CBSConnectModal({ onClose, onConnected, mode }) {
   const [step, setStep] = React.useState(mode === 'resync' ? 4 : 1);
@@ -233,54 +234,91 @@ export function CBSConnectModal({ onClose, onConnected, mode }) {
 export function CBSRankingsScreen({ onOpenPlayer }) {
   const [pos, setPos] = React.useState('ALL');
   const [search, setSearch] = React.useState('');
-  const [compare, setCompare] = React.useState(true);
+  const [format, setFormat] = React.useState('PPR');
+  const [sortCol, setSortCol] = React.useState('rank');
+  const [sortDir, setSortDir] = React.useState('asc');
+  const [fpRanks, setFpRanks] = React.useState({ PPR: null, Standard: null });
+  const [fpLoading, setFpLoading] = React.useState(false);
 
-  let rows = CBS_RANKINGS.slice();
-  if (pos !== 'ALL') rows = rows.filter(r => findPlayer(r.playerId)?.pos === pos);
-  if (search) rows = rows.filter(r => findPlayer(r.playerId)?.name.toLowerCase().includes(search.toLowerCase()));
+  React.useEffect(() => {
+    if (fpRanks[format]) return;
+    setFpLoading(true);
+    const fetcher = format === 'Standard' ? api.r2.ecrStandard : api.r2.ecrPPR;
+    fetcher().then(raw => {
+      const arr = Array.isArray(raw) ? raw : Array.isArray(raw?.players) ? raw.players : [];
+      const byName = new Map();
+      for (const r of arr) {
+        const name = (r.player_name || r.full_name || r.name || '').toLowerCase().trim();
+        const ecr = r.ecr_rank ?? r.ecr_avg ?? r.rank;
+        if (name && ecr != null) byName.set(name, Math.round(Number(ecr)));
+      }
+      setFpRanks(prev => ({ ...prev, [format]: byName }));
+    }).catch(() => {}).finally(() => setFpLoading(false));
+  }, [format]);
 
-  const disagreements = CBS_RANKINGS
-    .filter(r => Math.abs(r.ecrDelta) > 10 && r.cbsRank <= 80)
-    .sort((a, b) => Math.abs(b.ecrDelta) - Math.abs(a.ecrDelta))
-    .slice(0, 4);
+  const allPlayers = getPlayers();
+  const fpMap = fpRanks[format];
+
+  const ranked = React.useMemo(() => {
+    const list = allPlayers
+      .filter(p => ['QB','RB','WR','TE','K','DST'].includes(p.pos))
+      .map(p => {
+        const fpEcr = fpMap?.get(p.name?.toLowerCase().trim()) ?? null;
+        const ecr = fpEcr ?? (p.ecr < 999 ? p.ecr : null);
+        return ecr != null ? { ...p, fpEcr: ecr } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.fpEcr - b.fpEcr);
+    return list;
+  }, [allPlayers, fpMap]);
+
+  const rows = ranked.map((p, i) => ({
+    playerId: p.id,
+    rank: i + 1,
+    fpEcr: p.fpEcr,
+    tier: p.tier || Math.ceil((i + 1) / 50),
+  }));
+
+  let filtered = rows.slice();
+  if (pos !== 'ALL') filtered = filtered.filter(r => findPlayer(r.playerId)?.pos === pos);
+  if (search) filtered = filtered.filter(r => findPlayer(r.playerId)?.name.toLowerCase().includes(search.toLowerCase()));
+
+  const sortFn = (a, b) => {
+    const pa = findPlayer(a.playerId);
+    const pb = findPlayer(b.playerId);
+    let av, bv;
+    if (sortCol === 'rank') { av = a.rank; bv = b.rank; }
+    else if (sortCol === 'name') { av = pa?.name || ''; bv = pb?.name || ''; return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av); }
+    else if (sortCol === 'proj') { av = pa?.proj || 0; bv = pb?.proj || 0; }
+    else if (sortCol === 'avg') { av = pa?.avg || 0; bv = pb?.avg || 0; }
+    else if (sortCol === 'ecr') { av = pa?.ecr || 999; bv = pb?.ecr || 999; }
+    else if (sortCol === 'adp') { av = pa?.adp || 999; bv = pb?.adp || 999; }
+    else if (sortCol === 'tier') { av = a.tier; bv = b.tier; }
+    else { av = a.rank; bv = b.rank; }
+    return sortDir === 'asc' ? av - bv : bv - av;
+  };
+  filtered.sort(sortFn);
+
+  function handleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir(col === 'name' ? 'asc' : 'asc'); }
+  }
+
+  const thStyle = (col) => ({
+    cursor: 'pointer', userSelect: 'none',
+    color: sortCol === col ? 'var(--accent)' : undefined,
+    fontWeight: sortCol === col ? 800 : undefined,
+  });
+  const arrow = (col) => sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
   return (
     <div className="col" style={{ height: '100%', overflow: 'auto' }}>
       <div className="page-head">
         <div className="flex gap-12" style={{ alignItems: 'center' }}>
-          <div className="src-platform-tag" style={{ background: '#0d4ea2', width: 44, height: 44, fontSize: 13 }}>CBS</div>
+          <div className="src-platform-tag" style={{ background: '#ee4c2e', width: 44, height: 44, fontSize: 11 }}>FP</div>
           <div>
-            <h1>CBS Sports Rankings</h1>
-            <div className="sub">432 players · 8 tier breaks · pulled from atotauleague.football.cbssports.com · synced 2 min ago</div>
-          </div>
-        </div>
-        <div className="flex gap-8">
-          <button className="btn ghost">↻ Resync</button>
-          <button className="btn ghost">⇣ Export</button>
-        </div>
-      </div>
-
-      <div style={{ padding: '0 24px 16px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr) 2fr', gap: 12 }}>
-        <div className="stat"><div className="k">Players Ranked</div><div className="v">432</div><div className="sub">all positions · pre + post-bye</div></div>
-        <div className="stat"><div className="k">Tier Breaks</div><div className="v">8</div><div className="sub">CBS analyst pool</div></div>
-        <div className="stat"><div className="k">Vs ECR Δ ≥ 10</div><div className="v" style={{ color: 'var(--warn)' }}>{disagreements.length}+</div><div className="sub">disagreements w/ consensus</div></div>
-        <div className="stat"><div className="k">Last Update</div><div className="v" style={{ fontSize: 18 }}>2m ago</div><div className="sub mono">auto · every 5 min</div></div>
-        <div className="muted-card" style={{ padding: 12, borderLeft: '3px solid var(--accent-2)' }}>
-          <div className="card-mini-label" style={{ color: 'var(--accent-2)', marginBottom: 6 }}>◆ BIGGEST CBS VS CONSENSUS GAPS</div>
-          <div className="cbs-gaps">
-            {disagreements.map(d => {
-              const p = findPlayer(d.playerId);
-              if (!p) return null;
-              return (
-                <div key={d.playerId} className="cbs-gap" onClick={() => onOpenPlayer && onOpenPlayer(p.id)}>
-                  <PosBadge pos={p.pos} />
-                  <span className="nm">{p.name.split(' ').slice(-1)[0]}</span>
-                  <span className={`delta mono ${d.ecrDelta > 0 ? 'up' : 'down'}`}>
-                    {d.ecrDelta > 0 ? '▲' : '▼'} {Math.abs(d.ecrDelta)}
-                  </span>
-                </div>
-              );
-            })}
+            <h1>FantasyPros Draft Rankings</h1>
+            <div className="sub">{rows.length} players ranked · {format} scoring · {fpLoading ? 'Loading...' : fpMap ? `FantasyPros ${format} ECR` : 'Player store ECR'}</div>
           </div>
         </div>
       </div>
@@ -291,61 +329,52 @@ export function CBSRankingsScreen({ onOpenPlayer }) {
             <div key={p} className={`chip ${pos === p ? 'accent active' : ''}`} onClick={() => setPos(p)}>{p}</div>
           ))}
         </div>
-        <input className="input search" placeholder="Filter by name" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 240 }} />
-        <div className="grow"></div>
-        <label className="cbs-toggle-inline">
-          <input type="checkbox" checked={compare} onChange={() => setCompare(!compare)} />
-          <span>Compare vs FantasyPros ECR</span>
-        </label>
+        <div style={{ display: 'flex', gap: 0, background: 'var(--panel)', borderRadius: 6, padding: 2 }}>
+          {['PPR', 'Standard'].map(f => (
+            <button key={f} onClick={() => setFormat(f)} style={{
+              padding: '5px 14px', borderRadius: 5, fontSize: 11, fontWeight: format === f ? 700 : 500,
+              cursor: 'pointer', border: 'none',
+              background: format === f ? 'var(--accent)' : 'transparent',
+              color: format === f ? 'var(--accent-ink)' : 'var(--text-dim)',
+            }}>{f}</button>
+          ))}
+        </div>
+        <input className="input search" placeholder="Search players" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 200 }} />
       </div>
 
       <div style={{ padding: '0 24px 24px' }}>
-        <table className="data-table cbs-rank-table">
+        <table className="data-table">
           <thead>
             <tr>
-              <th className="num">CBS #</th>
-              <th>Player</th>
-              <th>Tier</th>
-              <th className="num">Move</th>
-              {compare && <th className="num">FP ECR</th>}
-              {compare && <th className="num">Δ</th>}
-              <th className="num">ADP</th>
-              <th>CBS Note</th>
-              <th></th>
+              <th className="num" style={thStyle('rank')} onClick={() => handleSort('rank')}>Rank{arrow('rank')}</th>
+              <th style={thStyle('name')} onClick={() => handleSort('name')}>Player{arrow('name')}</th>
+              <th style={thStyle('tier')} onClick={() => handleSort('tier')}>Tier{arrow('tier')}</th>
+              <th className="num" style={thStyle('proj')} onClick={() => handleSort('proj')}>Proj{arrow('proj')}</th>
+              <th className="num" style={thStyle('avg')} onClick={() => handleSort('avg')}>Avg{arrow('avg')}</th>
+              <th className="num" style={thStyle('ecr')} onClick={() => handleSort('ecr')}>ECR{arrow('ecr')}</th>
+              <th className="num" style={thStyle('adp')} onClick={() => handleSort('adp')}>ADP{arrow('adp')}</th>
             </tr>
           </thead>
           <tbody>
-            {rows.slice(0, 80).map(r => {
+            {filtered.slice(0, 300).map(r => {
               const p = findPlayer(r.playerId);
               if (!p) return null;
-              const tierColor = `hsl(${200 + r.cbsTier * 18}, 60%, 60%)`;
+              const tierColor = `hsl(${200 + (r.tier || 1) * 18}, 60%, 60%)`;
               return (
                 <tr key={r.playerId} onClick={() => onOpenPlayer && onOpenPlayer(p.id)} style={{ cursor: 'pointer' }}>
                   <td className="num">
-                    <strong style={{ fontSize: 14, fontFamily: 'var(--font-display)', fontStretch: '75%' }}>{r.cbsRank}</strong>
+                    <strong style={{ fontSize: 14, fontFamily: 'var(--font-display)', fontStretch: '75%' }}>{r.rank}</strong>
                   </td>
                   <td><PlayerCell player={p} /></td>
                   <td>
                     <span className="tier-pill" style={{ background: `${tierColor}22`, color: tierColor, borderColor: `${tierColor}66` }}>
-                      T{r.cbsTier}
+                      T{r.tier || '—'}
                     </span>
                   </td>
-                  <td className="num"><Movement value={r.movement} prev={r.prevRank} /></td>
-                  {compare && <td className="num faint">{p.ecr}</td>}
-                  {compare && (
-                    <td className="num">
-                      {Math.abs(r.ecrDelta) > 0 && (
-                        <span className={`delta-cell mono ${r.ecrDelta > 0 ? 'up' : 'down'}`}>
-                          {r.ecrDelta > 0 ? '+' : ''}{r.ecrDelta}
-                        </span>
-                      )}
-                    </td>
-                  )}
-                  <td className="num faint">{p.adp.toFixed(1)}</td>
-                  <td className="dim" style={{ fontSize: 11, maxWidth: 220 }}>{r.cbsNotes}</td>
-                  <td>
-                    <button className="btn sm icon" title="Watch" onClick={e => e.stopPropagation()}>★</button>
-                  </td>
+                  <td className="num" style={{ color: '#4ea8ff', fontWeight: 600 }}>{p.proj > 0 ? p.proj.toFixed(1) : '—'}</td>
+                  <td className="num">{p.avg > 0 ? p.avg.toFixed(1) : '—'}</td>
+                  <td className="num faint">{r.fpEcr ?? (p.ecr < 999 ? p.ecr : '—')}</td>
+                  <td className="num faint">{p.adp < 999 ? p.adp.toFixed(1) : '—'}</td>
                 </tr>
               );
             })}
@@ -774,7 +803,7 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
         <div className="flex gap-8">
           <button className="btn ghost" onClick={() => { setImportInitialTab('url'); setShowImport(true); }}>🌐 Scrape Rankings</button>
           <button className="btn ghost" onClick={() => { setImportInitialTab('file'); setShowImport(true); }}>↑ Import Rankings</button>
-          <button className={`btn ${tab === 'cbs' ? 'primary' : 'ghost'}`} onClick={() => setTab('cbs')}>▦ CBS</button>
+          <button className={`btn ${tab === 'cbs' ? 'primary' : 'ghost'}`} onClick={() => setTab('cbs')}>▦ FantasyPros ECR</button>
           {savedRankings.map(r => (
             <div key={r.id} style={{ display: 'flex', alignItems: 'center' }}>
               <button

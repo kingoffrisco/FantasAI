@@ -199,22 +199,39 @@ function fmtWaiverDate(d) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' · 11:59 PM ET';
 }
 
-function WeatherBadge({ opp }) {
+function WeatherBadge({ team, opp, scheduleOppMap }) {
   const { data: r2Weather } = useR2WeatherForecast();
-  const entry = r2Weather?.teams?.[opp?.toUpperCase()];
+  if (!r2Weather?.teams) return null;
+  const schedOpp = scheduleOppMap?.get(team) || opp || '';
+  const isAway = schedOpp.startsWith('@');
+  const oppClean = schedOpp.replace(/^@/, '').toUpperCase();
+  const homeTeam = isAway ? oppClean : (team || '').toUpperCase();
+  if (!homeTeam) return null;
+  const entry = r2Weather.teams[homeTeam];
   if (!entry) return null;
-  if (entry.is_dome) return <div style={{ fontSize: 10, color: '#1affa0', marginTop: 2 }}>🏟️ Dome</div>;
-  if (!entry.forecast?.length) return null;
+  if (entry.is_dome) return <div style={{ fontSize: 10, color: '#1affa0' }}>🏟️ Dome</div>;
+  if (!entry.forecast?.length) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
   const day = entry.forecast[0];
   const hour = day?.hourly?.find(h => h.time === '1300') || day?.hourly?.[0];
-  if (!hour) return null;
+  if (!hour) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
   const temp = Math.round(hour.temp_f || day.max_temp_f || 0);
   const wind = Math.round(hour.wind_mph || 0);
-  const isAlert = wind >= 15 || temp <= 32;
-  const icon = wind >= 20 ? '🌬️' : temp <= 32 ? '❄️' : temp >= 80 ? '☀️' : '⛅';
+  const gust = Math.round(hour.wind_gust_mph || hour.gust_mph || 0);
+  const precip = hour.precip_in || 0;
+  const cond = (hour.condition || '').toLowerCase();
+  const isSnow = cond.includes('snow') || cond.includes('blizzard');
+  const isRain = precip > 0.05 || cond.includes('rain') || cond.includes('drizzle');
+  const windColor = wind >= 20 ? 'var(--danger)' : wind >= 15 ? '#ff9800' : wind >= 10 ? '#ffd700' : 'var(--text)';
+  const tempColor = temp >= 90 ? '#ff4f4f' : temp >= 75 ? '#ff9800' : temp >= 50 ? '#1affa0' : temp >= 32 ? '#7ecff5' : '#ffffff';
   return (
-    <div style={{ fontSize: 10, marginTop: 2, color: isAlert ? 'var(--warn)' : 'var(--text-faint)' }}>
-      {icon} {temp}°F{wind > 0 ? ` · ${wind}mph` : ''}
+    <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>
+      <span style={{ fontWeight: 700, color: tempColor }}>{temp}°</span>
+      {' · '}
+      <span style={{ color: windColor }}>{wind}mph</span>
+      {isSnow && <div style={{ color: '#7ecff5', fontSize: 10 }}>❄ Snow</div>}
+      {!isSnow && isRain && <div style={{ color: '#ffd700', fontSize: 10 }}>🌧 Rain</div>}
+      {wind >= 20 && <div style={{ color: 'var(--danger)', fontSize: 10, fontWeight: 700 }}>⚠ Wind</div>}
+      {gust >= 20 && <div style={{ color: 'var(--danger)', fontSize: 10 }}>💨 {gust}mph</div>}
     </div>
   );
 }
@@ -1417,7 +1434,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                         {p.benchPress != null ? p.benchPress : <span className="faint">—</span>}
                       </td>
                     );
-                    if (col.id === 'weather') return <td key="weather"><WeatherBadge opp={p.opp} /></td>;
+                    if (col.id === 'weather') return <td key="weather"><WeatherBadge team={p.team} opp={p.opp} scheduleOppMap={scheduleOppMap} /></td>;
                       return null;
                     })();
                     if (!cell) return cell;

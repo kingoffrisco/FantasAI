@@ -178,8 +178,12 @@ export function normalizePlayerList(rawArr) {
     const projRaw    = Number(p.proj) || Number(p.projected_avg_points)
                     || Number(p.season_avg_points_2025) || Number(p.career_ppg) || 0;
     // ECR: use positionRank → p.ecr → 999. Never use search_rank (Sleeper popularity index, not a rank).
-    const posRank    = Number(p.positionRank || p.position_rank) || null;
+    let posRank    = Number(p.positionRank || p.position_rank) || null;
     const searchRank = Number(p.ecr) || null;
+    // DST positionRank is positional (1-32) — convert to overall
+    if (pos === 'DST' && posRank && posRank <= 32) {
+      posRank = 150 + (posRank - 1) * 3;
+    }
     const ecr        = posRank ?? searchRank ?? 999;
     // Accept any ADP field name used across our data sources:
     //   adp           — legacy/Sleeper field
@@ -187,8 +191,12 @@ export function normalizePlayerList(rawArr) {
     //   adp_rank_ppr  — integer rank from same tables
     //   adp_value     — adp_ppr.json / adp_standard.json dedicated files
     //   adp_rank      — integer rank from same files
-    const adpRaw = Number(p.adp) || Number(p.adp_ppr) || Number(p.adp_rank_ppr)
+    let adpRaw = Number(p.adp) || Number(p.adp_ppr) || Number(p.adp_rank_ppr)
                  || Number(p.adp_value) || Number(p.adp_rank) || 0;
+    // DST adp_rank is positional (1-32) — convert to overall draft position
+    if (pos === 'DST' && adpRaw > 0 && adpRaw <= 32) {
+      adpRaw = 150 + (adpRaw - 1) * 3;
+    }
     // search_rank is Sleeper's popularity rank, NOT a draft position — never use it as ADP
     const adp    = adpRaw || 999;
     const searchRk   = Number(p.search_rank) || 0;

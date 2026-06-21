@@ -7,6 +7,8 @@ import { useR2BreakoutCandidates } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 
+const dstOverallRank = (posRank) => 150 + (posRank - 1) * 3;
+
 // ── Next Gen stat definitions per position ────────────────────────────────
 const NG_STATS = {
   QB: [
@@ -445,20 +447,26 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   }
 
   // Returns sort rank for a player under the active ranking source
+  // DSTs always use their overall ADP as a floor — never rank above it
   function getRank(p) {
-    if (rankSource === 'fantasai') return fantasaiRankMap.get(p.id) ?? 9999;
-    if (rankSource === 'cbs' && cbsRanks) {
+    const dstFloor = p.pos === 'DST' ? (p.adp || 999) : 0;
+    let rank;
+    if (rankSource === 'fantasai') {
+      rank = fantasaiRankMap.get(p.id) ?? 9999;
+    } else if (rankSource === 'cbs' && cbsRanks) {
       const n = p.name?.toLowerCase();
       const r = cbsRanks.find(x => x.name?.toLowerCase() === n && x.pos === p.pos);
-      return r ? r.rank : 9999;
-    }
-    if (rankSource === 'fp' && fpRanks) {
+      rank = r ? r.rank : 9999;
+    } else if (rankSource === 'fp' && fpRanks) {
       const n = p.name?.toLowerCase();
       const r = fpRanks.find(x => x.player_name?.toLowerCase() === n);
-      return r ? (r.rank_ecr ?? r.rank_avg ?? 9999) : 9999;
+      rank = r ? (r.rank_ecr ?? r.rank_avg ?? 9999) : 9999;
+    } else if (rankSource === 'owner') {
+      rank = ownerRanks[p.id] ?? 9999;
+    } else {
+      rank = p.ecr ?? 9999;
     }
-    if (rankSource === 'owner') return ownerRanks[p.id] ?? 9999;
-    return p.ecr ?? 9999; // sleeper ADP
+    return Math.max(rank, dstFloor);
   }
 
   function logCommish(type, message) {
@@ -667,10 +675,15 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     }
   }
 
+  function getAdp(p) {
+    const raw = p.adp ?? 9999;
+    if (p.pos === 'DST') return Math.max(raw, dstOverallRank(1));
+    return raw;
+  }
   const boardSortFn = (a, b) => {
     let av, bv;
     if (boardSortCol === 'tier') { av = a.tier ?? 99; bv = b.tier ?? 99; }
-    else if (boardSortCol === 'adp') { av = a.adp ?? 9999; bv = b.adp ?? 9999; }
+    else if (boardSortCol === 'adp') { av = getAdp(a); bv = getAdp(b); }
     else { av = getRank(a); bv = getRank(b); }
     return boardSortDir === 'asc' ? av - bv : bv - av;
   };
@@ -1872,7 +1885,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                         </div>
                       </td>
                       <td className="tier" style={{ color: 'var(--text-faint)' }}>T{p.tier}</td>
-                      <td className="num faint" style={{ fontSize: 11 }}>{p.adp != null ? p.adp.toFixed(1) : '—'}</td>
+                      <td className="num faint" style={{ fontSize: 11 }}>{p.adp != null ? getAdp(p).toFixed(1) : '—'}</td>
                       {activeNgCols.map(s => (
                         <td key={s.id} className="num" style={{ fontSize: 10, color: 'var(--text-faint)', opacity: 0.5 }}>
                           {fmtNg(getNgVal(p, s.id, breakoutByName), s.id)}
