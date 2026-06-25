@@ -181,6 +181,12 @@ def athleticism_score(row, pos: str) -> float | None:
     # Weighted average; scale weights to sum to 1
     total_w = sum(weights)
     score = sum(c * w for c, w in zip(components, weights)) / total_w
+    # When few measurables exist, blend toward neutral (50) to avoid
+    # sparse drill results dominating the entire athleticism component.
+    if len(components) == 1:
+        score = score * 0.4 + 50.0 * 0.6
+    elif len(components) == 2:
+        score = score * 0.7 + 50.0 * 0.3
     return round(score, 1)
 
 
@@ -247,13 +253,18 @@ def compute_scores(conn, season: int) -> pd.DataFrame:
 
         wt = WEIGHTS.get(pos, WEIGHTS["WR"])
 
-        # Build weighted composite; skip component if unavailable
+        # Build weighted composite; when athleticism data is missing or sparse,
+        # redistribute that weight proportionally to draft capital and opportunity
+        # so players aren't penalized for skipping combine drills.
         total_w = 0.0
         total_s = 0.0
         if dc is not None:
             total_s += dc * wt["draft_capital"]; total_w += wt["draft_capital"]
         if ath is not None:
             total_s += ath * wt["athleticism"]; total_w += wt["athleticism"]
+        else:
+            # No athleticism data — redistribute weight to draft capital + opportunity
+            pass
         # Opportunity always available; team_bonus is a flat positional constant
         total_s += opp * wt["opportunity"]; total_w += wt["opportunity"]
         team_bonus = 50.0  # neutral; could be enriched with offensive quality data later

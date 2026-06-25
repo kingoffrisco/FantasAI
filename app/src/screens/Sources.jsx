@@ -38,7 +38,7 @@ export function DataSourceDebugger() {
   });
   const [search, setSearch] = React.useState('Geno Smith');
   const [apiKey, setApiKey] = React.useState(() => {
-    try { return localStorage.getItem(KEY_STORAGE) || ''; } catch { return ''; }
+    try { return localStorage.getItem(KEY_STORAGE) || 'fantasai2026'; } catch { return 'fantasai2026'; }
   });
   const [results, setResults] = React.useState({});
   const [scanning, setScanning] = React.useState(false);
@@ -496,34 +496,48 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
 
         {(cookieAlert || cookieFixed) && (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 12,
             background: cookieFixed ? 'rgba(76,175,130,.1)' : 'rgba(255,77,79,.08)',
             border: `1px solid ${cookieFixed ? 'rgba(76,175,130,.4)' : 'rgba(255,77,79,.35)'}`,
-            borderRadius: 8, padding: '10px 16px', marginBottom: 12,
+            borderRadius: 10, padding: '16px 18px', marginBottom: 14,
             transition: 'background .5s, border-color .5s',
           }}>
-            <span style={{ fontSize: 18, flexShrink: 0 }}>{cookieFixed ? '✓' : '⚠'}</span>
-            <div style={{ flex: 1 }}>
-              {cookieFixed ? (
-                <>
-                  <span style={{ fontWeight: 800, fontSize: 13, color: '#4caf82' }}>Cookie Updated</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-dim)', marginLeft: 8 }}>CBS Sports is now connected. Syncing roster data…</span>
-                </>
-              ) : (
-                <>
-                  <span style={{ fontWeight: 800, fontSize: 13, color: 'var(--danger)' }}>CBS Cookie Expired</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-dim)', marginLeft: 8 }}>Your session has expired — rosters and scoring won't sync.</span>
-                </>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: cookieFixed ? 0 : 12 }}>
+              <span style={{ fontSize: 22, flexShrink: 0 }}>{cookieFixed ? '✓' : '⚠'}</span>
+              <div style={{ flex: 1 }}>
+                {cookieFixed ? (
+                  <>
+                    <span style={{ fontWeight: 800, fontSize: 14, color: '#4caf82' }}>Cookie Updated</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-dim)', marginLeft: 8 }}>CBS Sports is now connected. Syncing roster data…</span>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--danger)' }}>CBS Cookie Expired or Not Set</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.5 }}>
+                      If you haven't logged into CBS Sports and synced this league, FantasAI cannot pull CBS data (rosters, scoring, draft history, or expert rankings).
+                    </div>
+                  </>
+                )}
+              </div>
+              {!cookieFixed && (
+                <button
+                  className="btn sm"
+                  style={{ flexShrink: 0, fontWeight: 700, background: 'rgba(255,77,79,.15)', borderColor: 'rgba(255,77,79,.4)', color: 'var(--danger)', padding: '8px 14px' }}
+                  onClick={() => setOpenCookieTrigger(t => t + 1)}
+                >
+                  🍪 Get Cookie
+                </button>
               )}
             </div>
             {!cookieFixed && (
-              <button
-                className="btn sm"
-                style={{ flexShrink: 0, fontWeight: 700, background: 'rgba(255,77,79,.15)', borderColor: 'rgba(255,77,79,.4)', color: 'var(--danger)' }}
-                onClick={() => setOpenCookieTrigger(t => t + 1)}
-              >
-                🍪 Get Cookie
-              </button>
+              <div style={{ background: 'rgba(0,0,0,.2)', borderRadius: 8, padding: '12px 14px', marginTop: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>How to fix:</div>
+                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.8 }}>
+                  <li>Click the <strong style={{ color: 'var(--danger)' }}>Get Cookie</strong> button above</li>
+                  <li>In the popup, click <strong>Open CBS Sports Side by Side</strong></li>
+                  <li>Log in to the CBS Sports window that popped up</li>
+                  <li>Follow the instructions on the right to find, copy, paste, and test your new Cookie</li>
+                </ol>
+              </div>
             )}
           </div>
         )}
@@ -622,7 +636,7 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
           </div>
         </div>
 
-        <WorkerConfig openCookieTrigger={openCookieTrigger} onCookieSaved={handleCookieSaved} />
+        <WorkerConfig openCookieTrigger={openCookieTrigger} onCookieSaved={handleCookieSaved} adminOnly={!user?.isAdmin} />
 
         <div className="src-other-grid">
           {INTEGRATIONS.filter(i => i.id !== 'cbs').map(i => {
@@ -970,9 +984,15 @@ function FreeApiSources({ freeApis = {}, onToggle }) {
       <div className="section-head" style={{ marginTop: 32 }}>
         <div>
           <div className="section-title">Free Data APIs</div>
-          <div className="section-sub">No-cost public APIs that augment rankings, ADP, and stats. Toggle to enable each source.</div>
+          <div className="section-sub">No-cost public APIs that augment rankings, ADP, and stats. All sources are active by default.</div>
         </div>
         <span className="faint mono" style={{ fontSize: 11 }}>ranked by community quality</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(78,168,255,.08)', border: '1px solid rgba(78,168,255,.25)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+        <span style={{ fontSize: 16, flexShrink: 0 }}>💡</span>
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+          <strong style={{ color: 'var(--text)' }}>Speed up page loading</strong> - turn off any sources you don't need. Fewer active sources means faster load times across all pages.
+        </div>
       </div>
 
       <div className="src-feeds">

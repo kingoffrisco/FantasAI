@@ -304,6 +304,16 @@ def export_news(conn, dry_run: bool):
 def export_analysis(conn, dry_run: bool):
     print("\n── Analysis Exports ──────────────────────────────────────────────────")
 
+    # 0. College stats (CFBD) — for rookie profiles in draft room
+    has_cfbd = conn.execute(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'bronze_cfbd_player_stats'"
+    ).fetchone()[0] > 0
+    if has_cfbd:
+        cfbd = q(conn, "SELECT * FROM bronze_cfbd_player_stats ORDER BY player_name, season")
+        r2_put("fantasai/analysis/college_stats.json", cfbd, dry_run)
+    else:
+        print("   ⚠️  No CFBD data — skipping college_stats export")
+
     # 1. Breakout candidates — from gold_weekly_stats (snap delta proxy)
     breakout = q(conn, """
         SELECT
@@ -527,9 +537,11 @@ def export_analysis(conn, dry_run: bool):
         LEFT JOIN snap_2025 sn ON LOWER(TRIM(p.player_name)) = sn.name_key
         LEFT JOIN combine cb ON LOWER(TRIM(p.player_name)) = cb.name_key
         WHERE p.position IN ('QB','RB','WR','TE','K')
-          AND p.team IS NOT NULL
           AND p.active = TRUE
-          AND (s.games_played_2025 > 0 OR p.depth_chart_order IS NOT NULL OR COALESCE(p.years_exp, 0) < 3)
+          AND (
+            (p.team IS NOT NULL AND (s.games_played_2025 > 0 OR p.depth_chart_order IS NOT NULL OR COALESCE(p.years_exp, 0) < 3))
+            OR s.games_played_2025 >= 5
+          )
 
         UNION ALL
 

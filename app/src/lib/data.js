@@ -1,4 +1,4 @@
-﻿// Mock data â€” converted from vanilla prototype to ES module exports
+// Mock data - converted from vanilla prototype to ES module exports
 import { getLiveTeams, getMyTeamPrefs } from './leagueStore.js';
 
 export const NFL_TEAMS = [
@@ -28,7 +28,7 @@ export const CBS_RANKINGS = [];
 // Real CBS team names (id maps directly to CBS team id; id 8 = Armed Rodgery = user's team)
 // record/pf/pa reset for 2026 season — populated from live standings once season begins
 export const LEAGUE_TEAMS = [
-  { id: 1,  cbsId: "8",  name: "Armed Rodgery",            owner: "Shane Olsen",              email: "kingoffrisco@yahoo.com",    logo: "AR", color: "#c6ff3a", record: "0-0", pf: 0, pa: 0, me: true },
+  { id: 1,  cbsId: "8",  name: "Armed Rodgery",            owner: "Shane Olsen",              email: "kingoffrisco@yahoo.com",    logo: "AR", color: "#c6ff3a", record: "0-0", pf: 0, pa: 0 },
   { id: 2,  cbsId: "1",  name: "Bourbon is a Vegetable",   owner: "Joseph Blalock",           email: "jnbii@att.net",             logo: "BV", color: "#ff5a6e", record: "0-0", pf: 0, pa: 0 },
   { id: 3,  cbsId: "2",  name: "Howdy Hut",                owner: "David Gray & Gary Remy",   email: "david@dlgog.com",           logo: "HH", color: "#4ea8ff", record: "0-0", pf: 0, pa: 0 },
   { id: 4,  cbsId: "3",  name: "Start Pulling Out",        owner: "Nathan Jekel",             email: "njekel04@yahoo.com",        logo: "SP", color: "#36d39a", record: "0-0", pf: 0, pa: 0 },
@@ -53,12 +53,13 @@ export function findTeam(id) {
     const user = JSON.parse(localStorage.getItem('fantasai_user') || 'null');
     const myPrefs = user?.teamId === id ? (getMyTeamPrefs() || {}) : {};
     const merged = { ...base, ...adminOv, ...myPrefs };
+    merged.me = user?.teamId === id;
     return merged;
   } catch {}
   return base;
 }
 
-// Rosters are populated only by the draft and subsequent waivers â€” never pre-seeded.
+// Rosters are populated only by the draft and subsequent waivers - never pre-seeded.
 export const MY_ROSTER = [];
 
 export const WATCHLIST = {
@@ -105,7 +106,7 @@ export const BEAT_WRITERS = [
   { handle: 'colton_pouncy',   name: 'Colton Pouncy',       category: 'beat', team: 'DET' },
 ];
 
-// Source metadata â€” color used for badges across News, Players, etc.
+// Source metadata - color used for badges across News, Players, etc.
 export const SOURCE_META = {
   'Rotoworld':         { color: '#ff7a3a' },
   'Adam Schefter':     { color: '#4ea8ff' },
@@ -127,12 +128,12 @@ export const QUEUE = [];
 
 export const CHAT_MESSAGES = [
   { who: "Marcus", color: "#ff5a6e", ts: "7:14", msg: "lol that pick was a reach" },
-  { who: "Tess", color: "#ffd84a", ts: "7:14", msg: "ðŸŽ¯ I had him next" },
+  { who: "Tess", color: "#ffd84a", ts: "7:14", msg: "I had him next" },
   { who: "Devon", color: "#4ea8ff", ts: "7:15", msg: "auto-draft about to make Sam look smart" },
-  { who: "Sam", color: "#ffa83a", ts: "7:15", msg: "Hey â€” I'm here. Tea, not coffee, that's the difference" },
-  { who: "FantasAI", color: "#c6ff3a", ts: "7:16", msg: "âš¡ Tier break at RB coming after this pick â€” 4 candidates left.", ai: true },
+  { who: "Sam", color: "#ffa83a", ts: "7:15", msg: "Hey - I'm here. Tea, not coffee, that's the difference" },
+  { who: "FantasAI", color: "#c6ff3a", ts: "7:16", msg: "Tier break at RB coming after this pick - 4 candidates left.", ai: true },
   { who: "Jordan", color: "#b48cff", ts: "7:16", msg: "queue is mine, AI" },
-  { who: "Priya", color: "#36d39a", ts: "7:17", msg: "armed rogery is cooking ðŸ”¥" },
+  { who: "Priya", color: "#36d39a", ts: "7:17", msg: "armed rogery is cooking" },
 ];
 
 export const INTEGRATIONS = [
@@ -160,7 +161,7 @@ export const FREE_DATA_SOURCES = [
     provides: ["NFL players & stats", "ADP (Sleeper best-ball)", "League rosters (with league ID)", "Weekly projections"],
     docUrl: "https://docs.sleeper.com",
     color: "#1c8eaf",
-    enabled: false,
+    enabled: true,
     leagueIdRequired: false,
   },
   {
@@ -169,11 +170,11 @@ export const FREE_DATA_SOURCES = [
     url: "https://fantasysports.yahooapis.com/fantasy/v2",
     rank: 2,
     auth: "oauth2",
-    authNote: "OAuth2 Â· free Yahoo Developer account",
+    authNote: "OAuth2 - free Yahoo Developer account",
     provides: ["Live scoring & rosters", "Draft results", "Waiver transactions", "Player stats & news"],
     docUrl: "https://developer.yahoo.com/fantasysports/guide",
     color: "#6e1f87",
-    enabled: false,
+    enabled: true,
     leagueIdRequired: true,
   },
   {
@@ -182,11 +183,11 @@ export const FREE_DATA_SOURCES = [
     url: "https://www.leaguelogs.com",
     rank: 3,
     auth: "account",
-    authNote: "Free account required â€” sign up at leaguelogs.com, then use your API token",
+    authNote: "Free account required - sign up at leaguelogs.com, then use your API token",
     provides: ["Historical NFL player stats", "Season-by-season fantasy scoring", "Cross-platform league history"],
     docUrl: "https://www.leaguelogs.com/resources/api",
     color: "#2a9d8f",
-    enabled: false,
+    enabled: true,
     leagueIdRequired: false,
   },
   {
@@ -195,11 +196,11 @@ export const FREE_DATA_SOURCES = [
     url: "https://github.com/nflverse/nflverse-data",
     rank: 4,
     auth: "none",
-    authNote: "No auth required â€” open GitHub data releases",
+    authNote: "No auth required - open GitHub data releases",
     provides: ["Weekly player stats (CSV)", "Rosters & depth charts", "Next-gen stats", "Play-by-play data"],
     docUrl: "https://nflverse.nflverse.com",
     color: "#1a6b3c",
-    enabled: false,
+    enabled: true,
     leagueIdRequired: false,
   },
   {
@@ -208,7 +209,7 @@ export const FREE_DATA_SOURCES = [
     url: "https://site.api.espn.com/apis/site/v2/sports/football/nfl",
     rank: 5,
     auth: "none",
-    authNote: "No auth required â€” public ESPN endpoints",
+    authNote: "No auth required - public ESPN endpoints",
     provides: ["Team rosters & schedules", "Player injury reports", "Game scores & stats", "Standings"],
     docUrl: "https://gist.github.com/nntrn/ee26cb2a0716de0947a0a4e9a157bc1c",
     color: "#d00",
@@ -221,11 +222,11 @@ export const FREE_DATA_SOURCES = [
     url: "https://twitter.com",
     rank: 7,
     auth: "none",
-    authNote: "No API key required â€” scrapes public X/Twitter posts via Nitter RSS",
+    authNote: "No API key required - scrapes public X/Twitter posts via Nitter RSS",
     provides: ["Breaking NFL transactions", "Injury reports from beat reporters", "Fantasy-focused analysis", "32 team beat writers"],
     docUrl: null,
     color: "#1da1f2",
-    enabled: false,
+    enabled: true,
     leagueIdRequired: false,
   },
   {
@@ -238,19 +239,19 @@ export const FREE_DATA_SOURCES = [
     provides: ["RotoWire player news blurbs", "Injury & practice status", "Beat writer updates"],
     docUrl: null,
     color: "#0d4ea2",
-    enabled: false,
+    enabled: true,
     leagueIdRequired: false,
   },
 ];
 
-// Limited-free APIs: free tier with API key â€” used for targeted per-roster updates
+// Limited-free APIs: free tier with API key - used for targeted per-roster updates
 export const LIMITED_FREE_SOURCES = [
   {
     id: "apifootball",
     name: "API-Football",
     url: "https://v1.american-football.api-sports.io",
     keyHeader: "x-apisports-key",
-    authNote: "100 req/day free Â· api-sports.io account",
+    authNote: "100 req/day free - api-sports.io account",
     provides: ["Live game scores", "Player game stats", "Team rosters", "Season standings"],
     docUrl: "https://www.api-football.com/documentation-american-football",
     signupUrl: "https://dashboard.api-football.com/register",
@@ -262,7 +263,7 @@ export const LIMITED_FREE_SOURCES = [
     url: "https://tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com",
     keyHeader: "x-rapidapi-key",
     keyHost: "tank01-nfl-live-in-game-real-time-statistics-nfl.p.rapidapi.com",
-    authNote: "100 req/day free Â· RapidAPI account",
+    authNote: "100 req/day free - RapidAPI account",
     provides: ["NFL fantasy news", "Player injury articles"],
     docUrl: "https://rapidapi.com/tank01/api/tank01-nfl-live-in-game-real-time-statistics-nfl",
     signupUrl: "https://rapidapi.com/auth/sign-up",
@@ -276,7 +277,7 @@ export const LIMITED_FREE_SOURCES = [
     keyHeader: null,
     keyInUrl: true,
     defaultKey: "123",
-    authNote: "Free key '123' â€” no signup needed Â· 30 free req/min",
+    authNote: "Free key '123' - no signup needed - 30 free req/min",
     provides: ["Player bios & photos", "Team info", "Event results", "Venue data"],
     docUrl: "https://www.thesportsdb.com/api.php",
     signupUrl: "https://www.thesportsdb.com/register.php",
@@ -287,7 +288,7 @@ export const LIMITED_FREE_SOURCES = [
     name: "MySportsFeeds",
     url: "https://api.mysportsfeeds.com/v2.1",
     keyHeader: "Authorization",
-    authNote: "Rookie plan free â€” 1,000 req/month for historical seasons Â· mysportsfeeds.com",
+    authNote: "Rookie plan free - 1,000 req/month for historical seasons - mysportsfeeds.com",
     provides: ["Historical game logs", "Player season stats", "Injury reports", "Season standings"],
     docUrl: "https://www.mysportsfeeds.com/data-feeds/api-docs/",
     signupUrl: "https://www.mysportsfeeds.com/",
@@ -306,7 +307,7 @@ export const RANKING_SOURCES = [
   { id: "nfl-r",     name: "NFL.com Rankings",             type: "site",      contributors: 3,   weight: 4,  enabled: false, updated: "6 hr ago",   note: "Off by default. Stale most weeks." },
   { id: "sharp",     name: "Sharp Football Analysis",      type: "site",      contributors: 2,   weight: 6,  enabled: true,  updated: "Daily",      note: "Matchup & scheme edge." },
   { id: "boris",     name: "Borischen Tiers",              type: "tiers",     contributors: 1,   weight: 6,  enabled: true,  updated: "30 min ago", note: "Tier breaks drive draft strategy." },
-  { id: "custom",    name: "Your Custom Cheat Sheet",      type: "you",       contributors: 1,   weight: 0,  enabled: false, updated: "â€”",          note: "Upload a CSV or rank in-app to override." },
+  { id: "custom",    name: "Your Custom Cheat Sheet",      type: "you",       contributors: 1,   weight: 0,  enabled: false, updated: "-",          note: "Upload a CSV or rank in-app to override." },
 ];
 
 const _r = (qb,rb,wr,te,k,dst) => ({QB:qb, RB:rb, WR:wr, TE:te, K:k, DST:dst});
@@ -351,10 +352,10 @@ export const OWNER_PROFILES = [
       _r(10,20,30,20,10,10), _r(0,20,30,20,20,10), _r(0,10,20,20,30,20), _r(0,10,20,10,40,20),
     ],
     history: [
-      { year: 2024, place: "ðŸ† Champion", roundPick: 12, picks: [20, 25, 53, 81, 26], notes: "Got CMC at 1.12 turn â€” pure value." },
+      { year: 2024, place: "ðŸ† Champion", roundPick: 12, picks: [20, 25, 53, 81, 26], notes: "Got CMC at 1.12 turn - pure value." },
       { year: 2023, place: "2nd", roundPick: 5, picks: [], notes: "Textbook draft. Boring. Effective." },
       { year: 2022, place: "4th", roundPick: 8, picks: [], notes: "Bingo card draft." },
-      { year: 2021, place: "ðŸ† Champion", roundPick: 1, picks: [], notes: "Took Taylor 1.01 â€” the obvious move that won the league." },
+      { year: 2021, place: "ðŸ† Champion", roundPick: 1, picks: [], notes: "Took Taylor 1.01 - the obvious move that won the league." },
       { year: 2020, place: "6th", roundPick: 7, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 5 },
@@ -375,8 +376,8 @@ export const OWNER_PROFILES = [
       _r(0,50,30,10,10,0), _r(0,40,30,10,10,10), _r(0,30,20,10,20,20), _r(0,20,20,10,30,20),
     ],
     history: [
-      { year: 2024, place: "8th", roundPick: 2, picks: [50, 51, 80, 56, 27], notes: "Zero RB blew up â€” Hall got hurt, Cook never broke out." },
-      { year: 2023, place: "2nd", roundPick: 10, picks: [], notes: "Zero RB hit â€” championship game appearance." },
+      { year: 2024, place: "8th", roundPick: 2, picks: [50, 51, 80, 56, 27], notes: "Zero RB blew up - Hall got hurt, Cook never broke out." },
+      { year: 2023, place: "2nd", roundPick: 10, picks: [], notes: "Zero RB hit - championship game appearance." },
       { year: 2022, place: "9th", roundPick: 6, picks: [], notes: "" },
       { year: 2021, place: "4th", roundPick: 3, picks: [], notes: "" },
       { year: 2020, place: "3rd", roundPick: 12, picks: [], notes: "" },
@@ -406,7 +407,7 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "4th", roundPick: 10, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 7 },
-    predictedNext: { topTargets: [6, 5, 65], reasoning: "Caleb Williams is a Priya pick â€” young QB hype + preseason buzz." },
+    predictedNext: { topTargets: [6, 5, 65], reasoning: "Caleb Williams is a Priya pick - young QB hype + preseason buzz." },
   },
   {
     teamId: 5, archetype: "Late-Round QB",
@@ -502,11 +503,11 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "11th", roundPick: 11, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 11 },
-    predictedNext: { topTargets: [83, 31, 65], reasoning: "Will auto. CBS default ranks at slot 4.11 â†’ LaPorta or Aaron Jones." },
+    predictedNext: { topTargets: [83, 31, 65], reasoning: "Will auto. CBS default ranks at slot 4.11 â†' LaPorta or Aaron Jones." },
   },
   {
     teamId: 9, archetype: "Stack & Pray",
-    archetypeDesc: "Builds offensive stacks â€” QB+WR+TE from same team. Aggressive, ceiling-chaser.",
+    archetypeDesc: "Builds offensive stacks - QB+WR+TE from same team. Aggressive, ceiling-chaser.",
     confidence: 82,
     tool: { name: "Underdog ADP + Stack Targets", inferred: true, signal: "3+ same-team stacks per draft" },
     tools: ["Underdog ADP", "FantasyPros Stack Builder"],
@@ -526,7 +527,7 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "7th", roundPick: 4, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 12 },
-    predictedNext: { topTargets: [83, 85, 61], reasoning: "Has Hurts QB. Targeting stack WRs â€” Metcalf or Evans as next receiver." },
+    predictedNext: { topTargets: [83, 85, 61], reasoning: "Has Hurts QB. Targeting stack WRs - Metcalf or Evans as next receiver." },
   },
   {
     teamId: 10, archetype: "Veteran Hoarder",
@@ -550,7 +551,7 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "12th", roundPick: 5, picks: [], notes: "" },
     ],
     upcomingPick: { round: 5, slot: 1 },
-    predictedNext: { topTargets: [84, 60, 64], reasoning: "Kelce, Evans, Adams â€” pick the one still available." },
+    predictedNext: { topTargets: [84, 60, 64], reasoning: "Kelce, Evans, Adams - pick the one still available." },
   },
   {
     teamId: 11, archetype: "Analytics Native",
@@ -574,7 +575,7 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "5th", roundPick: 1, picks: [], notes: "" },
     ],
     upcomingPick: { round: 5, slot: 2 },
-    predictedNext: { topTargets: [83, 85, 6], reasoning: "Will exit at tier breaks â€” TE3 or RB3 tier most likely." },
+    predictedNext: { topTargets: [83, 85, 6], reasoning: "Will exit at tier breaks - TE3 or RB3 tier most likely." },
   },
   {
     teamId: 12, archetype: "Wild Card",
@@ -607,10 +608,10 @@ export const findOwner = (teamId) => OWNER_PROFILES.find(o => o.teamId === teamI
 // Real CBS draft history scraped from:
 //   /draft/results/2024:Pre-season:Tau League Draft/
 // Real draft pick data from CBS (2024 + 2025 seasons).
-// 2024 team names â†’ internal id mapping:
-//   Groom of Deuce(1) Â· Cheeseheads(2) Â· Howdy Hut(3) Â· Cuddlebone loves Kamala!(4)
-//   Pablo Chacon(5) Â· Five Pound Bass(6) Â· My Couch Pulls Out But I Dont(7)
-//   Gecko Barflies(8) Â· Walton(9) Â· Buck Wild(10) Â· Fat,Drunk&Stupid(11) Â· DJ 8 Trak(12)
+// 2024 team names â†' internal id mapping:
+//   Groom of Deuce(1) - Cheeseheads(2) - Howdy Hut(3) - Cuddlebone loves Kamala!(4)
+//   Pablo Chacon(5) - Five Pound Bass(6) - My Couch Pulls Out But I Dont(7)
+//   Gecko Barflies(8) - Walton(9) - Buck Wild(10) - Fat,Drunk&Stupid(11) - DJ 8 Trak(12)
 // rounds = 14-char string of actual pick positions in order: Q=QB R=RB W=WR T=TE K=K D=DST
 // picks = [R1..R14] player IDs; null = player not in local PLAYERS array
 export const CBS_DRAFT_HISTORY = {
@@ -621,18 +622,18 @@ export const CBS_DRAFT_HISTORY = {
   },
   // id 2 = Bourbon is a Vegetable | 2024: Cheeseheads (slot 5, Hill R1)
   2: {
-    2024: { slot: 5,  rounds: "WWWWQTWRRRQRWD", picks: [53, 56, 71, 72, 11, 81, null, null, null, null, 15, null, null, 133], notes: "Hill 1.05, A.J. Brown R2, Kupp + Addison WRs R3â€“R4, Purdy QB R5 â€” WR-stack" },
+    2024: { slot: 5,  rounds: "WWWWQTWRRRQRWD", picks: [53, 56, 71, 72, 11, 81, null, null, null, null, 15, null, null, 133], notes: "Hill 1.05, A.J. Brown R2, Kupp + Addison WRs R3-R4, Purdy QB R5 - WR-stack" },
     2025: { slot: 9,  rounds: "RRWTRWWQQWTRDW", picks: [34, 24, 56, 82, null, null, null, null, null, null, null, null, null, null], notes: "Jeanty 1.09, Achane R2, A.J. Brown R3, Kittle TE R4" },
   },
   // id 3 = Howdy Hut (same both years)
   3: {
-    2024: { slot: 12, rounds: "RQRRRTDWRRRRRR", picks: [30, 1, 46, 32, 40, 88, 122, null, null, null, null, null, null, null], notes: "BUF stack: Cook 1.12 + Allen 2.01, Spears R3, Kamara R4 â€” rest auto-drafted" },
+    2024: { slot: 12, rounds: "RQRRRTDWRRRRRR", picks: [30, 1, 46, 32, 40, 88, 122, null, null, null, null, null, null, null], notes: "BUF stack: Cook 1.12 + Allen 2.01, Spears R3, Kamara R4 - rest auto-drafted" },
     2025: { slot: 4,  rounds: "RRWWQRTWDWRQDR", picks: [25, 30, 64, null, null, null, null, null, null, null, null, null, null, null], notes: "Henry 1.04, Cook again R2, Adams WR R3" },
   },
   // id 4 = Start Pulling Out | 2024: Cuddlebone loves Kamala! (slot 3, Hall R1)
   4: {
-    2024: { slot: 3,  rounds: "RRQRRWWQTDWTRR", picks: [26, 29, 9, 38, 37, null, 76, 14, null, 125, null, null, null, null], notes: "Hall 1.03, Mixon R2, Love QB R3, Stevenson R4, Montgomery R5 â€” RB-RB-QB" },
-    2025: { slot: 6,  rounds: "RRQRWWWRWWTDQR", picks: [20, null, 5, 32, null, null, null, null, null, null, null, null, null, null], notes: "CMC 1.06, Burrow QB R3, Kamara R4 â€” RB anchor" },
+    2024: { slot: 3,  rounds: "RRQRRWWQTDWTRR", picks: [26, 29, 9, 38, 37, null, 76, 14, null, 125, null, null, null, null], notes: "Hall 1.03, Mixon R2, Love QB R3, Stevenson R4, Montgomery R5 - RB-RB-QB" },
+    2025: { slot: 6,  rounds: "RRQRWWWRWWTDQR", picks: [20, null, 5, 32, null, null, null, null, null, null, null, null, null, null], notes: "CMC 1.06, Burrow QB R3, Kamara R4 - RB anchor" },
   },
   // id 5 = The Epstein Islanders | 2024: Pablo Chacon (slot 2, Saquon R1)
   5: {
@@ -641,22 +642,22 @@ export const CBS_DRAFT_HISTORY = {
   },
   // id 6 = Penn State Shower Power | 2024: Five Pound Bass (slot 6, Amon-Ra R1)
   6: {
-    2024: { slot: 6,  rounds: "WWWRWQRTRWQWWD", picks: [54, 58, 62, 39, 57, 12, null, null, null, null, 17, null, null, 132], notes: "Amon-Ra 1.06, Wilson + MHJ + Pacheco R4, London R5, Dak QB R6 â€” 4 WRs in first 5" },
-    2025: { slot: 11, rounds: "WWRWWTRQRRRQRD", picks: [52, 67, null, null, 58, null, null, null, null, null, null, null, null, null], notes: "CeeDee 1.11, Nabers WR R2, Wilson WR R5 â€” WR every round" },
+    2024: { slot: 6,  rounds: "WWWRWQRTRWQWWD", picks: [54, 58, 62, 39, 57, 12, null, null, null, null, 17, null, null, 132], notes: "Amon-Ra 1.06, Wilson + MHJ + Pacheco R4, London R5, Dak QB R6 - 4 WRs in first 5" },
+    2025: { slot: 11, rounds: "WWRWWTRQRRRQRD", picks: [52, 67, null, null, 58, null, null, null, null, null, null, null, null, null], notes: "CeeDee 1.11, Nabers WR R2, Wilson WR R5 - WR every round" },
   },
   // id 7 = Vick's Hushpuppies | 2024: My Couch Pulls Out But I Dont (slot 7, CeeDee R1)
   7: {
-    2024: { slot: 7,  rounds: "WWTWWWQRRRWRQD", picks: [52, 51, 84, 64, 70, 65, 6, null, null, null, null, null, 18, 134], notes: "CeeDee 1.07, Jefferson R2, Kelce TE R3, Adams R4, Diggs R5 â€” elite WRs" },
+    2024: { slot: 7,  rounds: "WWTWWWQRRRWRQD", picks: [52, 51, 84, 64, 70, 65, 6, null, null, null, null, null, 18, 134], notes: "CeeDee 1.07, Jefferson R2, Kelce TE R3, Adams R4, Diggs R5 - elite WRs" },
     2025: { slot: 8,  rounds: "WWRRRWQRWTRQWD", picks: [51, 55, null, 26, null, null, null, null, null, null, null, null, null, null], notes: "Jefferson 1.08, Puka Nacua R2, Breece Hall R4" },
   },
   // id 8 = Gecko Barflies (same both years)
   8: {
-    2024: { slot: 1,  rounds: "RRWRQRWTRDWRWQ", picks: [20, 44, 60, 45, 5, null, 66, 87, null, 130, null, null, null, 19], notes: "CMC 1.01, Edwards R2, Evans R3, Robinson R4, Burrow QB R5 â€” value in mid-rounds" },
-    2025: { slot: 3,  rounds: "RQWRWWRDTRWQWQ", picks: [23, 1, 60, 29, 53, null, null, null, null, null, null, null, null, null], notes: "Gibbs 1.03, Josh Allen QB R2, Evans R3, Mixon + Hill R4â€“5" },
+    2024: { slot: 1,  rounds: "RRWRQRWTRDWRWQ", picks: [20, 44, 60, 45, 5, null, 66, 87, null, 130, null, null, null, 19], notes: "CMC 1.01, Edwards R2, Evans R3, Robinson R4, Burrow QB R5 - value in mid-rounds" },
+    2025: { slot: 3,  rounds: "RQWRWWRDTRWQWQ", picks: [23, 1, 60, 29, 53, null, null, null, null, null, null, null, null, null], notes: "Gibbs 1.03, Josh Allen QB R2, Evans R3, Mixon + Hill R4-5" },
   },
   // id 9 = Swingin' Flamingos | 2024: Walton (slot 8, Chase R1)
   9: {
-    2024: { slot: 8,  rounds: "WRTWWQWWWWWRDQ", picks: [50, 23, 83, 68, 61, 7, 77, null, null, null, 79, null, 120, null], notes: "Chase 1.08, Gibbs R2, LaPorta TE R3, Tee Higgins R4, Metcalf R5 â€” balanced" },
+    2024: { slot: 8,  rounds: "WRTWWQWWWWWRDQ", picks: [50, 23, 83, 68, 61, 7, 77, null, null, null, 79, null, 120, null], notes: "Chase 1.08, Gibbs R2, LaPorta TE R3, Tee Higgins R4, Metcalf R5 - balanced" },
     2025: { slot: 5,  rounds: "WQRWTWWWDQRRWW", picks: [50, 2, null, 61, 84, null, null, null, null, null, null, null, null, null], notes: "Chase again 1.05, Hurts QB R2, Metcalf R4, Kelce TE R5" },
   },
   // id 10 = Gringo Pendejo | 2024: Buck Wild (slot 11, Hurts R1)
@@ -667,16 +668,16 @@ export const CBS_DRAFT_HISTORY = {
   // id 11 = Fat, Drunk & Stupid (same both years)
   11: {
     2024: { slot: 9,  rounds: "RWWQWTRWWWDTRQ", picks: [33, 55, 59, 10, 67, 89, null, 78, null, null, 129, null, null, null], notes: "J.Taylor 1.09, Puka Nacua R2, Nico Collins R3, Darnold QB R4, Nabers R5" },
-    2025: { slot: 12, rounds: "WWWRQRWRTWWQWD", picks: [54, 59, null, null, null, null, null, null, null, null, null, null, null, null], notes: "Amon-Ra 1.12, Nico Collins R2 â€” WR-stack start again" },
+    2025: { slot: 12, rounds: "WWWRQRWRTWWQWD", picks: [54, 59, null, null, null, null, null, null, null, null, null, null, null, null], notes: "Amon-Ra 1.12, Nico Collins R2 - WR-stack start again" },
   },
   // id 12 = DJ 8 Trak (same both years)
   12: {
-    2024: { slot: 10, rounds: "RQRRWRTRRTWDDQ", picks: [25, 3, 27, 43, 73, null, 90, null, null, 80, 63, 127, 128, null], notes: "BAL stack: Henry 1.10 + Lamar R2 + Jacobs R3, Williams R4, Allen WR R5 â€” loaded" },
-    2025: { slot: 10, rounds: "RQRRRTWWRTRRQD", picks: [33, 3, null, null, null, null, null, null, null, null, null, null, null, null], notes: "J.Taylor 1.10, Lamar QB R2 again â€” consistent R1â€“R2 build" },
+    2024: { slot: 10, rounds: "RQRRWRTRRTWDDQ", picks: [25, 3, 27, 43, 73, null, 90, null, null, 80, 63, 127, 128, null], notes: "BAL stack: Henry 1.10 + Lamar R2 + Jacobs R3, Williams R4, Allen WR R5 - loaded" },
+    2025: { slot: 10, rounds: "RQRRRTWWRTRRQD", picks: [33, 3, null, null, null, null, null, null, null, null, null, null, null, null], notes: "J.Taylor 1.10, Lamar QB R2 again - consistent R1-R2 build" },
   },
 };
 
-// Draft picks â€” 14 rounds Ã— 12 teams = 168 picks, all null (rosters populated only by draft).
+// Draft picks - 14 rounds Ã— 12 teams = 168 picks, all null (rosters populated only by draft).
 // 14 matches the league roster max: 8 starters + 6 bench.
 const TEAMS_ORDER = [2, 5, 11, 7, 12, 1, 8, 3, 10, 4, 9, 6];
 export const DRAFT_ROUNDS = 14;
@@ -693,7 +694,7 @@ function buildDraftPicks() {
 export const DRAFT_PICKS = buildDraftPicks();
 export { TEAMS_ORDER };
 
-// â”€â”€â”€ Roster & Scoring Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Roster & Scoring Config â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 // Source: https://atotauleague.football.cbssports.com/rules
 // 8 starters: QBÃ—1, RBÃ—1, WRÃ—1, TEÃ—1, RB-WR FLEXÃ—3, DSTÃ—1  |  6 bench  = 14 total
 export const ROSTER_CONFIG = {
@@ -707,10 +708,10 @@ export const ROSTER_CONFIG = {
     { slot: 'FLEX', count: 3, eligible: ['RB', 'WR'] },
     { slot: 'DST',  count: 1, eligible: ['DST'] },
   ],
-  rosterLimits: { QB: 2 },   // all other positions: no limit
+  rosterLimits: { QB: 2, K: 0 },   // K disabled; all other positions: no limit
 };
 
-// Map: slot name â†’ allowed positions
+// Map: slot name â†' allowed positions
 export const SLOT_ELIGIBILITY = Object.fromEntries([
   ...ROSTER_CONFIG.slots.map(s => [s.slot, s.eligible]),
   ['BENCH', ['QB', 'RB', 'WR', 'TE', 'K', 'DST']],
@@ -718,7 +719,7 @@ export const SLOT_ELIGIBILITY = Object.fromEntries([
   ['DST',   ['DST']],  // explicit override (also set by ROSTER_CONFIG above)
 ]);
 
-// Half PPR scoring (CBS Atotau League defaults â€” fetch live via /api/cbs/scoring when worker is running)
+// Half PPR scoring (CBS Atotau League defaults - fetch live via /api/cbs/scoring when worker is running)
 export const SCORING_RULES = {
   format: 'Half PPR',
   source: 'defaults',
@@ -730,7 +731,7 @@ export const SCORING_RULES = {
                pts0: 10, pts1_6: 7, pts7_13: 4, pts14_20: 1, pts21_27: 0, pts28_34: -1, pts35plus: -4 },
 };
 
-// All team rosters start empty â€” populated only by the 2026 draft, then waivers.
+// All team rosters start empty - populated only by the 2026 draft, then waivers.
 function buildTeamRosters() {
   const rosters = {};
   for (const t of LEAGUE_TEAMS) rosters[t.id] = [];
@@ -791,7 +792,7 @@ export function refreshTeamRosters() {
 // Auto-refresh on module load so first render already sees draft data
 refreshTeamRosters();
 
-// â”€â”€â”€ Settings-based roster frame helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Settings-based roster frame helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const _KEY_TO_SLOT = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', RBWR: 'FLEX', DST: 'DST', K: 'K' };
 const _DEFAULT_POSITIONS = [
   { key: 'QB',   activeMax: 1 },
@@ -799,6 +800,7 @@ const _DEFAULT_POSITIONS = [
   { key: 'WR',   activeMax: 1 },
   { key: 'TE',   activeMax: 1 },
   { key: 'RBWR', activeMax: 3 },
+  { key: 'K',    activeMax: 0 },
   { key: 'DST',  activeMax: 1 },
 ];
 const _FLEX_ELIGIBLE = ['RB', 'WR'];
@@ -833,7 +835,7 @@ export function assignRoster(frame, playerIds, slotOverrides = {}, playerLookup 
     unplaced.push(pid);
   }
 
-  // Second pass: auto-assign by player position â†’ dedicated slot â†’ FLEX â†’ BENCH
+  // Second pass: auto-assign by player position â†' dedicated slot â†' FLEX â†' BENCH
   for (const pid of unplaced) {
     const p = _findPlayerLocal(pid) ?? (playerLookup ? playerLookup(pid) : null);
     if (!p) continue;

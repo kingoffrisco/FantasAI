@@ -149,3 +149,4 @@ export const useR2PlayerOwnership       = () => useR2Analysis(api.r2.playerOwner
 export const useR2CombineData           = () => useR2Analysis(api.r2.combineData)
 export const useR2WeeklyStartSit        = () => useR2Analysis(api.r2.weeklyStartSit)
 export const useR2PlayerStats2025       = () => useR2Analysis(api.r2.playerStats2025)
+export const useR2CollegeStats          = () => useR2Analysis(api.r2.collegeStats)

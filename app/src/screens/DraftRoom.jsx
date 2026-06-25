@@ -1,5 +1,5 @@
 import React from 'react';
-import { LEAGUE_TEAMS, DRAFT_PICKS, TEAMS_ORDER, DRAFT_ROUNDS, QUEUE as INIT_QUEUE, CHAT_MESSAGES } from '../lib/data.js';
+import { LEAGUE_TEAMS, DRAFT_PICKS, TEAMS_ORDER, DRAFT_ROUNDS, QUEUE as INIT_QUEUE, CHAT_MESSAGES, ROSTER_CONFIG, findTeam } from '../lib/data.js';
 import { getPlayers, usePlayers, findPlayer } from '../lib/playerStore.js';
 import { predictPicks } from '../lib/draft.js';
 import { PosBadge, PlayerAvatar, PlayerCell, TeamLogoBadge } from '../components/ui.jsx';
@@ -135,15 +135,47 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     try { localStorage.removeItem('fantasai_draft_paused'); } catch {}
     onDraftStatusChange?.(null);
   }
+  const [draftLimitToast, setDraftLimitToast] = React.useState(null);
+  React.useEffect(() => { if (draftLimitToast) { const t = setTimeout(() => setDraftLimitToast(null), 3000); return () => clearTimeout(t); } }, [draftLimitToast]);
+
+  const posLimits = React.useMemo(() => {
+    const base = { ...(ROSTER_CONFIG.rosterLimits || {}) };
+    try {
+      const settings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+      const positions = settings?.positions || [];
+      for (const p of positions) {
+        const pos = p.key === 'RBWR' ? 'FLEX' : p.key;
+        const total = p.rosterTotal;
+        const activeMax = Number(p.activeMax);
+        if (total === '0' || total === 0 || activeMax === 0) base[pos] = 0;
+        else if (total !== 'No Limit' && total != null && total !== '') base[pos] = Number(total);
+      }
+    } catch {}
+    return base;
+  }, []);
+
+  function checkPosLimit(playerId, teamId, existingPicks) {
+    const p = findP(playerId);
+    if (!p) return null;
+    const max = posLimits[p.pos];
+    if (max === 0) return `${p.pos} is not allowed in this league`;
+    if (max == null) return null;
+    const count = existingPicks.filter(pk => pk.teamId === teamId && pk.playerId).map(pk => findP(pk.playerId)).filter(x => x?.pos === p.pos).length;
+    if (count >= max) return `${p.pos} limit reached (max ${max})`;
+    return null;
+  }
+
   function draftPlayer(playerId) {
     if (!mockActive) return;
+    const teamId = mockUserTeamId || 1;
+    const err = checkPosLimit(playerId, teamId, mockPicks);
+    if (err) { setDraftLimitToast(err); return; }
     const round = Math.ceil(mockPickNum / 12);
     const s     = (mockPickNum - 1) % 12;
-    setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId: mockUserTeamId || 1, playerId, round, slot: s + 1 }]);
+    setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId, playerId, round, slot: s + 1 }]);
     setMockPickNum(n => n + 1);
     setSeconds(clockSeconds);
     setQueue(q => q.filter(id => id !== playerId));
-    // NOTE: mock draft intentionally does NOT call onDraftPick — it never affects the real roster
   }
   // Commish draft-on-behalf in mock mode: records pick for an arbitrary team at the current pick slot
   function commishMockPick(playerId, forTeamId) {
@@ -378,20 +410,26 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
   // ── Ranking sources ──────────────────────────────────────────────────────
   const RANK_SOURCES = [
-    { id: 'fantasai', label: 'FantasAI',       color: '#c6ff3a' },
-    { id: 'sleeper',  label: 'Sleeper ADP',    color: '#1c8eaf' },
     { id: 'cbs',      label: 'CBS Expert',     color: '#0d4ea2' },
     { id: 'fp',       label: 'FantasyPros ECR', color: '#ee4c2e' },
     { id: 'owner',    label: 'My Rankings',    color: '#a78bfa' },
   ];
-  const [rankSource,    setRankSource]    = React.useState('fantasai');
+  const [rankSource,    setRankSource]    = React.useState('fp');
   const [cbsRanks,      setCbsRanks]      = React.useState(null);
   const [cbsRankLoad,   setCbsRankLoad]   = React.useState(false);
   const [cbsRankErr,    setCbsRankErr]    = React.useState(null);
   const [fpRanks,       setFpRanks]       = React.useState(null);
   const [fpRankLoad,    setFpRankLoad]    = React.useState(false);
   const [fpRankErr,     setFpRankErr]     = React.useState(null);
-  const [ownerRanks,    setOwnerRanks]    = React.useState(() => getPrefs().draftOwnerRanks || {});
+  const [ownerRanks,    setOwnerRanks]    = React.useState(() => {
+    const personal = getPrefs().personalRankings;
+    if (Array.isArray(personal) && personal.length > 0) {
+      const m = {};
+      personal.forEach((id, i) => { m[Number(id)] = i + 1; m[String(id)] = i + 1; });
+      return m;
+    }
+    return getPrefs().draftOwnerRanks || {};
+  });
 
   // FantasAI ranks: sorted by proj PPG desc, ADP asc as tiebreaker — no fetch needed
   const fantasaiRankMap = React.useMemo(() => {
@@ -444,6 +482,8 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     else { next[playerId] = Number(rank); }
     setOwnerRanks(next);
     patchPrefs({ draftOwnerRanks: next });
+    const ordered = Object.entries(next).sort((a, b) => a[1] - b[1]).map(([id]) => Number(id));
+    patchPrefs({ personalRankings: ordered });
   }
 
   // Returns sort rank for a player under the active ranking source
@@ -560,6 +600,8 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   function commishPick(playerId, overrideTeamId) {
     const pickNum = livePickNum;
     const teamId  = overrideTeamId ?? onClockTeamId;
+    const err = checkPosLimit(playerId, teamId, livePicks.filter(p => p.playerId));
+    if (err) { setDraftLimitToast(err); return; }
     setLivePicks(prev => prev.map(p => p.pickNum === pickNum ? { ...p, playerId, teamId } : p));
     setLivePickNum(n => n + 1);
     setSeconds(clockSeconds);
@@ -650,7 +692,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     const round = Math.ceil(pn / 12);
     const s = ((pn - 1) % 12);
     const tid = round % 2 === 1 ? teamsOrder[s] : teamsOrder[11 - s];
-    const team = LEAGUE_TEAMS.find(t => t.id === tid);
+    const team = findTeam(tid) || LEAGUE_TEAMS.find(t => t.id === tid);
     upcoming.push({ pick: pn, round, team, teamId: tid });
   }
 
@@ -695,8 +737,15 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     return p.pos === pos;
   }
 
-  const DRAFT_MAX = { QB: 2, RB: 6, WR: 6, TE: 2, K: 1, DST: 1 };
-  const DRAFT_MIN = { QB: 1, RB: 2, WR: 2, TE: 1, K: 1, DST: 1 };
+  const DRAFT_MAX = React.useMemo(() => {
+    const defaults = { QB: 2, RB: 6, WR: 6, TE: 2, K: 1, DST: 1 };
+    for (const [pos, max] of Object.entries(posLimits)) {
+      if (pos === 'FLEX') continue;
+      defaults[pos] = max;
+    }
+    return defaults;
+  }, [posLimits]);
+  const DRAFT_MIN = { QB: 1, RB: 2, WR: 2, TE: 1, K: posLimits.K === 0 ? 0 : 1, DST: 1 };
 
   // Position-aware auto-pick for a given team (non-user AI turns + live auto mode)
   function pickForTeamAuto(teamId, pickNum, currentPicks, draftedSet) {
@@ -802,7 +851,29 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
   const myDraftTeamId = mockActive ? (mockUserTeamId || 1) : (user?.teamId || 1);
   const myPicks = allPicks.filter(p => p.teamId === myDraftTeamId && p.playerId);
-  const teamsForCols = teamsOrder.map(id => LEAGUE_TEAMS.find(t => t.id === id));
+  const teamsForCols = teamsOrder.map(id => findTeam(id) || LEAGUE_TEAMS.find(t => t.id === id));
+
+  const BELL_GRADES = ['A+','A','A-','B+','B','B-','C+','C','C-','D+','D','F'];
+  const BELL_COLORS = { 'A+':'#1affa0','A':'#1affa0','A-':'#4caf82','B+':'#4ea8ff','B':'#4ea8ff','B-':'#4ea8ff','C+':'var(--text-dim)','C':'var(--text-dim)','C-':'var(--text-dim)','D+':'#ff9800','D':'#ff9800','F':'#ff4f4f' };
+  const teamBellGrades = React.useMemo(() => {
+    const scores = teamsForCols.filter(Boolean).map(t => {
+      const picks = allPicks.filter(pk => pk.teamId === t.id && pk.playerId);
+      const sum = picks.reduce((s, pk) => {
+        const p = findP(pk.playerId);
+        const rawAdp = p?.adp ?? p?.ecr ?? 999;
+        return s + (rawAdp < 500 ? pk.pickNum - rawAdp : 0);
+      }, 0);
+      return { teamId: t.id, avg: picks.length ? sum / picks.length : -999 };
+    }).sort((a, b) => b.avg - a.avg);
+    const m = {};
+    const n = scores.filter(s => s.avg > -999).length;
+    scores.forEach((s, i) => {
+      if (s.avg <= -999) { m[s.teamId] = null; return; }
+      const pct = n > 1 ? i / (n - 1) : 0.5;
+      m[s.teamId] = BELL_GRADES[Math.min(BELL_GRADES.length - 1, Math.floor(pct * BELL_GRADES.length))];
+    });
+    return m;
+  }, [allPicks, teamsForCols]);
 
   const ghostPredictions = React.useMemo(() => {
     const drafted = new Set();
@@ -1258,6 +1329,11 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
   return (
     <div className="draft-grid">
+      {draftLimitToast && (
+        <div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: '#ff4f4f', color: '#fff', padding: '10px 24px', borderRadius: 8, fontWeight: 700, fontSize: 14, boxShadow: '0 4px 20px rgba(0,0,0,.5)' }}>
+          {draftLimitToast}
+        </div>
+      )}
       {/* CLOCK BAR */}
       <div className="draft-clock" style={paused ? { background: 'linear-gradient(180deg, rgba(255,90,110,.18) 0%, rgba(255,90,110,.08) 100%)', animation: 'blink 1.2s infinite' } : isMyTurn ? { background: 'linear-gradient(180deg, rgba(76,175,130,.22) 0%, rgba(76,175,130,.10) 100%)' } : {}}>
         <div style={{ padding: '0 24px', borderRight: `1px solid ${paused ? 'rgba(255,90,110,.3)' : 'var(--border)'}`, display: 'flex', alignItems: 'center', gap: 16, alignSelf: 'stretch' }}>
@@ -1328,16 +1404,13 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             >
               {paused ? '▶ Resume' : (mockActive ? '⏸ Pause AI' : '⏸ Pause')}
             </button>
-            {mockActive && (
-              <button className="btn ghost sm" style={{ color: '#ff6b6b', borderColor: 'rgba(255,107,107,.4)' }} onClick={exitMockDraft}>✕ Exit Mock</button>
-            )}
             {mockActive && !isMyTurn && !paused && (
               <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>AI picking…</span>
             )}
             {mockActive && paused && (
               <span style={{ fontSize: 11, color: '#ffb547', fontFamily: 'var(--font-mono)' }}>AI paused</span>
             )}
-            <button className="btn ghost sm" style={{ marginLeft: 8 }} onClick={() => onNav?.('roster')}>← Exit Draft</button>
+            <button className="btn sm" style={{ marginLeft: 8, background: '#ff4f4f', color: '#fff', borderColor: '#ff4f4f', fontWeight: 700 }} onClick={() => { if (mockActive) exitMockDraft(); onNav?.('roster'); }}>✕ Exit Draft</button>
           </div>
           {/* Panel visibility toggles */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', paddingLeft: 2 }}>
@@ -1553,10 +1626,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
           {/* Mock Draft */}
           <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, paddingLeft: 8, borderLeft: '1px solid rgba(255,180,0,.15)' }}>
             {mockActive ? (
-              <>
-                <span style={{ fontSize: 12, color: '#ffb547', whiteSpace: 'nowrap' }}>Mock · {mockPickNum > TOTAL_PICKS ? 'Done' : `Pick #${mockPickNum}`}</span>
-                <button className="btn ghost sm" style={{ fontSize: 12, color: '#ff5a6e' }} onClick={exitMockDraft}>✕ Exit</button>
-              </>
+              <span style={{ fontSize: 12, color: '#ffb547', whiteSpace: 'nowrap' }}>Mock · {mockPickNum > TOTAL_PICKS ? 'Done' : `Pick #${mockPickNum}`}</span>
             ) : (
               <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={startMockDraft} disabled={isLive}>▶ Mock Draft</button>
             )}
@@ -1910,7 +1980,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                   }>
                     <td className="rank" style={{ color: rank < 9999 ? undefined : 'var(--text-faint)' }}>{displayRank}</td>
                     <td>
-                      <div className="player-cell" style={{ cursor: 'pointer' }} onClick={() => setDetailPlayer(p)}>
+                      <div className="player-cell" style={{ cursor: 'pointer' }} onClick={() => setDetailPlayer(prev => prev?.id === p.id ? null : p)}>
                         <PlayerAvatar player={p} />
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -2189,7 +2259,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
         {/* MY ROSTER view */}
         {rosterPanelView === 'roster' && (() => {
-          const POS_ORDER = ['QB', 'RB', 'WR', 'TE', 'DST'];
+          const POS_ORDER = ['QB', 'RB', 'WR', 'TE', 'K', 'DST'].filter(pos => posLimits[pos] !== 0);
           const grouped = POS_ORDER.map(pos => ({
             pos,
             picks: myPicks.map(pk => findP(pk.playerId)).filter(p => p?.pos === pos),
@@ -2227,15 +2297,14 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             {teamsForCols.map((t) => {
               if (!t) return null;
               const teamPicks = allPicks.filter(pk => pk.teamId === t.id && pk.playerId);
-              // Team draft grade: average adpDelta (positive = steals, negative = reaches)
               const teamGradeSum = teamPicks.reduce((s, pk) => {
                 const p = findP(pk.playerId);
                 const rawAdp = p?.adp ?? p?.ecr ?? 999;
                 return s + (rawAdp < 500 ? pk.pickNum - rawAdp : 0);
               }, 0);
               const teamGradeAvg = teamPicks.length ? teamGradeSum / teamPicks.length : 0;
-              const teamGradeLabel = teamGradeAvg > 18 ? 'A+' : teamGradeAvg > 10 ? 'A' : teamGradeAvg > 3 ? 'B' : teamGradeAvg >= -3 ? 'C' : teamGradeAvg >= -10 ? 'D' : 'F';
-              const teamGradeColor = teamGradeAvg > 10 ? '#4caf82' : teamGradeAvg > 3 ? '#4ea8ff' : teamGradeAvg >= -3 ? 'var(--text-dim)' : teamGradeAvg >= -10 ? 'var(--warn)' : 'var(--danger)';
+              const teamGradeLabel = teamBellGrades[t.id] || '—';
+              const teamGradeColor = BELL_COLORS[teamGradeLabel] || 'var(--text-dim)';
               return (
                 <div key={t.id} style={{ borderBottom: '1px solid var(--border)', background: t.id === onClockTeamId ? 'rgba(76,175,130,.06)' : t.me ? 'rgba(198,255,58,.04)' : 'transparent' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', background: t.id === onClockTeamId ? 'rgba(76,175,130,.12)' : 'var(--bg-2)' }}>
@@ -2468,6 +2537,7 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
   const [seasons, setSeasons] = React.useState({});
   const [loading, setLoading] = React.useState(true);
   const [news, setNews]       = React.useState([]);
+  const [collegeStats, setCollegeStats] = React.useState(null);
 
   const avatarUrl = p.photoUrl || (p.sleeperId ? `https://sleepercdn.com/content/nfl/players/thumb/${p.sleeperId}.jpg` : null);
   const pos = p.pos;
@@ -2489,6 +2559,21 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
       }
       setSeasons({ 2025: toTot(s25), 2024: toTot(s24), 2023: toTot(s23) });
       setLoading(false);
+      // Fetch college stats for rookies
+      try {
+        const csRes = await fetch('https://api.fantasai.net/api/v1/r2/fantasai/analysis/college_stats.json', { signal: AbortSignal.timeout(8000) });
+        if (csRes.ok && !cancelled) {
+          const csData = await csRes.json();
+          const csArr = Array.isArray(csData) ? csData : csData?.data || [];
+          const pKey = p.name?.toLowerCase().trim();
+          let mine = csArr.filter(r => r.player_name?.toLowerCase().trim() === pKey);
+          if (!mine.length) {
+            const lastName = pKey.split(' ').slice(1).join(' ');
+            if (lastName) mine = csArr.filter(r => (r.player_name?.toLowerCase().trim() || '').endsWith(lastName));
+          }
+          if (mine.length) setCollegeStats(mine.sort((a, b) => (a.season || 0) - (b.season || 0)));
+        }
+      } catch {}
       const parts = p.name.trim().split(' ');
       const fl = parts[0].toLowerCase(); const ll = parts.slice(1).join(' ').toLowerCase();
       try {
@@ -2567,39 +2652,143 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
         {oppScore != null && <>{pill('Opp', oppScore.toFixed(1), true)}</>}
       </div>
 
-      {/* Row 3 — 3-year stats side by side */}
+      {/* Row 3 — 3-year stats table */}
       {loading
         ? <div style={{ padding: '5px 12px 7px', color: 'var(--text-faint)', fontSize: 10, display: 'flex', alignItems: 'center', gap: 6 }}><div className="ai-orb" style={{ width: 10, height: 10 }} /> Loading stats…</div>
-        : (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderTop: '1px solid var(--border)' }}>
-            {[2023, 2024, 2025].map((yr, i) => {
-              const s = seasons[yr];
-              const injured = s !== null && s !== undefined && (s._gp === 0);
-              return (
-              <div key={yr} style={{ padding: '6px 10px 8px', borderRight: i < 2 ? '1px solid var(--border)' : 'none', background: i === 0 ? 'rgba(78,168,255,.03)' : 'transparent' }}>
-                <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.06em', color: s ? (injured ? '#ff9800' : 'var(--accent-2)') : 'var(--text-faint)', marginBottom: 3 }}>
-                  {yr}{s ? (injured ? ' · 0G' : ` · ${s._gp}G`) : ' · —'}
-                </div>
-                {injured
-                  ? <div style={{ fontSize: 10, fontWeight: 800, color: '#ff9800', fontFamily: 'var(--font-mono)', letterSpacing: '.06em', textTransform: 'uppercase', marginTop: 2 }}>Injured</div>
-                  : <CompactSeasonStats tot={s} pos={pos} />
-                }
-              </div>
-              );
-            })}
-          </div>
-        )
+        : (() => {
+          const isRookie = p.rookie || (p.age && p.age <= 24 && !seasons[2023]?._gp && !seasons[2024]?._gp);
+          const nflStart = isRookie ? 2026 : 2023;
+          const nflCols = pos === 'QB'
+            ? [{ k: 'G', fn: s => s._gp }, { k: 'Cmp', fn: s => s.pass_cmp }, { k: 'Att', fn: s => s.pass_att }, { k: 'Yds', fn: s => s.pass_yd }, { k: 'TD', fn: s => s.pass_td }, { k: 'INT', fn: s => s.pass_int }, { k: 'Pts', fn: s => s.pts_half_ppr?.toFixed(1) }]
+            : pos === 'RB'
+            ? [{ k: 'G', fn: s => s._gp }, { k: 'Att', fn: s => s.rush_att }, { k: 'RuYd', fn: s => s.rush_yd }, { k: 'RuTD', fn: s => s.rush_td }, { k: 'Rec', fn: s => s.rec }, { k: 'ReYd', fn: s => s.rec_yd }, { k: 'Pts', fn: s => s.pts_half_ppr?.toFixed(1) }]
+            : [{ k: 'G', fn: s => s._gp }, { k: 'Tgt', fn: s => s.rec_tgt }, { k: 'Rec', fn: s => s.rec }, { k: 'Yds', fn: s => s.rec_yd }, { k: 'TD', fn: s => s.rec_td }, { k: 'Pts', fn: s => s.pts_half_ppr?.toFixed(1) }];
+          const collegeCols = pos === 'QB'
+            ? [{ k: 'Cmp', fn: s => s.completions }, { k: 'Att', fn: s => s.att }, { k: 'Yds', fn: s => s.yds }, { k: 'TD', fn: s => s.td }, { k: 'INT', fn: s => s.int }]
+            : pos === 'RB'
+            ? [{ k: 'Car', fn: s => s.car }, { k: 'Yds', fn: s => s.yds }, { k: 'TD', fn: s => s.td }, { k: 'Rec', fn: s => s.rec }, { k: 'YPC', fn: s => s.ypc?.toFixed(1) }]
+            : [{ k: 'Rec', fn: s => s.rec }, { k: 'Yds', fn: s => s.yds }, { k: 'TD', fn: s => s.td }, { k: 'YPR', fn: s => s.ypr?.toFixed(1) }];
+          const hasCollege = collegeStats && collegeStats.length > 0;
+          return (
+            <div style={{ borderTop: '1px solid var(--border)', overflowX: 'auto' }}>
+              {/* College stats table */}
+              {hasCollege && (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(167,139,250,.08)' }}>
+                      <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 9, fontWeight: 700, color: '#a78bfa', letterSpacing: '.06em' }}>College</th>
+                      <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 9, fontWeight: 700, color: 'var(--text-faint)' }}>Team</th>
+                      {collegeCols.map(c => <th key={c.k} style={{ padding: '4px 6px', textAlign: 'right', fontSize: 9, fontWeight: 700, color: 'var(--text-faint)' }}>{c.k}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {collegeStats.map(cs => (
+                      <tr key={cs.season} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: '4px 8px', fontWeight: 700, fontSize: 10, color: '#a78bfa' }}>{cs.season}</td>
+                        <td style={{ padding: '4px 6px', fontSize: 10, color: 'var(--text-dim)' }}>{cs.team}</td>
+                        {collegeCols.map(c => (
+                          <td key={c.k} style={{ padding: '4px 6px', textAlign: 'right', color: 'var(--text)' }}>
+                            {c.fn(cs) != null ? Math.round(Number(c.fn(cs))) || c.fn(cs) : '—'}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {/* NFL stats table — hidden for rookies with college data and no NFL seasons */}
+              {(() => {
+                const nflRows = [2023, 2024, 2025].filter(yr => yr >= nflStart || !hasCollege);
+                if (nflRows.length === 0) return null;
+                return (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(78,168,255,.06)' }}>
+                        <th style={{ padding: '4px 8px', textAlign: 'left', fontSize: 9, fontWeight: 700, color: 'var(--accent-2)', letterSpacing: '.06em' }}>NFL</th>
+                        {nflCols.map(c => <th key={c.k} style={{ padding: '4px 6px', textAlign: 'right', fontSize: 9, fontWeight: 700, color: 'var(--text-faint)' }}>{c.k}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {nflRows.map(yr => {
+                        const s = seasons[yr];
+                        const inNfl = yr >= nflStart;
+                        const hasStats = s && s._gp > 0;
+                        return (
+                          <tr key={yr} style={{ borderTop: '1px solid var(--border)' }}>
+                            <td style={{ padding: '4px 8px', fontWeight: 700, fontSize: 10, color: hasStats ? 'var(--accent-2)' : 'var(--text-faint)' }}>
+                              {yr}
+                              {!inNfl && <span style={{ fontSize: 8, color: '#a78bfa', marginLeft: 4 }}>College</span>}
+                              {inNfl && !hasStats && <span style={{ fontSize: 8, color: '#ff9800', marginLeft: 4 }}>Rookie</span>}
+                            </td>
+                            {nflCols.map(c => (
+                              <td key={c.k} style={{ padding: '4px 6px', textAlign: 'right', color: hasStats ? 'var(--text)' : 'var(--text-faint)', fontWeight: c.k === 'Pts' ? 700 : 400 }}>
+                                {hasStats ? (c.fn(s) ?? '—') : '—'}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+          );
+        })()
       }
 
-      {/* News blurb — first item, 2 lines max */}
-      {(news.length > 0 || (!loading && p.news)) && (
-        <div style={{ padding: '5px 12px 7px', borderTop: '1px solid var(--border)', background: 'rgba(0,0,0,.12)' }}>
-          <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.45, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-            {news.length > 0
-              ? <>{news[0].headline && <strong style={{ marginRight: 4 }}>{news[0].headline}</strong>}{news[0].description}</>
-              : p.news
-            }
-          </div>
+      {/* FantasAI Notes — expandable */}
+      <DraftNotesBlock player={p} news={news} loading={loading} />
+    </div>
+  );
+}
+
+function DraftNotesBlock({ player: p, news, loading }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const { data: writeupsRaw } = useR2BreakoutCandidates(); // reuse hook — we'll get writeups separately
+  const [writeup, setWriteup] = React.useState(null);
+
+  React.useEffect(() => {
+    fetch('https://api.fantasai.net/api/v1/r2/players/player_writeups.json', { signal: AbortSignal.timeout(8000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.players) return;
+        const key = p.name?.toLowerCase().trim();
+        const entry = data.players[key] || data.players[p.name];
+        if (entry?.writeup) setWriteup(entry.writeup);
+      }).catch(() => {});
+  }, [p.id]);
+
+  const hasContent = writeup || news?.length > 0 || p.news;
+  if (!hasContent && loading) return null;
+  if (!hasContent) return null;
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', background: 'rgba(0,0,0,.08)' }}>
+      <div
+        onClick={() => setExpanded(e => !e)}
+        style={{ padding: '5px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+      >
+        <span style={{ fontSize: 10, color: 'var(--text-faint)', fontWeight: 700 }}>{expanded ? '▾' : '▸'}</span>
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#c6ff3a', letterSpacing: '.06em' }}>FantasAI Notes</span>
+        {news?.length > 0 && <span style={{ fontSize: 9, color: 'var(--accent-2)', fontFamily: 'var(--font-mono)' }}>📰 {news.length}</span>}
+      </div>
+      {expanded && (
+        <div style={{ padding: '0 12px 8px' }}>
+          {writeup && (
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6, marginBottom: 8 }}>
+              {writeup}
+            </div>
+          )}
+          {news?.length > 0 && news.map((n, i) => (
+            <div key={i} style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.4, marginBottom: 4, borderLeft: '2px solid var(--accent-2)', paddingLeft: 8 }}>
+              {n.headline && <strong style={{ color: 'var(--text)', marginRight: 4 }}>{n.headline}</strong>}
+              {n.description?.slice(0, 150)}
+            </div>
+          ))}
+          {!writeup && !news?.length && p.news && (
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.4 }}>{p.news}</div>
+          )}
         </div>
       )}
     </div>

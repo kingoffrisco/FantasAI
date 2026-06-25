@@ -182,7 +182,7 @@ function buildStandings(cbsRaw) {
     const pf = ct.pf ?? ct.points_for ?? 0;
     const pa = ct.pa ?? ct.points_against ?? 0;
     const liveTeam = mock?.id ? findTeam(mock.id) : null;
-    return { id: mock?.id, name: ct.name || mock?.name || '—', logo: mock?.logo || '??', logoImg: liveTeam?.logoImg || null, color: mock?.color || '#555', w, l, pf, pa, me: mock?.me };
+    return { id: mock?.id, name: ct.name || mock?.name || '—', logo: mock?.logo || '??', logoImg: liveTeam?.logoImg || null, color: mock?.color || '#555', w, l, pf, pa, me: liveTeam?.me || false };
   });
 
   return rows.sort((a, b) => (b.w - a.w) || (b.pf - a.pf) || (a.pa - b.pa));
@@ -403,9 +403,15 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     return new Map(data.map((d, i) => [d.team.id, i + 1]));
   }, [isOffseason, currentWeek, allPlayersList, myRosterIds, slotOverrides]);
 
-  // Standings sorted: wins → PF → PR (power ranking, lower number = better)
+  // Standings sorted: pre-season = power ranking only; in-season = wins → PF → PA → PR
   const sortedStandings = React.useMemo(() => {
     if (!standings) return null;
+    const hasGames = standings.some(t => t.w > 0 || t.l > 0);
+    if (!hasGames) {
+      return [...standings].sort((a, b) =>
+        (powerRankMap.get(a.id) ?? Infinity) - (powerRankMap.get(b.id) ?? Infinity)
+      );
+    }
     return [...standings].sort((a, b) => {
       if (b.w !== a.w) return b.w - a.w;
       if (b.pf !== a.pf) return b.pf - a.pf;

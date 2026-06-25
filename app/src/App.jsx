@@ -35,6 +35,7 @@ import DraftRecapScreen from './screens/DraftRecap.jsx';
 // DST positional rank (1-32) → overall draft rank (~120-244).
 // Keeps defenses in the correct draft range instead of competing with top picks.
 const dstOverallRank = (posRank) => 150 + (posRank - 1) * 3;
+const stripSuffix = (n) => (n || '').toLowerCase().trim().replace(/\s+(jr\.?|sr\.?|ii|iii|iv|v)$/i, '').trim();
 
 // ── Live Score Ticker ─────────────────────────────────────────────────────────
 const TICKER_SEASON_START = new Date('2026-09-09');
@@ -375,7 +376,7 @@ function validateRosterAdd(playerId, currentIds) {
     { key: 'RB', rosterTotal: 'No Limit' },
     { key: 'WR', rosterTotal: 'No Limit' },
     { key: 'TE', rosterTotal: 'No Limit' },
-    { key: 'K',  rosterTotal: 'No Limit' },
+    { key: 'K',  rosterTotal: '0' },
     { key: 'DST',rosterTotal: 'No Limit' },
   ];
 
@@ -482,7 +483,9 @@ export default function App() {
     try {
       const session = JSON.parse(localStorage.getItem('fantasai_mock_session') || 'null');
       const wip     = JSON.parse(localStorage.getItem('fantasai_mock_picks_wip') || 'null');
-      return session?.active === true && Array.isArray(wip) && wip.length > 0 ? 'mock' : null;
+      const u       = JSON.parse(localStorage.getItem('fantasai_user') || 'null');
+      if (session?.active === true && Array.isArray(wip) && wip.length > 0 && session.userTeamId === u?.teamId) return 'mock';
+      return null;
     } catch { return null; }
   });
   const [draftMeta, setDraftMeta] = React.useState(() => {
@@ -523,67 +526,25 @@ export default function App() {
     }).length;
   }, [myRosterIds, rosterSlotOverrides]);
 
-  const [needsPasswordChange, setNeedsPasswordChange] = React.useState(false);
+  const [needsPasswordChange, setNeedsPasswordChange] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_user') || 'null')?.needsPasswordChange || false; } catch { return false; }
+  });
   const [resetToken, setResetToken] = React.useState(() => {
     return new URLSearchParams(window.location.search).get('reset') || null;
   });
 
   function handleLogin(u) {
-    localStorage.setItem('fantasai_user', JSON.stringify(u));
-    setUser(u);
-    userRef.current = u;
-    loadLeagueData(u.leagueId || 'tau');
-    setMyRosterIds(new Set());
-    setRosterSlotOverrides({});
-    if (u.needsPasswordChange) setNeedsPasswordChange(true);
-
-    // Load per-user prefs and league-wide state from R2 (no localStorage fallback)
-    const teamId = u.teamId || u.email || 'guest';
-    Promise.all([
-      loadUserPrefs(teamId),
-      loadRemoteState(),
-    ]).then(([prefs]) => {
-      // Apply persisted prefs to React state
-      if (prefs.slotOverrides && Object.keys(prefs.slotOverrides).length)
-        setRosterSlotOverrides(prefs.slotOverrides);
-      if (Array.isArray(prefs.watchlist))
-        setWatchlistIds(new Set(prefs.watchlist));
-      if (prefs.sources?.freeApis && prefs.sources?.feeds) {
-        // Merge: any source now enabled:true by default should be turned on even in old prefs
-        const mergedApis = { ...prefs.sources.freeApis };
-        FREE_DATA_SOURCES.forEach(s => { if (s.enabled && mergedApis[s.id] === false) mergedApis[s.id] = true; });
-        setSourcesState({ ...prefs.sources, freeApis: mergedApis });
-      }
-
-      // Apply trade offers and waivers from remoteState
-      const offers = getTradeOffers();
-      setTradeOffers(offers);
-      const { claims } = getWaivers();
-      const now = Date.now();
-      setWaiverQueue(
-        Object.fromEntries(Object.entries(claims).filter(([, v]) => new Date(v.expiresAt).getTime() > now))
-      );
-    });
-
-    if (u.teamId) {
-      setRosterLoading(true);
-      fetchS3Roster(u.teamId).then(s3Ids => {
-        const merged = buildMergedRoster(u.teamId, s3Ids);
-        const backup = restoreRosterBackup(u.teamId);
-        if (merged.size >= 3) {
-          setMyRosterIds(merged);
-          backupRoster(u.teamId, merged);
-        } else if (backup && backup.size >= 3) {
-          console.warn('[Roster] Merged roster too small, restoring backup');
-          setMyRosterIds(backup);
-        } else {
-          setMyRosterIds(merged);
-        }
-        setRosterLoading(false);
-      });
-    } else {
-      setRosterLoading(false);
+    const prev = (() => { try { return JSON.parse(localStorage.getItem('fantasai_user') || 'null'); } catch { return null; } })();
+    if (prev && prev.teamId !== u.teamId) {
+      const keep = ['fantasai_league_settings', 'fantasai_owners_config', 'fantasai.workerUrl', 'fantasai.workerKey', 'fantasai_debug_api_key'];
+      const saved = {};
+      for (const k of keep) { const v = localStorage.getItem(k); if (v != null) saved[k] = v; }
+      const allKeys = Object.keys(localStorage).filter(k => k.startsWith('fantasai'));
+      for (const k of allKeys) localStorage.removeItem(k);
+      for (const [k, v] of Object.entries(saved)) localStorage.setItem(k, v);
     }
+    localStorage.setItem('fantasai_user', JSON.stringify(u));
+    window.location.reload();
   }
 
   // Keep browser tab title in sync with the logged-in league name
@@ -690,7 +651,7 @@ export default function App() {
           if (adpByNameRef.current) {
             const byName = adpByNameRef.current;
             patchPlayers(p => {
-              const adp = byName.get(p.name?.toLowerCase().trim());
+              const adp = byName.get(p.name?.toLowerCase().trim()) ?? byName.get(stripSuffix(p.name));
               if (adp != null && p.pos !== 'DST' && p.pos !== 'K') return { ...p, adp };
               return p;
             });
@@ -821,8 +782,8 @@ export default function App() {
       if (!cookie) { setCookieAlert(true); return; }
       try {
         const headers = { 'X-CBS-Cookie': cookie };
-        const key = import.meta.env.VITE_FANTASAI_KEY ?? '';
-        if (key) headers['X-FantasAI-Key'] = key;
+        const key = import.meta.env.VITE_FANTASAI_KEY || 'fantasai2026';
+        headers['X-FantasAI-Key'] = key;
         const res = await fetch('https://api.fantasai.net/api/v1/league', { headers, signal: AbortSignal.timeout(8000) });
         if (!res.ok) setCookieAlert(true);
       } catch { /* network error — don't alert, may be offline */ }
@@ -843,13 +804,16 @@ export default function App() {
         const name = (r.full_name || r.player_name || r.name || '').toLowerCase().trim();
         // R2 file uses adp_value (float pick#) or adp_rank (int); fall back to bare adp
         const adpVal = r.adp_value ?? r.adp_rank ?? r.adp;
-        if (name && adpVal != null) byName.set(name, Number(adpVal));
+        if (name && adpVal != null) {
+          byName.set(name, Number(adpVal));
+          const stripped = stripSuffix(name);
+          if (stripped !== name && !byName.has(stripped)) byName.set(stripped, Number(adpVal));
+        }
       }
       if (byName.size === 0) return;
       adpByNameRef.current = byName;
       patchPlayers(p => {
-        const adp = byName.get(p.name?.toLowerCase().trim());
-        // Only patch skill positions — DST/K are not in the ADP file and default to 999
+        const adp = byName.get(p.name?.toLowerCase().trim()) ?? byName.get(stripSuffix(p.name));
         if (adp != null && p.pos !== 'DST' && p.pos !== 'K') return { ...p, adp };
         return p;
       });
@@ -868,12 +832,16 @@ export default function App() {
       for (const r of arr) {
         const name = (r.player_name || r.full_name || r.name || '').toLowerCase().trim();
         const ecr = r.ecr_rank ?? r.ecr_avg ?? r.rank;
-        if (name && ecr != null) byName.set(name, Math.round(Number(ecr)));
+        if (name && ecr != null) {
+          byName.set(name, Math.round(Number(ecr)));
+          const stripped = stripSuffix(name);
+          if (stripped !== name && !byName.has(stripped)) byName.set(stripped, Math.round(Number(ecr)));
+        }
       }
       if (byName.size === 0) return;
       ecrByNameRef.current = byName;
       patchPlayers(p => {
-        const ecr = byName.get(p.name?.toLowerCase().trim());
+        const ecr = byName.get(p.name?.toLowerCase().trim()) ?? byName.get(stripSuffix(p.name));
         return ecr != null ? { ...p, ecr } : p;
       });
     }).catch(() => {});
@@ -947,7 +915,11 @@ export default function App() {
 
   function handleLogout() {
     localStorage.removeItem('fantasai_user');
+    localStorage.removeItem('fantasai_mock_session');
+    localStorage.removeItem('fantasai_mock_picks_wip');
+    localStorage.removeItem('fantasai_draft_paused');
     setUser(null);
+    setDraftInProgress(null);
     setMyRosterIds(new Set());
     setRosterLoading(false);
     setRosterSlotOverrides({});
@@ -1037,7 +1009,7 @@ export default function App() {
           const [bw] = (b.record || '0-0').split('-').map(Number);
           return bw - aw;
         });
-        const myRank = sorted.findIndex(t => t.me) + 1;
+        const myRank = sorted.findIndex(t => t.id === userRef.current?.teamId) + 1;
         const waiverPick = myRank ? totalTeams - myRank + 1 : null;
         api.transactions.log({
           id: `${Date.now()}-add-${id}`,
@@ -1281,7 +1253,7 @@ export default function App() {
     }} />
   );
   if (!user) return <Login onLogin={handleLogin} />;
-  if (needsPasswordChange) return <ChangePassword user={user} onDone={handlePasswordChanged} />;
+  if (needsPasswordChange) return <ChangePassword user={user} onDone={handlePasswordChanged} onCancel={handleLogout} />;
 
   return (
     <React.Fragment>
@@ -1389,7 +1361,7 @@ export default function App() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 {/* Top row */}
                 <div style={{ fontSize: 11, fontWeight: 800, color: accent, letterSpacing: '.08em', textTransform: 'uppercase', lineHeight: 1 }}>
-                  {isComplete ? '✓ DRAFT COMPLETE' : isPaused ? '⏸ DRAFT PAUSED' : `${isMock ? 'Mock Draft' : 'Live Draft'} · Pick #${currentPickNum}`}
+                  {isComplete ? '✓ DRAFT COMPLETE' : isPaused ? '⏸ DRAFT PAUSED' : `${isMock ? '🏈 Mock Draft' : '🏈 Live Draft'} In Progress · Pick #${currentPickNum}`}
                 </div>
                 {/* Bottom row */}
                 {isComplete ? (
@@ -1414,10 +1386,10 @@ export default function App() {
               </div>
 
               <button
-                style={{ background: accent, color: isPaused ? '#fff' : isMock ? '#000' : 'var(--accent-2-ink)', border: 'none', borderRadius: 10, padding: '8px 18px', fontSize: 12, fontWeight: 900, cursor: 'pointer', flexShrink: 0, letterSpacing: '.05em', whiteSpace: 'nowrap' }}
+                style={{ background: isComplete ? '#4caf82' : '#1affa0', color: '#000', border: 'none', borderRadius: 10, padding: '10px 22px', fontSize: 13, fontWeight: 900, cursor: 'pointer', flexShrink: 0, letterSpacing: '.05em', whiteSpace: 'nowrap', boxShadow: '0 2px 12px rgba(26,255,160,.3)' }}
                 onClick={e => { e.stopPropagation(); setActive('draft'); }}
               >
-                ▶ Return
+                {isComplete ? '📋 View Recap' : '▶ Join Draft'}
               </button>
             </div>
           );

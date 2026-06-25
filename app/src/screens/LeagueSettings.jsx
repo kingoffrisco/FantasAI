@@ -34,6 +34,7 @@ const DEFAULTS = {
     { key: 'WR',    label: 'WR',     activeMin: 1, activeMax: 1, rosterTotal: 'No Limit' },
     { key: 'TE',    label: 'TE',     activeMin: 1, activeMax: 1, rosterTotal: 'No Limit' },
     { key: 'RBWR',  label: 'RB-WR',  activeMin: 3, activeMax: 3, rosterTotal: 'No Limit' },
+    { key: 'K',     label: 'K',      activeMin: 0, activeMax: 0, rosterTotal: '0'        },
     { key: 'DST',   label: 'D/ST',   activeMin: 1, activeMax: 1, rosterTotal: 'No Limit' },
   ],
   extraRosterSettings: [
@@ -174,7 +175,15 @@ const DEFAULTS = {
 function load() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-    if (saved) return { ...DEFAULTS, ...saved };
+    if (saved) {
+      const merged = { ...DEFAULTS, ...saved };
+      if (saved.positions) {
+        const savedKeys = new Set(saved.positions.map(p => p.key));
+        const missing = DEFAULTS.positions.filter(p => !savedKeys.has(p.key));
+        if (missing.length) merged.positions = [...saved.positions, ...missing];
+      }
+      return merged;
+    }
   } catch {}
   return DEFAULTS;
 }
@@ -533,6 +542,11 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
         if (d.fromS3 && d.settings) {
           setData(prev => {
             const merged = { ...DEFAULTS, ...prev, ...d.settings };
+            if (merged.positions) {
+              const keys = new Set(merged.positions.map(p => p.key));
+              const missing = DEFAULTS.positions.filter(p => !keys.has(p.key));
+              if (missing.length) merged.positions = [...merged.positions, ...missing];
+            }
             persist(merged);
             return merged;
           });

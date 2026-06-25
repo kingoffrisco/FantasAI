@@ -711,6 +711,24 @@ def _matchup_grade(rank) -> str:
     return "AVOID — one of the best defenses vs this position"
 
 
+def _dst_matchup_grade(rank) -> str:
+    """DST matchup grade — based on opponent's offensive quality.
+    High rank = facing weak offense (good for DST). Low rank = strong offense."""
+    try:
+        r = int(rank)
+    except (TypeError, ValueError):
+        return "Unknown"
+    if r >= 28:
+        return "SMASH — facing bottom 5 offense, expect turnovers and low scoring"
+    if r >= 23:
+        return "FAVORABLE — weak offense, good sack and turnover upside"
+    if r >= 10:
+        return "NEUTRAL — average offense, standard DST floor"
+    if r >= 6:
+        return "DIFFICULT — strong offense, limited ceiling"
+    return "AVOID — elite offense with explosive playmakers"
+
+
 def _weather_label(player: dict, weather_by_team: dict, wx_penalty: float) -> str:
     team      = (player.get("team") or "").upper()
     opp_raw   = (player.get("opp") or "")
@@ -1124,10 +1142,46 @@ def main():
                 proj_source = "adp"
 
         opp_team = opp.lstrip("@").upper() if has_opp else ""
-        def_key  = (opp_team, pos)
-        def_row  = def_vs_pos.get(def_key) or {} if opp_team else {}
-        def_rank = def_row.get("rank_vs_pos", "?")
-        def_avg  = def_row.get("avg_pts_allowed", "?")
+        if pos == "DST" and opp_team:
+            # For DSTs, evaluate the OPPONENT'S OFFENSE — not their defense
+            # Look up how many pts the opponent's offense scores (higher = tougher for DST)
+            # Use QB + RB + WR avg pts allowed as proxy for offensive quality
+            off_pts = []
+            for opos in ("QB", "RB", "WR"):
+                row = def_vs_pos.get((opp_team, opos)) or {}
+                if row.get("avg_pts_allowed"):
+                    off_pts.append(float(row["avg_pts_allowed"]))
+            if off_pts:
+                # Higher avg_pts_allowed = stronger offense = harder for DST
+                # Invert: rank 32 (allows most pts = strong offense) is bad for DST
+                avg_off = sum(off_pts) / len(off_pts)
+                # Get all teams' offensive averages to compute relative rank
+                all_off = []
+                for t_abbr in set(k[0] for k in def_vs_pos.keys()):
+                    t_pts = []
+                    for opos in ("QB", "RB", "WR"):
+                        r = def_vs_pos.get((t_abbr, opos)) or {}
+                        if r.get("avg_pts_allowed"):
+                            t_pts.append(float(r["avg_pts_allowed"]))
+                    if t_pts:
+                        all_off.append(sum(t_pts) / len(t_pts))
+                all_off.sort()
+                # Rank: 1 = weakest offense (best for DST), 32 = strongest (worst for DST)
+                def_rank = 1
+                for val in all_off:
+                    if avg_off > val:
+                        def_rank += 1
+                # Invert so high rank = good for DST (facing weak offense)
+                def_rank = max(1, len(all_off) + 1 - def_rank)
+                def_avg = round(avg_off, 1)
+            else:
+                def_rank = "?"
+                def_avg = "?"
+        else:
+            def_key  = (opp_team, pos)
+            def_row  = def_vs_pos.get(def_key) or {} if opp_team else {}
+            def_rank = def_row.get("rank_vs_pos", "?")
+            def_avg  = def_row.get("avg_pts_allowed", "?")
 
         snap_data  = get_sleeper_snap_trend(pid) if pid else {}
         news_texts = notes_lookup.get(name.lower()) or []
@@ -1145,7 +1199,10 @@ def main():
             is_out, wx_penalty, status,
         )
         mi         = matchup_indicator(def_rank) if has_opp else "NEUTRAL"
-        matchup_gr = _matchup_grade(def_rank) if has_opp else "No opponent scheduled"
+        if pos == "DST" and has_opp:
+            matchup_gr = _dst_matchup_grade(def_rank)
+        else:
+            matchup_gr = _matchup_grade(def_rank) if has_opp else "No opponent scheduled"
 
         # Depth chart adjustment
         depth_order = p.get("depth_chart_order")
@@ -1246,6 +1303,7 @@ def main():
             "def_rank":          def_rank,
             "def_avg_pts":       def_avg,
             "matchup_grade":     matchup_gr,
+            "matchup_type":      "Offense Matchup" if pos == "DST" else "Defense Matchup",
             "proj":              proj,
             "proj_avg":          season_avg,
             "proj_last":         last_pts,

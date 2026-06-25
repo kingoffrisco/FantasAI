@@ -1004,9 +1004,9 @@ function Movement({ value, prev }) {
   );
 }
 
-export function WorkerConfig({ openCookieTrigger = 0, onCookieSaved }) {
+export function WorkerConfig({ openCookieTrigger = 0, onCookieSaved, adminOnly = false }) {
   const [url, setUrl] = React.useState(() => localStorage.getItem('fantasai.workerUrl') || 'https://api.fantasai.net');
-  const [key, setKey] = React.useState(() => localStorage.getItem('fantasai.workerKey') || '');
+  const [key, setKey] = React.useState(() => localStorage.getItem('fantasai.workerKey') || 'fantasai2026');
   const [status, setStatus] = React.useState(null);
   const [statusMsg, setStatusMsg] = React.useState('');
   const [healthData, setHealthData] = React.useState(null);
@@ -1071,8 +1071,8 @@ export function WorkerConfig({ openCookieTrigger = 0, onCookieSaved }) {
     try {
       const u = url.replace(/\/$/, '') + '/api/health';
       const headers = {};
-      const effectiveKey = key || (import.meta.env.VITE_FANTASAI_KEY ?? '');
-      if (effectiveKey) headers['X-FantasAI-Key'] = effectiveKey;
+      const effectiveKey = key || import.meta.env.VITE_FANTASAI_KEY || 'fantasai2026';
+      headers['X-FantasAI-Key'] = effectiveKey;
       const res = await fetch(u, { headers });
       const data = await res.json();
       setHealthData(data);
@@ -1095,8 +1095,8 @@ export function WorkerConfig({ openCookieTrigger = 0, onCookieSaved }) {
     setResult({ loading: true });
     try {
       const headers = {};
-      const effectiveKey = key || (import.meta.env.VITE_FANTASAI_KEY ?? '');
-      if (effectiveKey) headers['X-FantasAI-Key'] = effectiveKey;
+      const effectiveKey = key || import.meta.env.VITE_FANTASAI_KEY || 'fantasai2026';
+      headers['X-FantasAI-Key'] = effectiveKey;
       try { const c = localStorage.getItem('fantasai_cbs_cookie'); if (c) headers['X-CBS-Cookie'] = c; } catch {}
       const res = await fetch(url.replace(/\/$/, '') + path, { headers });
       const data = await res.json();
@@ -1123,7 +1123,7 @@ export function WorkerConfig({ openCookieTrigger = 0, onCookieSaved }) {
 
   return (
     <>
-    <div className="worker-config">
+    {!adminOnly && <div className="worker-config">
       <div className="worker-head">
         <span className="worker-dot" style={{ background: dotColor, boxShadow: `0 0 0 4px ${dotColor}33` }}></span>
         <div style={{ flex: 1 }}>
@@ -1268,7 +1268,7 @@ export function WorkerConfig({ openCookieTrigger = 0, onCookieSaved }) {
           )}
         </div>
       )}
-    </div>
+    </div>}
 
     {/* ── Get Cookie Modal ──────────────────────────────────────────────────── */}
     {showCookieModal && (

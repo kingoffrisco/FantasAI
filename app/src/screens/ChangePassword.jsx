@@ -9,7 +9,7 @@ function loadOwnerConfig() {
 
 // ── First-login password change ───────────────────────────────────────────────
 
-export default function ChangePassword({ user, onDone }) {
+export default function ChangePassword({ user, onDone, onCancel }) {
   const [newPass, setNewPass]         = React.useState('');
   const [confirm, setConfirm]         = React.useState('');
   const [showNew, setShowNew]         = React.useState(false);
@@ -55,6 +55,11 @@ export default function ChangePassword({ user, onDone }) {
         <button className="btn primary login-btn" type="submit" disabled={saving}>
           {saving ? 'Saving…' : 'Set Password & Continue →'}
         </button>
+        {onCancel && (
+          <button type="button" className="btn ghost login-btn" style={{ marginTop: 8 }} onClick={onCancel}>
+            Cancel & Sign Out
+          </button>
+        )}
       </form>
     </PasswordFormShell>
   );
@@ -173,7 +178,7 @@ function PasswordFormShell({ title, subtitle, emoji, children }) {
     <div className="login-bg">
       <div className="login-card">
         <div className="login-logo-row">
-          <span className="logo"><span className="ai-mark">AI</span>FANTAS</span>
+          <span className="logo">FANTAS<span className="ai-mark">AI</span></span>
         </div>
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           {emoji && <div style={{ fontSize: 28, marginBottom: 8 }}>{emoji}</div>}

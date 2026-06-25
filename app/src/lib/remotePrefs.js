@@ -23,7 +23,7 @@
 import React from 'react';
 
 const API_BASE     = 'https://api.fantasai.net';
-const FANTASAI_KEY = import.meta.env.VITE_FANTASAI_KEY ?? '';
+const FANTASAI_KEY = import.meta.env.VITE_FANTASAI_KEY || 'fantasai2026';
 
 function apiHeaders() {
   return FANTASAI_KEY ? { 'X-FantasAI-Key': FANTASAI_KEY } : {};

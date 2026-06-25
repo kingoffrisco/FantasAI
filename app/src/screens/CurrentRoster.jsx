@@ -265,7 +265,7 @@ function buildScoringBreakdown(player, week) {
   return { items, accumulated };
 }
 
-const SLOT_ORDER = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'DST', 'BENCH'];
+const SLOT_ORDER = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'K', 'DST', 'BENCH'];
 
 function canFillSlot(playerPos, targetSlot) {
   const allowed = SLOT_ELIGIBILITY[targetSlot];
@@ -1591,7 +1591,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                 {incoming.map(offer => {
                   const fromTeam = findTeam(offer.fromTeamId);
                   const givePlayers = offer.giveIds.map(id => findPlayer(id)).filter(Boolean);
-                  const getPlayers  = offer.getIds.map(id => findPlayer(id)).filter(Boolean);
+                  const receivePlayers = offer.getIds.map(id => findPlayer(id)).filter(Boolean);
                   return (
                     <div key={offer.id} style={{ borderRadius: 8, border: '1px solid rgba(255,215,0,.4)', background: 'rgba(255,215,0,.07)', padding: '10px 14px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -1617,14 +1617,14 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                         <div style={{ width: 1, background: 'rgba(255,215,0,.2)' }} />
                         <div style={{ flex: 1, minWidth: 140 }}>
                           <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--danger)', marginBottom: 4 }}>You Give Up</div>
-                          {getPlayers.map(p => (
+                          {receivePlayers.map(p => (
                             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 3 }}>
                               <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'rgba(255,90,110,.12)', color: 'var(--danger)', border: '1px solid rgba(255,90,110,.3)', borderRadius: 3, padding: '0 4px' }}>{p.pos}</span>
                               <span style={{ fontWeight: 600 }}>{p.name}</span>
                               <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>{p.team} · {p.avg.toFixed(1)}</span>
                             </div>
                           ))}
-                          {getPlayers.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>—</span>}
+                          {receivePlayers.length === 0 && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>—</span>}
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 8 }}>
@@ -2214,7 +2214,18 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                           : '#1affa0';
                         // Position-specific matchup indicator
                         const posKey = p.pos === 'DST' ? null : p.pos;
-                        const posRank = posKey ? defVsPosIndex.get(`${oppTeam.toUpperCase()}|${posKey}`) ?? null : null;
+                        let posRank = posKey ? defVsPosIndex.get(`${oppTeam.toUpperCase()}|${posKey}`) ?? null : null;
+                        // DST: compute offensive quality of opponent (invert — weak offense = good for DST)
+                        if (p.pos === 'DST' && oppTeam) {
+                          const offPts = ['QB','RB','WR'].map(op => {
+                            const val = defVsPosIndex.get(`${oppTeam.toUpperCase()}|${op}`);
+                            return val ?? null;
+                          }).filter(v => v != null);
+                          if (offPts.length) {
+                            const avgRank = offPts.reduce((s,v) => s+v, 0) / offPts.length;
+                            posRank = Math.round(33 - avgRank);
+                          }
+                        }
                         const matchup = posRank == null ? null
                           : posRank <= 5  ? { emoji: '🔴',      label: 'Avoid',     score: -2 }
                           : posRank <= 10 ? { emoji: '🟠',      label: 'Difficult', score: -1 }
@@ -2300,7 +2311,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                       const total = p.pts2025 > 0 ? p.pts2025 : (p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null);
                       return total != null ? <span style={{ color: 'var(--text)', fontWeight: 600 }}>{Number(total).toFixed(1)}</span> : <span className="faint">—</span>;
                     })()}</td>
-                    <td className="num">{p.last > 0 ? <span>{p.last.toFixed(1)}</span> : <span className="faint">—</span>}</td>
+                    <td className="num">{p.avg > 0 ? <span>{p.avg.toFixed(1)}</span> : <span className="faint">—</span>}</td>
                     <td className="num" style={{ fontWeight: 600 }}>
                       {(() => {
                         const isOut = ['O', 'IR', 'NFI'].includes(effectiveStatus);
@@ -2351,13 +2362,19 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                             return next;
                           });
                         };
+                        const ssPreview = (() => {
+                          const ssRaw = startSitMap.get(p.name.toLowerCase().trim());
+                          if (!ssRaw) return null;
+                          const ssOv = liveOverrideRec(ssRaw, effectiveStatus);
+                          return ssOv;
+                        })();
                         const previewColor = hasR2
                           ? (r2InjSt === 'Out' ? 'var(--danger)' : r2InjSt === 'Questionable' ? '#ff8c00' : r2InjSt === 'Doubtful' ? '#ffb547' : 'var(--accent-2)')
-                          : 'var(--text-dim)';
+                          : ssPreview ? 'var(--text)' : 'var(--text-dim)';
                         const rawPreview = hasR2
                           ? `${r2InjSt}${r2.injury_notes ? ` · ${r2.injury_notes}` : ''}`
-                          : p.news || (liveNotes.length ? liveNotes[0].note : 'FantasAI insight');
-                        const previewText = rawPreview.length > 100 ? rawPreview.slice(0, 100) + '…' : rawPreview;
+                          : p.news || (liveNotes.length ? liveNotes[0].note : null);
+                        const previewText = rawPreview ? (rawPreview.length > 100 ? rawPreview.slice(0, 100) + '…' : rawPreview) : null;
                         return (
                           <div style={{ fontSize: 12, lineHeight: 1.5, whiteSpace: 'normal', display: 'flex', flexDirection: 'column', gap: 4 }} onClick={e => e.stopPropagation()}>
                             {/* ── Toggle row ── */}
@@ -2368,10 +2385,31 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                               >{isExpanded ? '▾' : '▸'}</button>
                               {!isExpanded && (
                                 <>
-                                  <span
-                                    style={{ fontSize: 11, color: previewColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300, cursor: 'pointer' }}
-                                    onClick={toggleNews}
-                                  >{previewText}</span>
+                                  {previewText ? (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flexWrap: 'nowrap', overflow: 'hidden' }} onClick={toggleNews}>
+                                      <span style={{ fontSize: 11, color: previewColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{previewText}</span>
+                                      {ssPreview && (() => {
+                                        const rec = ssPreview.recommendation;
+                                        const recClr = rec === 'MONITOR' ? '#ff9800' : rec?.startsWith('START') ? '#1affa0' : rec?.startsWith('SIT') ? '#ff4f4f' : '#ffb547';
+                                        return <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, color: recClr, flexShrink: 0 }}>{rec}{ssPreview.start_score != null ? ` ${ssPreview.start_score}` : ''}</span>;
+                                      })()}
+                                    </span>
+                                  ) : ssPreview ? (() => {
+                                    const rec = ssPreview.recommendation;
+                                    const mi = ssPreview.matchup_indicator;
+                                    const recClr = rec === 'MONITOR' ? '#ff9800' : rec?.startsWith('START') ? '#1affa0' : rec?.startsWith('SIT') ? '#ff4f4f' : '#ffb547';
+                                    const miClr2 = mi === 'SMASH' ? '#1affa0' : mi === 'FAVORABLE' ? '#1affa0' : mi === 'AVOID' ? '#ff4f4f' : mi === 'DIFFICULT' ? '#ff9800' : 'var(--text-dim)';
+                                    const mType = ssPreview.matchup_type || (p.pos === 'DST' ? 'Off Matchup' : 'Def Matchup');
+                                    return (
+                                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flexWrap: 'wrap' }} onClick={toggleNews}>
+                                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 800, color: recClr }}>{rec}</span>
+                                        {ssPreview.start_score != null && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>Score <strong style={{ color: recClr }}>{ssPreview.start_score}</strong>/100</span>}
+                                        {mi && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: miClr2 }}>{mType} {mi}{ssPreview.def_rank && ssPreview.def_rank !== '?' ? ` (#${ssPreview.def_rank}/32)` : ''}</span>}
+                                      </span>
+                                    );
+                                  })() : (
+                                    <span style={{ fontSize: 11, color: 'var(--text-faint)', cursor: 'pointer' }} onClick={toggleNews}>—</span>
+                                  )}
                                   {arts.length > 0 && (
                                     <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-2)', opacity: 0.7, flexShrink: 0 }}>📰 {arts.length}</span>
                                   )}
@@ -2451,7 +2489,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                                           <span style={{ fontWeight: 900, fontSize: 13, color: scoreBarClr }}>{ss.start_score}<span style={{ color: 'var(--text-faint)', fontSize: 10, fontWeight: 400 }}>/100</span> <span style={{ fontSize: 9, color: clr, fontWeight: 700 }}>{conf}</span></span>
                                         </>}
                                         {mi && <>
-                                          <span style={{ color: 'var(--text-faint)', fontWeight: 700 }}>Defense Matchup:</span>
+                                          <span style={{ color: 'var(--text-faint)', fontWeight: 700 }}>{ss.matchup_type || 'Defense Matchup'}:</span>
                                           <span style={{ fontWeight: 800, color: miClr }}>{mi}{ss.def_rank && ss.def_rank !== '?' ? ` (#${ss.def_rank}/32)` : ''}</span>
                                         </>}
                                         {ss.opponent && <>
@@ -2692,7 +2730,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                                         <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 14, color: 'var(--accent)' }}>{fp.proj.toFixed(1)}</span>
                                         <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>proj</span>
                                       </div>
-                                      <span style={{ fontSize: 11, fontWeight: 700, color: '#1affa0', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>+ Add →</span>
+                                      <span style={{ fontSize: 11, fontWeight: 700, color: '#1affa0', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>↻ Swap</span>
                                     </button>
                                   ))}
                                 </div>
@@ -3092,8 +3130,16 @@ function StrengthOfSchedule({ rosterPlayers, fullSchedule, defVsPosIndex, starte
     const entry = sched[team];
     if (!entry) return null;
     const opp = entry.opp?.replace(/^@/, '').toUpperCase();
-    if (!opp || !pos) return null;
-    const rank = defVsPosIndex.get(`${opp}|${pos}`);
+    if (!opp) return null;
+    let rank;
+    if (pos === 'DST') {
+      const offRanks = ['QB','RB','WR'].map(op => defVsPosIndex.get(`${opp}|${op}`)).filter(v => v != null);
+      if (!offRanks.length) return null;
+      rank = Math.round(33 - offRanks.reduce((s,v) => s+v, 0) / offRanks.length);
+    } else {
+      if (!pos) return null;
+      rank = defVsPosIndex.get(`${opp}|${pos}`);
+    }
     if (rank == null) return null;
     if (rank >= 28) return { label: 'SMASH', color: '#1affa0', score: 2 };
     if (rank >= 23) return { label: 'FAV', color: '#4ea8ff', score: 1 };
@@ -3102,11 +3148,13 @@ function StrengthOfSchedule({ rosterPlayers, fullSchedule, defVsPosIndex, starte
     return { label: '', color: 'var(--text-faint)', score: 0 };
   }
 
+  const hasScheduleData = Object.keys(fullSchedule).length > 0;
+
   const playerSOS = players.map(p => {
-    const grades = weeks.map(w => p.bye === w ? null : getMatchupGrade(p.team, p.pos === 'DST' ? null : p.pos, w));
-    const rosTotal = grades.filter(Boolean).reduce((s, g) => s + g.score, 0);
-    const playoffGrades = [15, 16, 17].map(w => p.bye === w ? null : getMatchupGrade(p.team, p.pos === 'DST' ? null : p.pos, w));
-    const playoffTotal = playoffGrades.filter(Boolean).reduce((s, g) => s + g.score, 0);
+    const grades = weeks.map(w => p.bye === w ? 'BYE' : (getMatchupGrade(p.team, p.pos, w) || null));
+    const rosTotal = grades.filter(g => g && g !== 'BYE').reduce((s, g) => s + g.score, 0);
+    const playoffGrades = [15, 16, 17].map(w => p.bye === w ? 'BYE' : (getMatchupGrade(p.team, p.pos, w) || null));
+    const playoffTotal = playoffGrades.filter(g => g && g !== 'BYE').reduce((s, g) => s + g.score, 0);
     return { player: p, grades, rosTotal, playoffGrades, playoffTotal };
   }).sort((a, b) => b.rosTotal - a.rosTotal);
 
@@ -3162,16 +3210,20 @@ function StrengthOfSchedule({ rosterPlayers, fullSchedule, defVsPosIndex, starte
                 <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11, color: rosTotal > 0 ? '#1affa0' : rosTotal < 0 ? '#ff4f4f' : 'var(--text-dim)' }}>
                   {rosTotal > 0 ? '+' : ''}{rosTotal}
                 </td>
-                {grades.map((g, w) => (
-                  <td key={w} style={{
-                    textAlign: 'center', padding: '3px 4px', fontSize: 9, fontWeight: 700,
-                    color: g ? g.color : '#ff4f4f',
-                    background: g ? (g.score >= 2 ? 'rgba(26,255,160,.12)' : g.score >= 1 ? 'rgba(78,168,255,.08)' : g.score <= -2 ? 'rgba(255,60,60,.12)' : g.score <= -1 ? 'rgba(255,152,0,.08)' : 'transparent') : (p.bye === w + 1 ? 'rgba(255,60,60,.08)' : 'transparent'),
-                    ...(w + 1 >= 15 && w + 1 <= 17 ? { borderLeft: w + 1 === 15 ? '2px solid rgba(198,255,58,.3)' : undefined, borderRight: w + 1 === 17 ? '2px solid rgba(198,255,58,.3)' : undefined } : {}),
-                  }}>
-                    {g ? g.label || '—' : 'BYE'}
-                  </td>
-                ))}
+                {grades.map((g, w) => {
+                  const isBye = g === 'BYE';
+                  const hasGrade = g && g !== 'BYE';
+                  return (
+                    <td key={w} style={{
+                      textAlign: 'center', padding: '3px 4px', fontSize: 9, fontWeight: 700,
+                      color: isBye ? '#ff4f4f' : hasGrade ? g.color : 'var(--text-faint)',
+                      background: isBye ? 'rgba(255,60,60,.08)' : hasGrade ? (g.score >= 2 ? 'rgba(26,255,160,.12)' : g.score >= 1 ? 'rgba(78,168,255,.08)' : g.score <= -2 ? 'rgba(255,60,60,.12)' : g.score <= -1 ? 'rgba(255,152,0,.08)' : 'transparent') : 'transparent',
+                      ...(w + 1 >= 15 && w + 1 <= 17 ? { borderLeft: w + 1 === 15 ? '2px solid rgba(198,255,58,.3)' : undefined, borderRight: w + 1 === 17 ? '2px solid rgba(198,255,58,.3)' : undefined } : {}),
+                    }}>
+                      {isBye ? 'BYE' : hasGrade ? (g.label || '—') : '—'}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>

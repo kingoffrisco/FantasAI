@@ -96,7 +96,7 @@ DRAFT CONTEXT:
 RECENT NEWS ({news_count} articles in last 30 days):
 {news_block}
 
-Paragraph 1: Summarize their 2025 performance. Ground it in their actual stats.
+{college_stats_block}{combine_block}Paragraph 1: {para1_instruction}
 Paragraph 2: Discuss current news, team situation, and any injury/role concerns.
 Paragraph 3: Give a 2026 fantasy draft outlook — who should target them, at what round, and why.
 
@@ -282,6 +282,96 @@ def _physical_label(profile: dict) -> str:
     return "—"
 
 
+def _college_stats_block(profile: dict, college_stats: dict) -> str:
+    name = (profile.get("full_name") or "").strip()
+    if not name or not college_stats:
+        return ""
+    key = name.lower()
+    seasons = college_stats.get(key)
+    if not seasons:
+        return ""
+    lines = ["COLLEGE PRODUCTION:"]
+    for s in sorted(seasons, key=lambda x: x.get("season", 0)):
+        yr = s.get("season", "?")
+        team = s.get("team", "?")
+        rec = s.get("rec", 0) or 0
+        rec_yds = s.get("yds", 0) or 0
+        td = s.get("td", 0) or 0
+        car = s.get("car", 0) or 0
+        rush_yds = s.get("rush_yds", 0) or 0
+        att = s.get("att", 0) or 0
+        completions = s.get("completions", 0) or 0
+        pass_yds = s.get("pass_yds", 0) or 0
+        parts = [f"  {yr} ({team}):"]
+        if completions > 0:
+            parts.append(f"Pass {completions}/{att} for {pass_yds} yds, {td} TD")
+        if car > 10:
+            parts.append(f"Rush {car} att, {rush_yds if rush_yds else rec_yds} yds")
+        if rec > 0:
+            parts.append(f"Rec {rec} for {rec_yds} yds, {td} TD")
+        lines.append(" | ".join(parts))
+    return "\n".join(lines) + "\n\n"
+
+
+def _combine_block(profile: dict, combine_data: dict) -> str:
+    name = (profile.get("full_name") or "").strip()
+    if not name or not combine_data:
+        return ""
+    row = combine_data.get(name.lower())
+    if not row:
+        return ""
+    parts = ["COMBINE / ATHLETIC PROFILE:"]
+    if row.get("forty"): parts.append(f"  40-yard: {row['forty']}s")
+    if row.get("vertical"): parts.append(f"  Vertical: {row['vertical']}\"")
+    if row.get("broad_jump"): parts.append(f"  Broad jump: {row['broad_jump']}\"")
+    if row.get("bench"): parts.append(f"  Bench: {row['bench']} reps")
+    if row.get("wt"): parts.append(f"  Weight: {row['wt']} lbs")
+    if row.get("draft_round") and row.get("draft_ovr"):
+        parts.append(f"  Draft: Round {row['draft_round']}, Pick #{row['draft_ovr']}")
+    if len(parts) <= 1:
+        return ""
+    return "\n".join(parts) + "\n\n"
+
+
+def _load_college_stats(conn) -> dict:
+    """Load CFBD college stats into a dict keyed by lowercase player name."""
+    try:
+        rows = conn.execute(
+            "SELECT * FROM bronze_cfbd_player_stats"
+        ).fetchall()
+        cols = [c[0] for c in conn.description]
+        by_name = {}
+        for row in rows:
+            d = dict(zip(cols, row))
+            key = (d.get("player_name") or "").lower().strip()
+            if not key:
+                continue
+            if key not in by_name:
+                by_name[key] = []
+            by_name[key].append(d)
+        return by_name
+    except Exception:
+        return {}
+
+
+def _load_combine_data(conn) -> dict:
+    """Load combine measurables into a dict keyed by lowercase player name."""
+    try:
+        rows = conn.execute(
+            "SELECT * FROM bronze_combine_data WHERE forty IS NOT NULL OR vertical IS NOT NULL"
+        ).fetchall()
+        cols = [c[0] for c in conn.description]
+        by_name = {}
+        for row in rows:
+            d = dict(zip(cols, row))
+            key = (d.get("player_name") or "").lower().strip()
+            if key:
+                by_name[key] = d
+        return by_name
+    except Exception:
+        return {}
+
+
 # ── Rostered player lookup ───────────────────────────────────────────────────
 
 def load_rostered_names() -> set:
@@ -407,7 +497,7 @@ def load_profiles_fallback() -> list:
 
 # ── Model call ──────────────────────────────────────────────────────────────
 
-def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1) -> str:
+def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1, college_stats: dict = None, combine_data: dict = None) -> str:
     news_count  = profile.get("recent_news_count") or 0
     games       = profile.get("games_played_2025") or 0
     fantasy_pts = float(profile.get("total_fantasy_points_2025") or 0)
@@ -431,6 +521,13 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
             news_block     = _news_block(profile, notes_lookup),
         )
     else:
+        is_rookie = int(profile.get("years_exp") or 99) <= 1
+        college_block = _college_stats_block(profile, college_stats) if is_rookie and college_stats else ""
+        comb_block = _combine_block(profile, combine_data) if is_rookie and combine_data else ""
+        para1 = ("Summarize their college production and what it means for their NFL transition. Ground it in their actual college stats."
+                 if is_rookie and games == 0 and college_block
+                 else "Summarize their 2025 performance. Ground it in their actual stats.")
+
         prompt = WRITEUP_PROMPT.format(
             player_name    = profile.get("full_name", "Unknown"),
             position       = pos,
@@ -452,6 +549,9 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
             adp_rank_std   = profile.get("adp_rank_standard") or "unranked",
             news_count     = news_count,
             news_block     = _news_block(profile, notes_lookup),
+            college_stats_block = college_block,
+            combine_block  = comb_block,
+            para1_instruction = para1,
         )
 
     resp = requests.post(
@@ -556,6 +656,19 @@ def main():
     notes_dict = notes_raw.get("players", {}) if isinstance(notes_raw, dict) else {}
     print(f"[Job 3] {len(notes_dict)} player note records available.")
 
+    # ── Load college stats + combine data for rookie writeups ────────────────
+    try:
+        from db import get_conn as _get_db_conn
+        _db = _get_db_conn()
+        college_stats = _load_college_stats(_db)
+        combine_data = _load_combine_data(_db)
+        _db.close()
+        print(f"[Job 3] College stats: {len(college_stats)} players, Combine: {len(combine_data)} players")
+    except Exception as e:
+        print(f"[Job 3] College/combine data unavailable: {e}")
+        college_stats = {}
+        combine_data = {}
+
     # ── Load existing writeups for incremental skip ──────────────────────────
     existing: dict = {}
     if not args.full:
@@ -622,7 +735,7 @@ def main():
 
         t0 = time.time()
         try:
-            writeup = generate_writeup(profile, notes_dict, model)
+            writeup = generate_writeup(profile, notes_dict, model, college_stats, combine_data)
             elapsed = round(time.time() - t0, 1)
             summary = writeup.split(".")[0].strip() + "." if writeup else ""
 

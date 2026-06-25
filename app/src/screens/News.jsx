@@ -2033,7 +2033,7 @@ function ArticleLabelerTab({ articles, user, search = '' }) {
 
   async function submitLabel() {
     if (!selected || !form.labeled_position) return;
-    const apiKey = import.meta.env.VITE_FANTASAI_KEY || '';
+    const apiKey = import.meta.env.VITE_FANTASAI_KEY || 'fantasai2026';
     if (!apiKey) {
       setSaveMsg({ ok: false, text: 'VITE_FANTASAI_KEY not set — add it to app/.env and Cloudflare Pages env vars, then redeploy' });
       return;

@@ -174,7 +174,7 @@ export default function Login({ onLogin }) {
       <div className="login-card">
 
         <div className="login-logo-row">
-          <span className="logo"><span className="ai-mark">AI</span>FANTAS</span>
+          <span className="logo">FANTAS<span className="ai-mark">AI</span></span>
         </div>
         <div className="login-subtitle">Sign in to your fantasy league</div>
 

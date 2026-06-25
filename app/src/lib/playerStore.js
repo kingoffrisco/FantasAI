@@ -119,8 +119,9 @@ export function normalizePlayerList(rawArr) {
     if (isTeamless) {
       // Keep free agents / unknowns only if they have evidence of NFL relevance
       const hasRank  = Number(p.positionRank || p.position_rank || p.search_rank || p.ecr) > 0;
-      const hasGames = Number(p.games_played_2025 || p.games_played) > 0;
-      if (!hasRank && !hasGames) continue;
+      const hasGames = Number(p.games_played_2025 || p.games_played) >= 5;
+      const hasStats = Number(p.season_avg_points_2025 || p.avg) > 0;
+      if (!hasRank && !hasGames && !hasStats) continue;
     }
     // Map source positions to canonical set; reject anything unexpected.
     // Use fantasy_positions only as a fallback when `position` is absent or unrecognised —
@@ -282,10 +283,27 @@ export function normalizePlayerList(rawArr) {
     });
   }
 
-  // ECR starts at 999 for all players; the async ECR patch (ecr_ppr.json / ecr_std.json)
-  // sets real FantasyPros ranks after normalizePlayerList returns. Never derive fake ranks
-  // from proj here — that produced duplicate #1s when players without stats sorted
-  // alphabetically and collided with the real #1 from the ECR patch.
+  // Compute tiers from ECR when no tier data exists in the export.
+  // Group by position, sort by ECR, assign tiers based on positional rank.
+  const posTierCuts = { QB: [3,8,15,24], RB: [6,15,30,48], WR: [6,15,30,48], TE: [3,6,12,20], K: [3,8,16], DST: [3,8,16] };
+  const byPos = {};
+  for (const p of result) {
+    if (!byPos[p.pos]) byPos[p.pos] = [];
+    byPos[p.pos].push(p);
+  }
+  for (const [pos, players] of Object.entries(byPos)) {
+    const cuts = posTierCuts[pos] || [5, 12, 24, 40];
+    const sorted = [...players].sort((a, b) => (a.ecr || 999) - (b.ecr || 999));
+    sorted.forEach((p, i) => {
+      if (p.tier > 0) return;
+      const rank = i + 1;
+      let tier = cuts.length + 1;
+      for (let t = 0; t < cuts.length; t++) {
+        if (rank <= cuts[t]) { tier = t + 1; break; }
+      }
+      p.tier = tier;
+    });
+  }
 
   return result;
 }

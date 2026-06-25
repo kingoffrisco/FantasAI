@@ -2,7 +2,7 @@ const BASE        = import.meta.env.VITE_WORKER_URL ?? 'https://fantasai-cbs.fan
 const API_BASE    = 'https://api.fantasai.net'
 // X-FantasAI-Key is required by the main API Worker for all R2 and db endpoints.
 // Set VITE_FANTASAI_KEY in Cloudflare Pages env vars (or local .env for dev).
-const FANTASAI_KEY = import.meta.env.VITE_FANTASAI_KEY ?? ''
+const FANTASAI_KEY = import.meta.env.VITE_FANTASAI_KEY || 'fantasai2026'
 
 function apiHeaders() {
   return FANTASAI_KEY ? { 'X-FantasAI-Key': FANTASAI_KEY } : {}
@@ -142,6 +142,7 @@ export const api = {
     },
     defenseVsPos:   () => r2Get('fantasai/analysis/defense_vs_pos.json'),
     rookieScores:   () => r2Get('fantasai/analysis/rookie_scores.json'),
+    collegeStats:   () => r2Get('fantasai/analysis/college_stats.json'),
     // 583K records — only use on demand, not on page load
     weeklyStats: () => r2Get('fantasai/stats/gold_weekly_stats.json'),
     adpPPR:        () => r2Get('players/adp_ppr.json'),
