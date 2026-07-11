@@ -20,6 +20,9 @@ const DEFAULTS = {
   playerPool:   'AFC and NFC Players',
   commishMessage: "Welcome to ATO Tau League! The league's commissioner can use this space to keep managers informed about important decisions, events or anything that requires everyone's attention. Check this message frequently in case there is an important announcement.",
 
+  // League type — 'redraft' (fresh draft every year) or 'dynasty' (rosters carry over).
+  leagueType: 'redraft',
+
   // Roster limits
   roster: {
     starters:        { min: 8,  max: 8  },
@@ -863,6 +866,62 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               { label: 'Player Pool',          key: 'playerPool',  value: data.playerPool },
             ]}
           />
+
+          <Card title="League Type">
+            <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button
+                  disabled={!canEdit}
+                  onClick={() => {
+                    if (!canEdit) return;
+                    const nextType = data.leagueType === 'dynasty' ? 'redraft' : 'dynasty';
+                    const next = { ...data, leagueType: nextType };
+                    persist(next);
+                    setData(next);
+                    flash();
+                    logChange('general', `League type changed to ${nextType === 'dynasty' ? 'Dynasty' : 'Redraft'}`);
+                  }}
+                  style={{
+                    width: 44, height: 24, borderRadius: 12, border: 'none', padding: 0,
+                    background: data.leagueType === 'dynasty' ? 'var(--accent)' : 'var(--border-strong)',
+                    position: 'relative', cursor: canEdit ? 'pointer' : 'default', flexShrink: 0,
+                    transition: 'background .15s', opacity: canEdit ? 1 : 0.6,
+                  }}
+                >
+                  <span style={{
+                    position: 'absolute', top: 3, left: data.leagueType === 'dynasty' ? 23 : 3,
+                    width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                    display: 'block', transition: 'left .15s',
+                  }} />
+                </button>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: data.leagueType === 'dynasty' ? 'var(--accent)' : 'var(--text)' }}>
+                    Dynasty League — {data.leagueType === 'dynasty' ? 'Yes' : 'No'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 1 }}>
+                    {data.leagueType === 'dynasty'
+                      ? 'Rosters are intended to carry over between seasons instead of a full annual redraft.'
+                      : 'Standard league — a full startup draft happens every season, rosters reset.'}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.7 }}>
+                <strong style={{ color: 'var(--text-dim)' }}>Redraft:</strong> rosters reset every year, full draft each season, long-term player value doesn't carry weight.<br />
+                <strong style={{ color: 'var(--text-dim)' }}>Dynasty:</strong> teams keep most/all players year to year, only a rookie-class draft happens each offseason, trading future draft picks is common, and long-term player value matters a lot more than this-week matchups.
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--warn)', background: 'rgba(255,193,7,.08)', border: '1px solid rgba(255,193,7,.25)', borderRadius: 6, padding: '7px 10px' }}>
+                ⚠ This toggle currently only records the league's type. Season-to-season roster carryover, rookie-only drafts, and future-pick trading aren't implemented yet — ask if you want any of those built out.
+              </div>
+
+              {!canEdit && (
+                <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                  Only Commissioners and Admins can change the league type.
+                </div>
+              )}
+            </div>
+          </Card>
 
           {canEdit && (
             <Card title="CBS Sports FantasAI Key">

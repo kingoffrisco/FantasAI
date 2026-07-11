@@ -9,6 +9,18 @@ import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 
 const dstOverallRank = (posRank) => 150 + (posRank - 1) * 3;
 
+// ── "Your turn" chime options — each is a list of [frequency, delaySeconds] tone pairs
+// played through the shared playChime() synthesizer (no audio files). ────────────────
+const TURN_CHIMES = [
+  { id: 'classic',  label: 'Classic Chime',  notes: [[880, 0], [1100, 0.15], [1320, 0.3]] },
+  { id: 'alert',    label: 'Alert Beep',     notes: [[880, 0], [880, 0.16], [880, 0.32]] },
+  { id: 'bell',     label: 'Bell',           notes: [[1046.5, 0], [1318.5, 0.05], [1046.5, 0.35]] },
+  { id: 'trill',    label: 'Trill',          notes: [[900, 0], [1200, 0.09], [900, 0.18], [1200, 0.27]] },
+  { id: 'horn',     label: 'Horn',           notes: [[440, 0], [440, 0.22], [660, 0.44]] },
+  { id: 'buzzer',   label: 'Buzzer',         notes: [[600, 0], [500, 0.13], [400, 0.26]] },
+];
+const DEFAULT_TURN_CHIME = TURN_CHIMES[0].id;
+
 // ── Next Gen stat definitions per position ────────────────────────────────
 const NG_STATS = {
   QB: [
@@ -133,6 +145,8 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     setMockTeamsOrder([...TEAMS_ORDER]);
     setPaused(false);
     try { localStorage.removeItem('fantasai_draft_paused'); } catch {}
+    // Don't let Autodraft/AI-Draft mode carry over into the idle "no draft active" state
+    setUserDraftMode('manual');
     onDraftStatusChange?.(null);
   }
   const [draftLimitToast, setDraftLimitToast] = React.useState(null);
@@ -300,6 +314,65 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   function postChat(msg, extra = {}) {
     const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setChatMessages(prev => [...prev, { who: '⚡ System', color: 'var(--text-faint)', ts, msg, ai: true, ...extra }]);
+  }
+
+  // Draft sound on/off — persisted across sessions
+  const [soundOn, setSoundOn] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_draft_sound') ?? 'true'); } catch { return true; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem('fantasai_draft_sound', JSON.stringify(soundOn)); } catch {}
+  }, [soundOn]);
+
+  // Which chime plays for "your turn" — persisted across sessions
+  const [turnChimeId, setTurnChimeId] = React.useState(() => {
+    try {
+      const saved = localStorage.getItem('fantasai_draft_turn_chime');
+      return saved && TURN_CHIMES.some(c => c.id === saved) ? saved : DEFAULT_TURN_CHIME;
+    } catch { return DEFAULT_TURN_CHIME; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem('fantasai_draft_turn_chime', turnChimeId); } catch {}
+  }, [turnChimeId]);
+
+  // Toast for autodraft on/off announcements (distinct from the red error toast below)
+  const [autodraftToast, setAutodraftToast] = React.useState(null);
+  React.useEffect(() => {
+    if (autodraftToast) { const t = setTimeout(() => setAutodraftToast(null), 3500); return () => clearTimeout(t); }
+  }, [autodraftToast]);
+
+  // Shared draft audio-cue player — synthesized tones, no asset files. Gated by soundOn.
+  function playChime(notes) {
+    if (!soundOn) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const now = ctx.currentTime;
+      notes.forEach(([freq, delay]) => {
+        const t0 = now + delay;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, t0);
+        gain.gain.linearRampToValueAtTime(0.25, t0 + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.3);
+        osc.start(t0);
+        osc.stop(t0 + 0.3);
+      });
+    } catch {}
+  }
+
+  // Spoken voice announcement (Web Speech API — no audio files). Gated by soundOn, same as playChime.
+  function speak(text) {
+    if (!soundOn) return;
+    try {
+      if (!window.speechSynthesis) return;
+      window.speechSynthesis.cancel(); // don't let announcements queue up and pile behind each other
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 1.05;
+      window.speechSynthesis.speak(utter);
+    } catch {}
   }
   const [commishPickSearch, setCommishPickSearch] = React.useState('');
   const [commishPickTeamId, setCommishPickTeamId] = React.useState(null); // null = use onClockTeamId
@@ -514,21 +587,38 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     setCommishLog(prev => [...prev, { type, message, ts, id: Date.now() + Math.random(), pickNum: currentPickNum }]);
   }
 
+  // Only run the pick clock when a draft is actually happening (mock in progress, or the live
+  // draft window is open). DraftRoom stays mounted at all times so the "Return to Draft" banner
+  // and background auto-picks keep working when the user navigates elsewhere — without this
+  // guard, the clock (and everything downstream of it: turn chimes, autodraft) would keep running
+  // against stale/default pick data even with no real draft active.
   React.useEffect(() => {
-    if (paused) return;
+    if (paused || !(mockActive || isLive)) return;
     const t = setInterval(() => setSeconds(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
-  }, [paused]);
+  }, [paused, mockActive, isLive]);
 
+  // When a non-user team's clock expires in a live draft, auto-draft a pick for them and switch
+  // them to Autodraft for the rest of the draft so the room doesn't keep stalling on them.
+  // (Mock-draft bot teams don't rely on this — they're already auto-picked the instant it becomes
+  // their turn, well before the clock could expire.) The user's own timer-expiry auto-pick is
+  // handled by a separate effect further down (after isMyTurn is defined) so the pick doesn't get
+  // double-submitted by both effects firing at once.
   React.useEffect(() => {
     if (seconds === 0 && !paused) {
       const r = setTimeout(() => {
-        if (isMyTurn && !draftComplete) {
+        if (!mockActive && !isMyTurn && !draftComplete) {
           const draftedSet = new Set(allPicks.filter(p => p.playerId).map(p => p.playerId));
-          const myPickIds  = allPicks.filter(p => p.teamId === (mockActive ? mockUserTeamId : myDraftTeamId) && p.playerId).map(p => p.playerId);
-          const pickId = pickBestAvailable(draftedSet, myPickIds, currentPickNum, 'auto');
+          const pickId = pickForTeamAuto(onClockTeamId, currentPickNum, allPicks, draftedSet);
           if (pickId) {
-            if (mockActive) { draftPlayer(pickId); } else { commishPick(pickId); }
+            commishPick(pickId, onClockTeamId);
+            if (getTeamMode(onClockTeamId) === 'manual') {
+              const team = LEAGUE_TEAMS.find(x => x.id === onClockTeamId) || findTeam(onClockTeamId);
+              setTeamModes(prev => ({ ...prev, [onClockTeamId]: 'auto' }));
+              postChat(`${team?.name}'s pick clock expired — Autodraft turned ON for their remaining picks ⚡`);
+              setAutodraftToast(`${team?.name} timed out — Autodraft turned ON`);
+              playChime([[420, 0], [420, 0.18]]);
+            }
             return;
           }
         }
@@ -537,7 +627,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
       return () => clearTimeout(r);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seconds, paused, clockSeconds]); // isMyTurn/draftComplete defined after this hook — read via closure in callback, not dep array
+  }, [seconds, paused, clockSeconds]); // isMyTurn/draftComplete/onClockTeamId/allPicks defined after this hook — read via closure
 
   function flashFreed(ids) {
     const s = new Set(ids);
@@ -661,7 +751,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
   // Auto-draft for live mode when a team's mode is 'auto' or 'ai'
   React.useEffect(() => {
-    if (mockActive || paused || livePickNum > TOTAL_PICKS) return;
+    if (mockActive || !isLive || paused || livePickNum > TOTAL_PICKS) return;
     const mode = teamModes[onClockTeamId];
     if (!mode || mode === 'manual') return;
     const draftedSet = new Set(livePicks.filter(p => p.playerId).map(p => p.playerId));
@@ -683,7 +773,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     }, 1800);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mockActive, paused, livePickNum, teamModes, onClockTeamId]);
+  }, [mockActive, isLive, paused, livePickNum, teamModes, onClockTeamId]);
 
   const upcoming = [];
   for (let i = 1; i <= 12; i++) {
@@ -853,6 +943,35 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   const myPicks = allPicks.filter(p => p.teamId === myDraftTeamId && p.playerId);
   const teamsForCols = teamsOrder.map(id => findTeam(id) || LEAGUE_TEAMS.find(t => t.id === id));
 
+  // Unified autodraft-mode lookup: my own team uses userDraftMode; every other team uses the
+  // commissioner-assignable teamModes map. Only meaningful in live drafts — in mock drafts every
+  // non-user team is always AI-controlled anyway (not an "elected" autodraft state).
+  function getTeamMode(teamId) {
+    if (teamId === myDraftTeamId) return userDraftMode;
+    return mockActive ? 'manual' : (teamModes[teamId] || 'manual');
+  }
+  // Unified setter — announces, toasts, and chimes consistently whether the owner set it themselves
+  // or the commissioner assigned it on their behalf.
+  function setTeamMode(teamId, mode) {
+    const isMe = teamId === myDraftTeamId;
+    if (isMe) setUserDraftMode(mode);
+    else setTeamModes(prev => ({ ...prev, [teamId]: mode }));
+    const team = LEAGUE_TEAMS.find(x => x.id === teamId) || findTeam(teamId);
+    const label = mode === 'ai' ? 'AI-Draft (Ghost)' : 'Autodraft';
+    if (mode === 'manual') {
+      postChat(isMe
+        ? `${myName} disabled ${label} — back to manual picking`
+        : `Commissioner disabled autodraft for ${team?.name} — back to manual picking`);
+      return;
+    }
+    const detail = mode === 'ai' ? 'AI is picking for them each round 🤖' : 'picking best available each round ⚡';
+    postChat(isMe
+      ? `${myName} enabled ${label} — ${detail}`
+      : `Commissioner set ${team?.name} to ${label} — ${detail}`);
+    setAutodraftToast(`${team?.name} — ${label} turned ON`);
+    playChime(mode === 'ai' ? [[520, 0], [660, 0.16]] : [[420, 0], [420, 0.18]]);
+  }
+
   const BELL_GRADES = ['A+','A','A-','B+','B','B-','C+','C','C-','D+','D','F'];
   const BELL_COLORS = { 'A+':'#1affa0','A':'#1affa0','A-':'#4caf82','B+':'#4ea8ff','B':'#4ea8ff','B-':'#4ea8ff','C+':'var(--text-dim)','C':'var(--text-dim)','C-':'var(--text-dim)','D+':'#ff9800','D':'#ff9800','F':'#ff4f4f' };
   const teamBellGrades = React.useMemo(() => {
@@ -905,29 +1024,32 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     return 0;
   }, [isMyTurn, currentPickNum, teamsOrder, myDraftTeamId]);
 
-  // Play audio alert when it becomes the user's turn
+  // Play audio alert when it becomes the user's turn — only when they'd actually need to act.
+  // Skip it when Autodraft/AI-Draft is on, since the pick happens automatically a moment later
+  // (this fires in the background even while browsing other screens — DraftRoom stays mounted —
+  // so without this guard it produces a random-seeming chime every time an autodraft pick occurs).
   const isMyTurnRef = React.useRef(false);
   React.useEffect(() => {
-    if (isMyTurn && !isMyTurnRef.current && !draftComplete && !paused) {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const now = ctx.currentTime;
-        [880, 1100, 1320].forEach((freq, i) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.frequency.value = freq;
-          gain.gain.setValueAtTime(0, now + i * 0.15);
-          gain.gain.linearRampToValueAtTime(0.25, now + i * 0.15 + 0.04);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.3);
-          osc.start(now + i * 0.15);
-          osc.stop(now + i * 0.15 + 0.3);
-        });
-      } catch {}
+    if (isMyTurn && !isMyTurnRef.current && !draftComplete && !paused && userDraftMode === 'manual' && (mockActive || isLive)) {
+      const chime = TURN_CHIMES.find(c => c.id === turnChimeId) || TURN_CHIMES[0];
+      playChime(chime.notes);
+      setTimeout(() => speak('You are on the clock'), 400);
     }
     isMyTurnRef.current = isMyTurn;
-  }, [isMyTurn, draftComplete, paused]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMyTurn, draftComplete, paused, soundOn, turnChimeId, userDraftMode, mockActive, isLive]);
+
+  // Play a lighter "on deck" chime when the user becomes next up (one pick away) — same
+  // manual-mode guard as the turn chime above.
+  const picksAwayRef = React.useRef(null);
+  React.useEffect(() => {
+    if (picksAway === 1 && picksAwayRef.current !== 1 && !isMyTurn && !draftComplete && !paused && userDraftMode === 'manual' && (mockActive || isLive)) {
+      playChime([[660, 0], [780, 0.16]]);
+      setTimeout(() => speak('You are on deck'), 350);
+    }
+    picksAwayRef.current = picksAway;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picksAway, isMyTurn, draftComplete, paused, soundOn, userDraftMode, mockActive, isLive]);
 
   // Push live draft metadata to App.jsx so the Return-to-Draft banner can show pick count & clock
   React.useEffect(() => {
@@ -949,7 +1071,9 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   const draftStatusText  = draftComplete ? 'Draft Complete' : paused ? 'Commissioner Paused Draft' : 'Draft Active';
   const draftStatusColor = draftComplete ? '#4caf82' : paused ? '#ff9800' : '#4caf82';
 
-  // Timer expiry auto-pick: when the clock hits 0 on the user's turn, auto-draft best available
+  // Timer expiry auto-pick: when the clock hits 0 on the user's turn, auto-draft best available.
+  // Since they weren't watching the clock, also switch them to Autodraft for the rest of the
+  // draft so future picks don't get missed the same way.
   React.useEffect(() => {
     if (seconds !== 0 || paused || !isMyTurn || draftComplete) return;
     const r = setTimeout(() => {
@@ -959,6 +1083,12 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
       if (pickId) {
         if (mockActive) { draftPlayer(pickId); }
         else { commishPick(pickId); }
+        if (userDraftMode === 'manual') {
+          setUserDraftMode('auto');
+          postChat(`${myName}'s pick clock expired — Autodraft turned ON for the rest of the draft ⚡`);
+          setAutodraftToast(`${onClockTeam?.name || myName} timed out — Autodraft turned ON`);
+          playChime([[420, 0], [420, 0.18]]);
+        }
       } else {
         setSeconds(clockSeconds);
       }
@@ -969,7 +1099,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
   // User autodraft/AI-draft: fires automatically on the user's turn when they've opted in
   React.useEffect(() => {
-    if (paused || userDraftMode === 'manual' || !isMyTurn || draftComplete) return;
+    if (paused || !(mockActive || isLive) || userDraftMode === 'manual' || !isMyTurn || draftComplete) return;
     const draftedSet = new Set(allPicks.filter(p => p.playerId).map(p => p.playerId));
     const myPickIds  = allPicks.filter(p => p.teamId === myDraftTeamId && p.playerId).map(p => p.playerId);
     const t = setTimeout(() => {
@@ -981,7 +1111,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     }, 1500);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMyTurn, userDraftMode, paused, draftComplete, currentPickNum, mockActive]);
+  }, [isMyTurn, userDraftMode, paused, draftComplete, currentPickNum, mockActive, isLive]);
 
   // When draft finishes, show DRAFT COMPLETE banner for 60 s then clear everything
   React.useEffect(() => {
@@ -995,6 +1125,8 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
         try { localStorage.removeItem('fantasai_mock_session'); } catch {}
         try { localStorage.removeItem('fantasai_mock_picks_wip'); } catch {}
       }
+      // Don't let Autodraft/AI-Draft mode carry over into the idle "no draft active" state
+      setUserDraftMode('manual');
     }, 60000);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1334,6 +1466,11 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
           {draftLimitToast}
         </div>
       )}
+      {autodraftToast && (
+        <div style={{ position: 'fixed', top: 130, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: 'var(--accent)', color: 'var(--accent-ink)', padding: '10px 24px', borderRadius: 8, fontWeight: 700, fontSize: 14, boxShadow: '0 4px 20px rgba(0,0,0,.5)' }}>
+          ⚡ {autodraftToast}
+        </div>
+      )}
       {/* CLOCK BAR */}
       <div className="draft-clock" style={paused ? { background: 'linear-gradient(180deg, rgba(255,90,110,.18) 0%, rgba(255,90,110,.08) 100%)', animation: 'blink 1.2s infinite' } : isMyTurn ? { background: 'linear-gradient(180deg, rgba(76,175,130,.22) 0%, rgba(76,175,130,.10) 100%)' } : {}}>
         <div style={{ padding: '0 24px', borderRight: `1px solid ${paused ? 'rgba(255,90,110,.3)' : 'var(--border)'}`, display: 'flex', alignItems: 'center', gap: 16, alignSelf: 'stretch' }}>
@@ -1351,7 +1488,18 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             <span style={{ position: 'relative', zIndex: 1 }}>{onClockTeam.logo}</span>
           </div>
           <div>
-            <div className="name">{onClockTeam.name}</div>
+            <div className="name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {onClockTeam.name}
+              {getTeamMode(onClockTeamId) !== 'manual' && (
+                <span title={getTeamMode(onClockTeamId) === 'ai' ? 'This team is on AI-Draft (Ghost)' : 'This team is on Autodraft'} style={{
+                  fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 8, letterSpacing: '.04em',
+                  background: getTeamMode(onClockTeamId) === 'ai' ? 'rgba(78,168,255,.15)' : 'rgba(198,255,58,.15)',
+                  color: getTeamMode(onClockTeamId) === 'ai' ? 'var(--accent-2)' : 'var(--accent)',
+                }}>
+                  {getTeamMode(onClockTeamId) === 'ai' ? '🤖 AI' : '⚡ AUTO'}
+                </span>
+              )}
+            </div>
             <div className="pick">{onClockTeam.owner}</div>
             {paused ? (
               <div style={{ fontSize: 13, fontWeight: 900, color: '#ff5a6e', letterSpacing: '.10em', textTransform: 'uppercase', animation: 'blink 1s infinite', marginTop: 3 }}>
@@ -1371,8 +1519,19 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-faint)', letterSpacing: '.14em', textTransform: 'uppercase', flexShrink: 0, writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>NEXT</div>
             {upcoming.map((u, i) => {
               const isMe = u.team?.me || u.teamId === myDraftTeamId;
+              const uMode = getTeamMode(u.teamId);
               return (
                 <div key={u.pick} className={`tn ${isMe ? 'me' : ''}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '4px 7px', gap: 2, position: 'relative', minWidth: 36 }}>
+                  {uMode !== 'manual' && (
+                    <div
+                      title={uMode === 'ai' ? 'On AI-Draft (Ghost)' : 'On Autodraft'}
+                      style={{
+                        position: 'absolute', top: 0, right: 2, width: 7, height: 7, borderRadius: '50%',
+                        background: uMode === 'ai' ? 'var(--accent-2)' : 'var(--accent)',
+                        boxShadow: `0 0 4px ${uMode === 'ai' ? 'var(--accent-2)' : 'var(--accent)'}`,
+                      }}
+                    />
+                  )}
                   <div style={{ fontSize: 11, lineHeight: 1 }}>{u.team?.logo ?? '?'}</div>
                   <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: isMe ? 'inherit' : 'var(--text-dim)', lineHeight: 1 }}>#{u.pick}</div>
                   {isMe && <div style={{ fontSize: 7, fontWeight: 900, letterSpacing: '.06em', lineHeight: 1, color: 'var(--accent-ink)' }}>YOU</div>}
@@ -1395,14 +1554,33 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             <button className="btn ghost sm" onClick={() => setShowRecap(!showRecap)}>Round {currentRound - 1} Recap</button>
             <button
               className="btn ghost sm"
-              onClick={() => {
-                const next = !paused;
-                setPaused(next);
-                if (!mockActive) logCommish(next ? 'pause' : 'resume', next ? 'Commissioner paused the draft clock' : 'Commissioner resumed the draft clock');
-              }}
-              style={paused ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : {}}
+              onClick={() => setSoundOn(s => !s)}
+              title={soundOn ? 'Mute draft sounds (turn/on-deck chimes + voice announcements, autodraft alerts)' : 'Unmute draft sounds'}
+              style={soundOn ? {} : { color: 'var(--text-faint)' }}
             >
-              {paused ? '▶ Resume' : (mockActive ? '⏸ Pause AI' : '⏸ Pause')}
+              {soundOn ? '🔊 Sound' : '🔇 Muted'}
+            </button>
+            <select
+              className="input"
+              value={turnChimeId}
+              onChange={e => setTurnChimeId(e.target.value)}
+              disabled={!soundOn}
+              title="Sound played when it becomes your turn to draft"
+              style={{ fontSize: 11, padding: '2px 4px', width: 118 }}
+            >
+              {TURN_CHIMES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+            <button
+              className="btn ghost sm"
+              disabled={!soundOn}
+              title="Preview this chime"
+              onClick={() => {
+                const chime = TURN_CHIMES.find(c => c.id === turnChimeId) || TURN_CHIMES[0];
+                playChime(chime.notes);
+              }}
+              style={{ padding: '3px 8px' }}
+            >
+              ▶
             </button>
             {mockActive && !isMyTurn && !paused && (
               <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>AI picking…</span>
@@ -1623,14 +1801,12 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             );
           })()}
 
-          {/* Mock Draft */}
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, paddingLeft: 8, borderLeft: '1px solid rgba(255,180,0,.15)' }}>
-            {mockActive ? (
+          {/* Mock Draft status (only shown once a mock is running — started from the pre-draft lobby, not from here) */}
+          {mockActive && (
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, paddingLeft: 8, borderLeft: '1px solid rgba(255,180,0,.15)' }}>
               <span style={{ fontSize: 12, color: '#ffb547', whiteSpace: 'nowrap' }}>Mock · {mockPickNum > TOTAL_PICKS ? 'Done' : `Pick #${mockPickNum}`}</span>
-            ) : (
-              <button className="btn ghost sm" style={{ fontSize: 12 }} onClick={startMockDraft} disabled={isLive}>▶ Mock Draft</button>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Danger — pushed to far right */}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center', paddingLeft: 8, borderLeft: '1px solid rgba(255,80,80,.2)' }}>
@@ -1674,6 +1850,10 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
               postChat(next === 'auto'
                 ? `${myName} enabled Autodraft — picking best available automatically each round ⚡`
                 : `${myName} disabled Autodraft — back to manual picking`);
+              if (next === 'auto') {
+                setAutodraftToast(`${LEAGUE_TEAMS.find(t => t.id === myDraftTeamId)?.name || myName} — Autodraft turned ON`);
+                playChime([[420, 0], [420, 0.18]]);
+              }
             }}
             title="Autodraft — picks best available based on ranking and roster needs"
           >
@@ -1687,6 +1867,10 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
               postChat(next === 'ai'
                 ? `${myName} enabled AI-Draft (Ghost) — AI is picking for them each round 🤖`
                 : `${myName} disabled AI-Draft (Ghost) — back to manual picking`);
+              if (next === 'ai') {
+                setAutodraftToast(`${LEAGUE_TEAMS.find(t => t.id === myDraftTeamId)?.name || myName} — AI-Draft (Ghost) turned ON`);
+                playChime([[520, 0], [660, 0.16]]);
+              }
             }}
             title="AI-Draft (Ghost) — AI picks for you every round"
           >
@@ -2305,11 +2489,33 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
               const teamGradeAvg = teamPicks.length ? teamGradeSum / teamPicks.length : 0;
               const teamGradeLabel = teamBellGrades[t.id] || '—';
               const teamGradeColor = BELL_COLORS[teamGradeLabel] || 'var(--text-dim)';
+              const mode = getTeamMode(t.id);
+              const nextMode = mode === 'manual' ? 'auto' : mode === 'auto' ? 'ai' : 'manual';
+              const canAssign = isCommissioner && !mockActive; // commissioner assigns autodraft for any team, live drafts only
               return (
                 <div key={t.id} style={{ borderBottom: '1px solid var(--border)', background: t.id === onClockTeamId ? 'rgba(76,175,130,.06)' : t.me ? 'rgba(198,255,58,.04)' : 'transparent' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', background: t.id === onClockTeamId ? 'rgba(76,175,130,.12)' : 'var(--bg-2)' }}>
                     <span style={{ fontSize: 14 }}>{t.logo}</span>
                     <span style={{ fontSize: 11, fontWeight: t.me ? 800 : 600, color: t.id === onClockTeamId ? '#4caf82' : 'var(--text)', flex: 1 }}>{t.name}</span>
+                    {mode !== 'manual' && (
+                      <span title={mode === 'ai' ? 'AI-Draft (Ghost) is active for this team' : 'Autodraft is active for this team'} style={{
+                        fontSize: 9, fontWeight: 800, padding: '1px 6px', borderRadius: 8, flexShrink: 0, letterSpacing: '.04em',
+                        background: mode === 'ai' ? 'rgba(78,168,255,.15)' : 'rgba(198,255,58,.15)',
+                        color: mode === 'ai' ? 'var(--accent-2)' : 'var(--accent)',
+                      }}>
+                        {mode === 'ai' ? '🤖 AI' : '⚡ AUTO'}
+                      </span>
+                    )}
+                    {canAssign && (
+                      <button
+                        className="btn ghost sm"
+                        style={{ fontSize: 9, padding: '1px 6px', flexShrink: 0 }}
+                        title={`Commissioner: set ${t.name} to ${nextMode === 'manual' ? 'Manual' : nextMode === 'auto' ? 'Autodraft' : 'AI-Draft (Ghost)'}`}
+                        onClick={() => setTeamMode(t.id, nextMode)}
+                      >
+                        {mode === 'manual' ? 'Set Auto' : '↻'}
+                      </button>
+                    )}
                     {teamPicks.length > 0 && (
                       <span style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', fontWeight: 900, fontSize: 15, color: teamGradeColor }}>{teamGradeLabel}</span>
                     )}
@@ -2656,8 +2862,12 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
       {loading
         ? <div style={{ padding: '5px 12px 7px', color: 'var(--text-faint)', fontSize: 10, display: 'flex', alignItems: 'center', gap: 6 }}><div className="ai-orb" style={{ width: 10, height: 10 }} /> Loading stats…</div>
         : (() => {
+          // A player's NFL rookie season is whichever of 2023-2025 they first recorded real NFL
+          // games in — not just "2026" for anyone under 24, which mislabeled already-completed
+          // rookie seasons (e.g. Ashton Jeanty's 2025 rookie year) as "College".
+          const firstNflSeason = [2023, 2024, 2025].find(yr => seasons[yr]?._gp > 0);
           const isRookie = p.rookie || (p.age && p.age <= 24 && !seasons[2023]?._gp && !seasons[2024]?._gp);
-          const nflStart = isRookie ? 2026 : 2023;
+          const nflStart = firstNflSeason ?? (isRookie ? 2026 : 2023);
           const nflCols = pos === 'QB'
             ? [{ k: 'G', fn: s => s._gp }, { k: 'Cmp', fn: s => s.pass_cmp }, { k: 'Att', fn: s => s.pass_att }, { k: 'Yds', fn: s => s.pass_yd }, { k: 'TD', fn: s => s.pass_td }, { k: 'INT', fn: s => s.pass_int }, { k: 'Pts', fn: s => s.pts_half_ppr?.toFixed(1) }]
             : pos === 'RB'

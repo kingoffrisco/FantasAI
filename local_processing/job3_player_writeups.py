@@ -83,10 +83,7 @@ INJURY STATUS: {injury_status}
 
 2025 SEASON ({games_played} games):
   Fantasy points: {fantasy_pts:.1f} total  ({ppg:.1f} PPG)
-  Rushing yards:  {rush_yds}
-  Receiving yards:{recv_yds}
-  Passing yards:  {pass_yds}
-  Touchdowns:     {tds}
+{stats_block}  Touchdowns:     {tds}
 
 DRAFT CONTEXT:
   ADP rank (PPR):      {adp_rank_ppr}
@@ -248,6 +245,29 @@ def enrich_profiles_with_sleeper(profiles: list, sleeper: dict) -> None:
         p.setdefault("weight_lbs", sp.get("weight"))  # lbs
         p.setdefault("college", sp.get("college") or "")
         p.setdefault("rookie_year", (sp.get("metadata") or {}).get("rookie_year"))
+
+
+# Which yardage categories are actually worth reporting per position — keeps the LLM
+# from being handed (and then "grounding" a writeup in) stats that don't apply to a
+# position at all, e.g. a QB's receiving yards, which are essentially always 0.
+POSITION_STAT_LINES = {
+    "QB": [("Passing yards", "pass_yds"), ("Rushing yards", "rush_yds")],
+    "RB": [("Rushing yards", "rush_yds"), ("Receiving yards", "recv_yds")],
+    "WR": [("Receiving yards", "recv_yds")],
+    "TE": [("Receiving yards", "recv_yds")],
+}
+
+
+def _stats_block(pos: str, rush_yds, recv_yds, pass_yds) -> str:
+    """Build the indented yardage-stat lines for WRITEUP_PROMPT, limited to whichever
+    categories are actually relevant to the player's position."""
+    values = {"rush_yds": rush_yds, "recv_yds": recv_yds, "pass_yds": pass_yds}
+    lines = POSITION_STAT_LINES.get(pos)
+    if lines is None:
+        # Unknown/unexpected position — fall back to showing everything rather than
+        # silently dropping stats the LLM might actually need.
+        lines = [("Rushing yards", "rush_yds"), ("Receiving yards", "recv_yds"), ("Passing yards", "pass_yds")]
+    return "".join(f"  {label + ':':<16}{values[key]}\n" for label, key in lines)
 
 
 def _years_exp_label(profile: dict) -> str:
@@ -540,9 +560,12 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
             games_played   = games,
             fantasy_pts    = fantasy_pts,
             ppg            = ppg,
-            rush_yds       = profile.get("rushing_yards_2025") or 0,
-            recv_yds       = profile.get("receiving_yards_2025") or 0,
-            pass_yds       = profile.get("passing_yards_2025") or 0,
+            stats_block    = _stats_block(
+                pos,
+                profile.get("rushing_yards_2025") or 0,
+                profile.get("receiving_yards_2025") or 0,
+                profile.get("passing_yards_2025") or 0,
+            ),
             tds            = profile.get("total_touchdowns_2025") or 0,
             adp_rank_ppr   = profile.get("adp_rank_ppr") or "unranked",
             adp_ppr        = profile.get("adp_ppr") or "—",

@@ -535,14 +535,12 @@ export default function App() {
 
   function handleLogin(u) {
     const prev = (() => { try { return JSON.parse(localStorage.getItem('fantasai_user') || 'null'); } catch { return null; } })();
-    if (prev && prev.teamId !== u.teamId) {
-      const keep = ['fantasai_league_settings', 'fantasai_owners_config', 'fantasai.workerUrl', 'fantasai.workerKey', 'fantasai_debug_api_key'];
-      const saved = {};
-      for (const k of keep) { const v = localStorage.getItem(k); if (v != null) saved[k] = v; }
-      const allKeys = Object.keys(localStorage).filter(k => k.startsWith('fantasai'));
-      for (const k of allKeys) localStorage.removeItem(k);
-      for (const [k, v] of Object.entries(saved)) localStorage.setItem(k, v);
-    }
+    const keep = ['fantasai_league_settings', 'fantasai_owners_config', 'fantasai.workerUrl', 'fantasai.workerKey', 'fantasai_debug_api_key', 'fantasai_cbs_cookie', 'fantasai_cbs_cookie_saved_at'];
+    const saved = {};
+    for (const k of keep) { const v = localStorage.getItem(k); if (v != null) saved[k] = v; }
+    const allKeys = Object.keys(localStorage).filter(k => k.startsWith('fantasai'));
+    for (const k of allKeys) localStorage.removeItem(k);
+    for (const [k, v] of Object.entries(saved)) localStorage.setItem(k, v);
     localStorage.setItem('fantasai_user', JSON.stringify(u));
     window.location.reload();
   }

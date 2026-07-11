@@ -299,7 +299,7 @@ function fmtTs(ts) {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-function RosterWriteupBlock({ writeup, aiNotes, notesList, borderTop }) {
+function RosterWriteupBlock({ writeup, aiNotes, notesList, borderTop, isDynasty }) {
   const [expanded, setExpanded] = React.useState(false);
   if (writeup?.writeup) {
     const paragraphs = writeup.writeup.split(/\n\n+/).filter(Boolean);
@@ -321,10 +321,9 @@ function RosterWriteupBlock({ writeup, aiNotes, notesList, borderTop }) {
             style={{ marginTop: 4, fontSize: 9, fontFamily: 'var(--font-mono)', color: '#c6ff3a', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
           >{expanded ? '↑ less' : `↓ +${paragraphs.length - 1} more`}</button>
         )}
-        {aiNotes && ((aiNotes.waiver_relevance >= 6) || (aiNotes.dynasty_relevance >= 6)) && (
+        {aiNotes && isDynasty && aiNotes.dynasty_relevance >= 6 && (
           <div style={{ display: 'flex', gap: 5, marginTop: 4 }}>
-            {aiNotes.waiver_relevance >= 6 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--warn)', background: 'rgba(255,181,71,.1)', border: '1px solid rgba(255,181,71,.3)', borderRadius: 3, padding: '1px 5px' }}>W {Number(aiNotes.waiver_relevance).toFixed(1)}</span>}
-            {aiNotes.dynasty_relevance >= 6 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b4a0ff', background: 'rgba(180,160,255,.1)', border: '1px solid rgba(180,160,255,.3)', borderRadius: 3, padding: '1px 5px' }}>DYN {Number(aiNotes.dynasty_relevance).toFixed(1)}</span>}
+            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b4a0ff', background: 'rgba(180,160,255,.1)', border: '1px solid rgba(180,160,255,.3)', borderRadius: 3, padding: '1px 5px' }}>DYN {Number(aiNotes.dynasty_relevance).toFixed(1)}</span>
           </div>
         )}
       </div>
@@ -347,10 +346,9 @@ function RosterWriteupBlock({ writeup, aiNotes, notesList, borderTop }) {
           </div>
         );
       })}
-      {aiNotes && ((aiNotes.waiver_relevance >= 6) || (aiNotes.dynasty_relevance >= 6)) && (
+      {aiNotes && isDynasty && aiNotes.dynasty_relevance >= 6 && (
         <div style={{ display: 'flex', gap: 5, marginTop: 1 }}>
-          {aiNotes.waiver_relevance >= 6 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--warn)', background: 'rgba(255,181,71,.1)', border: '1px solid rgba(255,181,71,.3)', borderRadius: 3, padding: '1px 5px' }}>W {Number(aiNotes.waiver_relevance).toFixed(1)}</span>}
-          {aiNotes.dynasty_relevance >= 6 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b4a0ff', background: 'rgba(180,160,255,.1)', border: '1px solid rgba(180,160,255,.3)', borderRadius: 3, padding: '1px 5px' }}>DYN {Number(aiNotes.dynasty_relevance).toFixed(1)}</span>}
+          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b4a0ff', background: 'rgba(180,160,255,.1)', border: '1px solid rgba(180,160,255,.3)', borderRadius: 3, padding: '1px 5px' }}>DYN {Number(aiNotes.dynasty_relevance).toFixed(1)}</span>
         </div>
       )}
     </div>
@@ -466,6 +464,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   const rosterSettings = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch { return null; }
   }, []);
+  const isDynasty = rosterSettings?.leagueType === 'dynasty';
   const slotFrame  = React.useMemo(() => buildRosterFrame(rosterSettings), [rosterSettings]);
   // Include allPlayers so assignRoster re-runs when live data loads (findPlayer depends on the store)
   const fullRoster = React.useMemo(
@@ -2532,7 +2531,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                                   const notesList = aiNotes?.notes?.slice(0, 5) || [];
                                   if (!writeup?.writeup && !notesList.length) return null;
                                   const borderTop = (liveNotes.length || hasR2 || p.news) ? '1px solid rgba(255,255,255,.06)' : 'none';
-                                  return <RosterWriteupBlock writeup={writeup} aiNotes={aiNotes} notesList={notesList} borderTop={borderTop} />;
+                                  return <RosterWriteupBlock writeup={writeup} aiNotes={aiNotes} notesList={notesList} borderTop={borderTop} isDynasty={isDynasty} />;
                                 })()}
                                 {/* ── Articles dropdown ── */}
                                 {arts.length > 0 && (() => {
@@ -2770,6 +2769,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
           nflSchedule={nflSchedule}
           startSitMap={startSitMap}
           defVsPosIndex={defVsPosIndex}
+          notesLookup={r2NotesLookup}
         />
       )}
 
@@ -2807,6 +2807,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
           injuryCount={injuryCount}
           onOpenPlayer={onOpenPlayer}
           deriveStatus={deriveStatus}
+          isDynasty={isDynasty}
         />
       )}
 
@@ -3376,7 +3377,7 @@ function ByeWeekPlanner({ rosterPlayers, starters, fullRoster }) {
   );
 }
 
-function WaiverRecommendations({ myRosterIds, starters, fullRoster, onOpenPlayer, onAddPlayer, nflSchedule, startSitMap, defVsPosIndex }) {
+function WaiverRecommendations({ myRosterIds, starters, fullRoster, onOpenPlayer, onAddPlayer, nflSchedule, startSitMap, defVsPosIndex, notesLookup }) {
   const allPlayers = usePlayers();
   const [waiverPos, setWaiverPos] = React.useState('ALL');
   const [aiLoading, setAiLoading] = React.useState(false);
@@ -3533,6 +3534,14 @@ Give me your top 3 waiver wire pickups this week. For each, explain why they hel
                     <span style={{ fontWeight: 600 }}>{p.name}</span>
                     <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{p.team}</span>
                     {isNeed && <span style={{ fontSize: 8, fontWeight: 800, color: '#ff9800', background: 'rgba(255,152,0,.15)', borderRadius: 3, padding: '1px 4px' }}>NEED</span>}
+                    {(() => {
+                      const wr = notesLookup?.get(p.name.toLowerCase().trim())?.waiver_relevance;
+                      return wr >= 6 ? (
+                        <span title="Waiver-wire relevance score" style={{ fontSize: 8, fontFamily: 'var(--font-mono)', fontWeight: 800, color: 'var(--warn)', background: 'rgba(255,181,71,.15)', border: '1px solid rgba(255,181,71,.3)', borderRadius: 3, padding: '1px 4px' }}>
+                          W {Number(wr).toFixed(1)}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                 </td>
                 <td>
@@ -3931,7 +3940,7 @@ function dateBucket(published_at) {
   return 'Earlier This Week';
 }
 
-function RosterNewsFeed({ allNewsArticles, rosterNewsArticles, allRosterNews, rosterPlayers, injuryCount, onOpenPlayer, deriveStatus }) {
+function RosterNewsFeed({ allNewsArticles, rosterNewsArticles, allRosterNews, rosterPlayers, injuryCount, onOpenPlayer, deriveStatus, isDynasty }) {
   const [catFilter, setCatFilter] = React.useState('All');
   const [playerFilter, setPlayerFilter] = React.useState('All');
   // Default to "All NFL" so articles always appear; user can switch to "My Roster"
@@ -4156,16 +4165,16 @@ function RosterNewsFeed({ allNewsArticles, rosterNewsArticles, allRosterNews, ro
                         })}
                       </div>
                     )}
-                    {/* Signals */}
-                    {((n.waiverRelevance >= 5) || (n.dynastyRelevance >= 5) || (n.rookieRelevance >= 5)) && (
+                    {/* Signals — waiver relevance isn't shown here: every player in this feed is already
+                        on a roster, so waiver-wire actionability doesn't apply to them. */}
+                    {(((isDynasty && n.dynastyRelevance >= 5)) || (n.rookieRelevance >= 5)) && (
                       <div style={{ display: 'flex', gap: 5, marginTop: 4 }}>
-                        {n.waiverRelevance >= 5 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--warn)', background: 'rgba(255,181,71,.1)', border: '1px solid rgba(255,181,71,.3)', borderRadius: 3, padding: '1px 5px' }}>WAIVER {Number(n.waiverRelevance).toFixed(1)}</span>}
-                        {n.dynastyRelevance >= 5 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b4a0ff', background: 'rgba(180,160,255,.1)', border: '1px solid rgba(180,160,255,.3)', borderRadius: 3, padding: '1px 5px' }}>DYNASTY {Number(n.dynastyRelevance).toFixed(1)}</span>}
+                        {isDynasty && n.dynastyRelevance >= 5 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b4a0ff', background: 'rgba(180,160,255,.1)', border: '1px solid rgba(180,160,255,.3)', borderRadius: 3, padding: '1px 5px' }}>DYNASTY {Number(n.dynastyRelevance).toFixed(1)}</span>}
                         {n.rookieRelevance >= 5 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#a78bfa', background: 'rgba(167,139,250,.1)', border: '1px solid rgba(167,139,250,.3)', borderRadius: 3, padding: '1px 5px' }}>ROOKIE {Number(n.rookieRelevance).toFixed(1)}</span>}
                       </div>
                     )}
                     {/* No content fallback */}
-                    {!notesForDisplay.length && !n.waiverRelevance && !n.dynastyRelevance && (
+                    {!notesForDisplay.length && !(isDynasty && n.dynastyRelevance) && !n.rookieRelevance && (
                       <div style={{ fontSize: 11, color: 'var(--text-faint)', fontStyle: 'italic' }}>No analysis available yet — check back after the next pipeline run.</div>
                     )}
                   </div>
