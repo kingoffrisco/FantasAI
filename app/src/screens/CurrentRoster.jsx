@@ -435,6 +435,16 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   const [expandedArts, setExpandedArts] = React.useState(new Set()); // playerIds with expanded article list
   const [matchupExpanded, setMatchupExpanded] = React.useState(false);
 
+  // Mobile: player identity always visible, detail sections click through via tabs
+  const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  React.useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1100px)');
+    const onChange = e => setIsMobile(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const [rosterDetailTab, setRosterDetailTab] = React.useState('status'); // status | schedule | weather | trends | points | news
+
   // NFL schedule fetched live from ESPN scoreboard API — all 18 weeks
   const [nflSchedule, setNflSchedule] = React.useState({});
   const [fullSchedule, setFullSchedule] = React.useState({});
@@ -1908,6 +1918,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
             ) : null;
           })()}
 
+          {!isMobile && <>
           {/* ── Highlight intensity slider ── */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
             <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>Row Highlights</span>
@@ -2747,6 +2758,40 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
               })}
             </tbody>
           </table>
+          </>}
+
+          {isMobile && (
+            <MobileRosterList
+              fullRoster={fullRoster}
+              rosterDetailTab={rosterDetailTab}
+              setRosterDetailTab={setRosterDetailTab}
+              onOpenPlayer={onOpenPlayer}
+              onNav={onNav}
+              watchlistIds={watchlistIds}
+              onToggleWatch={onToggleWatch}
+              baseIds={baseIds}
+              tradeOffers={tradeOffers}
+              nflSchedule={nflSchedule}
+              defRankByTeam={defRankByTeam}
+              defVsPosIndex={defVsPosIndex}
+              getGameWeather={getGameWeather}
+              liveData={liveData}
+              deriveStatus={deriveStatus}
+              startSitMap={startSitMap}
+              r2InjuryByName={r2InjuryByName}
+              r2NotesLookup={r2NotesLookup}
+              playerNewsMap={playerNewsMap}
+              writeupsMap={writeupsMap}
+              rookieScoreMap={rookieScoreMap}
+              expandedNews={expandedNews}
+              setExpandedNews={setExpandedNews}
+              swapTarget={swapTarget}
+              setSwapTarget={setSwapTarget}
+              H2H_WEEK={H2H_WEEK}
+              isDynasty={isDynasty}
+            />
+          )}
+
           {/* ── Lineup Optimizer ── */}
           <LineupDecisions
             compact
@@ -2825,6 +2870,352 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
       <RosterLegend />
       <PageLogicPanel />
 
+    </div>
+  );
+}
+
+const ROSTER_DETAIL_TABS = [
+  { id: 'status',   label: 'Status' },
+  { id: 'schedule', label: 'Schedule' },
+  { id: 'weather',  label: 'Weather' },
+  { id: 'trends',   label: 'Trends' },
+  { id: 'points',   label: 'Fantasy Points' },
+  { id: 'news',     label: 'News' },
+];
+
+function MobileRosterList({
+  fullRoster, rosterDetailTab, setRosterDetailTab, onOpenPlayer, onNav,
+  watchlistIds, onToggleWatch, baseIds, tradeOffers,
+  nflSchedule, defRankByTeam, defVsPosIndex, getGameWeather,
+  liveData, deriveStatus, startSitMap, r2InjuryByName, r2NotesLookup,
+  playerNewsMap, writeupsMap, rookieScoreMap,
+  expandedNews, setExpandedNews, swapTarget, setSwapTarget,
+  H2H_WEEK, isDynasty,
+}) {
+  const [visibleTabs, setVisibleTabs] = React.useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('fantasai_roster_detail_tabs') || 'null');
+      if (Array.isArray(saved) && saved.length) return new Set(saved.filter(id => ROSTER_DETAIL_TABS.some(t => t.id === id)));
+    } catch {}
+    return new Set(ROSTER_DETAIL_TABS.map(t => t.id));
+  });
+  const [customizeOpen, setCustomizeOpen] = React.useState(false);
+
+  function toggleTabVisible(id) {
+    setVisibleTabs(prev => {
+      if (prev.has(id) && prev.size === 1) return prev; // keep at least one visible
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      try { localStorage.setItem('fantasai_roster_detail_tabs', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }
+
+  // If the active tab gets hidden, fall back to the first still-visible one
+  React.useEffect(() => {
+    if (!visibleTabs.has(rosterDetailTab)) {
+      const first = ROSTER_DETAIL_TABS.find(t => visibleTabs.has(t.id));
+      if (first) setRosterDetailTab(first.id);
+    }
+  }, [visibleTabs, rosterDetailTab, setRosterDetailTab]);
+
+  const shownTabs = ROSTER_DETAIL_TABS.filter(t => visibleTabs.has(t.id));
+
+  return (
+    <div>
+      <div className="tabs" style={{ padding: '0 2px', position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg-2)', display: 'flex', alignItems: 'center' }}>
+        <div style={{ display: 'flex', overflowX: 'auto', flex: 1, flexWrap: 'nowrap' }}>
+          {shownTabs.map(t => (
+            <div key={t.id} className={`tab ${rosterDetailTab === t.id ? 'active' : ''}`} onClick={() => setRosterDetailTab(t.id)} style={{ whiteSpace: 'nowrap' }}>{t.label}</div>
+          ))}
+        </div>
+        <button
+          onClick={() => setCustomizeOpen(o => !o)}
+          title="Choose which tabs to show"
+          style={{ flexShrink: 0, background: customizeOpen ? 'rgba(198,255,58,.12)' : 'transparent', border: 'none', color: customizeOpen ? 'var(--accent)' : 'var(--text-faint)', cursor: 'pointer', fontSize: 14, padding: '6px 10px' }}
+        >⚙</button>
+      </div>
+
+      {customizeOpen && (
+        <div style={{ padding: '8px 10px', display: 'flex', flexWrap: 'wrap', gap: 6, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
+          {ROSTER_DETAIL_TABS.map(t => {
+            const on = visibleTabs.has(t.id);
+            return (
+              <button
+                key={t.id}
+                onClick={() => toggleTabVisible(t.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, cursor: 'pointer',
+                  padding: '3px 9px', borderRadius: 12, fontWeight: on ? 700 : 500,
+                  border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+                  background: on ? 'rgba(198,255,58,.10)' : 'transparent',
+                  color: on ? 'var(--accent)' : 'var(--text-faint)',
+                }}
+              >{on ? '✓ ' : ''}{t.label}</button>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 2px' }}>
+        {fullRoster.map((entry, i) => {
+          const p = entry.playerId ? findPlayer(entry.playerId) : null;
+          const isBench = entry.slot === 'BENCH';
+          const prevEntry = fullRoster[i - 1];
+          const isFirstBench = isBench && prevEntry && prevEntry.slot !== 'BENCH';
+          const benchDivider = isFirstBench ? (
+            <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.1em', color: 'var(--text-faint)', textTransform: 'uppercase', padding: '8px 6px 2px' }}>Bench</div>
+          ) : null;
+
+          if (!p) {
+            return (
+              <React.Fragment key={i}>
+                {benchDivider}
+                <div className="card" style={{ padding: '10px 12px', opacity: 0.5, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className="roster-slot-tag" style={{ background: slotColor(entry.slot) }}>{entry.slot}</span>
+                  <span className="dim" style={{ fontSize: 12, flex: 1 }}>Empty slot</span>
+                  <button
+                    className="btn sm primary"
+                    onClick={() => {
+                      const filter = entry.slot === 'BENCH' ? 'ALL' : entry.slot;
+                      try { localStorage.setItem('fantasai_add_filter', filter); } catch {}
+                      onNav?.('players');
+                    }}
+                    style={{ fontSize: 11, padding: '3px 10px' }}
+                  >+ Add</button>
+                </div>
+              </React.Fragment>
+            );
+          }
+
+          const apiStatus = liveData[p.id]?.length > 0 ? deriveStatus(p.id) : null;
+          const rawStatus = apiStatus ?? p.status ?? 'OK';
+          const liveStatus = rawStatus === 'Out' ? 'O' : rawStatus;
+          const isOnBye = !!(p.bye && p.bye === H2H_WEEK);
+          const effectiveStatus = isOnBye ? 'O' : liveStatus;
+          const isWatched = watchlistIds.has(p.id);
+          const isDrafted = baseIds.has(entry.playerId);
+          const pendingTrade = tradeOffers.find(o => o.status === 'pending' && o.getIds.includes(p.id));
+
+          return (
+            <React.Fragment key={i}>
+              {benchDivider}
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                {/* ── Always-visible player identity ── */}
+                <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => onOpenPlayer?.(p.id)}>
+                  <span className="roster-slot-tag" style={{ background: isBench ? '#505050' : slotColor(entry.slot), flexShrink: 0 }}>{entry.slot}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      {isWatched && <span style={{ color: '#ffd700', fontSize: 11 }}>★</span>}
+                      <span style={{ color: isWatched ? '#ffd700' : isOnBye ? 'var(--danger)' : undefined }}>{p.name}</span>
+                      {p.rookie && <span style={{ fontSize: 9, fontWeight: 800, color: '#4ea8ff', background: 'rgba(78,168,255,.15)', border: '1px solid rgba(78,168,255,.3)', borderRadius: 3, padding: '1px 4px' }}>R</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                      <PosBadge pos={p.pos} /> {p.team} · #{p.num}
+                      {isDrafted && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: 3, background: 'rgba(198,255,58,.1)', color: 'var(--accent)', border: '1px solid rgba(198,255,58,.25)' }}>⬆ Drafted</span>}
+                      {pendingTrade && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '1px 6px', borderRadius: 3, background: 'rgba(255,215,0,.15)', color: '#FFD700', border: '1px solid rgba(255,215,0,.35)' }}>↔ Trade Requested</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                    <button className={`btn sm icon${isWatched ? ' watch-active' : ''}`} onClick={() => onToggleWatch?.(p.id)}>{isWatched ? '★' : '☆'}</button>
+                    <button
+                      className={`btn sm ghost${swapTarget?.playerId === p.id ? ' active' : ''}`}
+                      style={{ fontSize: 12, fontWeight: 700, color: swapTarget?.playerId === p.id ? 'var(--accent)' : undefined, borderColor: swapTarget?.playerId === p.id ? 'var(--accent)' : undefined }}
+                      onClick={() => setSwapTarget(swapTarget?.playerId === p.id ? null : { playerId: p.id, slot: entry.slot })}
+                    >⇄</button>
+                  </div>
+                </div>
+
+                {/* ── Detail section — one category at a time ── */}
+                <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', minHeight: 44 }}>
+
+                  {rosterDetailTab === 'status' && (
+                    isOnBye ? (
+                      <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--danger)' }}>Out · BYE</span>
+                    ) : (p.pos !== 'DST' && effectiveStatus !== 'OK') ? (() => {
+                      const statusLabel = effectiveStatus === 'Q' ? 'Questionable' : effectiveStatus === 'O' ? 'Out' : effectiveStatus === 'D' ? 'Doubtful' : effectiveStatus === 'IR' ? 'IR' : effectiveStatus;
+                      const statusColor = (effectiveStatus === 'Q' || effectiveStatus === 'D') ? '#ff9800' : (effectiveStatus === 'O' || effectiveStatus === 'IR') ? '#ff4f4f' : 'var(--text-dim)';
+                      return <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: statusColor }}>{statusLabel}</span>;
+                    })() : (
+                      <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0' }}>Active</span>
+                    )
+                  )}
+
+                  {rosterDetailTab === 'schedule' && (() => {
+                    const sched = nflSchedule[p.team];
+                    const oppTeam = sched?.opp || p.opp;
+                    if (!oppTeam) return <span className="faint">No schedule data</span>;
+                    const r = defRankByTeam[oppTeam] || p.oppRank;
+                    const oppColor = !r ? 'var(--text)' : r <= 5 ? '#ff4f4f' : r <= 10 ? '#ff9800' : r <= 20 ? '#ffd700' : '#1affa0';
+                    const posKey = p.pos === 'DST' ? null : p.pos;
+                    let posRank = posKey ? defVsPosIndex.get(`${oppTeam.toUpperCase()}|${posKey}`) ?? null : null;
+                    if (p.pos === 'DST' && oppTeam) {
+                      const offPts = ['QB', 'RB', 'WR'].map(op => defVsPosIndex.get(`${oppTeam.toUpperCase()}|${op}`)).filter(v => v != null);
+                      if (offPts.length) posRank = Math.round(33 - offPts.reduce((s, v) => s + v, 0) / offPts.length);
+                    }
+                    const matchup = posRank == null ? null
+                      : posRank <= 5  ? { emoji: '🔴',    label: 'Avoid' }
+                      : posRank <= 10 ? { emoji: '🟠',    label: 'Difficult' }
+                      : posRank >= 28 ? { emoji: '🟢🟢', label: 'Smash Spot' }
+                      : posRank >= 23 ? { emoji: '🟢',    label: 'Favorable' }
+                      : { emoji: '⚪', label: 'Neutral' };
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span className="mono" style={{ fontSize: 16, fontWeight: 800 }}>{sched?.isAway ? '@ ' : 'vs '}<span style={{ color: oppColor }}>{oppTeam}</span></span>
+                          {p.bye && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: isOnBye ? 'var(--danger)' : 'var(--text-faint)' }}>Bye Wk {p.bye}</span>}
+                        </div>
+                        {matchup && <span style={{ fontSize: 12 }}>{matchup.emoji} {matchup.label}{posRank ? ` · #${posRank}/32 vs ${posKey}` : ''}</span>}
+                        {sched?.time && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{sched.time}</span>}
+                      </div>
+                    );
+                  })()}
+
+                  {rosterDetailTab === 'weather' && (() => {
+                    const wx = getGameWeather(p.team);
+                    if (!wx || wx.noData) return <span className="faint">No weather data</span>;
+                    if (wx.dome) return <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0' }}>Dome</span>;
+                    const h = wx.hour;
+                    if (!h) return <span className="faint">No weather data</span>;
+                    const windMph  = h.wind_mph || 0;
+                    const gustMph  = h.wind_gust_mph || h.gust_mph || h.windgust_mph || 0;
+                    const tempF    = h.temp_f || wx.maxTempF || 0;
+                    const precipIn = h.precip_in || 0;
+                    const cond     = (h.condition || '').toLowerCase();
+                    const isSnow   = cond.includes('snow') || cond.includes('blizzard') || cond.includes('sleet');
+                    const isRain   = precipIn > 0.05 || cond.includes('rain') || cond.includes('drizzle') || cond.includes('shower');
+                    const windColor = windMph >= 20 ? 'var(--danger)' : windMph >= 15 ? '#ff8c00' : windMph >= 10 ? '#ffd700' : 'var(--text)';
+                    const tempColor = tempF >= 90 ? '#ff4f4f' : tempF >= 75 ? '#ff9800' : tempF >= 50 ? '#1affa0' : tempF >= 32 ? '#7ecff5' : '#ffffff';
+                    return (
+                      <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', lineHeight: 1.7 }}>
+                        <span style={{ fontWeight: 700, color: tempColor }}>{tempF}°F</span>{' · '}<span style={{ color: windColor }}>{windMph}mph{h.wind_dir ? ` ${h.wind_dir}` : ''}</span>
+                        {isSnow && <div style={{ color: '#7ecff5' }}>❄ Snow</div>}
+                        {!isSnow && isRain && <div style={{ color: '#ffd700' }}>🌧 Rain</div>}
+                        {windMph >= 25 && <div style={{ color: 'var(--danger)', fontWeight: 700 }}>⚠ Major wind</div>}
+                        {windMph >= 20 && windMph < 25 && <div style={{ color: 'var(--danger)' }}>⚠ Sig. wind</div>}
+                        {gustMph >= 20 && <div style={{ color: 'var(--danger)', fontWeight: 700 }}>💨 Gusts {gustMph}mph</div>}
+                      </div>
+                    );
+                  })()}
+
+                  {rosterDetailTab === 'trends' && (() => {
+                    const td = getTrendData(p);
+                    return td.length ? <Sparkline data={td} width={160} height={32} /> : <span className="faint">No trend data</span>;
+                  })()}
+
+                  {rosterDetailTab === 'points' && (() => {
+                    const total = p.pts2025 > 0 ? p.pts2025 : (p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null);
+                    const isOut = ['O', 'IR', 'NFI'].includes(effectiveStatus);
+                    let projVal = null, isEstimate = false, rookieProjFlag = false;
+                    if (!isOut) {
+                      const liveProj = (liveData[p.id] || []).find(e => e.proj != null);
+                      const noStats = p.proj <= 0 && (p.pts2025 || 0) === 0 && (p.avg || 0) === 0;
+                      const rookieRow = (noStats && p.rookie) ? rookieScoreMap.get(p.name.toLowerCase().trim()) : null;
+                      const rookieProj = rookieRow ? rookieProjFromScore(rookieRow, p.pos) : null;
+                      const adpProj = (noStats && !rookieProj) ? estimateProjFromAdp(p) : null;
+                      const fallback = rookieProj ?? adpProj ?? 0;
+                      projVal = liveProj ? liveProj.proj : (p.proj > 0 ? p.proj : fallback);
+                      isEstimate = !liveProj && p.proj <= 0 && fallback > 0;
+                      rookieProjFlag = !!rookieProj;
+                    }
+                    return (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>2025 Total</div>
+                          <div style={{ fontSize: 16, fontWeight: 700 }}>{total != null ? total.toFixed(1) : '—'}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>PPG</div>
+                          <div style={{ fontSize: 16, fontWeight: 700 }}>{p.avg > 0 ? p.avg.toFixed(1) : '—'}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Proj</div>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent-2)' }}>
+                            {projVal != null ? parseFloat(projVal.toFixed(1)) : '—'}
+                            {isEstimate && <span style={{ fontSize: 9, color: '#a78bfa', marginLeft: 3 }}>{rookieProjFlag ? 'R' : 'E'}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {rosterDetailTab === 'news' && (() => {
+                    const liveNotes = (liveData[p.id] || []).filter(e => e.note);
+                    const r2 = r2InjuryByName[p.name.toLowerCase()];
+                    const r2InjSt = r2?.injury_status;
+                    const hasR2 = r2 && r2InjSt && r2InjSt !== 'Active';
+                    const aiNotes = r2NotesLookup.get(p.name.toLowerCase().trim()) || null;
+                    const arts = (playerNewsMap.get(normalizeName(p.name)) || playerNewsMap.get(p.name.toLowerCase().trim()) || [])
+                      .slice().sort((a, b) => (b.published_at ? new Date(b.published_at).getTime() : 0) - (a.published_at ? new Date(a.published_at).getTime() : 0));
+                    const ssRaw = startSitMap.get(p.name.toLowerCase().trim());
+                    const ss = ssRaw ? liveOverrideRec(ssRaw, effectiveStatus) : null;
+                    const hasNews = liveNotes.length || hasR2 || p.news || aiNotes || ss || arts.length;
+                    if (!hasNews) return <span className="faint">No news</span>;
+                    const isExpanded = expandedNews.has(p.id);
+                    const toggleNews = () => setExpandedNews(prev => {
+                      const next = new Set(prev);
+                      if (next.has(p.id)) next.delete(p.id); else next.add(p.id);
+                      return next;
+                    });
+                    const writeup = writeupsMap.get(p.name.toLowerCase().trim());
+                    const notesList = aiNotes?.notes?.slice(0, 5) || [];
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {ss && (() => {
+                          const rec = ss.recommendation;
+                          const clr = rec === 'MONITOR' ? '#ff9800' : rec?.startsWith('START') ? '#1affa0' : rec?.startsWith('SIT') ? '#ff4f4f' : '#ffb547';
+                          return (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 900, padding: '2px 8px', borderRadius: 4, color: clr, background: `${clr}18`, border: `1px solid ${clr}44` }}>{rec}</span>
+                              {ss.start_score != null && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>Score <strong style={{ color: clr }}>{ss.start_score}</strong>/100</span>}
+                            </div>
+                          );
+                        })()}
+                        {p.news && <div style={{ fontSize: 12, color: '#ffd700' }}>{p.news} <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>BEAT WRITER</span></div>}
+                        {hasR2 && (
+                          <div style={{ fontSize: 12, color: r2InjSt === 'Out' ? 'var(--danger)' : r2InjSt === 'Questionable' ? '#ff8c00' : r2InjSt === 'Doubtful' ? '#ffb547' : 'var(--accent-2)' }}>
+                            {r2InjSt}{r2.injury_notes ? ` · ${r2.injury_notes}` : ''}
+                          </div>
+                        )}
+                        {liveNotes.slice(0, isExpanded ? undefined : 1).map((entry, ni) => (
+                          <div key={ni} style={{ fontSize: 12 }}>
+                            {entry.note}
+                            <span style={{ marginLeft: 5, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-faint)' }}>{(entry.source || 'LIVE').toUpperCase()}</span>
+                          </div>
+                        ))}
+                        {isExpanded && ss?.summary && <div style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic' }}>{ss.summary}</div>}
+                        {isExpanded && (ss?.factors || []).map((f, fi) => (
+                          <div key={fi} style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                            <strong style={{ color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>{f.label}:</strong> {f.text}
+                          </div>
+                        ))}
+                        {isExpanded && (writeup?.writeup || notesList.length > 0) && (
+                          <RosterWriteupBlock writeup={writeup} aiNotes={aiNotes} notesList={notesList} borderTop="1px solid rgba(255,255,255,.06)" isDynasty={isDynasty} />
+                        )}
+                        {isExpanded && arts.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid rgba(255,255,255,.06)', paddingTop: 6 }}>
+                            {arts.slice(0, 5).map((a, ai) => (
+                              <a key={ai} href={a.article_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--accent-2)' }}>
+                                📰 {(a.headline || a.publisher || '').slice(0, 90)}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                        {(liveNotes.length > 1 || arts.length > 0 || ss?.factors?.length || writeup?.writeup || notesList.length > 0) && (
+                          <button onClick={toggleNews} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--accent-2)', fontSize: 11, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+                            {isExpanded ? 'Show less' : 'Show more'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                </div>
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -1004,14 +1004,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         );
       })()}
 
-      {/* ── Weekly Recap Banner ─────────────────────────────────────────────── */}
-      <WeeklyRecapBanner
-        h2hWinData={h2hWinData}
-        starters={starters}
-        weekLabel={weekLabel}
-        teamName={teamName}
-      />
-
       <div style={{ padding: isMobile ? '12px 14px' : 24, display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 8 : 12, flexShrink: 0 }}>
         <div className="stat">
           <div className="k">Starters Projected</div>
@@ -1036,37 +1028,32 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         <div className="stat"><div className="k">Playoff Odds</div><div className="v">84.2%</div><div className="sub">Top seed: 21.8%</div></div>
       </div>
 
-      {/* ── League Standings + Commish + Transactions + Champions Corner ── */}
-      {isMobile && (
-        <div style={{ flexShrink: 0, background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
-          <div style={{ display: 'flex', overflowX: 'auto', scrollbarWidth: 'none' }}>
-            {[
-              { id: 'standings',    label: 'Standings', icon: '🏆' },
-              { id: 'commish',      label: 'Commish',   icon: '📢' },
-              { id: 'transactions', label: 'Moves',     icon: '↔' },
-              { id: 'events',       label: 'Events',    icon: '📅' },
-              { id: 'champions',    label: 'Champions', icon: '🥇' },
-            ].map(t => (
-              <button key={t.id} onClick={() => setDashTab(t.id)} style={{
-                flex: '0 0 auto',
-                padding: '10px 16px 8px',
-                fontSize: 12, fontWeight: dashTab === t.id ? 700 : 500,
-                border: 'none',
-                borderBottom: `2px solid ${dashTab === t.id ? 'var(--accent)' : 'transparent'}`,
-                background: 'transparent',
-                color: dashTab === t.id ? 'var(--accent)' : 'var(--text-dim)',
-                cursor: 'pointer', whiteSpace: 'nowrap',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-              }}>
-                <span style={{ fontSize: 16 }}>{t.icon}</span>
-                <span>{t.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      <div style={{ padding: isMobile ? '0 14px 24px' : '0 24px 24px', display: isMobile ? 'block' : 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: isMobile ? undefined : '1fr', gap: 16, alignItems: 'stretch', flex: isMobile ? undefined : 1, minHeight: isMobile ? undefined : 0 }}>
-        {(!isMobile || dashTab === 'standings') && <div className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', marginBottom: isMobile ? 0 : undefined }}>
+      {/* ── League Standings / Commish / Weekly / Transactions / Events / Champions ── */}
+      <div className="tabs" style={{ padding: `0 ${isMobile ? 14 : 24}px`, position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-2)', overflowX: 'auto', flexWrap: isMobile ? 'nowrap' : 'wrap' }}>
+        <div className={`tab ${dashTab === 'standings' ? 'active' : ''}`} onClick={() => setDashTab('standings')} style={{ whiteSpace: 'nowrap' }}>🏆 Standings</div>
+        <div className={`tab ${dashTab === 'commish' ? 'active' : ''}`} onClick={() => setDashTab('commish')} style={{ whiteSpace: 'nowrap' }}>📢 Commissioner</div>
+        <div className={`tab ${dashTab === 'weekly' ? 'active' : ''}`} onClick={() => setDashTab('weekly')} style={{ whiteSpace: 'nowrap' }}>📝 Weekly Recap</div>
+        <div className={`tab ${dashTab === 'transactions' ? 'active' : ''}`} onClick={() => setDashTab('transactions')} style={{ whiteSpace: 'nowrap' }}>↔ Transactions</div>
+        <div className={`tab ${dashTab === 'events' ? 'active' : ''}`} onClick={() => setDashTab('events')} style={{ whiteSpace: 'nowrap' }}>📅 Events</div>
+        <div className={`tab ${dashTab === 'champions' ? 'active' : ''}`} onClick={() => setDashTab('champions')} style={{ whiteSpace: 'nowrap' }}>🥇 Champions Corner</div>
+      </div>
+      <div style={{ padding: isMobile ? '14px' : 24, flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        {dashTab === 'weekly' && (
+          h2hWinData?.hasLive ? (
+            <WeeklyRecapBanner
+              h2hWinData={h2hWinData}
+              starters={starters}
+              weekLabel={weekLabel}
+              teamName={teamName}
+              embedded
+            />
+          ) : (
+            <div className="card" style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text-faint)' }}>
+              No live matchup yet this week — your recap will appear here once scoring starts.
+            </div>
+          )
+        )}
+        {dashTab === 'standings' && <div className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', maxHeight: '70vh' }}>
           <div className="card-head" style={{ flexShrink: 0 }}>
             <div className="card-title">League Standings · {weekLabel}</div>
             <span className="mono faint" style={{ fontSize: 10 }}>{standings ? 'CBS · live' : 'mock data'}</span>
@@ -1115,11 +1102,8 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           </div>
         </div>}
 
-        {/* ── Col 2: Commissioner Message + Transactions ── */}
-        {(!isMobile || dashTab === 'commish' || dashTab === 'transactions') && <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
-
         {/* Commissioner Message */}
-        {(!isMobile || dashTab === 'commish') && <div className="card" style={{ borderLeft: '3px solid var(--accent)', flexShrink: 0, minHeight: 280 }}>
+        {dashTab === 'commish' && <div className="card" style={{ borderLeft: '3px solid var(--accent)', minHeight: 280 }}>
           <div className="card-head" style={{ paddingBottom: 6 }}>
             <div className="card-title" style={{ fontSize: 12 }}>
               <span style={{ marginRight: 6 }}>📢</span>Commissioner Message
@@ -1177,7 +1161,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         </div>}
 
         {/* Transactions */}
-        {(!isMobile || dashTab === 'transactions') && <div className="card" style={{ width: '100%', boxSizing: 'border-box', flex: '0 1 615px', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {dashTab === 'transactions' && <div className="card" style={{ width: '100%', boxSizing: 'border-box', maxHeight: '70vh', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div className="card-head" style={{ flexShrink: 0 }}>
             <div className="card-title">Transactions</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
@@ -1279,13 +1263,11 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           </div>{/* end scroll wrapper */}
         </div>}
 
-        </div>}{/* end col 2 */}
+        {/* ── Weekly Events ── */}
+        {dashTab === 'events' && <WeeklyCalendar weekLabel={weekLabel} waiverPosition={waiverPosition} totalTeams={totalTeams} user={user} currentWeek={currentWeek} onNav={onNav} />}
 
-        {/* ── Col 3: Weekly Events ── */}
-        {(!isMobile || dashTab === 'events') && <WeeklyCalendar weekLabel={weekLabel} waiverPosition={waiverPosition} totalTeams={totalTeams} user={user} currentWeek={currentWeek} onNav={onNav} />}
-
-        {/* ── Col 4: Champions Corner ── */}
-        {(!isMobile || dashTab === 'champions') && <div style={{
+        {/* ── Champions Corner ── */}
+        {dashTab === 'champions' && <div style={{
           background: 'linear-gradient(135deg, rgba(255,215,0,.07) 0%, rgba(255,215,0,.02) 100%)',
           border: '1px solid rgba(255,215,0,.22)',
           borderRadius: 10,
@@ -2940,7 +2922,7 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
 
 const RECAP_API = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || 'https://api.fantasai.net';
 
-function WeeklyRecapBanner({ h2hWinData, starters, weekLabel, teamName }) {
+function WeeklyRecapBanner({ h2hWinData, starters, weekLabel, teamName, embedded = false }) {
   const [aiRecap, setAiRecap] = React.useState(null);
   const [aiLoading, setAiLoading] = React.useState(false);
   const [dismissed, setDismissed] = React.useState(false);
@@ -2989,7 +2971,7 @@ Be fun and direct. Highlight the key performer and the biggest disappointment. E
   const resultBorder = isWinning ? 'rgba(26,255,160,.3)' : 'rgba(255,79,79,.3)';
 
   return (
-    <div style={{ margin: '0 24px 8px', background: resultBg, border: `1px solid ${resultBorder}`, borderRadius: 10, padding: '14px 18px' }}>
+    <div style={{ margin: embedded ? 0 : '0 24px 8px', background: resultBg, border: `1px solid ${resultBorder}`, borderRadius: 10, padding: '14px 18px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: aiRecap ? 10 : 0 }}>
         <div style={{ fontSize: 22 }}>{isWinning ? '🏆' : '😤'}</div>
         <div style={{ flex: 1 }}>
