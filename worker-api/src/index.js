@@ -2056,9 +2056,9 @@ async function handleLabelsPost(request, env) {
 // ── Human-in-the-Loop Feedback Voting ────────────────────────────────────────
 
 const FEEDBACK_LABEL_SCORES = {
-  BREAKOUT: 10, INJURY_IMPACT: 15, DEPTH_CHART: 8, START_SIT: 5,
-  WAIVER_WIRE: 8, TRADE_IMPACT: 7, COACH_SPEAK: 2,
-  HYPE_ONLY: -10, OLD_NEWS: -5, CLICKBAIT: -15,
+  BREAKOUT: 10, SLEEPER: 10, INJURY_IMPACT: 15, DEPTH_CHART: 8, START_SIT: 5,
+  WAIVER_WIRE: 8, TRADE_IMPACT: 7, COACH_SPEAK: 2, PERSONAL: 2,
+  HYPE_ONLY: -10, OLD_NEWS: -5, CLICKBAIT: -15, OTHER: 0,
 };
 const FEEDBACK_SCORES_KEY = 'fantasai/feedback/article_scores.json';
 

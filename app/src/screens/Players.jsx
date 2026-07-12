@@ -3,7 +3,7 @@ import WatchlistScreen from './Watchlist.jsx';
 import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer, getPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -72,31 +72,41 @@ function useScheduleOppMap() {
   return map;
 }
 
+// newsSignal / opportunityScore / successRate / explosiveRate / elusivenessScore mirror the
+// same sub-groups shown in the Watchlist Sleepers/Breakout Candidates tables (Job 2 news score,
+// breakout opportunity model, and nflverse-derived efficiency metrics) — kept in sync with
+// POSITION_FEATURES / DEFAULT_WEIGHT_DIST in AccountEdit.jsx.
 const DEFAULT_SCORING_WEIGHTS = {
   QB: [
-    { key: 'proj', weight: 30 }, { key: 'avg', weight: 20 }, { key: 'ecr', weight: 20 },
+    { key: 'proj', weight: 25 }, { key: 'avg', weight: 13 }, { key: 'ecr', weight: 17 },
     { key: 'adp', weight: 10 }, { key: 'last', weight: 10 }, { key: 'owned', weight: 10 },
+    { key: 'newsSignal', weight: 5 }, { key: 'successRate', weight: 4 },
+    { key: 'explosiveRate', weight: 3 }, { key: 'elusivenessScore', weight: 3 },
   ],
   RB: [
-    { key: 'proj', weight: 25 }, { key: 'avg', weight: 20 }, { key: 'ecr', weight: 15 },
+    { key: 'proj', weight: 18 }, { key: 'avg', weight: 13 }, { key: 'ecr', weight: 12 },
     { key: 'adp', weight: 10 }, { key: 'last', weight: 10 }, { key: 'targetShare', weight: 10 },
-    { key: 'owned', weight: 10 },
+    { key: 'owned', weight: 10 }, { key: 'newsSignal', weight: 3 }, { key: 'opportunityScore', weight: 4 },
+    { key: 'successRate', weight: 3 }, { key: 'explosiveRate', weight: 3 }, { key: 'elusivenessScore', weight: 4 },
   ],
   WR: [
-    { key: 'proj', weight: 25 }, { key: 'avg', weight: 20 }, { key: 'ecr', weight: 15 },
+    { key: 'proj', weight: 18 }, { key: 'avg', weight: 15 }, { key: 'ecr', weight: 13 },
     { key: 'adp', weight: 10 }, { key: 'last', weight: 10 }, { key: 'targetShare', weight: 10 },
-    { key: 'owned', weight: 10 },
+    { key: 'owned', weight: 10 }, { key: 'newsSignal', weight: 3 }, { key: 'opportunityScore', weight: 4 },
+    { key: 'successRate', weight: 3 }, { key: 'explosiveRate', weight: 4 },
   ],
   TE: [
-    { key: 'proj', weight: 25 }, { key: 'avg', weight: 20 }, { key: 'ecr', weight: 15 },
+    { key: 'proj', weight: 18 }, { key: 'avg', weight: 15 }, { key: 'ecr', weight: 13 },
     { key: 'adp', weight: 10 }, { key: 'last', weight: 10 }, { key: 'targetShare', weight: 10 },
-    { key: 'owned', weight: 10 },
+    { key: 'owned', weight: 10 }, { key: 'newsSignal', weight: 3 }, { key: 'opportunityScore', weight: 4 },
+    { key: 'successRate', weight: 3 }, { key: 'explosiveRate', weight: 4 },
   ],
   K: [
     { key: 'proj', weight: 40 }, { key: 'avg', weight: 30 }, { key: 'ecr', weight: 30 },
   ],
   DST: [
-    { key: 'proj', weight: 40 }, { key: 'avg', weight: 30 }, { key: 'ecr', weight: 30 },
+    { key: 'proj', weight: 35 }, { key: 'avg', weight: 30 }, { key: 'ecr', weight: 30 },
+    { key: 'newsSignal', weight: 5 },
   ],
 };
 
@@ -404,6 +414,18 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     return s;
   }, [r2Breakouts]);
 
+  // Sleeper Slider weights below can weight by "News/Sleeper Signal" and "Opportunity Score" —
+  // same sub-scores shown in the Watchlist Sleepers table (Job 2 news score + breakout opportunity model).
+  const { data: r2Sleepers } = useR2SleeperPicks();
+  const sleeperByName = React.useMemo(() => {
+    const s = new Map();
+    const arr = Array.isArray(r2Sleepers) ? r2Sleepers : [];
+    for (const row of arr) {
+      if (row.player_name) s.set(row.player_name.toLowerCase().trim(), row);
+    }
+    return s;
+  }, [r2Sleepers]);
+
   // Global player store — seeds from static data, replaced with live Databricks/Sleeper on startup
   const apiPlayerList = usePlayers();
 
@@ -457,13 +479,25 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   // Merge R2 injury overlay into the player list when it arrives.
   // R2 has more current injury_status + depth_chart_order than Databricks bronze table.
   const allPlayersList = React.useMemo(() => {
-    if (!r2InjuryData && !r2Notes) return apiPlayerList;
+    if (!r2InjuryData && !r2Notes && !sleeperByName.size && !breakoutSet.size) return apiPlayerList;
     return apiPlayerList.map(p => {
-      const r2 = r2InjuryIndex.byName[p.name.toLowerCase().trim()]
+      const nameKey = p.name.toLowerCase().trim();
+      const r2 = r2InjuryIndex.byName[nameKey]
                || (p.sleeperId ? r2InjuryIndex.byId[String(p.sleeperId)] : null);
-      const note = r2NotesIndex[p.name.toLowerCase().trim()];
+      const note = r2NotesIndex[nameKey];
       const injSt = r2?.injury_status;
       const updates = {};
+      // Sleeper Slider inputs — same fields Watchlist's Sleepers sub-groups use
+      const sleeperRow = sleeperByName.get(nameKey);
+      if (sleeperRow?.news_score != null) updates.newsSignal = Number(sleeperRow.news_score);
+      const breakoutRow = breakoutSet.get(nameKey);
+      if (typeof breakoutRow?.opportunity_score === 'number') updates.opportunityScore = breakoutRow.opportunity_score;
+      if (typeof breakoutRow?.success_rate === 'number') updates.successRate = breakoutRow.success_rate;
+      // Explosive-play rate is rushing for QB/RB, receiving for WR/TE — same nflverse
+      // play-by-play source (player_efficiency_stats), just the position-relevant half.
+      const explosive = (p.pos === 'QB' || p.pos === 'RB') ? breakoutRow?.explosive_run_rate : breakoutRow?.explosive_rec_rate;
+      if (typeof explosive === 'number') updates.explosiveRate = explosive;
+      if (typeof breakoutRow?.elusiveness_score === 'number') updates.elusivenessScore = breakoutRow.elusiveness_score;
       if (injSt) {
         updates.status = injSt === 'Questionable' ? 'Q'
                        : injSt === 'Doubtful'     ? 'D'
@@ -486,7 +520,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       }
       return Object.keys(updates).length ? { ...p, ...updates } : p;
     });
-  }, [apiPlayerList, r2InjuryData, r2Notes, r2InjuryIndex, r2NotesIndex]);
+  }, [apiPlayerList, r2InjuryData, r2Notes, r2InjuryIndex, r2NotesIndex, sleeperByName, breakoutSet]);
 
   const sleeperScores  = React.useMemo(
     () => useSleeperSort ? computeSleeperScores(allPlayersList, sleeperWeights) : {},
@@ -715,6 +749,16 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       if (sort === 'oppScore') {
         const as = breakoutSet.get(a.name.toLowerCase().trim())?.opportunity_score ?? -1;
         const bs = breakoutSet.get(b.name.toLowerCase().trim())?.opportunity_score ?? -1;
+        return bs - as;
+      }
+      if (sort === 'efficiencyScore') {
+        const as = breakoutSet.get(a.name.toLowerCase().trim())?.efficiency_score ?? -1;
+        const bs = breakoutSet.get(b.name.toLowerCase().trim())?.efficiency_score ?? -1;
+        return bs - as;
+      }
+      if (sort === 'epaPerOpportunity') {
+        const as = breakoutSet.get(a.name.toLowerCase().trim())?.epa_per_opportunity ?? -999;
+        const bs = breakoutSet.get(b.name.toLowerCase().trim())?.epa_per_opportunity ?? -999;
         return bs - as;
       }
       return 0;
@@ -1064,6 +1108,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           <option value="owned">Sort: % Owned</option>
           <option value="adp">Sort: ADP</option>
           <option value="rank">Sort: Expert Rank</option>
+          {breakoutSet.size > 0 && <option value="oppScore">Sort: Opportunity Score</option>}
+          {breakoutSet.size > 0 && <option value="efficiencyScore">Sort: Efficiency Score</option>}
+          {breakoutSet.size > 0 && <option value="epaPerOpportunity">Sort: EPA/Play</option>}
           {columns.find(c => c.id === 'tgt')?.visible && <option value="targetShare">Sort: Tgt%</option>}
           {columns.find(c => c.id === 'routes')?.visible && <option value="routes">Sort: Routes</option>}
           {columns.find(c => c.id === 'yac')?.visible && <option value="yac">Sort: YAC</option>}
@@ -1787,7 +1834,7 @@ function glRow(pos, s) {
   if (pos === 'RB')  return [fmtStat(s.rush_att), fmtStat(s.rush_yd), (s.rush_att > 0 ? ((s.rush_yd||0)/(s.rush_att)).toFixed(1) : '—'), fmtStat((s.rush_td||0)+(s.rec_td||0)), fmtStat(s.rec), fmtStat(s.rec_tgt), fmtStat(s.rec_yd), fmtStat(s.off_snp), fmtStat(pts, 1)];
   if (pos === 'K')   return [fmtStat(s.fgm), fmtStat(s.fga), pct(s.fgm, s.fga), fmtStat(s.fg_lng), fmtStat(s.xpm), fmtStat(pts, 1)];
   if (pos === 'DST') return [fmtStat(s.sack), fmtStat(s.def_int), fmtStat(s.def_fr), fmtStat(s.def_td), fmtStat(s.pts_allow), fmtStat(pts, 1)];
-  return [fmtStat(s.off_snp), fmtStat(s.rec_tgt), fmtStat(s.rec), fmtStat(s.rec_yd), fmtStat(s.rec_air_yd), fmtStat(s.rec_yac), fmtStat(s.rec_td), fmtStat(pts, 1)];
+  return [fmtStat(s.off_snp), fmtStat(s.rec_tgt), fmtStat(s.rec), fmtStat(s.rec_yd), fmtStat(s.rec_air_yd), fmtStat(s.rec_yar), fmtStat(s.rec_td), fmtStat(pts, 1)];
 }
 
 // Raw numeric values parallel to glRow — used for percentile coloring
@@ -1798,7 +1845,7 @@ function glRawNums(pos, s) {
   if (pos === 'RB')  return [s.rush_att||0, s.rush_yd||0, s.rush_att>0 ? (s.rush_yd||0)/s.rush_att : 0, (s.rush_td||0)+(s.rec_td||0), s.rec||0, s.rec_tgt||0, s.rec_yd||0, s.off_snp||0, pts];
   if (pos === 'K')   return [s.fgm||0, s.fga||0, s.fga>0 ? (s.fgm||0)/s.fga*100 : 0, s.fg_lng||0, s.xpm||0, pts];
   if (pos === 'DST') return [s.sack||0, s.def_int||0, s.def_fr||0, s.def_td||0, s.pts_allow||0, pts];
-  return [s.off_snp||0, s.rec_tgt||0, s.rec||0, s.rec_yd||0, s.rec_air_yd||0, s.rec_yac||0, s.rec_td||0, pts];
+  return [s.off_snp||0, s.rec_tgt||0, s.rec||0, s.rec_yd||0, s.rec_air_yd||0, s.rec_yar||0, s.rec_td||0, pts];
 }
 
 // true = higher is better (false = lower is better, e.g. INTs, pts_allowed)
@@ -1815,7 +1862,7 @@ function NextGenStatsPanel({ pos, tot, gp, player }) {
   if (!tot || !gp) return <div className="dim" style={{ fontSize: 12, padding: 8 }}>Next Gen Stats require live Sleeper data. Enable Sleeper API in Sources.</div>;
 
   const v = (a, b) => (b > 0 ? parseFloat((a/b).toFixed(1)) : null);
-  const yac = tot.rec_yac > 0 ? tot.rec_yac : (player?.yac || 0);
+  const yac = tot.rec_yar > 0 ? tot.rec_yar : (player?.yac || 0);
   const pctVal = (a, b) => (b > 0 ? parseFloat(((a/b)*100).toFixed(1)) : null);
 
   const Section = ({ title, children }) => (
@@ -1920,12 +1967,15 @@ function SeasonStatBar({ label, val, max, rank, leagueN, leagueAvg }) {
   const numVal = typeof val === 'string' ? parseFloat(val) || 0 : (Number(val) || 0);
   const pct    = max > 0 ? Math.min(100, (numVal   / max) * 100) : 0;
   const avgPct = leagueAvg != null && max > 0 ? Math.min(100, (leagueAvg / max) * 100) : null;
-  const rankColor = rank <= 10 ? '#1affa0' : rank <= 20 ? '#4ea8ff' : rank <= 27 ? '#ff9800' : '#ff4f4f';
-  const barColor  = rank == null ? 'var(--accent-2)'
-    : rank <= 10 ? '#1affa0'
-    : rank <= 20 ? '#4ea8ff'
-    : rank <= 27 ? '#ff9800'
+  // Percentile-based: top 25% green, 26-50% yellow, 51-75% blue, bottom 25% red.
+  const percentile = (rank != null && leagueN > 0) ? (rank / leagueN) * 100 : null;
+  const percColor = percentile == null ? 'var(--accent-2)'
+    : percentile <= 25 ? '#1affa0'
+    : percentile <= 50 ? '#f5d130'
+    : percentile <= 75 ? '#4ea8ff'
     : '#ff4f4f';
+  const rankColor = percColor;
+  const barColor  = percColor;
   const fmtAvg = v => typeof v === 'number' ? (v % 1 === 0 ? v : v.toFixed(1)) : v;
   return (
     <div style={{ marginBottom: 10 }}>
@@ -2113,6 +2163,14 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     const key = player.name?.toLowerCase().trim();
     return r2RookieScoresData.players.find(r => r.player_name?.toLowerCase().trim() === key) ?? null;
   }, [player, r2RookieScoresData]);
+  // Efficiency Profile — EPA/play, success rate, explosive rate, opportunity/efficiency scores,
+  // all derived from nflverse play-by-play (player_efficiency_stats / breakout_candidates.json).
+  const { data: r2BreakoutsDetail } = useR2BreakoutCandidates();
+  const efficiencyData = React.useMemo(() => {
+    if (!Array.isArray(r2BreakoutsDetail)) return null;
+    const key = player.name?.toLowerCase().trim();
+    return r2BreakoutsDetail.find(b => b.player_name?.toLowerCase().trim() === key) ?? null;
+  }, [player, r2BreakoutsDetail]);
   const [activeTab, setTab] = React.useState('overview');
   const [added, setAdded] = React.useState(false);
   // Show 2025 stats until 2026 Week 1 is complete (~Sep 9 2026)
@@ -2369,6 +2427,29 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     const vals = Object.values(leagueTotals)
       .map(d => d.totals[statKey] || 0)
       .filter(v => v > 0);
+    if (!vals.length) return fallback ?? null;
+    return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+  }, [leagueTotals]);
+
+  // Rank by a computed ratio (e.g. Catch % = rec/rec_tgt, YAC/Rec = rec_yar/rec) —
+  // for stats that aren't stored directly in leagueTotals[x].totals.
+  const lRankRatio = React.useCallback((numKey, denKey, minDen = 1) => {
+    if (!leagueTotals || !displayLive?.sleeperId) return {};
+    const sid = String(displayLive.sleeperId);
+    const entries = Object.entries(leagueTotals)
+      .filter(([, d]) => (d.totals[denKey] || 0) >= minDen)
+      .map(([id, d]) => [id, (d.totals[numKey] || 0) / d.totals[denKey]])
+      .sort(([, a], [, b]) => b - a);
+    const rank = entries.findIndex(([id]) => id === sid) + 1;
+    return { rank: rank > 0 ? rank : null, leagueN: entries.length };
+  }, [leagueTotals, displayLive?.sleeperId]);
+
+  // Real league average of a computed ratio across all players who had stats.
+  const lAvgRatio = React.useCallback((numKey, denKey, { minDen = 1, scale = 1, fallback } = {}) => {
+    if (!leagueTotals) return fallback ?? null;
+    const vals = Object.values(leagueTotals)
+      .filter(d => (d.totals[denKey] || 0) >= minDen)
+      .map(d => (d.totals[numKey] || 0) / d.totals[denKey] * scale);
     if (!vals.length) return fallback ?? null;
     return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
   }, [leagueTotals]);
@@ -2773,9 +2854,9 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                       <SeasonStatBar label="Receptions"  val={Math.round(tot.rec     || 0)} max={150}  leagueAvg={lAvg('rec',     posAvg.rec)}     {...lRank('rec')}     />
                       <SeasonStatBar label="Rec Yards"   val={Math.round(tot.rec_yd  || 0)} max={1800} leagueAvg={lAvg('rec_yd',  posAvg.rec_yd)}  {...lRank('rec_yd')}  />
                       <SeasonStatBar label="Rec TDs"     val={Math.round(tot.rec_td  || 0)} max={20}   leagueAvg={lAvg('rec_td',  posAvg.rec_td)}  {...lRank('rec_td')}  />
-                      <SeasonStatBar label="Catch %"     val={tot.rec_tgt > 0 ? fmtStat((tot.rec/tot.rec_tgt)*100,1)+'%' : '—'} max={100} leagueAvg={posAvg.catch_pct} />
-                      <SeasonStatBar label="YAC Total"   val={(() => { const v = tot.rec_yac > 0 ? tot.rec_yac : (player.yac || 0); return v > 0 ? Math.round(v) : '—'; })()} max={600} leagueAvg={lAvg('rec_yac', posAvg.rec_yac)} {...lRank('rec_yac')} />
-                      <SeasonStatBar label="YAC/Rec"     val={(() => { const yac = tot.rec_yac > 0 ? tot.rec_yac : (player.yac || 0); const rec = tot.rec > 0 ? tot.rec : (tot.receptions > 0 ? tot.receptions : null); return rec > 0 && yac > 0 ? fmtStat(yac / rec, 1) : '—'; })()} max={12} leagueAvg={posAvg.yac_per_rec} />
+                      <SeasonStatBar label="Catch %"     val={tot.rec_tgt > 0 ? fmtStat((tot.rec/tot.rec_tgt)*100,1)+'%' : '—'} max={100} leagueAvg={lAvgRatio('rec', 'rec_tgt', { scale: 100, fallback: posAvg.catch_pct })} {...lRankRatio('rec', 'rec_tgt')} />
+                      <SeasonStatBar label="YAC Total"   val={(() => { const v = tot.rec_yar > 0 ? tot.rec_yar : (player.yac || 0); return v > 0 ? Math.round(v) : '—'; })()} max={600} leagueAvg={lAvg('rec_yar', posAvg.rec_yac)} {...lRank('rec_yar')} />
+                      <SeasonStatBar label="YAC/Rec"     val={(() => { const yac = tot.rec_yar > 0 ? tot.rec_yar : (player.yac || 0); const rec = tot.rec > 0 ? tot.rec : (tot.receptions > 0 ? tot.receptions : null); return rec > 0 && yac > 0 ? fmtStat(yac / rec, 1) : '—'; })()} max={12} leagueAvg={lAvgRatio('rec_yar', 'rec', { fallback: posAvg.yac_per_rec })} {...lRankRatio('rec_yar', 'rec')} />
                       <SeasonStatBar label="Fantasy Pts" val={fmtStat(tot.pts_half_ppr,1)} max={350}   leagueAvg={lAvg('pts_half_ppr', posAvg.pts_half_ppr)} {...lRank('pts_half_ppr')} />
                     </>}
                   </div>
@@ -3039,6 +3120,44 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                     </div>
                     );
                   })()}
+
+                  {/* Efficiency Profile — EPA, success rate, explosive plays, opportunity/efficiency scores */}
+                  {efficiencyData && (
+                    <div className="card" style={{ marginTop: 16 }}>
+                      <div className="card-head">
+                        <div className="card-title" style={{ color: '#c6ff3a' }}>Efficiency Profile</div>
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
+                          nflverse play-by-play · Wk {efficiencyData.week}, {efficiencyData.season}
+                        </span>
+                      </div>
+                      <div className="card-body">
+                        {efficiencyData.epa_per_opportunity != null && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, padding: '8px 10px', background: 'var(--panel-3)', borderRadius: 6 }}>
+                            <span className="dim" style={{ fontSize: 11 }}>EPA / Opportunity</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 800, color: efficiencyData.epa_per_opportunity >= 0.2 ? '#1affa0' : efficiencyData.epa_per_opportunity >= 0 ? '#4ea8ff' : '#ff4f4f' }}>
+                              {efficiencyData.epa_per_opportunity >= 0 ? '+' : ''}{efficiencyData.epa_per_opportunity.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                        {efficiencyData.efficiency_score != null && <SeasonStatBar label="Efficiency Score" val={efficiencyData.efficiency_score.toFixed(1)} max={100} leagueAvg={50} />}
+                        {efficiencyData.opportunity_score != null && <SeasonStatBar label="Opportunity Score" val={efficiencyData.opportunity_score.toFixed(1)} max={10} leagueAvg={5} />}
+                        {efficiencyData.success_rate != null && <SeasonStatBar label="Success Rate" val={`${(efficiencyData.success_rate * 100).toFixed(0)}%`} max={100} leagueAvg={45} />}
+                        {(efficiencyData.explosive_run_rate != null || efficiencyData.explosive_rec_rate != null) && (
+                          <SeasonStatBar
+                            label={player.pos === 'WR' || player.pos === 'TE' ? 'Explosive Reception Rate' : 'Explosive Run Rate'}
+                            val={`${((efficiencyData.explosive_run_rate ?? efficiencyData.explosive_rec_rate) * 100).toFixed(0)}%`}
+                            max={40}
+                          />
+                        )}
+                        {efficiencyData.yards_per_target != null && (player.pos === 'WR' || player.pos === 'TE' || player.pos === 'RB') && (
+                          <SeasonStatBar label="Yards / Target" val={efficiencyData.yards_per_target.toFixed(1)} max={15} leagueAvg={7.5} />
+                        )}
+                        {efficiencyData.elusiveness_score != null && (player.pos === 'RB' || player.pos === 'QB') && (
+                          <SeasonStatBar label="Elusiveness Score" val={efficiencyData.elusiveness_score.toFixed(1)} max={100} leagueAvg={40} />
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </>
           )}
 

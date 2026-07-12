@@ -41,6 +41,8 @@ R2_BASE = "https://api.fantasai.net/api/v1/r2"
 MODEL = "qwen3:8b"
 CACHE_KEY = "fantasai/news/classified_cache.json"
 CACHE_TTL_DAYS = 60
+LABELS_KEY = "fantasai/labeling/article_labels.json"
+FEEDBACK_SCORES_KEY = "fantasai/feedback/article_scores.json"
 
 FANTASAI_KEY = os.environ.get("FANTASAI_KEY", "")
 if not FANTASAI_KEY:
@@ -138,6 +140,63 @@ def r2_put(key: str, payload) -> bool:
     label = "OK" if ok else "FAIL %d" % resp.status_code
     print("  %s -> %s" % (label, key))
     return ok
+
+
+def fetch_labels() -> list:
+    """Human corrections from the Article Labeler UI — ground truth per article."""
+    data = r2_get(LABELS_KEY)
+    return data if isinstance(data, list) else []
+
+
+def fetch_feedback_scores() -> dict:
+    """Community quality-tag scores from the News feed's rating widget, keyed by article_url."""
+    data = r2_get(FEEDBACK_SCORES_KEY)
+    return data if isinstance(data, dict) else {}
+
+
+def build_alias_map(labels: list) -> dict:
+    """LLM-output player name -> human-corrected name, learned from past labels.
+
+    Applied to every future article, not just the one that was labeled — fixes
+    recurring LLM naming mistakes (nicknames, suffixes, misspellings) for good.
+    """
+    alias_map = {}
+    for lbl in labels:
+        orig  = (lbl.get("original_player_name") or "").strip()
+        fixed = (lbl.get("labeled_player_name") or "").strip()
+        if orig and fixed and orig.lower() != fixed.lower():
+            alias_map[orig.lower()] = fixed
+    return alias_map
+
+
+def build_label_overrides(labels: list) -> dict:
+    """article_url -> human ground truth, for exact-match override on re-classification."""
+    overrides = {}
+    for lbl in labels:
+        url = lbl.get("article_url")
+        if not url:
+            continue
+        overrides[url] = {
+            "player_name": (lbl.get("labeled_player_name") or "").strip(),
+            "is_relevant": lbl.get("is_relevant", True),
+        }
+    return overrides
+
+
+def _article_url(article: dict) -> str:
+    return (
+        article.get("source_url")
+        or article.get("article_url")
+        or article.get("url")
+        or ""
+    )
+
+
+def _apply_player_corrections(players: list, article_url: str, alias_map: dict, overrides: dict) -> list:
+    override = overrides.get(article_url)
+    if override and override["player_name"]:
+        return [override["player_name"]]
+    return [alias_map.get((p or "").strip().lower(), p) for p in players]
 
 
 # -- Model calls ------------------------------------------------------------
@@ -241,8 +300,10 @@ def build_player_notes(classified: list) -> dict:
     }
 
 
-def build_ai_summaries(classified: list, top_n: int = 50) -> dict:
+def build_ai_summaries(classified: list, feedback_scores: dict = None, top_n: int = 50) -> dict:
+    feedback_scores = feedback_scores or {}
     priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    fb_score = lambda a: feedback_scores.get(a.get("article_url", ""), {}).get("score", 0)
     top = sorted(
         [
             a for a in classified
@@ -250,6 +311,7 @@ def build_ai_summaries(classified: list, top_n: int = 50) -> dict:
         ],
         key=lambda a: (
             priority_order.get(a.get("priority_level", "low"), 3),
+            -fb_score(a),
             -a.get("relevance", 0),
         ),
     )[:top_n]
@@ -343,6 +405,17 @@ def main():
     global _ACTIVE_MODEL
     _ACTIVE_MODEL = args.model
 
+    # Load human corrections (Article Labeler) and community feedback scores —
+    # closes the loop so labeling/rating in the UI actually improves future runs.
+    labels = fetch_labels()
+    alias_map = build_alias_map(labels)
+    label_overrides = build_label_overrides(labels)
+    feedback_scores = fetch_feedback_scores()
+    print(
+        "[Job 1] Loaded %d labels (%d name aliases learned), %d feedback scores"
+        % (len(labels), len(alias_map), len(feedback_scores))
+    )
+
     # Load classified cache so we can skip already-processed articles
     cached_articles: list = []
     processed_ids: set = set()
@@ -381,7 +454,7 @@ def main():
     if not articles and cached_articles:
         print("[Job 1] No new articles — rebuilding outputs from cache.")
         player_notes = build_player_notes(cached_articles)
-        ai_summaries = build_ai_summaries(cached_articles)
+        ai_summaries = build_ai_summaries(cached_articles, feedback_scores)
         beat_signals = build_beat_writer_signals(cached_articles)
         if not args.dry_run:
             r2_put("fantasai/news/player_notes.json", player_notes)
@@ -415,9 +488,41 @@ def main():
         if not text:
             continue
 
+        article_url = _article_url(article)
+        override = label_overrides.get(article_url)
+
+        # A human already flagged this exact article as irrelevant — trust it
+        # and skip the LLM call entirely rather than re-litigating it forever.
+        if override and not override["is_relevant"]:
+            classified.append({
+                "article_id": (
+                    article.get("news_id")
+                    or article.get("id")
+                    or article.get("article_id")
+                    or i
+                ),
+                "_fid": _fingerprint(article),
+                "article_url": article_url,
+                "classified_at": datetime.now(timezone.utc).isoformat(),
+                "headline": article.get("headline", "")[:100],
+                "source": article.get("source_name", ""),
+                "elapsed_sec": 0,
+                "_draft_signal": None,
+                "players": [], "relevance": 0, "sentiment": "neutral",
+                "injury_related": False, "injury_status": "none",
+                "impact_category": "other", "priority_level": "low",
+                "waiver_relevance": 0, "dynasty_relevance": 0,
+                "rookie_relevance": 0, "summary": "",
+            })
+            print("  [%d/%d] SKIP (labeled not relevant)" % (i + 1, len(articles)))
+            continue
+
         t0 = time.time()
         try:
             result = classify_article(text)
+            result["players"] = _apply_player_corrections(
+                result.get("players", []), article_url, alias_map, label_overrides
+            )
             elapsed = round(time.time() - t0, 2)
 
             draft_signal = None
@@ -443,6 +548,7 @@ def main():
                     or i
                 ),
                 "_fid": _fingerprint(article),
+                "article_url": article_url,
                 "classified_at": datetime.now(timezone.utc).isoformat(),
                 "headline": article.get("headline", "")[:100],
                 "source": article.get("source_name", ""),
@@ -486,7 +592,7 @@ def main():
     deduped.reverse()
 
     player_notes = build_player_notes(deduped)
-    ai_summaries = build_ai_summaries(deduped)
+    ai_summaries = build_ai_summaries(deduped, feedback_scores)
     beat_signals = build_beat_writer_signals(deduped)
 
     sig_count = beat_signals["signal_count"]

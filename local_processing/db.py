@@ -215,6 +215,43 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         PRIMARY KEY (season, week, gsis_id)
     );
 
+    CREATE TABLE IF NOT EXISTS player_snap_counts (
+        season           INTEGER,
+        week             INTEGER,
+        player_name      VARCHAR,
+        position         VARCHAR,
+        team             VARCHAR,
+        offense_snaps    INTEGER,
+        offense_pct      DOUBLE,
+        imported_at      TIMESTAMP,
+        PRIMARY KEY (season, week, player_name, team)
+    );
+
+    -- Derived efficiency metrics computed from play-by-play (nflverse EPA, success rate,
+    -- explosive plays, red zone/goal-line usage). See ingest_nflverse.py:import_efficiency_stats.
+    CREATE TABLE IF NOT EXISTS player_efficiency_stats (
+        season                INTEGER,
+        week                  INTEGER,
+        player_name           VARCHAR,
+        position              VARCHAR,
+        team                  VARCHAR,
+        rush_attempts         INTEGER,
+        targets               INTEGER,
+        epa_per_play          DOUBLE,
+        epa_per_rush          DOUBLE,
+        epa_per_target        DOUBLE,
+        epa_per_opportunity   DOUBLE,
+        success_rate          DOUBLE,
+        explosive_run_rate    DOUBLE,
+        explosive_rec_rate    DOUBLE,
+        yards_per_target      DOUBLE,
+        redzone_touches       INTEGER,
+        goalline_carries      INTEGER,
+        elusiveness_score     DOUBLE,
+        imported_at           TIMESTAMP,
+        PRIMARY KEY (season, week, player_name, team)
+    );
+
     CREATE TABLE IF NOT EXISTS depth_charts (
         season        INTEGER,
         week          INTEGER,
@@ -495,6 +532,10 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         stmt = stmt.strip()
         if stmt:
             conn.execute(stmt)
+
+    # Lightweight migrations — CREATE TABLE IF NOT EXISTS above won't add columns to a table
+    # that was already created by an older version of this schema. Add new columns here.
+    conn.execute("ALTER TABLE player_efficiency_stats ADD COLUMN IF NOT EXISTS yards_per_target DOUBLE")
 
 
 if __name__ == "__main__":

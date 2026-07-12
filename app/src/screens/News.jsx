@@ -1034,6 +1034,14 @@ function ReadingPane({ article, onClose, user, existingScore, onVote }) {
       {/* Content */}
       <div style={{ padding: '16px 16px 8px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', lineHeight: 1.5 }}>{article.headline}</div>
+        {(() => {
+          const { isSleeper, isBreakout } = detectSleeperBreakout(article.headline, article.fantasy_insight, article.summary_text, article.description, article.full_text);
+          return (isSleeper || isBreakout) ? (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <SleeperBreakoutBadges isSleeper={isSleeper} isBreakout={isBreakout} />
+            </div>
+          ) : null;
+        })()}
         {(article.fantasy_insight || article.summary_text) && (
           <div style={{ fontSize: 12, color: 'var(--accent)', lineHeight: 1.65, fontStyle: 'italic', padding: '10px 12px', background: 'rgba(198,255,58,.06)', border: '1px solid rgba(198,255,58,.18)', borderRadius: 7 }}>
             {article.fantasy_insight || article.summary_text}
@@ -1539,6 +1547,31 @@ function isBreaking(published_at) {
   return Date.now() - new Date(published_at).getTime() < 6 * 60 * 60 * 1000;
 }
 
+// Flags whether an article's own text calls a player a "sleeper" or "breakout" —
+// distinct from the FEEDBACK_LABELS human-tagging system below; this is automatic
+// keyword detection straight from the article content.
+function detectSleeperBreakout(...texts) {
+  const combined = texts.filter(Boolean).join(' ').toLowerCase();
+  return {
+    isSleeper:  /\bsleepers?\b/.test(combined),
+    isBreakout: /\bbreakouts?\b/.test(combined),
+  };
+}
+
+function SleeperBreakoutBadges({ isSleeper, isBreakout }) {
+  if (!isSleeper && !isBreakout) return null;
+  return (
+    <>
+      {isSleeper && (
+        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#ffd700', background: 'rgba(255,215,0,.1)', border: '1px solid rgba(255,215,0,.3)', borderRadius: 3, padding: '1px 6px' }}>💤 SLEEPER</span>
+      )}
+      {isBreakout && (
+        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#c6ff3a', background: 'rgba(198,255,58,.1)', border: '1px solid rgba(198,255,58,.3)', borderRadius: 3, padding: '1px 6px' }}>🚀 BREAKOUT</span>
+      )}
+    </>
+  );
+}
+
 function fmtAiAge(ts) {
   if (!ts) return null;
   const d = new Date(ts);
@@ -1758,6 +1791,15 @@ function FeedView({ news, onOpenPlayer, rosteredIds, playerNewsMap }) {
                 {best.dynastyRelevance >= 6 && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#b4a0ff', background: 'rgba(180,160,255,.1)', border: '1px solid rgba(180,160,255,.3)', borderRadius: 3, padding: '1px 6px' }}>DYN {best.dynastyRelevance.toFixed(1)}</span>}
               </div>
             )}
+            {/* Sleeper/Breakout — auto-detected from the article's own text */}
+            {(() => {
+              const { isSleeper, isBreakout } = detectSleeperBreakout(title, body, ...(notesList || []).map(nt => nt.text), ...articles.map(a => a.headline));
+              return (isSleeper || isBreakout) ? (
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                  <SleeperBreakoutBadges isSleeper={isSleeper} isBreakout={isBreakout} />
+                </div>
+              ) : null;
+            })()}
 
             {/* Ripple row */}
             {best?.ripple?.length > 0 && (
@@ -1787,15 +1829,18 @@ function FeedView({ news, onOpenPlayer, rosteredIds, playerNewsMap }) {
 
 const FEEDBACK_LABELS = [
   { id: 'BREAKOUT',      label: 'Breakout',      color: '#c6ff3a', score: +10 },
+  { id: 'SLEEPER',       label: 'Sleeper',       color: '#ffd700', score: +10 },
   { id: 'INJURY_IMPACT', label: 'Injury Impact', color: '#ff4d4d', score: +15 },
   { id: 'DEPTH_CHART',   label: 'Depth Chart',   color: '#4ea8ff', score: +8  },
   { id: 'START_SIT',     label: 'Start/Sit',     color: '#a78bfa', score: +5  },
   { id: 'WAIVER_WIRE',   label: 'Waiver Wire',   color: '#34d399', score: +8  },
   { id: 'TRADE_IMPACT',  label: 'Trade Impact',  color: '#fb923c', score: +7  },
   { id: 'COACH_SPEAK',   label: 'Coach Speak',   color: '#94a3b8', score: +2  },
+  { id: 'PERSONAL',      label: 'Personal',      color: '#94a3b8', score: +2  },
   { id: 'HYPE_ONLY',     label: 'Hype Only',     color: '#6b7280', score: -10 },
   { id: 'OLD_NEWS',      label: 'Old News',      color: '#6b7280', score: -5  },
   { id: 'CLICKBAIT',     label: 'Clickbait',     color: '#ef4444', score: -15 },
+  { id: 'OTHER',         label: 'Other',         color: '#6b7280', score: 0   },
 ];
 
 function FeedbackWidget({ article, user, initialScore, onVote, forceEdit = false, onRated }) {
@@ -1986,14 +2031,27 @@ function ArticleLabelerTab({ articles, user, search = '' }) {
   }, [labelByUrl, myId]);
 
   const displayed = React.useMemo(() => {
-    let list = articles;
-    if (filter === 'unlabeled') {
-      list = list.filter(a => !labelByUrl.has(a.article_url));
-    } else if (filter === 'mine') {
-      list = list.filter(a => {
-        const l = labelByUrl.get(a.article_url);
-        return l && (!myId || l.labeled_by === myId || l.labeled_by === 'commissioner');
-      });
+    let list;
+    if (filter === 'mine') {
+      // Build straight from the label records (not from `articles`) — labeled
+      // articles can age out of the currently-loaded feed window, but the label
+      // itself carries enough article metadata to render a row on its own.
+      const byUrl = new Map(articles.map(a => [a.article_url, a]));
+      list = [...labelByUrl.values()]
+        .filter(l => !myId || l.labeled_by === myId || l.labeled_by === 'commissioner')
+        .map(l => byUrl.get(l.article_url) || {
+          article_url:  l.article_url,
+          headline:     l.headline || l.article_url,
+          player_name:  l.original_player_name || '',
+          position:     l.original_position || '',
+          team:         l.original_team || '',
+          published_at: l.published_at || null,
+          publisher:    l.publisher || '',
+        });
+    } else if (filter === 'unlabeled') {
+      list = articles.filter(a => !labelByUrl.has(a.article_url));
+    } else {
+      list = articles;
     }
     if (search.trim()) {
       const q = search.toLowerCase();

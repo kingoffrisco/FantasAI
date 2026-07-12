@@ -83,6 +83,48 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
   const useSleepersR2  = Array.isArray(r2Sleepers)  && r2Sleepers.length  > 0;
   const useBreakoutsR2 = Array.isArray(r2Breakouts) && r2Breakouts.length > 0;
 
+  // Name → breakout/opportunity row, so Sleepers can pull in snap-share/opportunity data
+  // that's already flowing into the app for the Breakout Candidates group above.
+  const breakoutByName = React.useMemo(() => {
+    const m = new Map();
+    if (Array.isArray(r2Breakouts)) {
+      for (const b of r2Breakouts) if (b.player_name) m.set(b.player_name.toLowerCase().trim(), b);
+    }
+    return m;
+  }, [r2Breakouts]);
+
+  // Sub-group factor the Sleepers table is currently sorted/highlighted by
+  const [sleeperSortFactor, setSleeperSortFactor] = React.useState('blend'); // 'blend' | 'news' | 'opportunity' | 'adp'
+
+  // Join sleeper rows with opportunity data (breakout candidates) and ADP-vs-projection value,
+  // so the single LLM/ownership "Score" column becomes real sub-scores per factor.
+  const sleeperRows = React.useMemo(() => {
+    if (!useSleepersR2) return [];
+    const rows = r2Sleepers.slice(0, 15).map(s => {
+      const p = playerByName.get((s.player_name || '').toLowerCase().trim());
+      const b = breakoutByName.get((s.player_name || '').toLowerCase().trim());
+      const newsScore = s.news_score != null ? Number(s.news_score) : null;
+      const oppScore  = typeof b?.opportunity_score === 'number' ? b.opportunity_score : null;
+      const adp  = p?.adp;
+      const proj = s.projected_pts ?? p?.proj;
+      // Raw ADP-value signal: good projection AND being drafted late (high ADP rank number).
+      // Normalized to 0-10 across this candidate list below.
+      const adpRaw = (adp > 0 && proj > 0) ? Number(proj) * Number(adp) : null;
+      return { s, p, b, newsScore, oppScore, adpRaw, adp, proj: proj != null ? Number(proj) : null };
+    });
+    const maxAdpRaw = Math.max(1, ...rows.map(r => r.adpRaw || 0));
+    for (const r of rows) {
+      r.adpScore = r.adpRaw != null ? Math.min(10, (r.adpRaw / maxAdpRaw) * 10) : null;
+      const parts = [r.newsScore, r.oppScore, r.adpScore].filter(v => v != null);
+      r.blendScore = parts.length ? parts.reduce((a, b2) => a + b2, 0) / parts.length : (r.s.sleeper_score ?? r.s.value_score ?? null);
+    }
+    const key = sleeperSortFactor === 'blend' ? 'blendScore' : sleeperSortFactor === 'news' ? 'newsScore' : sleeperSortFactor === 'opportunity' ? 'oppScore' : 'adpScore';
+    return rows
+      .slice()
+      .sort((a, b2) => (b2[key] ?? -1) - (a[key] ?? -1))
+      .slice(0, 10);
+  }, [useSleepersR2, r2Sleepers, playerByName, breakoutByName, sleeperSortFactor]);
+
   const myWatchRows = [...watchlistIds].map(id => findPlayer(id)).filter(Boolean);
 
   const content = (
@@ -153,6 +195,7 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
                   <th className="num">Snap Δ</th>
                   <th className="num">Opp Score</th>
                   <th className="num">Avg Snap%</th>
+                  <th className="num" title="Success rate on rush attempts + targets (EPA-based, per-down yardage threshold)">Success%</th>
                 </>
               ) : (
                 <>
@@ -173,16 +216,34 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
                   const oppScore  = typeof b.opportunity_score === 'number' ? b.opportunity_score : 0;
                   const avgSnap   = typeof b.avg_snap_share === 'number' ? b.avg_snap_share
                                   : typeof b.avg_snap_share_prev_2wk === 'number' ? b.avg_snap_share_prev_2wk : null;
+                  const successRate = typeof b.success_rate === 'number' ? b.success_rate : null;
+                  const efficiencyScore = typeof b.efficiency_score === 'number' ? b.efficiency_score : null;
                   const proj      = b.projected_pts ?? p?.proj;
+                  // Easier-to-read signal than the raw numbers — one badge per row, most-notable first.
+                  const badge =
+                    efficiencyScore != null && efficiencyScore >= 75 ? { emoji: '🔥', label: 'Elite Efficiency', color: '#ff4f4f' } :
+                    efficiencyScore != null && efficiencyScore >= 60 && oppScore < 4 ? { emoji: '🎯', label: 'Efficient on Limited Volume', color: '#4ea8ff' } :
+                    oppScore >= 6 && efficiencyScore != null && efficiencyScore < 40 ? { emoji: '⚠️', label: 'High Opportunity / Low Efficiency', color: 'var(--warn)' } :
+                    (oppScore >= 6 || snapDelta > 0.1) ? { emoji: '📈', label: 'Rising Opportunity', color: '#c6ff3a' } :
+                    null;
                   return (
                     <tr key={i} onClick={() => p && onOpenPlayer?.(p.id)} style={{ cursor: p ? 'pointer' : 'default' }}>
                       <td className="rank" style={{ color: 'var(--text-faint)' }}>{i + 1}</td>
-                      <td>{p ? <PlayerCell player={p} /> : <span style={{ fontWeight: 600 }}>{b.player_name || '—'}</span>}</td>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {p ? <PlayerCell player={p} /> : <span style={{ fontWeight: 600 }}>{b.player_name || '—'}</span>}
+                          {badge && (
+                            <span title={badge.label} style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: badge.color, whiteSpace: 'nowrap' }}>
+                              {badge.emoji} {badge.label}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="mono dim" style={{ fontSize: 11 }}>{p ? `vs ${p.opp}` : (b.team ? `(${b.team})` : '—')}</td>
                       <td className="num"><strong>{proj != null ? Number(proj).toFixed(1) : '—'}</strong></td>
                       <td className="num">
                         <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: snapDelta > 0.15 ? '#c6ff3a' : snapDelta > 0.08 ? 'var(--warn)' : 'var(--text-dim)' }}>
-                          +{(snapDelta * 100).toFixed(0)}%
+                          {snapDelta >= 0 ? '+' : ''}{(snapDelta * 100).toFixed(0)}%
                         </span>
                       </td>
                       <td className="num">
@@ -192,6 +253,9 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
                       </td>
                       <td className="num mono faint" style={{ fontSize: 11 }}>
                         {avgSnap != null ? `${(avgSnap * 100).toFixed(0)}%` : '—'}
+                      </td>
+                      <td className="num mono" style={{ fontSize: 11, color: successRate != null && successRate > 0.5 ? '#c6ff3a' : 'var(--text-dim)' }}>
+                        {successRate != null ? `${(successRate * 100).toFixed(0)}%` : '—'}
                       </td>
                       <td className="num">{p ? <Sparkline data={p.trend} /> : '—'}</td>
                       <td><button className="btn sm primary" onClick={e => e.stopPropagation()}>+ Add</button></td>
@@ -237,12 +301,31 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
             Sleepers
             {useSleepersR2 && AI_BADGE}
           </div>
-          <div className="ct">{useSleepersR2 ? Math.min(r2Sleepers.length, 10) : localSleepers.length} players</div>
+          <div className="ct">{useSleepersR2 ? sleeperRows.length : localSleepers.length} players</div>
           <div style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 10 }}>
-            {useSleepersR2 ? 'FantasAI ML · low-ownership value targets' : 'Low ownership · high projected value'}
+            {useSleepersR2 ? 'FantasAI ML · news + opportunity + ADP value' : 'Low ownership · high projected value'}
           </div>
           <div className="grow"></div>
         </div>
+        {useSleepersR2 && (
+          <div style={{ display: 'flex', gap: 6, padding: '0 2px 8px', flexWrap: 'wrap' }}>
+            {[
+              { id: 'blend',       label: 'Blend' },
+              { id: 'news',        label: 'News' },
+              { id: 'opportunity', label: 'Opportunity' },
+              { id: 'adp',         label: 'ADP Value' },
+            ].map(f => (
+              <div
+                key={f.id}
+                className={`chip ${sleeperSortFactor === f.id ? 'accent active' : ''}`}
+                onClick={() => setSleeperSortFactor(f.id)}
+                title={`Sort sleepers by ${f.label}`}
+              >
+                {f.label}
+              </div>
+            ))}
+          </div>
+        )}
         <table className="data-table">
           <thead>
             <tr>
@@ -250,8 +333,19 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
               <th>Player</th>
               <th>Opp</th>
               <th className="num">Proj</th>
-              <th className="num">%Own</th>
-              <th className="num" title="50% news signal + 50% proj/ownership value">Score</th>
+              {useSleepersR2 ? (
+                <>
+                  <th className="num" title="LLM news/waiver signal" style={sleeperSortFactor === 'news' ? { color: 'var(--accent)' } : undefined}>News</th>
+                  <th className="num" title="Snap-share/opportunity model (Breakout Candidates data)" style={sleeperSortFactor === 'opportunity' ? { color: 'var(--accent)' } : undefined}>Opp</th>
+                  <th className="num" title="Projection vs. how late they're going in drafts" style={sleeperSortFactor === 'adp' ? { color: 'var(--accent)' } : undefined}>ADP Val</th>
+                  <th className="num" title="Average of available sub-scores" style={sleeperSortFactor === 'blend' ? { color: 'var(--accent)' } : undefined}>Blend</th>
+                </>
+              ) : (
+                <>
+                  <th className="num">%Own</th>
+                  <th className="num" title="proj/ownership value">Score</th>
+                </>
+              )}
               <th className="num">Trend</th>
               <th>Note</th>
               <th></th>
@@ -259,30 +353,20 @@ export default function WatchlistScreen({ onOpenPlayer, asTab = false, watchlist
           </thead>
           <tbody>
             {useSleepersR2
-              ? r2Sleepers.slice(0, 10).map((s, i) => {
-                  const p    = playerByName.get((s.player_name || '').toLowerCase().trim());
-                  const owned = s.ownership_pct ?? p?.owned;
-                  const proj  = s.projected_pts  ?? p?.proj;
-                  // prefer blended sleeper_score; fall back to value_score; then compute locally
-                  const scoreNum = s.sleeper_score ?? s.value_score ?? (
-                    proj != null && owned != null
-                      ? Number(proj) / Math.max(Number(owned), 1)
-                      : null
-                  );
-                  const value = scoreNum != null ? Number(scoreNum).toFixed(1) : '—';
-                  const scoreTitle = s.news_score != null
-                    ? `News: ${s.news_score}/10  Value: ${s.value_score}/10  Blend: ${s.sleeper_score}/10`
-                    : '';
+              ? sleeperRows.map(({ s, p, newsScore, oppScore, adpScore, blendScore }, i) => {
+                  const fmt = v => v != null ? v.toFixed(1) : '—';
                   return (
-                    <tr key={i} onClick={() => p && onOpenPlayer?.(p.id)} style={{ cursor: p ? 'pointer' : 'default' }}>
+                    <tr key={s.player_name || i} onClick={() => p && onOpenPlayer?.(p.id)} style={{ cursor: p ? 'pointer' : 'default' }}>
                       <td className="rank" style={{ color: 'var(--text-faint)' }}>{i + 1}</td>
                       <td>{p ? <PlayerCell player={p} /> : <span style={{ fontWeight: 600 }}>{s.player_name || '—'}</span>}</td>
                       <td className="mono dim" style={{ fontSize: 11 }}>{p ? `vs ${p.opp}` : (s.team ? `(${s.team})` : '—')}</td>
-                      <td className="num"><strong>{proj != null ? Number(proj).toFixed(1) : '—'}</strong></td>
-                      <td className="num" style={{ color: 'var(--good)' }}>{owned != null ? `${Number(owned).toFixed(1)}%` : '—'}</td>
-                      <td className="num" title={scoreTitle} style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent-2)', cursor: scoreTitle ? 'help' : 'default' }}>{value}</td>
+                      <td className="num"><strong>{fmt(s.projected_pts ?? p?.proj)}</strong></td>
+                      <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: sleeperSortFactor === 'news' ? 800 : 500, color: newsScore != null ? 'var(--text)' : 'var(--text-faint)' }}>{fmt(newsScore)}</td>
+                      <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: sleeperSortFactor === 'opportunity' ? 800 : 500, color: oppScore != null ? 'var(--text)' : 'var(--text-faint)' }}>{fmt(oppScore)}</td>
+                      <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: sleeperSortFactor === 'adp' ? 800 : 500, color: adpScore != null ? 'var(--text)' : 'var(--text-faint)' }}>{fmt(adpScore)}</td>
+                      <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: 'var(--accent-2)' }}>{fmt(blendScore)}</td>
                       <td className="num">{p ? <Sparkline data={p.trend} /> : '—'}</td>
-                      <td className="dim" style={{ fontSize: 11, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.reason || p?.news || ''}</td>
+                      <td className="dim" style={{ fontSize: 11, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.reason || p?.news || ''}</td>
                       <td><button className="btn sm primary" onClick={e => e.stopPropagation()}>+ Add</button></td>
                     </tr>
                   );

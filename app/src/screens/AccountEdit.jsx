@@ -23,6 +23,10 @@ const POSITION_FEATURES = {
     { key: 'cpoe',         label: 'NextGen: Completion % Over Expected' },
     { key: 'timeToThrow',  label: 'NextGen: Avg Time to Throw'  },
     { key: 'aggressiveness', label: 'NextGen: Aggressiveness %' },
+    { key: 'newsSignal',   label: 'News/Sleeper Signal (AI)'    },
+    { key: 'successRate',  label: 'Success Rate (EPA-based)'    },
+    { key: 'explosiveRate', label: 'Explosive Run Rate'         },
+    { key: 'elusivenessScore', label: 'Elusiveness Score (Rushing)' },
   ],
   RB:  [
     { key: 'proj',         label: 'Projected Points'            },
@@ -41,6 +45,11 @@ const POSITION_FEATURES = {
     { key: 'rushEff',      label: 'NextGen: Rush Efficiency (Yds Over Expected)' },
     { key: 'breakaway',    label: 'NextGen: Breakaway Run %'    },
     { key: 'yac',          label: 'NextGen: Yards After Contact'},
+    { key: 'newsSignal',   label: 'News/Sleeper Signal (AI)'    },
+    { key: 'opportunityScore', label: 'Opportunity Score (Snap Share Model)' },
+    { key: 'successRate',  label: 'Success Rate (EPA-based)'    },
+    { key: 'explosiveRate', label: 'Explosive Run Rate'         },
+    { key: 'elusivenessScore', label: 'Elusiveness Score (Rushing)' },
   ],
   WR:  [
     { key: 'proj',         label: 'Projected Points'            },
@@ -60,6 +69,10 @@ const POSITION_FEATURES = {
     { key: 'cushion',      label: 'NextGen: Avg Cushion at Snap'},
     { key: 'yac',          label: 'NextGen: Yards After Catch'  },
     { key: 'catchPct',     label: 'NextGen: Catch % Above Avg'  },
+    { key: 'newsSignal',   label: 'News/Sleeper Signal (AI)'    },
+    { key: 'opportunityScore', label: 'Opportunity Score (Snap Share Model)' },
+    { key: 'successRate',  label: 'Success Rate (EPA-based)'    },
+    { key: 'explosiveRate', label: 'Explosive Reception Rate'   },
   ],
   TE:  [
     { key: 'proj',         label: 'Projected Points'            },
@@ -77,6 +90,10 @@ const POSITION_FEATURES = {
     { key: 'separation',   label: 'NextGen: Avg Separation'     },
     { key: 'cushion',      label: 'NextGen: Avg Cushion at Snap'},
     { key: 'yac',          label: 'NextGen: Yards After Catch'  },
+    { key: 'newsSignal',   label: 'News/Sleeper Signal (AI)'    },
+    { key: 'opportunityScore', label: 'Opportunity Score (Snap Share Model)' },
+    { key: 'successRate',  label: 'Success Rate (EPA-based)'    },
+    { key: 'explosiveRate', label: 'Explosive Reception Rate'   },
   ],
   K:   [
     { key: 'proj',         label: 'Projected Points'            },
@@ -104,16 +121,22 @@ const POSITION_FEATURES = {
     { key: 'owned',        label: 'Ownership %'                 },
     { key: 'pressureRate', label: 'NextGen: QB Pressure Rate'   },
     { key: 'coverage',     label: 'NextGen: Coverage Grade'     },
+    { key: 'newsSignal',   label: 'News/Sleeper Signal (AI)'    },
   ],
 };
 
+// News/Sleeper Signal = Job 2's LLM waiver/news score (analysis/sleeper_picks.json).
+// Opportunity Score = the snap-share/opportunity breakout model (analysis/breakout_candidates.json).
+// Success Rate / Explosive Rate / Elusiveness Score = derived nflverse play-by-play efficiency
+// metrics (player_efficiency_stats — EPA per play, explosive plays, rush efficiency composite).
+// All mirror the same sub-groups shown in the Watchlist Sleepers/Breakout Candidates tables.
 const DEFAULT_WEIGHT_DIST = {
-  QB:  [25, 20, 12, 10, 5,  8, 5,  8,  3,  2,  1,  1, 0, 0, 0],
-  RB:  [25, 18, 12,  8,  8, 6,  5, 4,  7,  3,  2,  1,  1, 0, 0, 0],
-  WR:  [25, 18, 12,  8,  8, 6,  5, 4,  7,  3,  2,  1,  1, 0, 0, 0, 0],
-  TE:  [25, 18, 14,  8,  8, 6,  4, 8,  3,  2,  3,  1, 0, 0, 0],
+  QB:  [20, 11, 8, 10, 5,  8, 5,  8,  3,  2,  1,  1, 0, 0, 0, 5, 5, 4, 4],
+  RB:  [17, 10, 8,  8,  4, 6,  5, 4,  7,  3,  2,  1,  1, 0, 0, 0, 4, 4, 5, 5, 6],
+  WR:  [17, 11, 8,  8,  8, 6,  5, 4,  7,  3,  2,  1,  1, 0, 0, 0, 0, 4, 4, 5, 6],
+  TE:  [17, 11, 11, 8,  8, 6,  4, 8,  3,  2,  3,  1, 0, 0, 0, 4, 4, 5, 5],
   K:   [30, 20, 15, 10,  8, 7,  5,  3,  1,  1],
-  DST: [25, 18, 12, 10,  8, 7,  5, 7,  3,  3,  2, 0, 0],
+  DST: [20, 18, 12, 10,  8, 7,  5, 7,  3,  3,  2, 0, 0, 5],
 };
 
 function buildDefaultWeights() {

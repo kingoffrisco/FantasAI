@@ -85,7 +85,7 @@ INJURY STATUS: {injury_status}
   Fantasy points: {fantasy_pts:.1f} total  ({ppg:.1f} PPG)
 {stats_block}  Touchdowns:     {tds}
 
-DRAFT CONTEXT:
+{efficiency_block}DRAFT CONTEXT:
   ADP rank (PPR):      {adp_rank_ppr}
   ADP value (PPR):     {adp_ppr}
   ADP rank (Standard): {adp_rank_std}
@@ -270,6 +270,34 @@ def _stats_block(pos: str, rush_yds, recv_yds, pass_yds) -> str:
     return "".join(f"  {label + ':':<16}{values[key]}\n" for label, key in lines)
 
 
+def _efficiency_block(pos: str, eff_row: dict) -> str:
+    """Build an ADVANCED EFFICIENCY prompt section from a player_efficiency_stats row
+    (same source as analysis/breakout_candidates.json — EPA, success rate, explosive plays).
+    Returns "" if no row is available so the prompt section is simply omitted."""
+    if not eff_row:
+        return ""
+    lines = []
+    epa = eff_row.get("epa_per_opportunity")
+    if epa is not None:
+        lines.append(f"  EPA per opportunity: {epa:+.2f}")
+    sr = eff_row.get("success_rate")
+    if sr is not None:
+        lines.append(f"  Success rate: {sr * 100:.0f}%")
+    explosive = eff_row.get("explosive_rec_rate") if pos in ("WR", "TE") else eff_row.get("explosive_run_rate")
+    if explosive is not None:
+        label = "Explosive reception rate" if pos in ("WR", "TE") else "Explosive run rate"
+        lines.append(f"  {label}: {explosive * 100:.0f}%")
+    ypt = eff_row.get("yards_per_target")
+    if ypt is not None and pos in ("WR", "TE", "RB"):
+        lines.append(f"  Yards per target: {ypt:.1f}")
+    elus = eff_row.get("elusiveness_score")
+    if elus is not None and pos in ("RB", "QB"):
+        lines.append(f"  Elusiveness score: {elus:.0f}/100")
+    if not lines:
+        return ""
+    return "ADVANCED EFFICIENCY (nflverse play-by-play, most recent week charted):\n" + "\n".join(lines) + "\n\n"
+
+
 def _years_exp_label(profile: dict) -> str:
     """Return a human-readable NFL experience string for the prompt."""
     ye = profile.get("years_exp")
@@ -380,6 +408,30 @@ def _load_combine_data(conn) -> dict:
         rows = conn.execute(
             "SELECT * FROM bronze_combine_data WHERE forty IS NOT NULL OR vertical IS NOT NULL"
         ).fetchall()
+        cols = [c[0] for c in conn.description]
+        by_name = {}
+        for row in rows:
+            d = dict(zip(cols, row))
+            key = (d.get("player_name") or "").lower().strip()
+            if key:
+                by_name[key] = d
+        return by_name
+    except Exception:
+        return {}
+
+
+def _load_efficiency_data(conn) -> dict:
+    """Load each player's most recent nflverse-derived efficiency row, keyed by lowercase name.
+    Same source (player_efficiency_stats) that feeds analysis/breakout_candidates.json."""
+    try:
+        rows = conn.execute("""
+            SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY LOWER(TRIM(player_name)) ORDER BY season DESC, week DESC
+                ) AS rn
+                FROM player_efficiency_stats
+            ) WHERE rn = 1
+        """).fetchall()
         cols = [c[0] for c in conn.description]
         by_name = {}
         for row in rows:
@@ -517,7 +569,7 @@ def load_profiles_fallback() -> list:
 
 # ── Model call ──────────────────────────────────────────────────────────────
 
-def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1, college_stats: dict = None, combine_data: dict = None) -> str:
+def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1, college_stats: dict = None, combine_data: dict = None, efficiency_data: dict = None) -> str:
     news_count  = profile.get("recent_news_count") or 0
     games       = profile.get("games_played_2025") or 0
     fantasy_pts = float(profile.get("total_fantasy_points_2025") or 0)
@@ -544,6 +596,8 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
         is_rookie = int(profile.get("years_exp") or 99) <= 1
         college_block = _college_stats_block(profile, college_stats) if is_rookie and college_stats else ""
         comb_block = _combine_block(profile, combine_data) if is_rookie and combine_data else ""
+        eff_row = (efficiency_data or {}).get((profile.get("full_name") or "").lower().strip())
+        eff_block = _efficiency_block(pos, eff_row)
         para1 = ("Summarize their college production and what it means for their NFL transition. Ground it in their actual college stats."
                  if is_rookie and games == 0 and college_block
                  else "Summarize their 2025 performance. Ground it in their actual stats.")
@@ -567,6 +621,7 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
                 profile.get("passing_yards_2025") or 0,
             ),
             tds            = profile.get("total_touchdowns_2025") or 0,
+            efficiency_block = eff_block,
             adp_rank_ppr   = profile.get("adp_rank_ppr") or "unranked",
             adp_ppr        = profile.get("adp_ppr") or "—",
             adp_rank_std   = profile.get("adp_rank_standard") or "unranked",
@@ -685,12 +740,15 @@ def main():
         _db = _get_db_conn()
         college_stats = _load_college_stats(_db)
         combine_data = _load_combine_data(_db)
+        efficiency_data = _load_efficiency_data(_db)
         _db.close()
-        print(f"[Job 3] College stats: {len(college_stats)} players, Combine: {len(combine_data)} players")
+        print(f"[Job 3] College stats: {len(college_stats)} players, Combine: {len(combine_data)} players, "
+              f"Efficiency: {len(efficiency_data)} players")
     except Exception as e:
-        print(f"[Job 3] College/combine data unavailable: {e}")
+        print(f"[Job 3] College/combine/efficiency data unavailable: {e}")
         college_stats = {}
         combine_data = {}
+        efficiency_data = {}
 
     # ── Load existing writeups for incremental skip ──────────────────────────
     existing: dict = {}
@@ -758,7 +816,7 @@ def main():
 
         t0 = time.time()
         try:
-            writeup = generate_writeup(profile, notes_dict, model, college_stats, combine_data)
+            writeup = generate_writeup(profile, notes_dict, model, college_stats, combine_data, efficiency_data)
             elapsed = round(time.time() - t0, 1)
             summary = writeup.split(".")[0].strip() + "." if writeup else ""
 

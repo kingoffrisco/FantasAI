@@ -6,11 +6,15 @@ Replaces: notebooks/01_Ingestion/Bronze/Import nflverse Player Data.ipynb
 Uses the nfl_data_py library (free, no API key required).
 
 Outputs:
-  player_headshots       — skill position players with headshot URLs
-  player_yac_stats       — weekly YAC aggregated from play-by-play
-  player_nextgen_stats   — NGS receiving data (YACOE, air yards, etc.)
-  depth_charts           — weekly depth chart positions
-  silver_weekly_stats    — nflverse seasonal stats (upserted)
+  player_headshots        — skill position players with headshot URLs
+  player_yac_stats        — weekly YAC aggregated from play-by-play
+  player_nextgen_stats    — NGS receiving data (YACOE, air yards, etc.)
+  depth_charts            — weekly depth chart positions
+  silver_weekly_stats     — nflverse seasonal stats (upserted)
+  player_snap_counts      — weekly offense snap share (real snap-share-delta source)
+  player_efficiency_stats — EPA/play, success rate, explosive play rate, red zone/
+                            goal-line usage, and a public-data Elusiveness Score
+                            (proxy for PFF's missed-tackles-forced, which isn't public)
 
 Usage:
   pip install nfl_data_py
@@ -145,6 +149,201 @@ def import_yac(conn, seasons: list[int], dry_run: bool):
     conn.register("_yac", weekly)
     conn.execute("INSERT INTO player_yac_stats SELECT * FROM _yac")
     print(f"   💾 player_yac_stats: {len(weekly):,} rows")
+
+
+# ── Snap Counts ───────────────────────────────────────────────────────────────
+
+def import_snap_counts(conn, seasons: list[int], dry_run: bool):
+    print("\n🔢 Section: Snap Counts (offense snap share)")
+    snap_parts = []
+    for season in seasons:
+        print(f"   {season}: downloading snap counts…")
+        try:
+            snaps = nfl.import_snap_counts(years=[season])
+            sub = snaps[snaps["position"].isin(SKILL_POSITIONS)].copy()
+            print(f"     ✅ {len(sub):,} records")
+            snap_parts.append(sub)
+        except Exception as e:
+            print(f"     ⚠️  {season}: {e}")
+
+    if not snap_parts:
+        print("   ⚠️  No snap count data imported")
+        return
+
+    snaps_df = pd.concat(snap_parts, ignore_index=True)
+    clean = snaps_df.rename(columns={"player": "player_name"})[[
+        "season", "week", "player_name", "position", "team", "offense_snaps", "offense_pct"
+    ]].copy()
+    # Sum across game_type duplicates (e.g. regular season vs. playoffs in the same week key)
+    clean = (
+        clean.groupby(["season", "week", "player_name", "position", "team"], as_index=False)
+        .agg(offense_snaps=("offense_snaps", "sum"), offense_pct=("offense_pct", "max"))
+    )
+    clean["imported_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    print(f"   ✅ {len(clean):,} player-week snap count records")
+    if dry_run:
+        return
+
+    conn.execute("DELETE FROM player_snap_counts")
+    conn.register("_snaps", clean)
+    conn.execute("INSERT INTO player_snap_counts SELECT * FROM _snaps")
+    print(f"   💾 player_snap_counts: {len(clean):,} rows")
+
+
+# ── Efficiency metrics (EPA, success rate, explosive plays, RZ/goal-line usage) ─
+
+def import_efficiency_stats(conn, seasons: list[int], dry_run: bool):
+    print("\n⚡ Section: Efficiency Metrics (EPA, success rate, explosive plays)")
+    PBP_COLS = [
+        "season", "week", "posteam", "play_type", "down", "ydstogo", "yards_gained",
+        "epa", "yardline_100",
+        "rush_attempt", "rusher_player_id", "rusher_player_name",
+        "pass_attempt", "complete_pass", "receiver_player_id", "receiver_player_name",
+    ]
+    eff_parts = []
+    for season in seasons:
+        print(f"   {season}: downloading play-by-play…")
+        try:
+            pbp = nfl.import_pbp_data([season], columns=PBP_COLS)
+            eff_parts.append(pbp)
+            print(f"     ✅ {len(pbp):,} plays")
+        except Exception as e:
+            print(f"     ⚠️  {season}: {e}")
+
+    if not eff_parts:
+        print("   ⚠️  No play-by-play data imported")
+        return
+
+    pbp = pd.concat(eff_parts, ignore_index=True)
+
+    # Standard success-rate definition: 40%+ of needed yards on 1st down, 60%+ on 2nd, 100%+ on 3rd/4th
+    def _is_success(row):
+        if pd.isna(row["down"]) or pd.isna(row["ydstogo"]) or row["ydstogo"] <= 0:
+            return False
+        needed = row["ydstogo"] * (0.4 if row["down"] == 1 else 0.6 if row["down"] == 2 else 1.0)
+        return row["yards_gained"] >= needed
+
+    # ── Rushing plays ──
+    rush = pbp[(pbp["rush_attempt"] == 1) & pbp["rusher_player_id"].notna()].copy()
+    rush["is_success"]  = rush.apply(_is_success, axis=1)
+    rush["is_explosive"] = rush["yards_gained"] >= 15
+    rush["is_goalline"]  = rush["yardline_100"] <= 5
+    rush["is_redzone"]   = rush["yardline_100"] <= 20
+    rush_agg = rush.groupby(["season", "week", "rusher_player_id"]).agg(
+        player_name       = ("rusher_player_name", "first"),
+        team              = ("posteam", "first"),
+        rush_attempts     = ("rush_attempt", "sum"),
+        rush_epa_total    = ("epa", "sum"),
+        rush_success_ct   = ("is_success", "sum"),
+        explosive_run_ct  = ("is_explosive", "sum"),
+        goalline_carries  = ("is_goalline", "sum"),
+        redzone_rushes    = ("is_redzone", "sum"),
+    ).reset_index().rename(columns={"rusher_player_id": "player_id"})
+
+    # ── Passing targets (receiver side) ──
+    tgt = pbp[(pbp["pass_attempt"] == 1) & pbp["receiver_player_id"].notna()].copy()
+    tgt["is_success"]   = tgt.apply(_is_success, axis=1)
+    tgt["is_complete"]  = tgt["complete_pass"] == 1
+    tgt["is_explosive"] = tgt["is_complete"] & (tgt["yards_gained"] >= 20)
+    tgt["is_redzone"]   = tgt["yardline_100"] <= 20
+    tgt_agg = tgt.groupby(["season", "week", "receiver_player_id"]).agg(
+        player_name        = ("receiver_player_name", "first"),
+        team                = ("posteam", "first"),
+        targets             = ("pass_attempt", "sum"),
+        receptions          = ("is_complete", "sum"),
+        receiving_yards     = ("yards_gained", "sum"),
+        tgt_epa_total       = ("epa", "sum"),
+        tgt_success_ct      = ("is_success", "sum"),
+        explosive_rec_ct    = ("is_explosive", "sum"),
+        redzone_targets     = ("is_redzone", "sum"),
+    ).reset_index().rename(columns={"receiver_player_id": "player_id"})
+
+    # ── Merge rush + target sides per player-week ──
+    merged = pd.merge(rush_agg, tgt_agg, on=["season", "week", "player_id"], how="outer", suffixes=("_rush", "_tgt"))
+    merged["player_name"] = merged["player_name_rush"].fillna(merged["player_name_tgt"])
+    merged["team"]        = merged["team_rush"].fillna(merged["team_tgt"])
+
+    # Play-by-play names are abbreviated ("M.Nabers"), but every other table in this pipeline
+    # (snap counts, weekly stats, roster) uses full display names ("Mike Nabers") — resolve via
+    # player_headshots, which is keyed by the same gsis_id and stores nfl_data_py's full names.
+    try:
+        id_to_name = conn.execute(
+            "SELECT gsis_id, player_name FROM player_headshots WHERE player_name IS NOT NULL"
+        ).df().drop_duplicates("gsis_id").set_index("gsis_id")["player_name"].to_dict()
+    except Exception:
+        id_to_name = {}
+    if id_to_name:
+        resolved = merged["player_id"].map(id_to_name)
+        merged["player_name"] = resolved.fillna(merged["player_name"])
+    for c in ["rush_attempts", "rush_epa_total", "rush_success_ct", "explosive_run_ct", "goalline_carries", "redzone_rushes",
+              "targets", "receptions", "receiving_yards", "tgt_epa_total", "tgt_success_ct", "explosive_rec_ct", "redzone_targets"]:
+        merged[c] = merged[c].fillna(0)
+
+    total_opps = merged["rush_attempts"] + merged["targets"]
+    total_epa  = merged["rush_epa_total"] + merged["tgt_epa_total"]
+    total_success = merged["rush_success_ct"] + merged["tgt_success_ct"]
+
+    out = pd.DataFrame({
+        "season":              merged["season"].astype(int),
+        "week":                merged["week"].astype(int),
+        "player_name":         merged["player_name"],
+        "position":            None,  # joined/labeled downstream from player_headshots/roster data
+        "team":                merged["team"],
+        "rush_attempts":       merged["rush_attempts"].astype(int),
+        "targets":             merged["targets"].astype(int),
+        "epa_per_play":        (total_epa / total_opps.replace(0, float("nan"))),
+        "epa_per_rush":        (merged["rush_epa_total"] / merged["rush_attempts"].replace(0, float("nan"))),
+        "epa_per_target":      (merged["tgt_epa_total"] / merged["targets"].replace(0, float("nan"))),
+        "epa_per_opportunity": (total_epa / total_opps.replace(0, float("nan"))),
+        "success_rate":        (total_success / total_opps.replace(0, float("nan"))),
+        "explosive_run_rate":  (merged["explosive_run_ct"] / merged["rush_attempts"].replace(0, float("nan"))),
+        "explosive_rec_rate":  (merged["explosive_rec_ct"] / merged["receptions"].replace(0, float("nan"))),
+        "yards_per_target":    (merged["receiving_yards"] / merged["targets"].replace(0, float("nan"))),
+        "redzone_touches":     (merged["redzone_rushes"] + merged["redzone_targets"]).astype(int),
+        "goalline_carries":    merged["goalline_carries"].astype(int),
+    })
+    out = out[out["player_name"].notna() & (total_opps >= 3)].copy()  # drop tiny/noisy samples
+
+    # Elusiveness Score — composite proxy for "missed tackles forced" (no public source; PFF-only).
+    # 0.35 YAC-rate-esque rush efficiency (epa_per_rush) + 0.25 explosive run rate + 0.20 success
+    # rate + 0.20 EPA/rush again as a stand-in for YAC (nflverse YAC is receiving-only, tracked
+    # separately in player_yac_stats — this composite uses what's available on the rushing side).
+    # Normalized 0-1 within each season+week slate before blending so the components are comparable.
+    def _norm(s):
+        lo, hi = s.min(), s.max()
+        span = (hi - lo) or 1
+        return (s - lo) / span
+    rushers = out[out["rush_attempts"] > 0].copy()
+    if not rushers.empty:
+        rushers["_epaN"]  = rushers.groupby(["season", "week"])["epa_per_rush"].transform(_norm)
+        rushers["_expN"]  = rushers.groupby(["season", "week"])["explosive_run_rate"].transform(_norm)
+        rushers["_sucN"]  = rushers.groupby(["season", "week"])["success_rate"].transform(_norm)
+        rushers["elusiveness_score"] = (
+            0.35 * rushers["_epaN"] + 0.25 * rushers["_expN"] + 0.20 * rushers["_sucN"] + 0.20 * rushers["_epaN"]
+        ) * 100
+        out = out.merge(
+            rushers[["season", "week", "player_name", "team", "elusiveness_score"]],
+            on=["season", "week", "player_name", "team"], how="left",
+        )
+    else:
+        out["elusiveness_score"] = None
+
+    out["imported_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+    out = out.round({
+        "epa_per_play": 3, "epa_per_rush": 3, "epa_per_target": 3, "epa_per_opportunity": 3,
+        "success_rate": 3, "explosive_run_rate": 3, "explosive_rec_rate": 3, "elusiveness_score": 1,
+        "yards_per_target": 2,
+    })
+
+    print(f"   ✅ {len(out):,} player-week efficiency records")
+    if dry_run:
+        return
+
+    conn.execute("DELETE FROM player_efficiency_stats")
+    conn.register("_eff", out)
+    conn.execute("INSERT INTO player_efficiency_stats BY NAME SELECT * FROM _eff")
+    print(f"   💾 player_efficiency_stats: {len(out):,} rows")
 
 
 # ── Next Gen Stats ─────────────────────────────────────────────────────────────
@@ -328,7 +527,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seasons",  type=str, default=None,
                         help="Comma-separated years, e.g. 2024,2025")
-    parser.add_argument("--section",  choices=["headshots", "yac", "ngs", "depth", "stats", "all"],
+    parser.add_argument("--section",  choices=["headshots", "yac", "ngs", "depth", "stats", "snaps", "efficiency", "all"],
                         default="all")
     parser.add_argument("--dry-run",  action="store_true")
     args = parser.parse_args()
@@ -351,6 +550,8 @@ def main():
     if run_all or args.section == "ngs":       import_ngs(conn, seasons, args.dry_run)
     if run_all or args.section == "depth":     import_depth_charts(conn, seasons, args.dry_run)
     if run_all or args.section == "stats":     import_weekly_stats(conn, seasons, args.dry_run)
+    if run_all or args.section == "snaps":       import_snap_counts(conn, seasons, args.dry_run)
+    if run_all or args.section == "efficiency":  import_efficiency_stats(conn, seasons, args.dry_run)
 
     conn.close()
     print("\n✅ nflverse import complete")

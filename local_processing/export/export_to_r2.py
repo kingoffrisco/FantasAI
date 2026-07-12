@@ -314,26 +314,132 @@ def export_analysis(conn, dry_run: bool):
     else:
         print("   ⚠️  No CFBD data — skipping college_stats export")
 
-    # 1. Breakout candidates — from gold_weekly_stats (snap delta proxy)
-    breakout = q(conn, """
-        SELECT
-            g.player_name, g.team, g.position,
-            g.week, g.season,
-            g.fantasy_points AS opportunity_score,
-            NULL AS snap_share_delta,
-            NULL AS avg_snap_share
-        FROM gold_weekly_stats g
-        INNER JOIN (
-            SELECT master_player_id, MAX(season * 100 + week) AS latest_week_key
-            FROM gold_weekly_stats
-            GROUP BY master_player_id
-        ) lw ON g.master_player_id = lw.master_player_id
-             AND g.season * 100 + g.week = lw.latest_week_key
-        WHERE g.position IN ('QB','RB','WR','TE')
-          AND g.fantasy_points > 8
-        ORDER BY g.fantasy_points DESC
-        LIMIT 30
-    """)
+    # 1. Breakout candidates — real snap-share trend (player_snap_counts) + efficiency
+    # (player_efficiency_stats), both from nflverse play-by-play. Previously this query
+    # aliased recent fantasy_points as "opportunity_score" with snap_share_delta hardcoded
+    # NULL — that placeholder is gone now that ingest_nflverse.py computes the real thing.
+    has_snaps = conn.execute(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'player_snap_counts'"
+    ).fetchone()[0] > 0
+    has_eff = conn.execute(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'player_efficiency_stats'"
+    ).fetchone()[0] > 0
+
+    if has_snaps and has_eff:
+        breakout = q(conn, """
+            WITH snap_trend AS (
+                SELECT
+                    player_name, team,
+                    offense_pct AS latest_snap_pct,
+                    AVG(offense_pct) OVER (
+                        PARTITION BY player_name, team ORDER BY season, week
+                        ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING
+                    ) AS prior_avg_snap_pct,
+                    AVG(offense_pct) OVER (
+                        PARTITION BY player_name, team ORDER BY season, week
+                        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+                    ) AS avg_snap_share,
+                    ROW_NUMBER() OVER (PARTITION BY player_name, team ORDER BY season DESC, week DESC) AS rn
+                FROM player_snap_counts
+            ),
+            snap_latest AS (
+                SELECT player_name, team, latest_snap_pct, avg_snap_share,
+                       (latest_snap_pct - COALESCE(prior_avg_snap_pct, latest_snap_pct)) AS snap_share_delta
+                FROM snap_trend WHERE rn = 1
+            ),
+            eff_ranked AS (
+                SELECT player_name, team, epa_per_opportunity, success_rate,
+                       explosive_run_rate, explosive_rec_rate, redzone_touches,
+                       goalline_carries, elusiveness_score, yards_per_target,
+                       ROW_NUMBER() OVER (PARTITION BY player_name, team ORDER BY season DESC, week DESC) AS rn
+                FROM player_efficiency_stats
+            ),
+            eff_latest AS (
+                SELECT player_name, team, epa_per_opportunity, success_rate,
+                       explosive_run_rate, explosive_rec_rate, redzone_touches,
+                       goalline_carries, elusiveness_score, yards_per_target
+                FROM eff_ranked WHERE rn = 1
+            ),
+            latest_gold AS (
+                SELECT g.player_name, g.team, g.position, g.week, g.season, g.fantasy_points
+                FROM gold_weekly_stats g
+                INNER JOIN (
+                    SELECT master_player_id, MAX(season * 100 + week) AS latest_week_key
+                    FROM gold_weekly_stats
+                    GROUP BY master_player_id
+                ) lw ON g.master_player_id = lw.master_player_id
+                     AND g.season * 100 + g.week = lw.latest_week_key
+                WHERE g.position IN ('QB','RB','WR','TE') AND g.fantasy_points > 8
+            ),
+            combined AS (
+                SELECT
+                    lg.player_name, lg.team, lg.position, lg.week, lg.season, lg.fantasy_points,
+                    st.snap_share_delta, st.avg_snap_share,
+                    ef.epa_per_opportunity, ef.redzone_touches, ef.goalline_carries,
+                    ef.explosive_run_rate, ef.explosive_rec_rate, ef.success_rate, ef.elusiveness_score,
+                    ef.yards_per_target,
+                    GREATEST(COALESCE(ef.explosive_run_rate, 0), COALESCE(ef.explosive_rec_rate, 0)) AS explosive_rate
+                FROM latest_gold lg
+                LEFT JOIN snap_latest st ON LOWER(TRIM(st.player_name)) = LOWER(TRIM(lg.player_name))
+                LEFT JOIN eff_latest  ef ON LOWER(TRIM(ef.player_name)) = LOWER(TRIM(lg.player_name))
+            )
+            SELECT
+                player_name, team, position, week, season, fantasy_points,
+                snap_share_delta, avg_snap_share, redzone_touches, goalline_carries,
+                explosive_run_rate, explosive_rec_rate, success_rate, elusiveness_score,
+                epa_per_opportunity, yards_per_target,
+                -- Opportunity Score (0-10): blend of snap-share trend, red zone usage, and EPA/opportunity,
+                -- each min-max normalized across this candidate slate (same pattern as Job 2's value_score).
+                ROUND(10 * (
+                    0.5 * (COALESCE(snap_share_delta, 0) - MIN(COALESCE(snap_share_delta, 0)) OVER ())
+                        / NULLIF(MAX(COALESCE(snap_share_delta, 0)) OVER () - MIN(COALESCE(snap_share_delta, 0)) OVER (), 0)
+                  + 0.3 * (COALESCE(redzone_touches, 0) - MIN(COALESCE(redzone_touches, 0)) OVER ())
+                        / NULLIF(MAX(COALESCE(redzone_touches, 0)) OVER () - MIN(COALESCE(redzone_touches, 0)) OVER (), 0)
+                  + 0.2 * (COALESCE(epa_per_opportunity, 0) - MIN(COALESCE(epa_per_opportunity, 0)) OVER ())
+                        / NULLIF(MAX(COALESCE(epa_per_opportunity, 0)) OVER () - MIN(COALESCE(epa_per_opportunity, 0)) OVER (), 0)
+                ), 2) AS opportunity_score,
+                -- Efficiency Score (0-100): blend of success rate, explosive-play rate, and EPA/opportunity,
+                -- each min-max normalized across this candidate slate. Percentile-style score, easier for
+                -- fantasy managers to read than raw EPA/success-rate numbers.
+                ROUND(100 * (
+                    0.4 * (COALESCE(success_rate, 0) - MIN(COALESCE(success_rate, 0)) OVER ())
+                        / NULLIF(MAX(COALESCE(success_rate, 0)) OVER () - MIN(COALESCE(success_rate, 0)) OVER (), 0)
+                  + 0.3 * (COALESCE(explosive_rate, 0) - MIN(COALESCE(explosive_rate, 0)) OVER ())
+                        / NULLIF(MAX(COALESCE(explosive_rate, 0)) OVER () - MIN(COALESCE(explosive_rate, 0)) OVER (), 0)
+                  + 0.3 * (COALESCE(epa_per_opportunity, 0) - MIN(COALESCE(epa_per_opportunity, 0)) OVER ())
+                        / NULLIF(MAX(COALESCE(epa_per_opportunity, 0)) OVER () - MIN(COALESCE(epa_per_opportunity, 0)) OVER (), 0)
+                ), 1) AS efficiency_score
+            FROM combined
+            -- gold_weekly_stats' master_player_id isn't stable across seasons for some players
+            -- (same player, different hash in 2024 vs 2025), which can surface the same name
+            -- twice from different seasons — dedupe to their single best week here.
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(player_name)) ORDER BY fantasy_points DESC) = 1
+            ORDER BY fantasy_points DESC
+            LIMIT 30
+        """)
+    else:
+        print("   ⚠️  player_snap_counts / player_efficiency_stats not populated yet "
+              "(run: python ingest/ingest_nflverse.py --section all) — "
+              "falling back to fantasy_points-only breakout list")
+        breakout = q(conn, """
+            SELECT
+                g.player_name, g.team, g.position,
+                g.week, g.season,
+                g.fantasy_points AS opportunity_score,
+                NULL AS snap_share_delta,
+                NULL AS avg_snap_share
+            FROM gold_weekly_stats g
+            INNER JOIN (
+                SELECT master_player_id, MAX(season * 100 + week) AS latest_week_key
+                FROM gold_weekly_stats
+                GROUP BY master_player_id
+            ) lw ON g.master_player_id = lw.master_player_id
+                 AND g.season * 100 + g.week = lw.latest_week_key
+            WHERE g.position IN ('QB','RB','WR','TE')
+              AND g.fantasy_points > 8
+            ORDER BY g.fantasy_points DESC
+            LIMIT 30
+        """)
     r2_put("fantasai/analysis/breakout_candidates.json", breakout, dry_run)
 
     # 1b. Defense vs Position rankings (2025 season)
