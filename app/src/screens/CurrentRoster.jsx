@@ -422,7 +422,7 @@ function DropCandidatesPanel({ myRosterIds, onOpenPlayer }) {
   );
 }
 
-export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPlayer, onDropPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange, tradeOffers = [], onRespondTradeOffer, rosterSyncBadge, rosterLoading }) {
+export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPlayer, onDropPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange, tradeOffers = [], onRespondTradeOffer, rosterSyncBadge, rosterLoading, showMobile = false }) {
   const allPlayers = usePlayers();
   const [dropConfirm, setDropConfirm] = React.useState(null);
   const [tab, setTab] = React.useState('roster');
@@ -435,14 +435,11 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   const [expandedArts, setExpandedArts] = React.useState(new Set()); // playerIds with expanded article list
   const [matchupExpanded, setMatchupExpanded] = React.useState(false);
 
-  // Mobile: player identity always visible, detail sections click through via tabs
-  const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 1100px)').matches);
-  React.useEffect(() => {
-    const mq = window.matchMedia('(max-width: 1100px)');
-    const onChange = e => setIsMobile(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
+  // Mobile: player identity always visible, detail sections click through via tabs.
+  // Single source of truth lives in App.jsx (real device width OR the manual
+  // Mobile/Desktop preview toggle) — don't re-detect independently here, that
+  // caused this screen to disagree with the toggle at in-between widths.
+  const isMobile = showMobile;
   const [rosterDetailTab, setRosterDetailTab] = React.useState('status'); // status | schedule | weather | trends | points | news
 
   // NFL schedule fetched live from ESPN scoreboard API — all 18 weeks

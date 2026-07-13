@@ -371,14 +371,11 @@ function DraftCountdown({ canEdit }) {
   );
 }
 
-export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new Set(), sourcesState, slotOverrides = {}, watchlistIds = new Set(), tradeOffers = [] }) {
-  const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 1100px)').matches);
-  React.useEffect(() => {
-    const mq = window.matchMedia('(max-width: 1100px)');
-    const handler = e => setIsMobile(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
+export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new Set(), sourcesState, slotOverrides = {}, watchlistIds = new Set(), tradeOffers = [], showMobile = false }) {
+  // Single source of truth lives in App.jsx (real device width OR the manual
+  // Mobile/Desktop preview toggle) — don't re-detect independently here, that
+  // caused this screen to disagree with the toggle at in-between widths.
+  const isMobile = showMobile;
   const [dashTab, setDashTab] = React.useState('standings');
   const [mobileScoringOpen, setMobileScoringOpen] = React.useState(false);
 
