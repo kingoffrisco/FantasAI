@@ -5,7 +5,7 @@ import { buildPowerData } from '../lib/powerUtils.js';
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { PlayerCell, StatusDot, Sparkline, PosBadge, SourceBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
-import { useApi, useR2CriticalAlerts, useR2BreakoutCandidates } from '../hooks.js';
+import { useApi, useR2CriticalAlerts } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 import { sendLeaguePush } from '../lib/pushNotifications.js';
 const SLOT_ELIGIBLE = {
@@ -381,7 +381,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
   const { data: cbsTeams } = useApi(() => api.teams(), []);
   const { data: r2Alerts, fetchedAt: r2AlertsFetchedAt } = useR2CriticalAlerts();
-  const { data: r2Breakouts } = useR2BreakoutCandidates();
   const standings = React.useMemo(() => buildStandings(cbsTeams), [cbsTeams]);
   const currentWeek = React.useMemo(getCurrentWeek, []);
   const nextWeek    = React.useMemo(getNextWeek, []);
@@ -1611,7 +1610,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
 
 
-      {/* ── Breakout Candidates (mobile only — desktop is viewport-fit) ── */}
       {mobileScoringOpen && (
         <MobileScoringPopup
           onClose={() => setMobileScoringOpen(false)}
@@ -1620,68 +1618,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           espnGameMap={espnGameMap}
           espnPlayerActuals={espnPlayerActuals}
         />
-      )}
-
-      {isMobile && Array.isArray(r2Breakouts) && r2Breakouts.length > 0 && (
-        <div style={{ padding: '0 14px 16px' }}>
-          <div className="card" style={{ borderLeft: '3px solid #c6ff3a' }}>
-            <div className="card-head">
-              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 14 }}>↑</span> Breakout Candidates
-                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#c6ff3a', background: 'rgba(198,255,58,.12)', border: '1px solid rgba(198,255,58,.35)', borderRadius: 3, padding: '1px 6px' }}>
-                  FANTASAI ML · AUC 0.728
-                </span>
-              </div>
-              <span className="mono faint" style={{ fontSize: 10 }}>Snap share + opportunity model · top {Math.min(r2Breakouts.length, 10)}</span>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Player</th>
-                    <th>Pos</th>
-                    <th>Team</th>
-                    <th className="num">Snap Δ</th>
-                    <th className="num">Opp Score</th>
-                    <th className="num">Avg Snap%</th>
-                    <th className="num">Wk</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {r2Breakouts.slice(0, 10).map((b, i) => {
-                    const snapDelta = typeof b.snap_share_delta === 'number' ? b.snap_share_delta : 0;
-                    const oppScore  = typeof b.opportunity_score === 'number' ? b.opportunity_score : 0;
-                    const avgSnap   = typeof b.avg_snap_share === 'number' ? b.avg_snap_share
-                                    : typeof b.avg_snap_share_prev_2wk === 'number' ? b.avg_snap_share_prev_2wk : null;
-                    return (
-                      <tr key={i}>
-                        <td className="rank" style={{ color: 'var(--text-faint)' }}>{i + 1}</td>
-                        <td style={{ fontWeight: 600 }}>{b.player_name || '—'}</td>
-                        <td><span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--accent-2)' }}>{b.position || '—'}</span></td>
-                        <td className="mono faint" style={{ fontSize: 11 }}>{b.team || '—'}</td>
-                        <td className="num">
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: snapDelta > 0.15 ? '#c6ff3a' : snapDelta > 0.08 ? 'var(--warn)' : 'var(--text-dim)' }}>
-                            +{(snapDelta * 100).toFixed(0)}%
-                          </span>
-                        </td>
-                        <td className="num">
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 12, color: oppScore > 7 ? '#c6ff3a' : oppScore > 4 ? 'var(--warn)' : 'var(--text-dim)' }}>
-                            {oppScore.toFixed(1)}
-                          </span>
-                        </td>
-                        <td className="num mono faint" style={{ fontSize: 11 }}>
-                          {avgSnap != null ? `${(avgSnap * 100).toFixed(0)}%` : '—'}
-                        </td>
-                        <td className="num mono faint" style={{ fontSize: 11 }}>{b.week ?? '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* ── Push alert modal (commish only) ─────────────────────────────────── */}
