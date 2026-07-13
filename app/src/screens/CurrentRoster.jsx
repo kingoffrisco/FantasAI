@@ -2966,10 +2966,10 @@ function MobileRosterList({
                 <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', minHeight: 44 }}>
 
                   {rosterDetailTab === 'player' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', overflowX: 'auto', gap: 18, paddingBottom: 2 }}>
 
                       {/* Status */}
-                      <div>
+                      <div style={{ flexShrink: 0, minWidth: 90 }}>
                         <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Status</div>
                         {isOnBye ? (
                           <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--danger)' }}>Out · BYE</span>
@@ -2983,7 +2983,7 @@ function MobileRosterList({
                       </div>
 
                       {/* Schedule */}
-                      <div>
+                      <div style={{ flexShrink: 0, minWidth: 140 }}>
                         <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Schedule</div>
                         {(() => {
                           const sched = nflSchedule[p.team];
@@ -3017,7 +3017,7 @@ function MobileRosterList({
                       </div>
 
                       {/* Weather */}
-                      <div>
+                      <div style={{ flexShrink: 0, minWidth: 130 }}>
                         <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Weather</div>
                         {(() => {
                           const wx = getGameWeather(p.team);
@@ -3048,7 +3048,7 @@ function MobileRosterList({
                       </div>
 
                       {/* Trends */}
-                      <div>
+                      <div style={{ flexShrink: 0, minWidth: 170 }}>
                         <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Trends</div>
                         {(() => {
                           const td = getTrendData(p);
@@ -3057,7 +3057,7 @@ function MobileRosterList({
                       </div>
 
                       {/* Fantasy Points */}
-                      <div>
+                      <div style={{ flexShrink: 0, minWidth: 160 }}>
                         <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Fantasy Points</div>
                         {(() => {
                           const total = p.pts2025 > 0 ? p.pts2025 : (p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null);
