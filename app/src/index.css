@@ -172,7 +172,7 @@ body {
 .kbd { font-family: var(--font-mono); font-size: 10px; padding: 2px 6px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-dim); background: var(--panel); }
 
 /* Sidebar nav */
-.nav-section { padding: 10px 8px 4px; font-size: 12px; letter-spacing: .12em; color: var(--text-faint); text-transform: uppercase; font-weight: 700; }
+.nav-section { padding: 10px 8px 4px; font-size: 12px; letter-spacing: .12em; color: var(--accent); text-transform: uppercase; font-weight: 700; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 14px; border-radius: var(--radius-sm);
