@@ -93,8 +93,8 @@ function TxnRow({ tx }) {
       background: isHighlight ? 'rgba(255,181,71,.07)' : 'transparent',
       borderLeft: isHighlight ? '3px solid #ffb547' : '3px solid transparent',
     }}>
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+      {/* Header row — for add/drop, player identity lives inline here too (one line, no repeat) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: (isSettings && tx.description) ? 8 : 0, flexWrap: 'wrap' }}>
         <div style={{
           width: 26, height: 26, borderRadius: 7, flexShrink: 0,
           background: `${meta.color}18`, border: `1px solid ${meta.color}40`,
@@ -127,10 +127,34 @@ function TxnRow({ tx }) {
             <strong style={{ color: 'var(--text)' }}>{tx.changedBy || tx.teamName || 'Commissioner'}</strong>
           </span>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+        {/* Add/drop players — inline, one line, no per-player ADD/DROP repeat */}
+        {(tx.type === 'add' || tx.type === 'drop') && tx.players?.length > 0 && (
+          <span style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '3px 6px', fontSize: 12 }}>
+            <span style={{ color: 'var(--text-faint)' }}>·</span>
+            {tx.players.map((p, i) => {
+              const live = findPlayerByName(p.name);
+              const pos  = p.pos || live?.pos || '';
+              const nflTeam = p.nflTeam || live?.team || '';
+              const posColor = POS_COLORS[pos] || 'var(--text-faint)';
+              return (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  {i > 0 && <span style={{ color: 'var(--text-faint)' }}>,</span>}
+                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>{p.name}</span>
+                  {(pos || nflTeam) && (
+                    <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: posColor }}>
+                      {pos}{pos && nflTeam ? ' · ' : ''}{nflTeam}
+                    </span>
+                  )}
+                </span>
+              );
+            })}
+          </span>
+        )}
+        <span
+          title={new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+          style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', flexShrink: 0, cursor: 'default' }}
+        >
           {timeAgo(tx.timestamp)}
-          <span style={{ marginLeft: 6, color: 'var(--border)' }}>·</span>
-          <span style={{ marginLeft: 6 }}>{new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>
         </span>
       </div>
 
@@ -138,20 +162,6 @@ function TxnRow({ tx }) {
       {isSettings && tx.description && (
         <div style={{ fontSize: 12, color: isHighlight ? '#ffb547' : 'var(--text-dim)', lineHeight: 1.5, marginLeft: 34 }}>
           {tx.description}
-        </div>
-      )}
-
-      {/* Add/drop player cards */}
-      {(tx.type === 'add' || tx.type === 'drop') && tx.players?.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginLeft: 34 }}>
-          {tx.players.map((p, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 9, fontWeight: 900, color: tx.type === 'add' ? '#4caf82' : '#ff5a6e', fontFamily: 'var(--font-mono)', letterSpacing: '.06em', width: 32, flexShrink: 0 }}>
-                {tx.type === 'add' ? 'ADD' : 'DROP'}
-              </span>
-              <PlayerCard p={p} accent={tx.type === 'add' ? '#4caf82' : '#ff5a6e'} />
-            </div>
-          ))}
         </div>
       )}
 
