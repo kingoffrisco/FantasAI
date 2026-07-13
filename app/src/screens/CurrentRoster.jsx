@@ -440,7 +440,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   // Mobile/Desktop preview toggle) — don't re-detect independently here, that
   // caused this screen to disagree with the toggle at in-between widths.
   const isMobile = showMobile;
-  const [rosterDetailTab, setRosterDetailTab] = React.useState('status'); // status | schedule | weather | trends | points | news
+  const [rosterDetailTab, setRosterDetailTab] = React.useState('player'); // player | news
 
   // NFL schedule fetched live from ESPN scoreboard API — all 18 weeks
   const [nflSchedule, setNflSchedule] = React.useState({});
@@ -2872,12 +2872,8 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
 }
 
 const ROSTER_DETAIL_TABS = [
-  { id: 'status',   label: 'Status' },
-  { id: 'schedule', label: 'Schedule' },
-  { id: 'weather',  label: 'Weather' },
-  { id: 'trends',   label: 'Trends' },
-  { id: 'points',   label: 'Fantasy Points' },
-  { id: 'news',     label: 'News' },
+  { id: 'player', label: 'Player' },
+  { id: 'news',   label: 'Player News' },
 ];
 
 function MobileRosterList({
@@ -2889,70 +2885,13 @@ function MobileRosterList({
   expandedNews, setExpandedNews, swapTarget, setSwapTarget,
   H2H_WEEK, isDynasty,
 }) {
-  const [visibleTabs, setVisibleTabs] = React.useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('fantasai_roster_detail_tabs') || 'null');
-      if (Array.isArray(saved) && saved.length) return new Set(saved.filter(id => ROSTER_DETAIL_TABS.some(t => t.id === id)));
-    } catch {}
-    return new Set(ROSTER_DETAIL_TABS.map(t => t.id));
-  });
-  const [customizeOpen, setCustomizeOpen] = React.useState(false);
-
-  function toggleTabVisible(id) {
-    setVisibleTabs(prev => {
-      if (prev.has(id) && prev.size === 1) return prev; // keep at least one visible
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      try { localStorage.setItem('fantasai_roster_detail_tabs', JSON.stringify([...next])); } catch {}
-      return next;
-    });
-  }
-
-  // If the active tab gets hidden, fall back to the first still-visible one
-  React.useEffect(() => {
-    if (!visibleTabs.has(rosterDetailTab)) {
-      const first = ROSTER_DETAIL_TABS.find(t => visibleTabs.has(t.id));
-      if (first) setRosterDetailTab(first.id);
-    }
-  }, [visibleTabs, rosterDetailTab, setRosterDetailTab]);
-
-  const shownTabs = ROSTER_DETAIL_TABS.filter(t => visibleTabs.has(t.id));
-
   return (
     <div>
-      <div className="tabs" style={{ padding: '0 2px', position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg-2)', display: 'flex', alignItems: 'center' }}>
-        <div style={{ display: 'flex', overflowX: 'auto', flex: 1, flexWrap: 'nowrap' }}>
-          {shownTabs.map(t => (
-            <div key={t.id} className={`tab ${rosterDetailTab === t.id ? 'active' : ''}`} onClick={() => setRosterDetailTab(t.id)} style={{ whiteSpace: 'nowrap' }}>{t.label}</div>
-          ))}
-        </div>
-        <button
-          onClick={() => setCustomizeOpen(o => !o)}
-          title="Choose which tabs to show"
-          style={{ flexShrink: 0, background: customizeOpen ? 'rgba(198,255,58,.12)' : 'transparent', border: 'none', color: customizeOpen ? 'var(--accent)' : 'var(--text-faint)', cursor: 'pointer', fontSize: 14, padding: '6px 10px' }}
-        >⚙</button>
+      <div className="tabs" style={{ padding: '0 2px', position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg-2)' }}>
+        {ROSTER_DETAIL_TABS.map(t => (
+          <div key={t.id} className={`tab ${rosterDetailTab === t.id ? 'active' : ''}`} onClick={() => setRosterDetailTab(t.id)} style={{ whiteSpace: 'nowrap' }}>{t.label}</div>
+        ))}
       </div>
-
-      {customizeOpen && (
-        <div style={{ padding: '8px 10px', display: 'flex', flexWrap: 'wrap', gap: 6, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
-          {ROSTER_DETAIL_TABS.map(t => {
-            const on = visibleTabs.has(t.id);
-            return (
-              <button
-                key={t.id}
-                onClick={() => toggleTabVisible(t.id)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, cursor: 'pointer',
-                  padding: '3px 9px', borderRadius: 12, fontWeight: on ? 700 : 500,
-                  border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
-                  background: on ? 'rgba(198,255,58,.10)' : 'transparent',
-                  color: on ? 'var(--accent)' : 'var(--text-faint)',
-                }}
-              >{on ? '✓ ' : ''}{t.label}</button>
-            );
-          })}
-        </div>
-      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 2px' }}>
         {fullRoster.map((entry, i) => {
@@ -3026,115 +2965,139 @@ function MobileRosterList({
                 {/* ── Detail section — one category at a time ── */}
                 <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', minHeight: 44 }}>
 
-                  {rosterDetailTab === 'status' && (
-                    isOnBye ? (
-                      <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--danger)' }}>Out · BYE</span>
-                    ) : (p.pos !== 'DST' && effectiveStatus !== 'OK') ? (() => {
-                      const statusLabel = effectiveStatus === 'Q' ? 'Questionable' : effectiveStatus === 'O' ? 'Out' : effectiveStatus === 'D' ? 'Doubtful' : effectiveStatus === 'IR' ? 'IR' : effectiveStatus;
-                      const statusColor = (effectiveStatus === 'Q' || effectiveStatus === 'D') ? '#ff9800' : (effectiveStatus === 'O' || effectiveStatus === 'IR') ? '#ff4f4f' : 'var(--text-dim)';
-                      return <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: statusColor }}>{statusLabel}</span>;
-                    })() : (
-                      <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0' }}>Active</span>
-                    )
+                  {rosterDetailTab === 'player' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+                      {/* Status */}
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Status</div>
+                        {isOnBye ? (
+                          <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--danger)' }}>Out · BYE</span>
+                        ) : (p.pos !== 'DST' && effectiveStatus !== 'OK') ? (() => {
+                          const statusLabel = effectiveStatus === 'Q' ? 'Questionable' : effectiveStatus === 'O' ? 'Out' : effectiveStatus === 'D' ? 'Doubtful' : effectiveStatus === 'IR' ? 'IR' : effectiveStatus;
+                          const statusColor = (effectiveStatus === 'Q' || effectiveStatus === 'D') ? '#ff9800' : (effectiveStatus === 'O' || effectiveStatus === 'IR') ? '#ff4f4f' : 'var(--text-dim)';
+                          return <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: statusColor }}>{statusLabel}</span>;
+                        })() : (
+                          <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0' }}>Active</span>
+                        )}
+                      </div>
+
+                      {/* Schedule */}
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Schedule</div>
+                        {(() => {
+                          const sched = nflSchedule[p.team];
+                          const oppTeam = sched?.opp || p.opp;
+                          if (!oppTeam) return <span className="faint">No schedule data</span>;
+                          const r = defRankByTeam[oppTeam] || p.oppRank;
+                          const oppColor = !r ? 'var(--text)' : r <= 5 ? '#ff4f4f' : r <= 10 ? '#ff9800' : r <= 20 ? '#ffd700' : '#1affa0';
+                          const posKey = p.pos === 'DST' ? null : p.pos;
+                          let posRank = posKey ? defVsPosIndex.get(`${oppTeam.toUpperCase()}|${posKey}`) ?? null : null;
+                          if (p.pos === 'DST' && oppTeam) {
+                            const offPts = ['QB', 'RB', 'WR'].map(op => defVsPosIndex.get(`${oppTeam.toUpperCase()}|${op}`)).filter(v => v != null);
+                            if (offPts.length) posRank = Math.round(33 - offPts.reduce((s, v) => s + v, 0) / offPts.length);
+                          }
+                          const matchup = posRank == null ? null
+                            : posRank <= 5  ? { emoji: '🔴',    label: 'Avoid' }
+                            : posRank <= 10 ? { emoji: '🟠',    label: 'Difficult' }
+                            : posRank >= 28 ? { emoji: '🟢🟢', label: 'Smash Spot' }
+                            : posRank >= 23 ? { emoji: '🟢',    label: 'Favorable' }
+                            : { emoji: '⚪', label: 'Neutral' };
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span className="mono" style={{ fontSize: 16, fontWeight: 800 }}>{sched?.isAway ? '@ ' : 'vs '}<span style={{ color: oppColor }}>{oppTeam}</span></span>
+                                {p.bye && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: isOnBye ? 'var(--danger)' : 'var(--text-faint)' }}>Bye Wk {p.bye}</span>}
+                              </div>
+                              {matchup && <span style={{ fontSize: 12 }}>{matchup.emoji} {matchup.label}{posRank ? ` · #${posRank}/32 vs ${posKey}` : ''}</span>}
+                              {sched?.time && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{sched.time}</span>}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Weather */}
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Weather</div>
+                        {(() => {
+                          const wx = getGameWeather(p.team);
+                          if (!wx || wx.noData) return <span className="faint">No weather data</span>;
+                          if (wx.dome) return <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0' }}>Dome</span>;
+                          const h = wx.hour;
+                          if (!h) return <span className="faint">No weather data</span>;
+                          const windMph  = h.wind_mph || 0;
+                          const gustMph  = h.wind_gust_mph || h.gust_mph || h.windgust_mph || 0;
+                          const tempF    = h.temp_f || wx.maxTempF || 0;
+                          const precipIn = h.precip_in || 0;
+                          const cond     = (h.condition || '').toLowerCase();
+                          const isSnow   = cond.includes('snow') || cond.includes('blizzard') || cond.includes('sleet');
+                          const isRain   = precipIn > 0.05 || cond.includes('rain') || cond.includes('drizzle') || cond.includes('shower');
+                          const windColor = windMph >= 20 ? 'var(--danger)' : windMph >= 15 ? '#ff8c00' : windMph >= 10 ? '#ffd700' : 'var(--text)';
+                          const tempColor = tempF >= 90 ? '#ff4f4f' : tempF >= 75 ? '#ff9800' : tempF >= 50 ? '#1affa0' : tempF >= 32 ? '#7ecff5' : '#ffffff';
+                          return (
+                            <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', lineHeight: 1.7 }}>
+                              <span style={{ fontWeight: 700, color: tempColor }}>{tempF}°F</span>{' · '}<span style={{ color: windColor }}>{windMph}mph{h.wind_dir ? ` ${h.wind_dir}` : ''}</span>
+                              {isSnow && <div style={{ color: '#7ecff5' }}>❄ Snow</div>}
+                              {!isSnow && isRain && <div style={{ color: '#ffd700' }}>🌧 Rain</div>}
+                              {windMph >= 25 && <div style={{ color: 'var(--danger)', fontWeight: 700 }}>⚠ Major wind</div>}
+                              {windMph >= 20 && windMph < 25 && <div style={{ color: 'var(--danger)' }}>⚠ Sig. wind</div>}
+                              {gustMph >= 20 && <div style={{ color: 'var(--danger)', fontWeight: 700 }}>💨 Gusts {gustMph}mph</div>}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Trends */}
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Trends</div>
+                        {(() => {
+                          const td = getTrendData(p);
+                          return td.length ? <Sparkline data={td} width={160} height={32} /> : <span className="faint">No trend data</span>;
+                        })()}
+                      </div>
+
+                      {/* Fantasy Points */}
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Fantasy Points</div>
+                        {(() => {
+                          const total = p.pts2025 > 0 ? p.pts2025 : (p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null);
+                          const isOut = ['O', 'IR', 'NFI'].includes(effectiveStatus);
+                          let projVal = null, isEstimate = false, rookieProjFlag = false;
+                          if (!isOut) {
+                            const liveProj = (liveData[p.id] || []).find(e => e.proj != null);
+                            const noStats = p.proj <= 0 && (p.pts2025 || 0) === 0 && (p.avg || 0) === 0;
+                            const rookieRow = (noStats && p.rookie) ? rookieScoreMap.get(p.name.toLowerCase().trim()) : null;
+                            const rookieProj = rookieRow ? rookieProjFromScore(rookieRow, p.pos) : null;
+                            const adpProj = (noStats && !rookieProj) ? estimateProjFromAdp(p) : null;
+                            const fallback = rookieProj ?? adpProj ?? 0;
+                            projVal = liveProj ? liveProj.proj : (p.proj > 0 ? p.proj : fallback);
+                            isEstimate = !liveProj && p.proj <= 0 && fallback > 0;
+                            rookieProjFlag = !!rookieProj;
+                          }
+                          return (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
+                              <div>
+                                <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>2025 Total</div>
+                                <div style={{ fontSize: 16, fontWeight: 700 }}>{total != null ? total.toFixed(1) : '—'}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>PPG</div>
+                                <div style={{ fontSize: 16, fontWeight: 700 }}>{p.avg > 0 ? p.avg.toFixed(1) : '—'}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Proj</div>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent-2)' }}>
+                                  {projVal != null ? parseFloat(projVal.toFixed(1)) : '—'}
+                                  {isEstimate && <span style={{ fontSize: 9, color: '#a78bfa', marginLeft: 3 }}>{rookieProjFlag ? 'R' : 'E'}</span>}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                    </div>
                   )}
-
-                  {rosterDetailTab === 'schedule' && (() => {
-                    const sched = nflSchedule[p.team];
-                    const oppTeam = sched?.opp || p.opp;
-                    if (!oppTeam) return <span className="faint">No schedule data</span>;
-                    const r = defRankByTeam[oppTeam] || p.oppRank;
-                    const oppColor = !r ? 'var(--text)' : r <= 5 ? '#ff4f4f' : r <= 10 ? '#ff9800' : r <= 20 ? '#ffd700' : '#1affa0';
-                    const posKey = p.pos === 'DST' ? null : p.pos;
-                    let posRank = posKey ? defVsPosIndex.get(`${oppTeam.toUpperCase()}|${posKey}`) ?? null : null;
-                    if (p.pos === 'DST' && oppTeam) {
-                      const offPts = ['QB', 'RB', 'WR'].map(op => defVsPosIndex.get(`${oppTeam.toUpperCase()}|${op}`)).filter(v => v != null);
-                      if (offPts.length) posRank = Math.round(33 - offPts.reduce((s, v) => s + v, 0) / offPts.length);
-                    }
-                    const matchup = posRank == null ? null
-                      : posRank <= 5  ? { emoji: '🔴',    label: 'Avoid' }
-                      : posRank <= 10 ? { emoji: '🟠',    label: 'Difficult' }
-                      : posRank >= 28 ? { emoji: '🟢🟢', label: 'Smash Spot' }
-                      : posRank >= 23 ? { emoji: '🟢',    label: 'Favorable' }
-                      : { emoji: '⚪', label: 'Neutral' };
-                    return (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span className="mono" style={{ fontSize: 16, fontWeight: 800 }}>{sched?.isAway ? '@ ' : 'vs '}<span style={{ color: oppColor }}>{oppTeam}</span></span>
-                          {p.bye && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: isOnBye ? 'var(--danger)' : 'var(--text-faint)' }}>Bye Wk {p.bye}</span>}
-                        </div>
-                        {matchup && <span style={{ fontSize: 12 }}>{matchup.emoji} {matchup.label}{posRank ? ` · #${posRank}/32 vs ${posKey}` : ''}</span>}
-                        {sched?.time && <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{sched.time}</span>}
-                      </div>
-                    );
-                  })()}
-
-                  {rosterDetailTab === 'weather' && (() => {
-                    const wx = getGameWeather(p.team);
-                    if (!wx || wx.noData) return <span className="faint">No weather data</span>;
-                    if (wx.dome) return <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0' }}>Dome</span>;
-                    const h = wx.hour;
-                    if (!h) return <span className="faint">No weather data</span>;
-                    const windMph  = h.wind_mph || 0;
-                    const gustMph  = h.wind_gust_mph || h.gust_mph || h.windgust_mph || 0;
-                    const tempF    = h.temp_f || wx.maxTempF || 0;
-                    const precipIn = h.precip_in || 0;
-                    const cond     = (h.condition || '').toLowerCase();
-                    const isSnow   = cond.includes('snow') || cond.includes('blizzard') || cond.includes('sleet');
-                    const isRain   = precipIn > 0.05 || cond.includes('rain') || cond.includes('drizzle') || cond.includes('shower');
-                    const windColor = windMph >= 20 ? 'var(--danger)' : windMph >= 15 ? '#ff8c00' : windMph >= 10 ? '#ffd700' : 'var(--text)';
-                    const tempColor = tempF >= 90 ? '#ff4f4f' : tempF >= 75 ? '#ff9800' : tempF >= 50 ? '#1affa0' : tempF >= 32 ? '#7ecff5' : '#ffffff';
-                    return (
-                      <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', lineHeight: 1.7 }}>
-                        <span style={{ fontWeight: 700, color: tempColor }}>{tempF}°F</span>{' · '}<span style={{ color: windColor }}>{windMph}mph{h.wind_dir ? ` ${h.wind_dir}` : ''}</span>
-                        {isSnow && <div style={{ color: '#7ecff5' }}>❄ Snow</div>}
-                        {!isSnow && isRain && <div style={{ color: '#ffd700' }}>🌧 Rain</div>}
-                        {windMph >= 25 && <div style={{ color: 'var(--danger)', fontWeight: 700 }}>⚠ Major wind</div>}
-                        {windMph >= 20 && windMph < 25 && <div style={{ color: 'var(--danger)' }}>⚠ Sig. wind</div>}
-                        {gustMph >= 20 && <div style={{ color: 'var(--danger)', fontWeight: 700 }}>💨 Gusts {gustMph}mph</div>}
-                      </div>
-                    );
-                  })()}
-
-                  {rosterDetailTab === 'trends' && (() => {
-                    const td = getTrendData(p);
-                    return td.length ? <Sparkline data={td} width={160} height={32} /> : <span className="faint">No trend data</span>;
-                  })()}
-
-                  {rosterDetailTab === 'points' && (() => {
-                    const total = p.pts2025 > 0 ? p.pts2025 : (p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null);
-                    const isOut = ['O', 'IR', 'NFI'].includes(effectiveStatus);
-                    let projVal = null, isEstimate = false, rookieProjFlag = false;
-                    if (!isOut) {
-                      const liveProj = (liveData[p.id] || []).find(e => e.proj != null);
-                      const noStats = p.proj <= 0 && (p.pts2025 || 0) === 0 && (p.avg || 0) === 0;
-                      const rookieRow = (noStats && p.rookie) ? rookieScoreMap.get(p.name.toLowerCase().trim()) : null;
-                      const rookieProj = rookieRow ? rookieProjFromScore(rookieRow, p.pos) : null;
-                      const adpProj = (noStats && !rookieProj) ? estimateProjFromAdp(p) : null;
-                      const fallback = rookieProj ?? adpProj ?? 0;
-                      projVal = liveProj ? liveProj.proj : (p.proj > 0 ? p.proj : fallback);
-                      isEstimate = !liveProj && p.proj <= 0 && fallback > 0;
-                      rookieProjFlag = !!rookieProj;
-                    }
-                    return (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
-                        <div>
-                          <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>2025 Total</div>
-                          <div style={{ fontSize: 16, fontWeight: 700 }}>{total != null ? total.toFixed(1) : '—'}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>PPG</div>
-                          <div style={{ fontSize: 16, fontWeight: 700 }}>{p.avg > 0 ? p.avg.toFixed(1) : '—'}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Proj</div>
-                          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent-2)' }}>
-                            {projVal != null ? parseFloat(projVal.toFixed(1)) : '—'}
-                            {isEstimate && <span style={{ fontSize: 9, color: '#a78bfa', marginLeft: 3 }}>{rookieProjFlag ? 'R' : 'E'}</span>}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
 
                   {rosterDetailTab === 'news' && (() => {
                     const liveNotes = (liveData[p.id] || []).filter(e => e.note);
