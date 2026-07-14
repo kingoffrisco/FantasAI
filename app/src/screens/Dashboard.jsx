@@ -1233,8 +1233,14 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
             <div>
               {transactions.filter(tx => !txTeamFilter || tx.teamName === txTeamFilter).map((tx, idx) => {
                 const isTrade   = tx.type === 'trade' || tx.type === 'trade_offer';
-                const typeLabel = isTrade ? (tx.type === 'trade_offer' ? 'Offer' : 'Trade') : tx.type === 'drop' ? 'Drop' : 'Add';
-                const typeColor = isTrade ? '#c6ff3a' : tx.type === 'drop' ? 'var(--danger)' : 'var(--good)';
+                const typeLabel = isTrade ? (tx.type === 'trade_offer' ? 'Offer' : 'Trade')
+                  : tx.type === 'swap' ? 'Swapped'
+                  : tx.type === 'waiver_claim' ? 'Waiver Claim'
+                  : tx.type === 'drop' ? 'Drop' : 'Add';
+                const typeColor = isTrade ? '#c6ff3a'
+                  : tx.type === 'swap' ? '#4ea8ff'
+                  : tx.type === 'waiver_claim' ? '#34d399'
+                  : tx.type === 'drop' ? 'var(--danger)' : 'var(--good)';
                 const diff = Date.now() - new Date(tx.date || tx.timestamp || 0).getTime();
                 const ago  = diff < 3600000 ? `${Math.round(diff / 60000)}m ago` : diff < 86400000 ? `${Math.round(diff / 3600000)}h ago` : `${Math.round(diff / 86400000)}d ago`;
                 const PlayerLine = ({ p, action }) => (

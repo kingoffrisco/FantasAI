@@ -20,6 +20,8 @@ const CATEGORY_LABELS = {
 const TYPE_META = {
   add:          { icon: '➕', label: 'Add',        color: '#4caf82' },
   drop:         { icon: '➖', label: 'Drop',       color: '#ff5a6e' },
+  swap:         { icon: '⇄',  label: 'Swapped',    color: '#4ea8ff' },
+  waiver_claim: { icon: '📋', label: 'Waiver Claim', color: '#34d399' },
   trade:        { icon: '↔',  label: 'Trade',      color: '#4ea8ff' },
   trade_offer:  { icon: '📩', label: 'Trade Offer', color: '#ffb547' },
   league_settings: { icon: '⚙', label: 'Settings', color: '#c6ff3a' },
@@ -127,29 +129,46 @@ function TxnRow({ tx }) {
             <strong style={{ color: 'var(--text)' }}>{tx.changedBy || tx.teamName || 'Commissioner'}</strong>
           </span>
         )}
-        {/* Add/drop players — inline, one line, no per-player ADD/DROP repeat */}
-        {(tx.type === 'add' || tx.type === 'drop') && tx.players?.length > 0 && (
-          <span style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '3px 6px', fontSize: 12 }}>
-            <span style={{ color: 'var(--text-faint)' }}>·</span>
-            {tx.players.map((p, i) => {
-              const live = findPlayerByName(p.name);
-              const pos  = p.pos || live?.pos || '';
-              const nflTeam = p.nflTeam || live?.team || '';
-              const posColor = POS_COLORS[pos] || 'var(--text-faint)';
-              return (
-                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  {i > 0 && <span style={{ color: 'var(--text-faint)' }}>,</span>}
-                  <span style={{ fontWeight: 700, color: 'var(--text)' }}>{p.name}</span>
-                  {(pos || nflTeam) && (
-                    <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: posColor }}>
-                      {pos}{pos && nflTeam ? ' · ' : ''}{nflTeam}
-                    </span>
-                  )}
+        {/* Add/drop/swap/waiver-claim players — inline, one line. Per-player
+            Added/Dropped label only shows when a single transaction mixes
+            both actions (swap, waiver claim) — plain add/drop rows already
+            say so in the header badge, no need to repeat it. */}
+        {['add', 'drop', 'swap', 'waiver_claim'].includes(tx.type) && tx.players?.length > 0 && (() => {
+          const mixed = tx.players.some(p => p.action === 'add') && tx.players.some(p => p.action === 'drop');
+          return (
+            <span style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '3px 6px', fontSize: 12 }}>
+              <span style={{ color: 'var(--text-faint)' }}>·</span>
+              {tx.players.map((p, i) => {
+                const live = findPlayerByName(p.name);
+                const pos  = p.pos || live?.pos || '';
+                const nflTeam = p.nflTeam || live?.team || '';
+                const posColor = POS_COLORS[pos] || 'var(--text-faint)';
+                const actionColor = p.action === 'add' ? '#4caf82' : '#ff5a6e';
+                return (
+                  <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    {i > 0 && <span style={{ color: 'var(--text-faint)' }}>,</span>}
+                    {mixed && (
+                      <span style={{ fontSize: 9, fontWeight: 800, color: actionColor, fontFamily: 'var(--font-mono)' }}>
+                        {p.action === 'add' ? 'Added' : 'Dropped'}
+                      </span>
+                    )}
+                    <span style={{ fontWeight: 700, color: 'var(--text)' }}>{p.name}</span>
+                    {(pos || nflTeam) && (
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: posColor }}>
+                        {pos}{pos && nflTeam ? ' · ' : ''}{nflTeam}
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
+              {tx.type === 'waiver_claim' && tx.waiverPick != null && (
+                <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: '#34d399' }}>
+                  · Claim #{tx.waiverPick}{tx.newWaiverPick != null ? ` → #${tx.newWaiverPick}` : ''}
                 </span>
-              );
-            })}
-          </span>
-        )}
+              )}
+            </span>
+          );
+        })()}
         <span
           title={new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
           style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', flexShrink: 0, cursor: 'default' }}
@@ -224,7 +243,7 @@ export default function TransactionsScreen() {
 
   const filtered = React.useMemo(() => {
     if (filter === 'all') return txns;
-    if (filter === 'roster') return txns.filter(t => t.type === 'add' || t.type === 'drop');
+    if (filter === 'roster') return txns.filter(t => ['add', 'drop', 'swap', 'waiver_claim'].includes(t.type));
     if (filter === 'trades') return txns.filter(t => t.type === 'trade' || t.type === 'trade_offer');
     if (filter === 'settings') return txns.filter(t => t.type === 'league_settings');
     return txns;

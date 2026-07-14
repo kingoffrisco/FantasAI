@@ -422,7 +422,7 @@ function DropCandidatesPanel({ myRosterIds, onOpenPlayer }) {
   );
 }
 
-export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPlayer, onDropPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange, tradeOffers = [], onRespondTradeOffer, rosterSyncBadge, rosterLoading, showMobile = false }) {
+export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPlayer, onDropPlayer, onClaimPlayer, onOpenPlayer, watchlistIds = new Set(), onToggleWatch, sourcesState, slotOverrides = {}, onSlotOverridesChange, tradeOffers = [], onRespondTradeOffer, rosterSyncBadge, rosterLoading, showMobile = false }) {
   const allPlayers = usePlayers();
   const [dropConfirm, setDropConfirm] = React.useState(null);
   const [tab, setTab] = React.useState('roster');
@@ -2677,8 +2677,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                                   className="btn primary"
                                   style={{ fontWeight: 700 }}
                                   onClick={() => {
-                                    onAddPlayer?.(addDropPending.addPlayer.id);
-                                    onDropPlayer?.(addDropPending.dropPlayerId);
+                                    onClaimPlayer?.(addDropPending.addPlayer.id, addDropPending.dropPlayerId, 'swap');
                                     setAddDropPending(null);
                                     setSwapTarget(null);
                                   }}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { findTeam, MY_ROSTER, TEAM_ROSTERS, LEAGUE_TEAMS, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, refreshTeamRosters, clearAllRosters } from './lib/data.js';
+import { findTeam, MY_ROSTER, TEAM_ROSTERS, LEAGUE_TEAMS, TEAMS_ORDER, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, refreshTeamRosters, clearAllRosters } from './lib/data.js';
 import { findPlayer, getPlayers, setPlayers, patchPlayers, normalizePlayerList, BYE_WEEKS_2026 } from './lib/playerStore.js';
 import { api } from './api.js';
 import { getPlayerMap, fetchBulkProjections } from './lib/sleeper.js';
@@ -1128,7 +1128,10 @@ export default function App() {
   }, []);
 
   // Atomic claim: drop + add in one state update so validation sees the freed slot.
-  const handleClaimPlayer = React.useCallback((addId, dropId) => {
+  // logType lets callers distinguish a genuine waiver claim (consumes waiver
+  // priority, moves the team to the back of the order) from an instant swap
+  // that shouldn't touch waiver priority at all.
+  const handleClaimPlayer = React.useCallback((addId, dropId, logType = 'waiver_claim') => {
     let nextIds = null;
     setMyRosterIds(prev => {
       const working = new Set(prev);
@@ -1147,14 +1150,27 @@ export default function App() {
       if (addedPlayer)  players.push({ id: addId,  name: addedPlayer.name,  pos: addedPlayer.pos,  nflTeam: addedPlayer.team,  action: 'add' });
       if (droppedPlayer) players.push({ id: dropId, name: droppedPlayer.name, pos: droppedPlayer.pos, nflTeam: droppedPlayer.team, action: 'drop' });
       if (players.length) {
-        api.transactions.log({
+        const tx = {
           id: `${Date.now()}-claim-${addId}`,
-          type: dropId ? 'waiver_claim' : 'add',
+          type: dropId ? logType : 'add',
           timestamp: new Date().toISOString(),
           teamId:   userRef.current.teamId,
           teamName: userRef.current.teamName || userRef.current.teamId,
           players,
-        });
+        };
+        // A genuine waiver claim consumes priority — record the claim number
+        // and move this team to the back of the waiver order.
+        if (dropId && logType === 'waiver_claim') {
+          const { order } = getWaivers();
+          const currentOrder = Array.isArray(order) && order.length ? order : [...TEAMS_ORDER].reverse();
+          const myIdx = currentOrder.indexOf(userRef.current.teamId);
+          tx.waiverPick = myIdx >= 0 ? myIdx + 1 : currentOrder.length + 1;
+          const remaining = currentOrder.filter(id => id !== userRef.current.teamId);
+          const newOrder = [...remaining, userRef.current.teamId];
+          saveWaivers(undefined, newOrder);
+          tx.newWaiverPick = newOrder.length;
+        }
+        api.transactions.log(tx);
       }
     }
     if (dropId) {
@@ -1280,7 +1296,7 @@ export default function App() {
           {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} tradeOffers={tradeOffers} showMobile={showMobile} />}
           {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onClaimPlayer={handleClaimPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} playersTab={playersTab} onPlayersTabChange={setPlayersTab} />}
           {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} user={user} />}
-          {active === 'roster'    && <CurrentRosterScreen onNav={setActive} user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} rosterSyncBadge={rosterSyncBadge} rosterLoading={rosterLoading} showMobile={showMobile} />}
+          {active === 'roster'    && <CurrentRosterScreen onNav={setActive} user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onClaimPlayer={handleClaimPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} rosterSyncBadge={rosterSyncBadge} rosterLoading={rosterLoading} showMobile={showMobile} />}
           {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'compare'   && <CompareScreen />}
           {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} onSendTradeOffer={handleSendTradeOffer} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} onDeleteTradeOffer={handleDeleteTradeOffer} />}
