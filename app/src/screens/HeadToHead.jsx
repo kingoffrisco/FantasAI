@@ -196,13 +196,13 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
               ))}
             </div>
 
-            <div style={{ display: 'flex', gap: 3, overflowX: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, auto)', gridAutoFlow: 'row', gap: 3 }}>
               {Array.from({ length: NUM_WEEKS }, (_, i) => i + 1).map(w => (
                 <button
                   key={w}
                   onClick={() => { setWeek(w); setExpanded(showAll ? null : 0); }}
                   style={{
-                    flexShrink: 0, padding: '4px 6px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                    padding: '4px 6px', borderRadius: 5, fontSize: 10, fontWeight: 600,
                     cursor: 'pointer', border: '1px solid var(--border)', whiteSpace: 'nowrap',
                     background: w === week ? 'var(--accent)' : w < CURRENT_WEEK ? 'var(--panel)' : 'transparent',
                     color: w === week ? 'var(--accent-ink)' : w < CURRENT_WEEK ? 'var(--text)' : 'var(--text-dim)',
