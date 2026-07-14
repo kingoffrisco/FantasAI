@@ -158,9 +158,17 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     <div style={{ padding: '20px 24px', maxWidth: 1100, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="page-head" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'nowrap' }}>
-          <div style={{ flexShrink: 0 }}>
-            <h1 style={{ marginBottom: 2 }}>Head to Head</h1>
-            <div className="sub">Weekly matchup results · rosters pulled from Current Roster settings</div>
+          <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <div>
+              <h1 style={{ marginBottom: 2 }}>Head to Head</h1>
+              <div className="sub">Weekly matchup Results</div>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+              <span style={{ color: 'var(--text-faint)' }}>Week {week} · </span>
+              <span style={{ color: week === CURRENT_WEEK ? '#1affa0' : 'var(--text-faint)' }}>
+                {week < CURRENT_WEEK ? 'Final' : week === CURRENT_WEEK ? 'In Progress' : 'Upcoming'}
+              </span>
+            </div>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexWrap: 'nowrap' }}>
@@ -223,9 +231,6 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
       <div style={{ display: isMobile ? 'block' : 'grid', gridTemplateColumns: '1fr 280px', gap: 20, alignItems: 'start' }}>
         {(!isMobile || h2hMobileTab === 'matchups') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 2 }}>
-            Week {week} · {week < CURRENT_WEEK ? 'Final' : week === CURRENT_WEEK ? 'In Progress' : 'Upcoming'}
-          </div>
           {matchups.map(([homeId, awayId], idx) => {
             const homeRec = standings.find(t => t.id === homeId);
             const awayRec = standings.find(t => t.id === awayId);
