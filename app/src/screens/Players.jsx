@@ -3335,7 +3335,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                           {ev.ts && (
                             <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
-                              {new Date(ev.ts).toLocaleDateString([], { dateStyle: 'medium' })}
+                              {new Date(ev.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
                             </span>
                           )}
                           {ev.sub && (
