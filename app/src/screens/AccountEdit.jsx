@@ -171,22 +171,19 @@ function loadScoringWeights() {
 
 const SCORE_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DST'];
 
-const LIGHT_SURFACE_VARS = {
-  '--bg': '#b8bfd4', '--bg-2': '#aeb5ca', '--panel': '#c4cbde',
-  '--panel-2': '#bec5da', '--panel-3': '#b6bdd2',
-  '--border': '#7e88a8', '--border-strong': '#626c90', '--hover': '#b2b9d0',
-  '--text': '#070a1c', '--text-dim': '#1a2038', '--text-faint': '#343c62',
-};
-
-const THEMES = [
+export const THEMES = [
   { id: 'sportsbook-dark', label: 'Sportsbook Dark', accent: '#c6ff3a', accent2: '#4ea8ff', bg: '#060912' },
   { id: 'steel-city',      label: 'Steel City',      accent: '#ffb800', accent2: '#00aaff', bg: '#0a0c10' },
   { id: 'coastal-dusk',    label: 'Coastal Dusk',    accent: '#00e0c8', accent2: '#ff6050', bg: '#04101e' },
   { id: 'ember',           label: 'Ember',            accent: '#ff7c20', accent2: '#00cfff', bg: '#0e0c08' },
   { id: 'royal-crimson',   label: 'Royal Crimson',   accent: '#e53338', accent2: '#ffd700', bg: '#0c0808' },
+  { id: 'midnight-violet', label: 'Midnight Violet', accent: '#a855f7', accent2: '#22d3ee', bg: '#0a0714' },
+  { id: 'forest-night',    label: 'Forest Night',    accent: '#4ade80', accent2: '#facc15', bg: '#070f0a' },
+  { id: 'arctic-frost',    label: 'Arctic Frost',    accent: '#7dd3fc', accent2: '#f472b6', bg: '#070c14' },
+  { id: 'neon-grid',       label: 'Neon Grid',       accent: '#ff2fb0', accent2: '#00f0ff', bg: '#050505' },
 ];
 
-const THEME_VARS = {
+export const THEME_VARS = {
   'sportsbook-dark': {
     '--bg': '#060912', '--bg-2': '#0a0f1d', '--panel': '#0f1424', '--panel-2': '#161d33',
     '--panel-3': '#1c2540', '--border': '#1f2740', '--border-strong': '#2c365a', '--hover': '#19223b',
@@ -211,6 +208,26 @@ const THEME_VARS = {
     '--bg': '#0c0808', '--bg-2': '#140c0c', '--panel': '#1a1010', '--panel-2': '#221414',
     '--panel-3': '#2a1818', '--border': '#381c1c', '--border-strong': '#502828', '--hover': '#1e1414',
     '--accent': '#e53338', '--accent-ink': '#1a0002', '--accent-2': '#ffd700',
+  },
+  'midnight-violet': {
+    '--bg': '#0a0714', '--bg-2': '#0f0b1c', '--panel': '#161029', '--panel-2': '#1e1738',
+    '--panel-3': '#261e47', '--border': '#2f2555', '--border-strong': '#3f3170', '--hover': '#1a1430',
+    '--accent': '#a855f7', '--accent-ink': '#1a0028', '--accent-2': '#22d3ee',
+  },
+  'forest-night': {
+    '--bg': '#070f0a', '--bg-2': '#0a140d', '--panel': '#0f1c13', '--panel-2': '#15281a',
+    '--panel-3': '#1c3423', '--border': '#234430', '--border-strong': '#2f5a40', '--hover': '#132218',
+    '--accent': '#4ade80', '--accent-ink': '#00190a', '--accent-2': '#facc15',
+  },
+  'arctic-frost': {
+    '--bg': '#070c14', '--bg-2': '#0a121e', '--panel': '#101a2c', '--panel-2': '#16243a',
+    '--panel-3': '#1d304a', '--border': '#243c5c', '--border-strong': '#2f4e78', '--hover': '#132038',
+    '--accent': '#7dd3fc', '--accent-ink': '#001824', '--accent-2': '#f472b6',
+  },
+  'neon-grid': {
+    '--bg': '#050505', '--bg-2': '#0a0a0c', '--panel': '#0f0f14', '--panel-2': '#16161e',
+    '--panel-3': '#1e1e2a', '--border': '#28283a', '--border-strong': '#3a3a52', '--hover': '#181822',
+    '--accent': '#ff2fb0', '--accent-ink': '#1a0010', '--accent-2': '#00f0ff',
   },
 };
 
@@ -267,7 +284,6 @@ export default function AccountEditScreen({ user }) {
   const _initPrefs = getPrefs();
   const storedTheme = _initPrefs.theme || 'sportsbook-dark';
   const [activeTheme, setActiveTheme] = React.useState(VALID_THEME_IDS.has(storedTheme) ? storedTheme : 'sportsbook-dark');
-  const [lightMode, setLightMode] = React.useState(_initPrefs.lightMode || false);
 
   // Sleeper tab state
   const [sleeperUsername, setSleeperUsername] = React.useState(_initPrefs.sleeperUsername || '');
@@ -300,12 +316,6 @@ export default function AccountEditScreen({ user }) {
   React.useEffect(() => {
     setAiPrompt(`Fantasy football team logo for "${teamName}", sports emblem, bold design, dark background, professional`);
   }, [teamName]);
-
-  React.useEffect(() => {
-    const p = getPrefs();
-    if (p.theme && THEME_VARS[p.theme]) applyTheme(p.theme, p.lightMode);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function moveFeature(pos, idx, dir) {
     setScoringWeights(prev => {
@@ -390,18 +400,11 @@ export default function AccountEditScreen({ user }) {
     setLogoImg(null);
   }
 
-  function applyTheme(themeId, isLight) {
+  function applyTheme(themeId) {
     const vars = THEME_VARS[themeId] ?? THEME_VARS['sportsbook-dark'];
-    const merged = isLight ?? lightMode ? { ...vars, ...LIGHT_SURFACE_VARS } : vars;
-    Object.entries(merged).forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
+    Object.entries(vars).forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
     patchPrefs({ theme: themeId });
     setActiveTheme(themeId);
-  }
-
-  function toggleLightMode(next) {
-    patchPrefs({ lightMode: next });
-    setLightMode(next);
-    applyTheme(activeTheme, next);
   }
 
   function saveSleeperSettings() {
@@ -753,32 +756,13 @@ export default function AccountEditScreen({ user }) {
         {/* ── APPEARANCE TAB ── */}
         {activeTab === 'appearance' && (
           <div style={{ maxWidth: 640 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div>
-                <label style={{ ...labelStyle, marginBottom: 2 }}>Site Color Theme</label>
-                <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>Changes apply instantly and sync to your account across all devices</div>
-              </div>
-              <button
-                onClick={() => toggleLightMode(!lightMode)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 0, padding: 0,
-                  border: '1px solid var(--border)', borderRadius: 20, background: 'var(--panel-2)',
-                  cursor: 'pointer', overflow: 'hidden', fontFamily: 'var(--font-body)', fontSize: 11,
-                }}
-              >
-                {['Dark', 'Light'].map(mode => {
-                  const isActive = mode === 'Light' ? lightMode : !lightMode;
-                  return (
-                    <span key={mode} style={{ padding: '5px 14px', borderRadius: 20, background: isActive ? 'var(--accent)' : 'transparent', color: isActive ? 'var(--accent-ink)' : 'var(--text-faint)', fontWeight: isActive ? 700 : 400, transition: 'background .15s, color .15s' }}>
-                      {mode === 'Dark' ? '◗ Dark' : 'Light ◖'}
-                    </span>
-                  );
-                })}
-              </button>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ ...labelStyle, marginBottom: 2 }}>Site Color Theme</label>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>Changes apply instantly and sync to your account across all devices</div>
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 32 }}>
               {THEMES.map(t => (
-                <button key={t.id} onClick={() => applyTheme(t.id, lightMode)} style={{
+                <button key={t.id} onClick={() => applyTheme(t.id)} style={{
                   display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 8,
                   cursor: 'pointer', border: `2px solid ${activeTheme === t.id ? t.accent : 'rgba(255,255,255,.12)'}`,
                   background: t.bg, color: '#e0e4f0', fontFamily: 'var(--font-body)', fontSize: 12,

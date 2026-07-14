@@ -75,7 +75,7 @@ export default function CompareScreen() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>Players:</span>
-            {[1, 2, 3, 4, 5].map(n => (
+            {[2, 3, 4, 5].map(n => (
               <button
                 key={n}
                 onClick={() => setCount(n)}

@@ -27,7 +27,7 @@ import ScoringTestScreen from './screens/ScoringTest.jsx';
 import LeagueSettings from './screens/LeagueSettings.jsx';
 import CurrentRosterScreen from './screens/CurrentRoster.jsx';
 import HeadToHeadScreen from './screens/HeadToHead.jsx';
-import AccountEditScreen from './screens/AccountEdit.jsx';
+import AccountEditScreen, { THEME_VARS } from './screens/AccountEdit.jsx';
 import TransactionsScreen from './screens/Transactions.jsx';
 import PowerRankingsScreen from './screens/PowerRankings.jsx';
 import DraftRecapScreen from './screens/DraftRecap.jsx';
@@ -448,6 +448,15 @@ const CRUMBS = {
 
 export default function App() {
   const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+  // Apply the saved color theme once at startup — CSS custom properties set via
+  // JS don't survive a reload, and this shouldn't re-trigger just from visiting
+  // My Account (that used to live in AccountEdit's own mount effect).
+  React.useEffect(() => {
+    const p = getPrefs();
+    const vars = p.theme && THEME_VARS[p.theme] ? THEME_VARS[p.theme] : null;
+    if (vars) Object.entries(vars).forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
+  }, []);
 
   // Auto-detect mobile device. Matches the CSS breakpoint so JS state always
   // agrees with the media query that hides the sidebar and shows MobileNav.
