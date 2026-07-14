@@ -73,7 +73,8 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
       <div className="tabs" style={{ padding: '0 14px', flexShrink: 0 }}>
         {TABS.map(t => (
           <div key={t.id} className={`tab ${viewMode === t.id ? 'active' : ''}`} onClick={() => setViewMode(t.id)} style={{ whiteSpace: 'nowrap' }}>
-            {t.icon} {t.label}
+            <span style={{ fontSize: 12, marginRight: 4 }}>{t.icon}</span>
+            <span style={{ fontSize: 11 }}>{t.label}</span>
           </div>
         ))}
       </div>
