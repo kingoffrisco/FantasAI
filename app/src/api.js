@@ -170,4 +170,17 @@ export const api = {
         body: JSON.stringify(tx),
       }).catch(() => null),
   },
+
+  draftPicks: {
+    get: () =>
+      fetch(`${API_BASE}/api/v1/draft/picks`)
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => []),
+    save: picks =>
+      fetch(`${API_BASE}/api/v1/draft/picks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(picks),
+      }).catch(() => null),
+  },
 }

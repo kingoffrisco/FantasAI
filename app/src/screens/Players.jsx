@@ -7,6 +7,7 @@ import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
+import { api } from '../api.js';
 
 const NFL_TEAM_NAME = {
   ARI:'Cardinals',ATL:'Falcons',BAL:'Ravens',BUF:'Bills',CAR:'Panthers',CHI:'Bears',CIN:'Bengals',CLE:'Browns',
@@ -2179,11 +2180,87 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const [newsLoading, setNewsLoading] = React.useState(true);
   const [playerArticles,  setPlayerArticles]  = React.useState([]);
   const [articlesLoading, setArticlesLoading] = React.useState(true);
+  const [lineageTx,    setLineageTx]    = React.useState([]);
+  const [lineagePicks, setLineagePicks] = React.useState([]);
+  const [lineageLoading, setLineageLoading] = React.useState(true);
 
   React.useEffect(() => {
     setAdded(false);
     setStatYear(new Date() >= new Date('2026-09-09') ? 2026 : 2025);
   }, [player.id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLineageLoading(true);
+    Promise.all([api.transactions.get(), api.draftPicks.get()]).then(([tx, picks]) => {
+      if (cancelled) return;
+      setLineageTx(Array.isArray(tx) ? tx : []);
+      setLineagePicks(Array.isArray(picks) ? picks : []);
+      setLineageLoading(false);
+    }).catch(() => { if (!cancelled) setLineageLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Ownership history — drafted → added/dropped/swapped/claimed → traded, chronologically.
+  const lineage = React.useMemo(() => {
+    const key = player.name?.toLowerCase().trim();
+    const matchesPlayer = pl => pl && (pl.id === player.id || pl.name?.toLowerCase().trim() === key);
+    const events = [];
+
+    const pick = lineagePicks.find(p => p.playerId === player.id);
+    if (pick) {
+      const team = findTeam(pick.teamId);
+      events.push({
+        ts: pick.pickedAt || null,
+        icon: '📋',
+        color: '#a78bfa',
+        label: `Drafted by ${team?.name || `Team ${pick.teamId}`}`,
+        sub: pick.round != null ? `Round ${pick.round}${pick.pickNum != null ? ` · Pick ${pick.pickNum}` : ''}` : null,
+      });
+    }
+
+    for (const tx of lineageTx) {
+      if (Array.isArray(tx.players)) {
+        const entry = tx.players.find(matchesPlayer);
+        if (entry) {
+          const team = findTeam(tx.teamId);
+          const teamName = team?.name || tx.teamName || 'Unknown Team';
+          const isAdd = entry.action === 'add';
+          const label = isAdd
+            ? (tx.type === 'waiver_claim' ? `Claimed off waivers by ${teamName}`
+              : tx.type === 'swap' ? `Added by ${teamName} (swap)`
+              : `Added by ${teamName}`)
+            : `Dropped by ${teamName}`;
+          events.push({
+            ts: tx.timestamp,
+            icon: isAdd ? '➕' : '➖',
+            color: isAdd ? '#4caf82' : '#ff5a6e',
+            label,
+            sub: (tx.type === 'waiver_claim' && tx.waiverPick != null) ? `Claim #${tx.waiverPick}${tx.newWaiverPick != null ? ` → #${tx.newWaiverPick}` : ''}` : null,
+          });
+        }
+      } else if (tx.type === 'trade') {
+        const inGave = (tx.gave || []).some(matchesPlayer);
+        const inGot  = (tx.got  || []).some(matchesPlayer);
+        if (inGave || inGot) {
+          const txTeam    = findTeam(tx.teamId);
+          const otherTeam = findTeam(tx.otherTeamId);
+          const fromTeam = inGave ? txTeam : otherTeam;
+          const toTeam   = inGave ? otherTeam : txTeam;
+          events.push({
+            ts: tx.timestamp,
+            icon: '↔',
+            color: '#4ea8ff',
+            label: `Traded from ${fromTeam?.name || 'Unknown Team'} to ${toTeam?.name || 'Unknown Team'}`,
+            sub: null,
+          });
+        }
+      }
+    }
+
+    events.sort((a, b) => (a.ts ? new Date(a.ts).getTime() : 0) - (b.ts ? new Date(b.ts).getTime() : 0));
+    return events;
+  }, [lineagePicks, lineageTx, player.id, player.name]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -2633,7 +2710,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
 
         {/* ── Tabs ── */}
         <div className="tabs">
-          {[['overview','Overview'],['gamelog','Weekly Stats'],['nextgen','Next Gen'],['news','News'],['matchup','Matchup']].map(([k,v]) => (
+          {[['overview','Overview'],['gamelog','Weekly Stats'],['nextgen','Next Gen'],['news','News'],['matchup','Matchup'],['lineage','Lineage']].map(([k,v]) => (
             <div key={k} className={`tab ${activeTab===k?'active':''}`} onClick={() => setTab(k)}>{v}</div>
           ))}
         </div>
@@ -3224,6 +3301,52 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   </>
                 );
               })()}
+            </div>
+          )}
+
+          {/* ── Lineage — ownership history ── */}
+          {activeTab === 'lineage' && (
+            <div>
+              {lineageLoading ? (
+                <div className="dim" style={{ fontSize: 12, padding: '20px 0', textAlign: 'center' }}>Loading ownership history…</div>
+              ) : lineage.length === 0 ? (
+                <div className="dim" style={{ fontSize: 12, padding: '20px 0', textAlign: 'center' }}>
+                  No ownership history found for {player.name} — they may be a free agent, or moves predate this league's tracked history.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {lineage.map((ev, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 12, paddingBottom: i < lineage.length - 1 ? 16 : 0, position: 'relative' }}>
+                      {/* Timeline rail */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                        <div style={{
+                          width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+                          background: `${ev.color}18`, border: `1px solid ${ev.color}55`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12,
+                        }}>
+                          {ev.icon}
+                        </div>
+                        {i < lineage.length - 1 && (
+                          <div style={{ width: 1, flex: 1, background: 'var(--border)', marginTop: 4 }} />
+                        )}
+                      </div>
+                      <div style={{ paddingTop: 3 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{ev.label}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                          {ev.ts && (
+                            <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+                              {new Date(ev.ts).toLocaleDateString([], { dateStyle: 'medium' })}
+                            </span>
+                          )}
+                          {ev.sub && (
+                            <span style={{ fontSize: 11, color: ev.color, fontFamily: 'var(--font-mono)' }}>{ev.sub}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

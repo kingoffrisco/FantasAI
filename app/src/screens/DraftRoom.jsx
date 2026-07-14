@@ -6,6 +6,7 @@ import { PosBadge, PlayerAvatar, PlayerCell, TeamLogoBadge } from '../components
 import { useR2BreakoutCandidates } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
+import { api } from '../api.js';
 
 const dstOverallRank = (posRank) => 150 + (posRank - 1) * 3;
 
@@ -382,6 +383,10 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   React.useEffect(() => {
     if (!mockActive) {
       try { localStorage.setItem('fantasai_live_picks', JSON.stringify(livePicks)); } catch {}
+      // Sync filled picks to R2 so draft origin (who/when) is visible to every
+      // browser, not just the one that ran the draft.
+      const filled = livePicks.filter(p => p.playerId);
+      if (filled.length) api.draftPicks.save(filled);
     }
   }, [livePicks, mockActive]);
   React.useEffect(() => {
@@ -692,7 +697,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     const teamId  = overrideTeamId ?? onClockTeamId;
     const err = checkPosLimit(playerId, teamId, livePicks.filter(p => p.playerId));
     if (err) { setDraftLimitToast(err); return; }
-    setLivePicks(prev => prev.map(p => p.pickNum === pickNum ? { ...p, playerId, teamId } : p));
+    setLivePicks(prev => prev.map(p => p.pickNum === pickNum ? { ...p, playerId, teamId, pickedAt: new Date().toISOString() } : p));
     setLivePickNum(n => n + 1);
     setSeconds(clockSeconds);
     setQueue(q => q.filter(id => id !== playerId));
@@ -765,7 +770,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
       }
       if (pickId) {
         const pickNum = livePickNum;
-        setLivePicks(prev => prev.map(p => p.pickNum === pickNum ? { ...p, playerId: pickId, teamId: onClockTeamId } : p));
+        setLivePicks(prev => prev.map(p => p.pickNum === pickNum ? { ...p, playerId: pickId, teamId: onClockTeamId, pickedAt: new Date().toISOString() } : p));
         setLivePickNum(n => n + 1);
         setSeconds(clockSeconds);
         setQueue(q => q.filter(id => id !== pickId));

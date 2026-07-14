@@ -176,6 +176,7 @@ export default {
         if (url.pathname === '/api/v1/community/media')       return handleCommunityMediaUpload(url, request, env);
         if (url.pathname === '/api/v1/weather/refresh')       return handleWeatherRefresh(request, env);
         if (url.pathname === '/api/v1/transactions')          return handleTransactionsPost(request, env);
+        if (url.pathname === '/api/v1/draft/picks')           return handleDraftPicksPost(request, env);
         if (url.pathname === '/api/v1/scrape')                return handleScrape(request);
         // Push notifications (open — anyone with the app can subscribe/unsubscribe)
         if (url.pathname === '/api/v1/push/subscribe')        return handlePushSubscribe(request, env);
@@ -217,6 +218,7 @@ export default {
       if (url.pathname === '/api/v1/cbs/players')         return await handleCbsPlayers(request, env);
       if (url.pathname === '/api/v1/weather')            return await handleWeatherGet(env);
       if (url.pathname === '/api/v1/transactions')      return await handleTransactionsGet(env);
+      if (url.pathname === '/api/v1/draft/picks')       return await handleDraftPicksGet(env);
       if (url.pathname === '/api/v1/cbs/rankings')        return await handleCbsRankings(url, request, env);
       if (url.pathname === '/api/v1/twitter/beat')        return await handleBeatWriterNews();
       if (url.pathname.startsWith('/api/v1/player/'))   return await handlePlayerProfile(url, env);
@@ -1317,6 +1319,36 @@ async function handleTransactionsPost(request, env) {
     httpMetadata: { contentType: 'application/json' },
   });
   return json({ ok: true, count: updated.length }, 200);
+}
+
+// ── Draft Picks (R2-backed) — the live draft room syncs its whole picks
+// array here so draft origin ("who drafted this player, when") is visible
+// to everyone, not just the browser that ran the draft. Client always sends
+// the full current array, so this is a plain overwrite — no read-modify-write
+// race like the transactions log has.
+const DRAFT_PICKS_R2_KEY = 'fantasai/league/draft_picks.json';
+
+async function handleDraftPicksGet(env) {
+  if (!env.BUCKET) return json([], 200);
+  const obj = await env.BUCKET.get(DRAFT_PICKS_R2_KEY);
+  if (!obj) return json([], 200);
+  try {
+    const data = await obj.json();
+    return json(Array.isArray(data) ? data : [], 200);
+  } catch {
+    return json([], 200);
+  }
+}
+
+async function handleDraftPicksPost(request, env) {
+  if (!env.BUCKET) return json({ error: 'R2 not configured' }, 503);
+  let picks;
+  try { picks = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  if (!Array.isArray(picks)) return json({ error: 'Expected an array of picks' }, 400);
+  await env.BUCKET.put(DRAFT_PICKS_R2_KEY, JSON.stringify(picks), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+  return json({ status: 'ok', count: picks.length }, 200);
 }
 
 // ── Web Scrape Proxy ─────────────────────────────────────────────────────────
