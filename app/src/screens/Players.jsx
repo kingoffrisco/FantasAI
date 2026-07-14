@@ -431,6 +431,14 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   // Global player store — seeds from static data, replaced with live Databricks/Sleeper on startup
   const apiPlayerList = usePlayers();
 
+  // Some watched IDs may no longer resolve to a real player (stale ID from a
+  // prior data snapshot) — count only what the Watchlist tab will actually show,
+  // so the badge doesn't overcount vs what's visible.
+  const resolvableWatchCount = React.useMemo(
+    () => [...watchlistIds].filter(id => findPlayer(id)).length,
+    [watchlistIds, apiPlayerList]
+  );
+
   // R2 injury overlay — injury status + depth chart from R2 injury_overlay export
   const { data: r2InjuryData } = useR2Injuries();
   const { data: r2Notes } = useR2PlayerNotes();
@@ -904,7 +912,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       {/* ── Tab strip ── */}
       <div className="tabs" style={{ padding: '0 18px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
         <div className={`tab ${playersTab === 'players' ? 'active' : ''}`} onClick={() => onPlayersTabChange?.('players')}>Players</div>
-        <div className={`tab ${playersTab === 'watchlist' ? 'active' : ''}`} onClick={() => onPlayersTabChange?.('watchlist')}>★ Watchlist {watchlistIds.size > 0 && <span style={{ marginLeft: 4, fontSize: 9, background: 'rgba(198,255,58,.2)', color: 'var(--accent)', borderRadius: 3, padding: '1px 5px', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{watchlistIds.size}</span>}</div>
+        <div className={`tab ${playersTab === 'watchlist' ? 'active' : ''}`} onClick={() => onPlayersTabChange?.('watchlist')}>★ Watchlist {resolvableWatchCount > 0 && <span style={{ marginLeft: 4, fontSize: 9, background: 'rgba(198,255,58,.2)', color: 'var(--accent)', borderRadius: 3, padding: '1px 5px', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{resolvableWatchCount}</span>}</div>
       </div>
 
       {/* ── Watchlist tab ── */}
