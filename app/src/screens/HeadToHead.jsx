@@ -158,14 +158,11 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     <div style={{ padding: '20px 24px', maxWidth: 1100, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="page-head" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'nowrap' }}>
-          <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <div>
-              <h1 style={{ marginBottom: 2 }}>Head to Head</h1>
-              <div className="sub">Weekly matchup Results</div>
-            </div>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-              <span style={{ color: 'var(--text-faint)' }}>Week {week} · </span>
-              <span style={{ color: week === CURRENT_WEEK ? '#1affa0' : 'var(--text-faint)' }}>
+          <div style={{ flexShrink: 0 }}>
+            <h1 style={{ marginBottom: 2 }}>Head to Head</h1>
+            <div className="sub">
+              Weekly Matchup - Week {week}{' '}
+              <span style={{ color: week === CURRENT_WEEK ? '#1affa0' : 'inherit', fontWeight: week === CURRENT_WEEK ? 700 : 'inherit' }}>
                 {week < CURRENT_WEEK ? 'Final' : week === CURRENT_WEEK ? 'In Progress' : 'Upcoming'}
               </span>
             </div>
