@@ -321,6 +321,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
   // ── Waiver claim state ────────────────────────────────────────────────────
   const draftDone = React.useMemo(() => isDraftComplete(), []);
   const [waiverOrder, setWaiverOrder] = React.useState(loadWaiverOrder);
+  const [waiverOrderOpen, setWaiverOrderOpen] = React.useState(false);
   const [claimQueue, setClaimQueue] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_waiver_queue') || '[]'); } catch { return []; }
   });
@@ -862,13 +863,36 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
             </div>
           </div>
           {draftDone && (
-            <div
-              title={`Next waiver run: ${fmtWaiverDate(nextWaiverDate(processDay))}`}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 8, background: 'rgba(198,255,58,.08)', border: '1px solid rgba(198,255,58,.35)', cursor: 'default' }}
-            >
-              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: 15, color: 'var(--accent)', lineHeight: 1 }}>#{myWaiverPriority}</span>
-              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>of {waiverOrder.length} waiver priority</span>
-              {myWaiverPriority === 1 && <span style={{ fontSize: 9, background: 'rgba(198,255,58,.2)', color: 'var(--accent)', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>FIRST PICK</span>}
+            <div style={{ position: 'relative' }}>
+              <div
+                onClick={() => setWaiverOrderOpen(o => !o)}
+                title={`Next waiver run: ${fmtWaiverDate(nextWaiverDate(processDay))} · click for full order`}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 8, background: waiverOrderOpen ? 'rgba(198,255,58,.16)' : 'rgba(198,255,58,.08)', border: '1px solid rgba(198,255,58,.35)', cursor: 'pointer' }}
+              >
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: 15, color: 'var(--accent)', lineHeight: 1 }}>#{myWaiverPriority}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>of {waiverOrder.length} waiver priority</span>
+                {myWaiverPriority === 1 && <span style={{ fontSize: 9, background: 'rgba(198,255,58,.2)', color: 'var(--accent)', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>FIRST PICK</span>}
+                <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>{waiverOrderOpen ? '▲' : '▼'}</span>
+              </div>
+              {waiverOrderOpen && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50, background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 10, padding: '8px 4px', minWidth: 170, boxShadow: '0 12px 30px rgba(0,0,0,.5)' }}>
+                  <div style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', padding: '2px 10px 6px' }}>Waiver Order</div>
+                  {waiverOrder.map((tid, i) => {
+                    const t = findTeam(tid);
+                    const isMe = tid === (user?.teamId ?? null);
+                    return (
+                      <div key={tid} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderRadius: 6, background: isMe ? 'rgba(198,255,58,.12)' : 'transparent' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-faint)', width: 16, flexShrink: 0 }}>{i + 1}.</span>
+                        <span style={{ fontSize: 12, fontWeight: isMe ? 700 : 500, color: isMe ? 'var(--accent)' : 'var(--text)' }}>{t?.logo || t?.name || `Team ${tid}`}</span>
+                        {isMe && <span style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--accent)', fontWeight: 700 }}>YOU</span>}
+                      </div>
+                    );
+                  })}
+                  <div style={{ fontSize: 10, color: 'var(--text-faint)', padding: '6px 10px 2px', borderTop: '1px solid var(--border)', marginTop: 4 }}>
+                    Next run: {fmtWaiverDate(nextWaiverDate(processDay))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
