@@ -157,56 +157,54 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   return (
     <div style={{ padding: '20px 24px', maxWidth: 1100, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="page-head" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'nowrap' }}>
+          <div style={{ flexShrink: 0 }}>
             <h1 style={{ marginBottom: 2 }}>Head to Head</h1>
             <div className="sub">Weekly matchup results · rosters pulled from Current Roster settings</div>
           </div>
-          <div style={{ marginLeft: 'auto' }}>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexWrap: 'nowrap' }}>
             <button
               className="btn"
-              style={{ background: '#22c55e', border: 'none', color: '#fff', fontWeight: 700 }}
+              style={{ background: '#22c55e', border: 'none', color: '#fff', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}
               onClick={() => setMobileScoringOpen(true)}
             >📱 Mobile Scoring</button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: 'var(--panel)', borderRadius: 8, padding: 3, flexShrink: 0 }}>
+              {[{ label: 'My H2H', val: false }, { label: 'All Matchups', val: true }].map(opt => (
+                <button
+                  key={String(opt.val)}
+                  onClick={() => { setShowAll(opt.val); setExpanded(opt.val ? null : 0); }}
+                  style={{
+                    padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: showAll === opt.val ? 700 : 500,
+                    cursor: 'pointer', border: 'none', whiteSpace: 'nowrap',
+                    background: showAll === opt.val ? 'var(--accent)' : 'transparent',
+                    color: showAll === opt.val ? 'var(--accent-ink)' : 'var(--text-dim)',
+                    transition: 'background .15s, color .15s',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 3, overflowX: 'auto' }}>
+              {Array.from({ length: NUM_WEEKS }, (_, i) => i + 1).map(w => (
+                <button
+                  key={w}
+                  onClick={() => { setWeek(w); setExpanded(showAll ? null : 0); }}
+                  style={{
+                    flexShrink: 0, padding: '4px 6px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                    cursor: 'pointer', border: '1px solid var(--border)', whiteSpace: 'nowrap',
+                    background: w === week ? 'var(--accent)' : w < CURRENT_WEEK ? 'var(--panel)' : 'transparent',
+                    color: w === week ? 'var(--accent-ink)' : w < CURRENT_WEEK ? 'var(--text)' : 'var(--text-dim)',
+                  }}
+                >
+                  {w === CURRENT_WEEK ? `Wk ${w}●` : `Wk ${w}`}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      </div>
-
-      {/* View toggle + week tabs, one line */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'nowrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: 'var(--panel)', borderRadius: 8, padding: 3, flexShrink: 0 }}>
-          {[{ label: 'My H2H', val: false }, { label: 'All Matchups', val: true }].map(opt => (
-            <button
-              key={String(opt.val)}
-              onClick={() => { setShowAll(opt.val); setExpanded(opt.val ? null : 0); }}
-              style={{
-                padding: '6px 16px', borderRadius: 6, fontSize: 12, fontWeight: showAll === opt.val ? 700 : 500,
-                cursor: 'pointer', border: 'none', whiteSpace: 'nowrap',
-                background: showAll === opt.val ? 'var(--accent)' : 'transparent',
-                color: showAll === opt.val ? 'var(--accent-ink)' : 'var(--text-dim)',
-                transition: 'background .15s, color .15s',
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', gap: 3, marginLeft: 'auto', overflowX: 'auto' }}>
-          {Array.from({ length: NUM_WEEKS }, (_, i) => i + 1).map(w => (
-            <button
-              key={w}
-              onClick={() => { setWeek(w); setExpanded(showAll ? null : 0); }}
-              style={{
-                flexShrink: 0, padding: '4px 6px', borderRadius: 5, fontSize: 10, fontWeight: 600,
-                cursor: 'pointer', border: '1px solid var(--border)', whiteSpace: 'nowrap',
-                background: w === week ? 'var(--accent)' : w < CURRENT_WEEK ? 'var(--panel)' : 'transparent',
-                color: w === week ? 'var(--accent-ink)' : w < CURRENT_WEEK ? 'var(--text)' : 'var(--text-dim)',
-              }}
-            >
-              {w === CURRENT_WEEK ? `Wk ${w}●` : `Wk ${w}`}
-            </button>
-          ))}
         </div>
       </div>
 
