@@ -153,7 +153,7 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
 
           {/* ── Points view ── */}
           {viewMode === 'pts' && (
-            <table className="table" style={{ width: '100%' }}>
+            <table className="table">
               <thead>
                 <tr>
                   <th style={{ width: 32 }}>#</th>
@@ -194,7 +194,7 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
           {/* ── Schedule view ── */}
           {viewMode === 'schedule' && (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ borderCollapse: 'collapse', minWidth: 900, width: '100%' }}>
+              <table style={{ borderCollapse: 'collapse', minWidth: 900 }}>
                 <thead>
                   <tr>
                     <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', fontWeight: 700, letterSpacing: '.06em', borderBottom: '2px solid var(--border)', whiteSpace: 'nowrap' }}>
