@@ -224,6 +224,16 @@ export default function TransactionsScreen() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [filter, setFilter] = React.useState('all');
+  const [ownerFilter, setOwnerFilter] = React.useState(() => new Set()); // empty = all owners
+  const [ownerPickerOpen, setOwnerPickerOpen] = React.useState(false);
+
+  function toggleOwner(teamId) {
+    setOwnerFilter(prev => {
+      const next = new Set(prev);
+      next.has(teamId) ? next.delete(teamId) : next.add(teamId);
+      return next;
+    });
+  }
 
   async function load() {
     setLoading(true);
@@ -242,12 +252,21 @@ export default function TransactionsScreen() {
   React.useEffect(() => { load(); }, []);
 
   const filtered = React.useMemo(() => {
-    if (filter === 'all') return txns;
-    if (filter === 'roster') return txns.filter(t => ['add', 'drop', 'swap', 'waiver_claim'].includes(t.type));
-    if (filter === 'trades') return txns.filter(t => t.type === 'trade' || t.type === 'trade_offer');
-    if (filter === 'settings') return txns.filter(t => t.type === 'league_settings');
-    return txns;
-  }, [txns, filter]);
+    let list = txns;
+    if (filter === 'roster')      list = list.filter(t => ['add', 'drop', 'swap', 'waiver_claim'].includes(t.type));
+    else if (filter === 'trades') list = list.filter(t => t.type === 'trade' || t.type === 'trade_offer');
+    else if (filter === 'settings') list = list.filter(t => t.type === 'league_settings');
+    else if (filter === 'adds')   list = list.filter(t => t.type === 'add');
+    else if (filter === 'drops')  list = list.filter(t => t.type === 'drop');
+    else if (filter === 'trades_only') list = list.filter(t => t.type === 'trade');
+    else if (filter === 'offers') list = list.filter(t => t.type === 'trade_offer');
+    else if (filter === 'recent') list = list.filter(t => Date.now() - new Date(t.timestamp) < 7 * 864e5);
+
+    if (ownerFilter.size > 0) {
+      list = list.filter(t => ownerFilter.has(t.teamId) || (t.otherTeamId != null && ownerFilter.has(t.otherTeamId)));
+    }
+    return list;
+  }, [txns, filter, ownerFilter]);
 
   const highlightCount = txns.filter(t => t.type === 'league_settings' && t.highlight).length;
 
@@ -273,21 +292,69 @@ export default function TransactionsScreen() {
         </div>
       </div>
 
-      {/* Stats strip */}
+      {/* Stats strip — click a card to filter the list to just that data */}
       {!loading && txns.length > 0 && (
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {[
-            { label: 'Adds',    value: stats.adds,   color: '#4caf82' },
-            { label: 'Drops',   value: stats.drops,  color: '#ff5a6e' },
-            { label: 'Trades',  value: stats.trades, color: '#4ea8ff' },
-            { label: 'Offers',  value: stats.offers, color: '#ffb547' },
-            { label: 'This Week', value: stats.recent, color: 'var(--accent)' },
-          ].map(s => (
-            <div key={s.label} style={{ padding: '8px 14px', background: `${s.color}10`, border: `1px solid ${s.color}30`, borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 72 }}>
-              <span style={{ fontSize: 20, fontWeight: 900, color: s.color, fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{s.value}</span>
-              <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '.06em', textTransform: 'uppercase' }}>{s.label}</span>
-            </div>
-          ))}
+            { id: 'adds',       label: 'Adds',    value: stats.adds,   color: '#4caf82' },
+            { id: 'drops',      label: 'Drops',   value: stats.drops,  color: '#ff5a6e' },
+            { id: 'trades_only', label: 'Trades',  value: stats.trades, color: '#4ea8ff' },
+            { id: 'offers',     label: 'Offers',  value: stats.offers, color: '#ffb547' },
+            { id: 'recent',     label: 'This Week', value: stats.recent, color: 'var(--accent)' },
+          ].map(s => {
+            const active = filter === s.id;
+            return (
+              <button
+                key={s.id}
+                onClick={() => setFilter(active ? 'all' : s.id)}
+                style={{
+                  padding: '8px 14px', background: active ? `${s.color}22` : `${s.color}10`,
+                  border: `1px solid ${active ? s.color : `${s.color}30`}`, borderRadius: 8,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 72,
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ fontSize: 20, fontWeight: 900, color: s.color, fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{s.value}</span>
+                <span style={{ fontSize: 9, color: active ? s.color : 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: active ? 700 : 400 }}>{s.label}</span>
+              </button>
+            );
+          })}
+
+          {/* Owner filter */}
+          <div style={{ position: 'relative', marginLeft: 'auto' }}>
+            <button
+              onClick={() => setOwnerPickerOpen(o => !o)}
+              style={{
+                padding: '8px 14px', borderRadius: 8, cursor: 'pointer', minWidth: 72, height: '100%',
+                border: `1px solid ${ownerFilter.size > 0 ? 'var(--accent)' : 'var(--border)'}`,
+                background: ownerFilter.size > 0 ? 'rgba(198,255,58,.12)' : 'transparent',
+                color: ownerFilter.size > 0 ? 'var(--accent)' : 'var(--text-dim)',
+                fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              👤 Owners{ownerFilter.size > 0 ? ` (${ownerFilter.size})` : ''} {ownerPickerOpen ? '▲' : '▼'}
+            </button>
+            {ownerPickerOpen && (
+              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 50, background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 10, padding: '8px 4px', minWidth: 200, boxShadow: '0 12px 30px rgba(0,0,0,.5)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 10px 6px' }}>
+                  <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em' }}>Show Owners</span>
+                  {ownerFilter.size > 0 && (
+                    <button onClick={() => setOwnerFilter(new Set())} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 10, cursor: 'pointer', padding: 0 }}>Clear</button>
+                  )}
+                </div>
+                {LEAGUE_TEAMS.map(t => {
+                  const on = ownerFilter.has(t.id);
+                  return (
+                    <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderRadius: 6, cursor: 'pointer', background: on ? 'rgba(198,255,58,.1)' : 'transparent' }}>
+                      <input type="checkbox" checked={on} onChange={() => toggleOwner(t.id)} style={{ accentColor: 'var(--accent)', width: 13, height: 13, flexShrink: 0 }} />
+                      <span style={{ width: 16, height: 16, borderRadius: 3, background: t.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, fontWeight: 900, color: '#000', flexShrink: 0 }}>{t.logo}</span>
+                      <span style={{ fontSize: 12, color: on ? 'var(--text)' : 'var(--text-dim)', fontWeight: on ? 600 : 400 }}>{t.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
