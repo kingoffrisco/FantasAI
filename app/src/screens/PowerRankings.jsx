@@ -43,8 +43,7 @@ const TABS = [
   { id: 'schedule', icon: '📅', label: 'Schedule' },
 ];
 
-export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides = {}, showMobile = false }) {
-  const isMobile = showMobile;
+export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides = {} }) {
   const currentWeek = getCurrentWeek();
   const isOffseason = currentWeek === 0;
   const [viewMode, setViewMode] = React.useState('power');
@@ -71,33 +70,15 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
         </div>
       </div>
 
-      {isMobile && (
-        <div className="tabs" style={{ padding: '0 14px', flexShrink: 0 }}>
-          {TABS.map(t => (
-            <div key={t.id} className={`tab ${viewMode === t.id ? 'active' : ''}`} onClick={() => setViewMode(t.id)} style={{ whiteSpace: 'nowrap' }}>
-              {t.icon} {t.label}
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="tabs" style={{ padding: '0 14px', flexShrink: 0 }}>
+        {TABS.map(t => (
+          <div key={t.id} className={`tab ${viewMode === t.id ? 'active' : ''}`} onClick={() => setViewMode(t.id)} style={{ whiteSpace: 'nowrap' }}>
+            {t.icon} {t.label}
+          </div>
+        ))}
+      </div>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-
-        {/* ── Left vertical tab sidebar (desktop only — mobile uses the top tab bar) ── */}
-        {!isMobile && (
-          <div style={{ width: 160, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '10px 8px', background: 'var(--bg-2)', overflowY: 'auto', gap: 2 }}>
-            {TABS.map(t => (
-              <div
-                key={t.id}
-                className={`nav-item${viewMode === t.id ? ' active' : ''}`}
-                onClick={() => setViewMode(t.id)}
-              >
-                <span className="icon">{t.icon}</span>
-                <span style={{ flex: 1 }}>{t.label}</span>
-              </div>
-            ))}
-          </div>
-        )}
 
         {/* ── Right content ── */}
         <div style={{ flex: 1, overflow: 'auto', padding: '14px 18px' }}>

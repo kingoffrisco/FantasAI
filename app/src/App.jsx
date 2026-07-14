@@ -1342,7 +1342,7 @@ export default function App() {
           {active === 'admin-owners'  && <AdminOwners />}
           {active === 'admin-scoring'  && <ScoringTestScreen user={user} />}
           {active === 'transactions'  && <TransactionsScreen />}
-          {active === 'power'         && <PowerRankingsScreen user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} showMobile={showMobile} />}
+          {active === 'power'         && <PowerRankingsScreen user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'account'       && <AccountEditScreen user={user} />}
           {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} initialTab={settingsInitialTab} />}
         </div>

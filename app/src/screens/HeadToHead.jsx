@@ -85,9 +85,8 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   const allPlayers = usePlayers(); // subscribe so roster re-assigns when player data loads
   const [week, setWeek] = React.useState(CURRENT_WEEK);
   const [expanded, setExpanded] = React.useState(0);
-  const [showAll, setShowAll] = React.useState(false);
-  const [isMobile, setIsMobile] = React.useState(() => window.matchMedia('(max-width: 900px)').matches);
-  const [h2hMobileTab, setH2hMobileTab] = React.useState('matchups'); // 'matchups' | 'scores'
+  const [h2hTab, setH2hTab] = React.useState('mine'); // 'mine' | 'all' | 'scores'
+  const showAll = h2hTab === 'all';
   const [mobileScoringOpen, setMobileScoringOpen] = React.useState(false);
 
   // Sync TEAM_ROSTERS from localStorage whenever H2H is opened so drafted players appear
@@ -95,14 +94,6 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   React.useEffect(() => {
     refreshTeamRosters();
     setRosterVersion(v => v + 1);
-  }, []);
-
-
-  React.useEffect(() => {
-    const mq = window.matchMedia('(max-width: 900px)');
-    const h = e => setIsMobile(e.matches);
-    mq.addEventListener('change', h);
-    return () => mq.removeEventListener('change', h);
   }, []);
 
   const myTeamId = user?.teamId ?? LEAGUE_TEAMS.find(t => t.me)?.id;
@@ -176,15 +167,15 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
             >📱 Mobile Scoring</button>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: 'var(--panel)', borderRadius: 8, padding: 3, flexShrink: 0 }}>
-              {[{ label: 'My H2H', val: false }, { label: 'All Matchups', val: true }].map(opt => (
+              {[{ id: 'mine', label: 'My H2H' }, { id: 'all', label: 'All Matchups' }, { id: 'scores', label: 'Live Scores' }].map(opt => (
                 <button
-                  key={String(opt.val)}
-                  onClick={() => { setShowAll(opt.val); setExpanded(opt.val ? null : 0); }}
+                  key={opt.id}
+                  onClick={() => { setH2hTab(opt.id); setExpanded(opt.id === 'all' ? null : 0); }}
                   style={{
-                    padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: showAll === opt.val ? 700 : 500,
+                    padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: h2hTab === opt.id ? 700 : 500,
                     cursor: 'pointer', border: 'none', whiteSpace: 'nowrap',
-                    background: showAll === opt.val ? 'var(--accent)' : 'transparent',
-                    color: showAll === opt.val ? 'var(--accent-ink)' : 'var(--text-dim)',
+                    background: h2hTab === opt.id ? 'var(--accent)' : 'transparent',
+                    color: h2hTab === opt.id ? 'var(--accent-ink)' : 'var(--text-dim)',
                     transition: 'background .15s, color .15s',
                   }}
                 >
@@ -213,20 +204,11 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
         </div>
       </div>
 
-      {isMobile && (
-        <div style={{ display: 'flex', gap: 0, background: 'var(--panel)', borderRadius: 8, padding: 3, alignSelf: 'flex-start' }}>
-          {[{ id: 'matchups', label: 'Matchups' }, { id: 'scores', label: 'NFL Scores' }].map(t => (
-            <button key={t.id} onClick={() => setH2hMobileTab(t.id)} style={{
-              padding: '6px 16px', borderRadius: 6, fontSize: 12, fontWeight: h2hMobileTab === t.id ? 700 : 500,
-              cursor: 'pointer', border: 'none',
-              background: h2hMobileTab === t.id ? 'var(--accent)' : 'transparent',
-              color: h2hMobileTab === t.id ? 'var(--accent-ink)' : 'var(--text-dim)',
-            }}>{t.label}</button>
-          ))}
+      {h2hTab === 'scores' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 460 }}>
+          <NflScores week={week} />
         </div>
-      )}
-      <div style={{ display: isMobile ? 'block' : 'grid', gridTemplateColumns: '1fr 280px', gap: 20, alignItems: 'start' }}>
-        {(!isMobile || h2hMobileTab === 'matchups') && (
+      ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {matchups.map(([homeId, awayId], idx) => {
             const homeRec = standings.find(t => t.id === homeId);
@@ -252,15 +234,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
             );
           })}
         </div>
-        )}
-
-        {/* Right column: NFL Scores */}
-        {(!isMobile || h2hMobileTab === 'scores') && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <NflScores week={week} />
-        </div>
-        )}
-      </div>
+      )}
 
       {mobileScoringOpen && (
         <MobileScoringPopup
