@@ -861,17 +861,19 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               {isLiveData() ? '2026 Players' : 'Static seed'}
             </div>
           </div>
+          {draftDone && (
+            <div
+              title={`Next waiver run: ${fmtWaiverDate(nextWaiverDate(processDay))}`}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 8, background: 'rgba(198,255,58,.08)', border: '1px solid rgba(198,255,58,.35)', cursor: 'default' }}
+            >
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: 15, color: 'var(--accent)', lineHeight: 1 }}>#{myWaiverPriority}</span>
+              <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>of {waiverOrder.length} waiver priority</span>
+              {myWaiverPriority === 1 && <span style={{ fontSize: 9, background: 'rgba(198,255,58,.2)', color: 'var(--accent)', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>FIRST PICK</span>}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <button className="btn ghost"><span>⇣</span> Export</button>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.1em' }}>
-              {draftDone ? 'Waiver Priority' : 'Mode'}
-            </div>
-            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 22, lineHeight: 1, color: draftDone ? 'var(--accent)' : 'var(--text-dim)' }}>
-              {draftDone ? `#${myWaiverPriority}` : 'Pre-Draft'}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -891,24 +893,6 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       {/* ── Players tab content ── */}
       {playersTab === 'players' && <>
 
-      {/* ── Waiver position banner ── */}
-      {draftDone && (
-        <div style={{ margin: '10px 18px 0', padding: '10px 16px', borderRadius: 10, background: 'rgba(198,255,58,.07)', border: '2px solid rgba(198,255,58,.35)', display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: 48, height: 48, borderRadius: 10, background: 'rgba(198,255,58,.15)', border: '1px solid rgba(198,255,58,.4)', flexShrink: 0 }}>
-            <span style={{ fontSize: 22, fontWeight: 900, color: 'var(--accent)', lineHeight: 1, fontFamily: 'var(--font-mono)' }}>{myWaiverPriority}</span>
-            <span style={{ fontSize: 8, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em' }}>of {waiverOrder.length}</span>
-          </div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
-              Your Waiver Priority: #{myWaiverPriority}
-              {myWaiverPriority === 1 && <span style={{ marginLeft: 8, fontSize: 10, background: 'rgba(198,255,58,.2)', color: 'var(--accent)', borderRadius: 4, padding: '2px 6px', fontWeight: 700 }}>FIRST PICK</span>}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-              Next waiver run: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{fmtWaiverDate(nextWaiverDate(processDay))}</span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Success toast (pre-draft pickups) ── */}
       {addSuccess && (
@@ -1902,6 +1886,8 @@ function NextGenStatsPanel({ pos, tot, gp, player }) {
         <SeasonStatBar label="Targets / Game" val={v(tot.rec_tgt, gp)} max={8} leagueAvg={2.8} />
         <SeasonStatBar label="Catch %" val={pctVal(tot.rec, tot.rec_tgt) != null ? pctVal(tot.rec, tot.rec_tgt) + '%' : '—'} max={100} leagueAvg={75} />
         <SeasonStatBar label="Rec Yds / Game" val={v(tot.rec_yd, gp)} max={60} leagueAvg={16} />
+        <SeasonStatBar label="ADOT" val={tot.rec_tgt > 0 ? v(tot.rec_air_yd, tot.rec_tgt) : (player?.adot ?? '—')} max={8} leagueAvg={1.5} />
+        <SeasonStatBar label="Air Yards Total" val={tot.rec_air_yd > 0 ? Math.round(tot.rec_air_yd) : (player?.airYds ? Math.round(player.airYds) : '—')} max={500} leagueAvg={100} />
         <SeasonStatBar label="YAC Total" val={yac > 0 ? Math.round(yac) : '—'} max={600} leagueAvg={150} />
         <SeasonStatBar label="YAC / Rec" val={yac > 0 && tot.rec > 0 ? parseFloat((yac / tot.rec).toFixed(1)) : '—'} max={10} leagueAvg={4.5} />
       </Section>
@@ -3187,8 +3173,8 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                         {player.tgtG != null && (player.pos === 'WR' || player.pos === 'TE' || player.pos === 'RB') && <SeasonStatBar label="Targets / Game" val={player.tgtG.toFixed(1)} max={player.pos === 'RB' ? 8 : 12} leagueAvg={player.pos === 'WR' ? 5.5 : player.pos === 'TE' ? 4.5 : 2.8} {...ngRank('tgtG')} />}
                         {player.targetShare > 0 && <SeasonStatBar label="Target Share" val={`${player.targetShare.toFixed(1)}%`} max={player.pos === 'RB' ? 20 : 35} leagueAvg={player.pos === 'WR' ? 15 : player.pos === 'TE' ? 12 : 5} {...ngRank('targetShare')} />}
                         {player.attG != null && (player.pos === 'RB' || player.pos === 'QB') && <SeasonStatBar label="Rush Att / Game" val={player.attG.toFixed(1)} max={25} leagueAvg={player.pos === 'RB' ? 12 : 4} {...ngRank('attG')} />}
-                        {player.adot != null && (player.pos === 'WR' || player.pos === 'TE') && <SeasonStatBar label="ADOT" val={player.adot.toFixed(1)} max={20} leagueAvg={player.pos === 'WR' ? 10.5 : 7.5} {...ngRank('adot')} />}
-                        {player.airYds != null && (player.pos === 'WR' || player.pos === 'TE') && <SeasonStatBar label="Air Yards (season)" val={Math.round(player.airYds)} max={1800} leagueAvg={player.pos === 'WR' ? 600 : 350} {...ngRank('airYds')} />}
+                        {player.adot != null && (player.pos === 'WR' || player.pos === 'TE' || player.pos === 'RB') && <SeasonStatBar label="ADOT" val={player.adot.toFixed(1)} max={player.pos === 'RB' ? 8 : 20} leagueAvg={player.pos === 'WR' ? 10.5 : player.pos === 'TE' ? 7.5 : 1.5} {...ngRank('adot')} />}
+                        {player.airYds != null && (player.pos === 'WR' || player.pos === 'TE' || player.pos === 'RB') && <SeasonStatBar label="Air Yards (season)" val={Math.round(player.airYds)} max={player.pos === 'RB' ? 500 : 1800} leagueAvg={player.pos === 'WR' ? 600 : player.pos === 'TE' ? 350 : 100} {...ngRank('airYds')} />}
                         {player.yac > 0 && <SeasonStatBar label="YAC (season)" val={Math.round(player.yac)} max={800} leagueAvg={player.pos === 'WR' ? 250 : player.pos === 'RB' ? 150 : 180} {...ngRank('yac')} />}
                         {player.yptgt != null && (player.pos === 'WR' || player.pos === 'TE') && <SeasonStatBar label="Yards / Target" val={player.yptgt.toFixed(1)} max={15} leagueAvg={player.pos === 'WR' ? 7.5 : 6.5} {...ngRank('yptgt')} />}
                         {player.comboYdsG != null && <SeasonStatBar label="Combo Yds / Game" val={player.comboYdsG.toFixed(1)} max={150} leagueAvg={player.pos === 'RB' ? 65 : player.pos === 'WR' ? 55 : 40} {...ngRank('comboYdsG')} />}
