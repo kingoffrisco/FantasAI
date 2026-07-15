@@ -199,6 +199,25 @@ def _apply_player_corrections(players: list, article_url: str, alias_map: dict, 
     return [alias_map.get((p or "").strip().lower(), p) for p in players]
 
 
+def _recorrect_cached_articles(articles: list, alias_map: dict, overrides: dict) -> list:
+    """Re-apply the current alias map / label overrides to already-classified
+    (cached) articles. Labels are usually added against articles that were
+    classified in a prior run, so without this a correction would silently
+    never take effect unless the article happened to be re-classified from
+    scratch (--full). Pure Python transform — no LLM calls, cheap to run
+    on every invocation.
+    """
+    out = []
+    for a in articles:
+        if not a.get("players"):
+            out.append(a)
+            continue
+        url = a.get("article_url") or ""
+        corrected = _apply_player_corrections(a["players"], url, alias_map, overrides)
+        out.append({**a, "players": corrected} if corrected != a["players"] else a)
+    return out
+
+
 # -- Model calls ------------------------------------------------------------
 
 def _call_model(prompt: str) -> dict:
@@ -453,9 +472,10 @@ def main():
 
     if not articles and cached_articles:
         print("[Job 1] No new articles — rebuilding outputs from cache.")
-        player_notes = build_player_notes(cached_articles)
-        ai_summaries = build_ai_summaries(cached_articles, feedback_scores)
-        beat_signals = build_beat_writer_signals(cached_articles)
+        recorrected = _recorrect_cached_articles(cached_articles, alias_map, label_overrides)
+        player_notes = build_player_notes(recorrected)
+        ai_summaries = build_ai_summaries(recorrected, feedback_scores)
+        beat_signals = build_beat_writer_signals(recorrected)
         if not args.dry_run:
             r2_put("fantasai/news/player_notes.json", player_notes)
             r2_put("fantasai/news/ai_summaries.json", ai_summaries)
@@ -573,14 +593,17 @@ def main():
         % (len(classified), errors, avg)
     )
 
-    # Merge new results into cache and prune old entries
+    # Merge new results into cache and prune old entries. Re-apply corrections
+    # to the cached portion — `classified` already went through corrections
+    # in the loop above, but previously-cached articles never have.
     cutoff = (
         datetime.now(timezone.utc) - timedelta(days=CACHE_TTL_DAYS)
     ).isoformat()
-    merged = [
-        a for a in cached_articles
-        if a.get("classified_at", "9999") >= cutoff
-    ] + classified
+    recorrected_cache = _recorrect_cached_articles(
+        [a for a in cached_articles if a.get("classified_at", "9999") >= cutoff],
+        alias_map, label_overrides,
+    )
+    merged = recorrected_cache + classified
     # Deduplicate by _fid (keep latest)
     seen: set = set()
     deduped = []
