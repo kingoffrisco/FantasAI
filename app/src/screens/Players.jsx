@@ -3,7 +3,7 @@ import WatchlistScreen from './Watchlist.jsx';
 import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer, getPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -2202,6 +2202,15 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const [lineagePicks, setLineagePicks] = React.useState([]);
   const [lineageLoading, setLineageLoading] = React.useState(true);
 
+  // Start/Sit advice — same source Current Roster uses, so every player gets
+  // evaluated the same way regardless of whether they're rostered.
+  const { data: r2StartSitRaw } = useR2WeeklyStartSit();
+  const startSit = React.useMemo(() => {
+    const players = r2StartSitRaw?.players || {};
+    const key = player.name?.toLowerCase().trim();
+    return key ? players[key] || null : null;
+  }, [r2StartSitRaw, player.name]);
+
   React.useEffect(() => {
     setAdded(false);
     setStatYear(new Date() >= new Date('2026-09-09') ? 2026 : 2025);
@@ -3259,6 +3268,89 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
           {/* ── News ── */}
           {activeTab === 'news' && (
             <>
+              <a
+                href={`https://www.youtube.com/results?search_query=${encodeURIComponent(player.name + ' NFL highlights')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 6, background: 'rgba(26,255,160,.08)', border: '1px solid rgba(26,255,160,.35)', color: '#1affa0', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '.04em', marginBottom: 14 }}
+              >
+                <svg width="14" height="10" viewBox="0 0 18 13" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+                  <path d="M17.6 2.03C17.4 1.29 16.83.72 16.09.52 14.67.14 9 .14 9 .14S3.33.14 1.91.52C1.17.72.6 1.29.4 2.03 0 3.47 0 6.5 0 6.5s0 3.03.4 4.47c.2.74.77 1.31 1.51 1.51C3.33 12.86 9 12.86 9 12.86s5.67 0 7.09-.38c.74-.2 1.31-.77 1.51-1.51C18 9.53 18 6.5 18 6.5s0-3.03-.4-4.47z" fill="#1affa0"/>
+                  <path d="M7.2 9.29l4.73-2.79L7.2 3.71v5.58z" fill="black"/>
+                </svg>
+                Highlights
+              </a>
+
+              {startSit && (() => {
+                const rec  = startSit.recommendation;
+                const conf = startSit.confidence;
+                const mi   = startSit.matchup_indicator;
+                const clr  = rec === 'MONITOR' ? '#ff9800' : rec?.startsWith('START') ? '#1affa0' : rec?.startsWith('SIT') ? '#ff4f4f' : '#ffb547';
+                const bg   = rec === 'MONITOR' ? 'rgba(255,152,0,.08)' : rec === 'START' ? 'rgba(26,255,160,.08)' : rec === 'SIT' ? 'rgba(255,79,79,.08)' : 'rgba(255,181,71,.08)';
+                const bdr  = rec === 'MONITOR' ? 'rgba(255,152,0,.25)' : rec === 'START' ? 'rgba(26,255,160,.25)' : rec === 'SIT' ? 'rgba(255,79,79,.25)' : 'rgba(255,181,71,.25)';
+                const miClr = mi === 'SMASH' ? '#1affa0' : mi === 'FAVORABLE' ? '#1affa0' : mi === 'AVOID' ? '#ff4f4f' : mi === 'DIFFICULT' ? '#ff9800' : 'var(--text)';
+                const factors = startSit.factors || [];
+                const scoreVal = startSit.start_score ?? 0;
+                const scoreBarClr = scoreVal >= 65 ? '#1affa0' : scoreVal <= 35 ? '#ff4f4f' : '#ffb547';
+                return (
+                  <div className="card" style={{ marginBottom: 14, padding: '12px 16px' }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 8 }}>Start/Sit Advice</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 900, padding: '2px 8px', borderRadius: 4, color: clr, background: bg, border: `1px solid ${bdr}`, letterSpacing: '.08em' }}>
+                        {rec}
+                      </span>
+                      {startSit.depth_label && (
+                        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: startSit.depth_order > 1 ? '#ffb547' : 'var(--text-faint)', fontWeight: startSit.depth_order > 1 ? 700 : 400 }}>
+                          {startSit.depth_label}
+                        </span>
+                      )}
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>Week {startSit.week}</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '3px 8px', fontSize: 10, fontFamily: 'var(--font-mono)', marginBottom: 8 }}>
+                      {startSit.start_score != null && <>
+                        <span style={{ color: 'var(--text-faint)', fontWeight: 700 }}>Start Score:</span>
+                        <span style={{ fontWeight: 900, fontSize: 13, color: scoreBarClr }}>{startSit.start_score}<span style={{ color: 'var(--text-faint)', fontSize: 10, fontWeight: 400 }}>/100</span> <span style={{ fontSize: 9, color: clr, fontWeight: 700 }}>{conf}</span></span>
+                      </>}
+                      {mi && <>
+                        <span style={{ color: 'var(--text-faint)', fontWeight: 700 }}>{startSit.matchup_type || 'Defense Matchup'}:</span>
+                        <span style={{ fontWeight: 800, color: miClr }}>{mi}{startSit.def_rank && startSit.def_rank !== '?' ? ` (#${startSit.def_rank}/32)` : ''}</span>
+                      </>}
+                      {startSit.opponent && <>
+                        <span style={{ color: 'var(--text-faint)', fontWeight: 700 }}>Opponent:</span>
+                        <span style={{ fontWeight: 700, color: 'var(--text)' }}>vs {startSit.opponent}</span>
+                      </>}
+                    </div>
+                    {startSit.start_score != null && (
+                      <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,.08)', marginBottom: 8, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${scoreVal}%`, background: scoreBarClr, borderRadius: 2, transition: 'width .4s' }} />
+                      </div>
+                    )}
+                    {startSit.summary && (
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, marginBottom: 8, fontStyle: 'italic' }}>
+                        {startSit.summary}
+                      </div>
+                    )}
+                    {factors.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        {factors.map((f, fi) => {
+                          const fc = f.sentiment === 'positive' ? '#1affa0' : f.sentiment === 'negative' ? '#ff4f4f' : 'var(--text-faint)';
+                          const sym = f.sentiment === 'positive' ? '▲' : f.sentiment === 'negative' ? '▼' : '◆';
+                          return (
+                            <div key={fi} style={{ display: 'flex', gap: 5, alignItems: 'flex-start' }}>
+                              <span style={{ color: fc, fontSize: 9, marginTop: 2, flexShrink: 0 }}>{sym}</span>
+                              <span style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                                <strong style={{ color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, letterSpacing: '.04em' }}>{f.label}: </strong>
+                                {f.text}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <PlayerNewsCard items={playerNewsItems} loading={newsLoading || loading} playerName={player.name} />
               <PlayerArticlesCard articles={playerArticles} loading={articlesLoading} />
             </>
