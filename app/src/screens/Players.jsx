@@ -2208,7 +2208,11 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const startSit = React.useMemo(() => {
     const players = r2StartSitRaw?.players || {};
     const key = player.name?.toLowerCase().trim();
-    return key ? players[key] || null : null;
+    if (!key) return null;
+    for (const [name, entry] of Object.entries(players)) {
+      if (name.toLowerCase().trim() === key) return entry;
+    }
+    return null;
   }, [r2StartSitRaw, player.name]);
 
   React.useEffect(() => {
@@ -2429,7 +2433,12 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     if (!allWriteups || typeof allWriteups !== 'object') return null;
     // Top-level is { generated_at, players: { "Name": {...} } }
     const dict = allWriteups.players || allWriteups;
-    return dict[player.name] ?? null;
+    const key = player.name?.toLowerCase().trim();
+    if (!key) return null;
+    for (const [name, entry] of Object.entries(dict)) {
+      if (name.toLowerCase().trim() === key) return entry;
+    }
+    return null;
   }, [allWriteups, player.name]);
 
   // Pre-baked 2025 Sleeper stats (from R2) — used as fallback when live API unavailable
