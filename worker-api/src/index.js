@@ -1915,52 +1915,61 @@ function normalizeArticleRow(r) {
   return { headline, article_url, player_name, position: (position || '').toUpperCase(), team, published_at, publisher, description, article_rank };
 }
 
+// Articles are sourced from R2 (written by the local Job 1 / export_to_r2.py
+// pipeline), not Databricks — the export_player_news / gold_enriched_news
+// Databricks tables this used to query are no longer written to since the
+// pipeline moved local, and always returned empty.
 async function handleDbArticles(url, env) {
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '500'), 1000);
   let articles = [];
   let source = 'none';
 
-  // Primary: export_player_news — combined gold table, player context already resolved
-  try {
-    const rows = await queryDatabricks(
-      `SELECT news_id, headline, source_url, full_text, player_name, position, team, summary_text, fantasy_insight, impact_score, published_at FROM main.fantasai.export_player_news ORDER BY published_at DESC LIMIT ${limit}`, env
-    );
-    if (rows.length > 0) {
-      articles = rows.map(r => {
-        if (!r.headline || !r.source_url) return null;
-        return {
-          headline:        r.headline,
-          article_url:     r.source_url,
-          player_name:     r.player_name     || '',
-          position:        (r.position || '').toUpperCase(),
-          team:            r.team             || '',
-          published_at:    r.published_at     || null,
-          publisher:       'FantasAI',
-          description:     r.summary_text     || r.full_text || '',
-          summary_text:    r.summary_text     || '',
-          fantasy_insight: r.fantasy_insight  || '',
-          article_rank:    r.impact_score     ?? null,
-          ai_processed:    !!(r.summary_text  || r.fantasy_insight),
-        };
-      }).filter(Boolean);
-      source = 'export_player_news';
-    }
-  } catch (_) {}
-
-  // Fallback: gold_enriched_news (full articles with entity extraction)
-  if (articles.length === 0) {
+  // Primary: R2 player_news.json — unified pipeline output, player context already resolved
+  if (env.BUCKET) {
     try {
-      const rows = await queryDatabricks(
-        `SELECT headline, source_url, full_text, source_name, published_at FROM main.fantasai.gold_enriched_news ORDER BY published_at DESC LIMIT ${limit}`, env
-      );
-      if (rows.length > 0) {
-        articles = rows.map(r => normalizeArticleRow({ ...r, article_url: r.source_url, publisher: r.source_name })).filter(Boolean);
-        source = 'gold_enriched_news';
+      const obj = await env.BUCKET.get('fantasai/analysis/player_news.json');
+      if (obj) {
+        const data = await obj.json();
+        const rows = Array.isArray(data) ? data : (data.data || data.articles || []);
+        articles = rows.map(r => {
+          const article_url = r.source_url || r.article_url;
+          if (!r.headline || !article_url) return null;
+          return {
+            headline:        r.headline,
+            article_url,
+            player_name:     r.player_name     || '',
+            position:        (r.position || '').toUpperCase(),
+            team:            r.team             || '',
+            published_at:    r.published_at     || null,
+            publisher:       'FantasAI',
+            description:     r.summary_text     || r.full_text || '',
+            summary_text:    r.summary_text     || '',
+            fantasy_insight: r.fantasy_insight  || '',
+            article_rank:    r.impact_score     ?? null,
+            ai_processed:    !!(r.summary_text  || r.fantasy_insight || r.ai_generated_at),
+          };
+        }).filter(Boolean);
+        articles.sort((a, b) => new Date(b.published_at || 0) - new Date(a.published_at || 0));
+        articles = articles.slice(0, limit);
+        if (articles.length > 0) source = 'r2_player_news';
       }
     } catch (_) {}
   }
 
-  // silver_news fallback removed — violates medallion architecture (silver is internal-only)
+  // Fallback: R2 enriched_news.json (full articles with entity extraction)
+  if (articles.length === 0 && env.BUCKET) {
+    try {
+      const obj = await env.BUCKET.get('fantasai/news/enriched_news.json');
+      if (obj) {
+        const data = await obj.json();
+        const rows = Array.isArray(data) ? data : (data.data || data.articles || []);
+        articles = rows.map(r => normalizeArticleRow(r)).filter(Boolean);
+        articles.sort((a, b) => new Date(b.published_at || 0) - new Date(a.published_at || 0));
+        articles = articles.slice(0, limit);
+        if (articles.length > 0) source = 'r2_enriched_news';
+      }
+    } catch (_) {}
+  }
 
   return json({
     status: 'success',
