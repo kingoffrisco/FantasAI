@@ -3360,6 +3360,36 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                 );
               })()}
 
+              {!articlesLoading && playerArticles.length > 0 && (
+                <div className="card" style={{ marginBottom: 14 }}>
+                  <div className="card-head">
+                    <div className="card-title" style={{ fontSize: 11, letterSpacing: '.08em' }}>Player Articles</div>
+                    <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{playerArticles.length}</span>
+                  </div>
+                  <div style={{ padding: '4px 16px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {playerArticles.map((a, i) => {
+                      const url = a.article_url || a.source_url || '';
+                      const pub = a.published_at ? new Date(a.published_at) : null;
+                      const pubStr = pub ? pub.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+                      if (!url) return null;
+                      return (
+                        <a
+                          key={i}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12, color: '#4ea8ff', textDecoration: 'none', lineHeight: 1.4 }}
+                        >
+                          <span style={{ flexShrink: 0 }}>↗</span>
+                          <span style={{ flex: 1 }}>{a.headline || a.title}</span>
+                          {pubStr && <span style={{ flexShrink: 0, fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{pubStr}</span>}
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <PlayerNewsCard items={playerNewsItems} loading={newsLoading || loading} playerName={player.name} />
               <PlayerArticlesCard articles={playerArticles} loading={articlesLoading} />
             </>
