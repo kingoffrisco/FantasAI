@@ -155,6 +155,8 @@ export const api = {
     playerOwnership: () => r2Get('fantasai/analysis/player_ownership.json'),
     combineData:     () => r2Get('fantasai/analysis/combine_data.json'),
     playerStats2025: () => r2Get('fantasai/analysis/player_stats_2025.json'),
+    olineIndex:         () => r2Get('fantasai/analysis/oline_index.json'),
+    playerTeamHistory:  () => r2Get('fantasai/analysis/player_team_history.json'),
     weeklyStartSit:  () => r2Get('fantasai/analysis/weekly_startsit.json'),
   },
 

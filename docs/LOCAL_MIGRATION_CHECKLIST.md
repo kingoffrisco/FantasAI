@@ -116,6 +116,8 @@ Frontend reads R2 via `api.r2.*` in `app/src/api.js`. Every key below was found 
 | `fantasai/analysis/combine_data.json` | `ingest/ingest_combine.py` | `api.r2.combineData()` | ✅ 650 combine participants (2023-2025) |
 | `fantasai/analysis/performance_trends.json` | `export/export_to_r2.py` | `api.r2.trends()` | ✅ Produced (requires gold_weekly_stats data to be non-empty) |
 | `fantasai/draft/ghost_picks/board.json` | `job_ghost_picks_builder.py` | Draft screen | ✅ (manual trigger, pre-draft only) |
+| `fantasai/analysis/oline_index.json` | `ingest/ingest_oline_index.py` | `api.r2.olineIndex()` | ✅ Proprietary Run/Pass/Overall block score per team/season, derived from free nflverse PBP (no PFF data) |
+| `fantasai/analysis/player_team_history.json` | `ingest/ingest_oline_index.py` | `api.r2.playerTeamHistory()` | ✅ Which team a player suited up for each season (handles in-season trades), from `silver_weekly_stats` |
 
 ### Produced but Not Wired / Empty
 

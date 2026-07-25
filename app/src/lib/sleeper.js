@@ -196,6 +196,9 @@ export async function fetchSleeperPlayerStats(name, pos, season = 2025) {
     injuryBodyPart: player.injury_body_part || '',
     currentSeason: Number(state.season) || season,
     currentWeek,
+    // The week the projection above actually covers (Wk 1 in the offseason,
+    // otherwise the live current week). Used for the "Wk N Proj" label.
+    projWeek,
     gamesPlayed:   Object.keys(weeklyStats).length,
     weeklyStats,
     seasonTotals:  aggregate(Object.values(weeklyStats)),

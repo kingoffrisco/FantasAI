@@ -526,6 +526,48 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         PRIMARY KEY (article_id)
     );
 
+    -- =========================================================
+    -- OFFENSIVE LINE INDEX (proprietary, derived from nflverse PBP)
+    -- See ingest/ingest_oline_index.py — no free "official" O-line ranking
+    -- exists, so this is a composite score built from public play-by-play.
+    -- =========================================================
+    CREATE TABLE IF NOT EXISTS team_oline_index (
+        season                      INTEGER,
+        team                        VARCHAR,
+        dropbacks                   INTEGER,
+        rush_plays                  INTEGER,
+        sack_rate                   DOUBLE,
+        pressure_rate               DOUBLE,
+        pass_epa_per_play           DOUBLE,
+        pass_success_rate           DOUBLE,
+        stuff_rate                  DOUBLE,
+        explosive_run_rate          DOUBLE,
+        rush_epa_per_play           DOUBLE,
+        rush_success_rate           DOUBLE,
+        short_yardage_success_rate  DOUBLE,
+        pass_block_score            DOUBLE,
+        run_block_score             DOUBLE,
+        overall_score               DOUBLE,
+        pass_block_rank             INTEGER,
+        run_block_rank              INTEGER,
+        overall_rank                INTEGER,
+        imported_at                 TIMESTAMP,
+        PRIMARY KEY (season, team)
+    );
+
+    -- Which team a player suited up for each season, from silver_weekly_stats
+    -- (nflverse recent_team). Handles in-season trades: is_primary marks the
+    -- team the player played the most games for that season.
+    CREATE TABLE IF NOT EXISTS player_team_seasons (
+        player_name   VARCHAR,
+        season        INTEGER,
+        team          VARCHAR,
+        games         INTEGER,
+        is_primary    BOOLEAN,
+        imported_at   TIMESTAMP,
+        PRIMARY KEY (player_name, season, team)
+    );
+
     """
 
     for stmt in sql.split(";"):

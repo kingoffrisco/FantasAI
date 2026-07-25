@@ -10,6 +10,35 @@ import { api } from '../api.js';
 
 const dstOverallRank = (posRank) => 150 + (posRank - 1) * 3;
 
+// Strip generational suffixes so "Kenneth Walker" (app roster) matches "Kenneth Walker III"
+// (CFBD college stats) without falling back to a last-name-only match, which can collide
+// with dozens of unrelated players sharing a common surname.
+const stripNameSuffix = s => (s || '').replace(/\s+(jr|sr|ii|iii|iv|v)\.?$/i, '').trim();
+
+// Find a player's rows in a CFBD-style array keyed by player_name. Tries an exact
+// (suffix-stripped) match first; if that fails, falls back to same-last-name +
+// same-first-initial (handles nickname/given-name mismatches like "KC Concepcion"
+// (app/Sleeper) vs "Kevin Concepcion" (CFBD)) — but only when that fallback resolves
+// to exactly one distinct player, never a guess between several candidates.
+function matchCollegeRows(arr, targetName) {
+  const key = stripNameSuffix(targetName?.toLowerCase().trim());
+  if (!key) return [];
+  const exact = arr.filter(r => stripNameSuffix(r.player_name?.toLowerCase().trim() || '') === key);
+  if (exact.length) return exact;
+  const parts = key.split(' ');
+  const last = parts[parts.length - 1];
+  const firstInitial = key[0];
+  if (!last || !firstInitial) return [];
+  const candidates = new Set(
+    arr
+      .map(r => stripNameSuffix(r.player_name?.toLowerCase().trim() || ''))
+      .filter(n => n.endsWith(' ' + last) && n[0] === firstInitial)
+  );
+  if (candidates.size !== 1) return [];
+  const [only] = candidates;
+  return arr.filter(r => stripNameSuffix(r.player_name?.toLowerCase().trim() || '') === only);
+}
+
 // ── "Your turn" chime options — each is a list of [frequency, delaySeconds] tone pairs
 // played through the shared playChime() synthesizer (no audio files). ────────────────
 const TURN_CHIMES = [
@@ -55,7 +84,7 @@ function getNgVal(p, statId, breakoutByName) {
     case 'opp_score':  return b?.opportunity_score != null ? +b.opportunity_score.toFixed(1) : null;
     case 'snap_pct':   return b?.avg_snap_share != null ? +(b.avg_snap_share * 100).toFixed(1) : null;
     case 'snap_delta': return b?.snap_share_delta != null ? +(b.snap_share_delta * 100).toFixed(1) : null;
-    case 'tgt_share':  return p.targetShare > 0 ? +(p.targetShare * 100).toFixed(1) : null;
+    case 'tgt_share':  return p.targetShare > 0 ? +p.targetShare.toFixed(1) : null;
     case 'yac':        return p.yac > 0 ? +p.yac.toFixed(1) : null;
     default:           return null;
   }
@@ -2772,16 +2801,10 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
       setLoading(false);
       // Fetch college stats for rookies
       try {
-        const csRes = await fetch('https://api.fantasai.net/api/v1/r2/fantasai/analysis/college_stats.json', { signal: AbortSignal.timeout(8000) });
-        if (csRes.ok && !cancelled) {
-          const csData = await csRes.json();
+        const csData = await api.r2.collegeStats();
+        if (csData && !cancelled) {
           const csArr = Array.isArray(csData) ? csData : csData?.data || [];
-          const pKey = p.name?.toLowerCase().trim();
-          let mine = csArr.filter(r => r.player_name?.toLowerCase().trim() === pKey);
-          if (!mine.length) {
-            const lastName = pKey.split(' ').slice(1).join(' ');
-            if (lastName) mine = csArr.filter(r => (r.player_name?.toLowerCase().trim() || '').endsWith(lastName));
-          }
+          const mine = matchCollegeRows(csArr, p.name);
           if (mine.length) setCollegeStats(mine.sort((a, b) => (a.season || 0) - (b.season || 0)));
         }
       } catch {}
@@ -2874,10 +2897,10 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
           const isRookie = p.rookie || (p.age && p.age <= 24 && !seasons[2023]?._gp && !seasons[2024]?._gp);
           const nflStart = firstNflSeason ?? (isRookie ? 2026 : 2023);
           const nflCols = pos === 'QB'
-            ? [{ k: 'G', fn: s => s._gp }, { k: 'Cmp', fn: s => s.pass_cmp }, { k: 'Att', fn: s => s.pass_att }, { k: 'Yds', fn: s => s.pass_yd }, { k: 'TD', fn: s => s.pass_td }, { k: 'INT', fn: s => s.pass_int }, { k: 'Pts', fn: s => s.pts_half_ppr?.toFixed(1) }]
+            ? [{ k: 'G', fn: s => s._gp }, { k: 'Cmp', fn: s => s.pass_cmp }, { k: 'Att', fn: s => s.pass_att }, { k: 'Yds', fn: s => s.pass_yd }, { k: 'TD', fn: s => s.pass_td }, { k: 'INT', fn: s => s.pass_int }, { k: 'RuYd', fn: s => s.rush_yd }, { k: 'Pts', fn: s => s.pts_half_ppr?.toFixed(1) }]
             : pos === 'RB'
             ? [{ k: 'G', fn: s => s._gp }, { k: 'Att', fn: s => s.rush_att }, { k: 'RuYd', fn: s => s.rush_yd }, { k: 'RuTD', fn: s => s.rush_td }, { k: 'Rec', fn: s => s.rec }, { k: 'ReYd', fn: s => s.rec_yd }, { k: 'Pts', fn: s => s.pts_half_ppr?.toFixed(1) }]
-            : [{ k: 'G', fn: s => s._gp }, { k: 'Tgt', fn: s => s.rec_tgt }, { k: 'Rec', fn: s => s.rec }, { k: 'Yds', fn: s => s.rec_yd }, { k: 'TD', fn: s => s.rec_td }, { k: 'Pts', fn: s => s.pts_half_ppr?.toFixed(1) }];
+            : [{ k: 'G', fn: s => s._gp }, { k: 'Tgt', fn: s => s.rec_tgt }, { k: 'Rec', fn: s => s.rec }, { k: 'Yds', fn: s => s.rec_yd }, { k: 'TD', fn: s => s.rec_td }, { k: 'RuYd', fn: s => s.rush_yd }, { k: 'Pts', fn: s => s.pts_half_ppr?.toFixed(1) }];
           const collegeCols = pos === 'QB'
             ? [{ k: 'Cmp', fn: s => s.completions }, { k: 'Att', fn: s => s.att }, { k: 'Yds', fn: s => s.yds }, { k: 'TD', fn: s => s.td }, { k: 'INT', fn: s => s.int }]
             : pos === 'RB'

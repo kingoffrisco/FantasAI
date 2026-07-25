@@ -135,6 +135,13 @@ def main():
         if not run("ingest/ingest_combine.py", combine_args, "NFL Combine data — nflverse measurables"):
             failed.append("combine")
 
+        # Offensive Line Index (nflverse PBP — proprietary run/pass block score + team history)
+        oline_args = extra[:]
+        if args.seasons:
+            oline_args += ["--seasons", args.seasons]
+        if not run("ingest/ingest_oline_index.py", oline_args, "Offensive Line Index — nflverse play-by-play"):
+            failed.append("oline_index")
+
         # Player ownership (Sleeper public league sampling — runs weekly, non-fatal)
         if not run("ingest/ingest_ownership.py", extra, "Player ownership % — Sleeper public leagues"):
             print("   ⚠️  Ownership crawl failed (non-fatal)")

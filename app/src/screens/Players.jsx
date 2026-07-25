@@ -3,11 +3,40 @@ import WatchlistScreen from './Watchlist.jsx';
 import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer, getPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 import { api } from '../api.js';
+
+// Strip generational suffixes so "Kenneth Walker" (app roster) matches "Kenneth Walker III"
+// (CFBD college stats) without falling back to a last-name-only match, which can collide
+// with dozens of unrelated players sharing a common surname.
+const stripNameSuffix = s => (s || '').replace(/\s+(jr|sr|ii|iii|iv|v)\.?$/i, '').trim();
+
+// Find a player's rows in a CFBD-style array keyed by player_name. Tries an exact
+// (suffix-stripped) match first; if that fails, falls back to same-last-name +
+// same-first-initial (handles nickname/given-name mismatches like "KC Concepcion"
+// (app/Sleeper) vs "Kevin Concepcion" (CFBD)) — but only when that fallback resolves
+// to exactly one distinct player, never a guess between several candidates.
+function matchCollegeRows(arr, targetName) {
+  const key = stripNameSuffix(targetName?.toLowerCase().trim());
+  if (!key) return [];
+  const exact = arr.filter(r => stripNameSuffix(r.player_name?.toLowerCase().trim() || '') === key);
+  if (exact.length) return exact;
+  const parts = key.split(' ');
+  const last = parts[parts.length - 1];
+  const firstInitial = key[0];
+  if (!last || !firstInitial) return [];
+  const candidates = new Set(
+    arr
+      .map(r => stripNameSuffix(r.player_name?.toLowerCase().trim() || ''))
+      .filter(n => n.endsWith(' ' + last) && n[0] === firstInitial)
+  );
+  if (candidates.size !== 1) return [];
+  const [only] = candidates;
+  return arr.filter(r => stripNameSuffix(r.player_name?.toLowerCase().trim() || '') === only);
+}
 
 const NFL_TEAM_NAME = {
   ARI:'Cardinals',ATL:'Falcons',BAL:'Ravens',BUF:'Bills',CAR:'Panthers',CHI:'Bears',CIN:'Bengals',CLE:'Browns',
@@ -1836,7 +1865,7 @@ function LiveBadge() {
 
 // Position-aware game-log columns — expanded with advanced stats
 function glCols(pos) {
-  if (pos === 'QB')  return ['Att','Cmp','Cmp%','Yds','TD','INT','Air Yds','Pts'];
+  if (pos === 'QB')  return ['Att','Cmp','Cmp%','Yds','TD','INT','Air Yds','Ru Yds','Ru TD','Pts'];
   if (pos === 'RB')  return ['Att','Ru Yds','YPC','TD','Rec','Tgt','Re Yds','Snp','Pts'];
   if (pos === 'K')   return ['FGM','FGA','FG%','Long','XP','Pts'];
   if (pos === 'DST') return ['Sack','INT','FR','TD','PA','Pts'];
@@ -1847,7 +1876,7 @@ function glRow(pos, s) {
   if (!s) return null;
   const pts = s.pts_half_ppr ?? s.pts_std;
   const pct = (a, b) => (a > 0 && b > 0) ? `${((a/b)*100).toFixed(0)}%` : '—';
-  if (pos === 'QB')  return [fmtStat(s.pass_att), fmtStat(s.pass_cmp), pct(s.pass_cmp, s.pass_att), fmtStat(s.pass_yd), fmtStat(s.pass_td), fmtStat(s.pass_int), fmtStat(s.pass_air_yd || s.pass_cmp_air_yd), fmtStat(pts, 1)];
+  if (pos === 'QB')  return [fmtStat(s.pass_att), fmtStat(s.pass_cmp), pct(s.pass_cmp, s.pass_att), fmtStat(s.pass_yd), fmtStat(s.pass_td), fmtStat(s.pass_int), fmtStat(s.pass_air_yd || s.pass_cmp_air_yd), fmtStat(s.rush_yd), fmtStat(s.rush_td), fmtStat(pts, 1)];
   if (pos === 'RB')  return [fmtStat(s.rush_att), fmtStat(s.rush_yd), (s.rush_att > 0 ? ((s.rush_yd||0)/(s.rush_att)).toFixed(1) : '—'), fmtStat((s.rush_td||0)+(s.rec_td||0)), fmtStat(s.rec), fmtStat(s.rec_tgt), fmtStat(s.rec_yd), fmtStat(s.off_snp), fmtStat(pts, 1)];
   if (pos === 'K')   return [fmtStat(s.fgm), fmtStat(s.fga), pct(s.fgm, s.fga), fmtStat(s.fg_lng), fmtStat(s.xpm), fmtStat(pts, 1)];
   if (pos === 'DST') return [fmtStat(s.sack), fmtStat(s.def_int), fmtStat(s.def_fr), fmtStat(s.def_td), fmtStat(s.pts_allow), fmtStat(pts, 1)];
@@ -1858,7 +1887,7 @@ function glRow(pos, s) {
 function glRawNums(pos, s) {
   if (!s) return null;
   const pts = s.pts_half_ppr ?? s.pts_std ?? 0;
-  if (pos === 'QB')  return [s.pass_att||0, s.pass_cmp||0, s.pass_att>0 ? (s.pass_cmp||0)/s.pass_att*100 : 0, s.pass_yd||0, s.pass_td||0, s.pass_int||0, s.pass_air_yd||s.pass_cmp_air_yd||0, pts];
+  if (pos === 'QB')  return [s.pass_att||0, s.pass_cmp||0, s.pass_att>0 ? (s.pass_cmp||0)/s.pass_att*100 : 0, s.pass_yd||0, s.pass_td||0, s.pass_int||0, s.pass_air_yd||s.pass_cmp_air_yd||0, s.rush_yd||0, s.rush_td||0, pts];
   if (pos === 'RB')  return [s.rush_att||0, s.rush_yd||0, s.rush_att>0 ? (s.rush_yd||0)/s.rush_att : 0, (s.rush_td||0)+(s.rec_td||0), s.rec||0, s.rec_tgt||0, s.rec_yd||0, s.off_snp||0, pts];
   if (pos === 'K')   return [s.fgm||0, s.fga||0, s.fga>0 ? (s.fgm||0)/s.fga*100 : 0, s.fg_lng||0, s.xpm||0, pts];
   if (pos === 'DST') return [s.sack||0, s.def_int||0, s.def_fr||0, s.def_td||0, s.pts_allow||0, pts];
@@ -1867,7 +1896,7 @@ function glRawNums(pos, s) {
 
 // true = higher is better (false = lower is better, e.g. INTs, pts_allowed)
 function glHigherIsBetter(pos) {
-  if (pos === 'QB')  return [true, true, true, true, true, false, true, true];
+  if (pos === 'QB')  return [true, true, true, true, true, false, true, true, true, true];
   if (pos === 'RB')  return [true, true, true, true, true, true, true, true, true];
   if (pos === 'K')   return [true, true, true, true, true, true];
   if (pos === 'DST') return [true, true, true, true, false, true];
@@ -2161,20 +2190,12 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const { data: r2DefVsPos } = useR2DefenseVsPos();
   const { data: r2RookieScoresData } = useR2RookieScores();
   const { data: r2CollegeStatsRaw } = useR2CollegeStats();
+  const { data: r2OlineIndex } = useR2OlineIndex();
+  const { data: r2TeamHistory } = useR2PlayerTeamHistory();
   const collegeStats = React.useMemo(() => {
     if (!player.rookie || !r2CollegeStatsRaw) return null;
     const arr = Array.isArray(r2CollegeStatsRaw) ? r2CollegeStatsRaw : r2CollegeStatsRaw?.data || [];
-    const key = player.name?.toLowerCase().trim();
-    let rows = arr.filter(r => r.player_name?.toLowerCase().trim() === key);
-    if (!rows.length) {
-      const parts = key.split(' ');
-      const last = parts.slice(1).join(' ');
-      if (last) rows = arr.filter(r => {
-        const n = r.player_name?.toLowerCase().trim() || '';
-        return n.endsWith(last) && n !== key;
-      });
-    }
-    rows.sort((a, b) => (a.season || 0) - (b.season || 0));
+    const rows = matchCollegeRows(arr, player.name).sort((a, b) => (a.season || 0) - (b.season || 0));
     return rows.length > 0 ? rows : null;
   }, [player, r2CollegeStatsRaw]);
   const detailRookieData = React.useMemo(() => {
@@ -2194,6 +2215,19 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const [added, setAdded] = React.useState(false);
   // Show 2025 stats until 2026 Week 1 is complete (~Sep 9 2026)
   const [statYear, setStatYear] = React.useState(() => new Date() >= new Date('2026-09-09') ? 2026 : 2025);
+
+  // Which team the player suited up for in statYear, and that team's O-Line Index for
+  // that season — surfaces situation changes (e.g. RB moved from a bad line to a good one).
+  const yearTeam = React.useMemo(() => {
+    const key = player.name?.toLowerCase().trim();
+    const rec = r2TeamHistory?.players?.find(p => p.player_name?.toLowerCase().trim() === key);
+    const seasonRec = rec?.seasons?.[String(statYear)];
+    return seasonRec?.team || (statYear >= 2026 ? player.team : null) || null;
+  }, [r2TeamHistory, player, statYear]);
+  const yearOline = React.useMemo(() => {
+    if (!yearTeam || !r2OlineIndex?.teams) return null;
+    return r2OlineIndex.teams[yearTeam]?.[String(statYear)] ?? null;
+  }, [r2OlineIndex, yearTeam, statYear]);
   const [fetchedNewsItems, setFetchedNewsItems] = React.useState([]);
   const [newsLoading, setNewsLoading] = React.useState(true);
   const [playerArticles,  setPlayerArticles]  = React.useState([]);
@@ -2390,10 +2424,15 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const isOwnedByOther = !!ownerTeamId;
   const sleeperEnabled = sourcesState?.freeApis?.['sleeper-api'] !== false;
 
+  // player.opp comes from the draft export, which isn't populated with next-season
+  // matchups until the schedule lands there — fall back to the live ESPN schedule map.
+  const scheduleOppMap = useScheduleOppMap();
+  const displayOpp = player.opp || scheduleOppMap.get(player.team) || '';
+
   // Position-specific matchup rating for this player
   const detailMatchupRating = React.useMemo(() => {
-    if (!r2DefVsPos?.data?.length || !player.opp || player.pos === 'DST') return null;
-    const oppTeam = player.opp.replace(/^@/, '').toUpperCase();
+    if (!r2DefVsPos?.data?.length || !displayOpp || player.pos === 'DST') return null;
+    const oppTeam = displayOpp.replace(/^@/, '').toUpperCase();
     const posKey  = player.pos;
     const row = r2DefVsPos.data.find(
       r => r.def_team?.toUpperCase() === oppTeam && r.position === posKey
@@ -2419,7 +2458,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
            : rank >= 23 ? '#4ea8ff'
            : 'var(--text-faint)',
     };
-  }, [r2DefVsPos, player.opp, player.pos]);
+  }, [r2DefVsPos, displayOpp, player.pos]);
 
   const { data: detailBreakouts } = useR2BreakoutCandidates();
   const detailOppScore = React.useMemo(() => {
@@ -2698,7 +2737,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
           <div>
             <div className="flex gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <PosBadge pos={player.pos} solid />
-              <TeamLogoBadge team={player.team} size={20} />
+              <TeamLogoBadge team={{ name: player.team, color: NFL_TEAMS.find(t => t.abbr === player.team)?.color }} size={20} />
               <span className="mono dim" style={{ fontSize: 11 }}>{player.team} {NFL_TEAM_NAME[player.team] || ''} · #{player.num} · Age {player.age}</span>
               {(player.status !== 'OK' || statusFromLive) &&
                 <span className="status-pill"><StatusDot status={player.status} /> {statusFromLive || player.status}</span>}
@@ -2759,8 +2798,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
               <div style={{ display:'grid', gridTemplateColumns:`repeat(${(detailOppScore != null || detailMatchupRating != null) ? 5 : 4},1fr)`, gap:10, marginBottom:16 }}>
                 <div className="stat">
                   <div className="k">
-                    Wk {displayLive?.currentWeek || '—'} Proj
-                    {hasLive && <span style={{ marginLeft: 5, fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)', verticalAlign: 'middle' }}>SLEEPER</span>}
+                    Wk {displayLive?.projWeek || displayLive?.currentWeek || '—'} Proj
                   </div>
                   <div className="v accent">
                     {parseFloat((displayLive?.projection?.pts_half_ppr ?? displayLive?.projection?.pts_std ?? (player.proj > 0 ? player.proj : (() => {
@@ -2774,7 +2812,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                     })())).toFixed(1))}
                   </div>
                   <div className="sub">
-                    vs {player.opp}
+                    vs {displayOpp || '—'}
                     {detailMatchupRating && detailMatchupRating.score !== 0 &&
                       <span style={{ marginLeft: 4, color: detailMatchupRating.color, fontWeight: 700 }}>· {detailMatchupRating.label}</span>}
                   </div>
@@ -3030,8 +3068,8 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                 ) : (
                   <div style={{ fontSize:13, lineHeight:1.55 }}>
                     {player.proj > 18
-                      ? `Lock 'em in. Matchup model loves ${player.opp.replace('@','')} — ${player.name} should see volume at depth. Proj ${player.proj.toFixed(1)} is conservative; 75th-pct is ${(player.proj*1.25).toFixed(1)}.`
-                      : `Mixed signals. Volume is fine but ${player.opp.replace('@','')} has been stingy near the goal line. Floor ${(player.proj*0.6).toFixed(1)}, ceiling ${(player.proj*1.4).toFixed(1)}.`}
+                      ? `Lock 'em in. Matchup model loves ${displayOpp.replace('@','')} — ${player.name} should see volume at depth. Proj ${player.proj.toFixed(1)} is conservative; 75th-pct is ${(player.proj*1.25).toFixed(1)}.`
+                      : `Mixed signals. Volume is fine but ${displayOpp.replace('@','')} has been stingy near the goal line. Floor ${(player.proj*0.6).toFixed(1)}, ceiling ${(player.proj*1.4).toFixed(1)}.`}
                   </div>
                 )}
               </div>
@@ -3057,6 +3095,23 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                     }}
                   >{yr}{yr === 2026 && !has2026Data ? <span style={{ fontSize: 9, marginLeft: 4, opacity: 0.5 }}>No data yet</span> : null}</button>
                 ))}
+                {yearTeam && (
+                  <span className="mono" style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 6, marginLeft: 2 }}>
+                    <span style={{ color: 'var(--text-dim)', fontWeight: 700 }}>{yearTeam}</span>
+                    {yearOline && (
+                      <span
+                        title={`FantasAI O-Line Index (nflverse-derived) — Pass Block #${yearOline.pass_block_rank} of 32 · Run Block #${yearOline.run_block_rank} of 32`}
+                        style={{
+                          fontWeight: 700, padding: '1px 6px', borderRadius: 3,
+                          color: yearOline.overall_rank <= 10 ? '#1affa0' : yearOline.overall_rank >= 23 ? '#ff4f4f' : 'var(--text-faint)',
+                          background: yearOline.overall_rank <= 10 ? 'rgba(26,255,160,.1)' : yearOline.overall_rank >= 23 ? 'rgba(255,79,79,.1)' : 'transparent',
+                        }}
+                      >
+                        OL #{yearOline.overall_rank} <span style={{ opacity: 0.7, fontWeight: 500 }}>(Run #{yearOline.run_block_rank} · Pass #{yearOline.pass_block_rank})</span>
+                      </span>
+                    )}
+                  </span>
+                )}
                 {hasLive && <LiveBadge />}
                 <span className="mono faint" style={{ fontSize: 9 }}>Sleeper API</span>
               </div>
@@ -3407,18 +3462,18 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 800, color: detailMatchupRating.color }}>{detailMatchupRating.label}</div>
                     <div className="mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                      {player.pos} vs {player.opp} · #{detailMatchupRating.rank} of 32 defenses · {detailMatchupRating.avg_pts_allowed} pts/g allowed to {player.pos}s
+                      {player.pos} vs {displayOpp} · #{detailMatchupRating.rank} of 32 defenses · {detailMatchupRating.avg_pts_allowed} pts/g allowed to {player.pos}s
                     </div>
                   </div>
                 </div>
               ) : (
                 <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 10, background: 'rgba(255,255,255,.04)', color: 'var(--text-faint)', fontSize: 12 }}>
-                  No 2026 matchup data for {player.opp}
+                  No 2026 matchup data for {displayOpp || 'this player'}
                 </div>
               )}
               {/* All positions vs this defense */}
-              {r2DefVsPos?.data?.length > 0 && player.opp && (() => {
-                const oppTeam = player.opp.replace(/^@/, '').toUpperCase();
+              {r2DefVsPos?.data?.length > 0 && displayOpp && (() => {
+                const oppTeam = displayOpp.replace(/^@/, '').toUpperCase();
                 const rows = r2DefVsPos.data.filter(r => r.def_team?.toUpperCase() === oppTeam);
                 if (!rows.length) return null;
                 const posOrder = ['QB','RB','WR','TE','K'];
