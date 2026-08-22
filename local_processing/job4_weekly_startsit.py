@@ -28,14 +28,23 @@ Writes:
   fantasai/analysis/weekly_startsit.json
 
 Usage:
-  python job4_weekly_startsit.py                 # top 200 players, auto-detect week
+  python job4_weekly_startsit.py                 # top 650 players, auto-detect week
   python job4_weekly_startsit.py --dry-run       # run models, don't upload
   python job4_weekly_startsit.py --week 3        # force specific NFL week
   python job4_weekly_startsit.py --limit 10      # cap players (fast test)
   python job4_weekly_startsit.py --pos QB,RB     # specific positions only
   python job4_weekly_startsit.py --full          # ignore cache, regenerate all
-  python job4_weekly_startsit.py --top 300       # change pool size (default 200)
+  python job4_weekly_startsit.py --top 300       # change pool size (default 650)
   python job4_weekly_startsit.py --all           # all skill players (monthly full run)
+
+Pool size bumped 200 -> 650 on 2026-08-22: 574 players already have real 2025
+production data alone, which filled the entire 200-slot quota before any
+depth-chart-only rookie/backup (e.g. a rookie with a confirmed depth chart
+slot but no 2025 games yet) could be reached. 650 gives real headroom above
+that 574 floor. Most of this pool is scored deterministically — only
+borderline cases (score 35-65) trigger an actual Qwen 14B call — so the
+LLM-cost impact of the larger pool is smaller than the raw player count
+increase suggests, but runtime will still be longer; watch the first run.
 """
 
 import argparse
@@ -387,7 +396,7 @@ def load_player_list() -> list:
     return []
 
 
-def load_rostered_names(top_n: int = 200) -> set:
+def load_rostered_names(top_n: int = 650) -> set:
     """Top N players by real 2025 production, falling back to ECR/ADP, as
     the analysis pool.
 
@@ -408,6 +417,14 @@ def load_rostered_names(top_n: int = 200) -> set:
     with no 2025 games (rookies, injured all season). This is the same
     "prefer real data over an estimate" priority the app already documents
     elsewhere (see the Current Roster legend's proj-column priority chain).
+
+    Extended 2026-08-22: a rookie with no 2025 games can still have a real,
+    confirmed depth_chart_order (an actual roster role, not a guess) even
+    with zero ADP coverage. Rookies in that spot now rank above the ADP/ECR
+    fallback tier instead of tying with everyone else at 9999. Real example:
+    Makai Lemon (PHI's #2 slot WR, depth_chart_order=2) had no 2025 stats
+    and no adp_rank, so he tied at 9999 with hundreds of others and missed
+    the top-N pool despite having a genuine starting-unit role.
     """
     raw = load_player_list()
     ranked = []
@@ -417,14 +434,17 @@ def load_rostered_names(top_n: int = 200) -> set:
         if not name or pos not in SKILL_POS:
             continue
         avg_pts = p.get("season_avg_points_2025")
+        depth_chart_order = p.get("depth_chart_order")
         ecr = float(p.get("positionRank") or p.get("position_rank")
                      or p.get("ecr") or 9999)
         adp = float(p.get("adp") or p.get("adp_ppr") or p.get("adp_rank_ppr")
                      or p.get("adp_rank") or 9999)
         if avg_pts is not None and avg_pts > 0:
-            rank = (0, -float(avg_pts))       # tier 0: real production, best points first
+            rank = (0, -float(avg_pts))               # tier 0: real production, best points first
+        elif depth_chart_order is not None:
+            rank = (1, float(depth_chart_order))       # tier 1: no stats yet, but a confirmed roster slot
         else:
-            rank = (1, min(ecr, adp))         # tier 1: no 2025 data, fall back to ADP/ECR
+            rank = (2, min(ecr, adp))                  # tier 2: no signal at all, fall back to ADP/ECR
         ranked.append((rank, name.lower()))
     ranked.sort()
     names = set(n for _, n in ranked[:top_n])
@@ -1036,7 +1056,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--full",    action="store_true")
     parser.add_argument("--all",     action="store_true", help="All skill players, not just top N")
-    parser.add_argument("--top",     type=int, default=200, help="Pool size (default 200)")
+    parser.add_argument("--top",     type=int, default=650, help="Pool size (default 650)")
     args = parser.parse_args()
 
     pos_filter = set(p.strip().upper() for p in args.pos.split(",")) if args.pos else None

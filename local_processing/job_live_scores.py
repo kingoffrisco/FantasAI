@@ -382,6 +382,13 @@ def _stat_val_first(keys: list, stats: list, *candidates) -> float:
     return 0.0
 
 
+def _split_slash_first(keys: list, stats: list, *candidates) -> tuple:
+    for k in candidates:
+        if k in keys:
+            return _split_slash(keys, stats, k)
+    return 0.0, 0.0
+
+
 def _fetch_summaries(game_ids: list) -> dict:
     """Fetch every game's box score concurrently instead of one at a time —
     a full 16-game Sunday slate was previously ~16 sequential ESPN
@@ -425,9 +432,22 @@ def _infer_pos(stats: dict) -> str:
 
 
 def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
-    """Port of worker-api's handleNflPlayerStats box-score parsing loop."""
+    """Port of worker-api's handleNflPlayerStats box-score parsing loop.
+
+    Bug fixed 2026-08-22: DST/team-defense scoring was completely absent.
+    ESPN's box score only lists INDIVIDUAL defensive players (each
+    linebacker/corner/safety with their own sacks/INTs/etc.) — there was no
+    code path that ever aggregated those into a single team-level "D/ST"
+    entry the way DK/Sleeper scoring needs. Fixed by mirroring each
+    individual defender's sacks/ints/fumRec/tds/safeties into a per-team
+    accumulator during the same loop, then emitting one synthetic
+    "{TEAM} D/ST" entry per team afterward — same naming convention as the
+    export_players_2026_draft.json roster (confirmed: "ARI D/ST", etc.), so
+    it matches rostered DST players by name like everything else does.
+    """
     game_ids = [e["id"] for e in events[:16]]
     player_map: dict = {}
+    team_def_stats: dict = {}  # team_abbr -> aggregated defensive stat dict
     summaries = _fetch_summaries(game_ids)
 
     for game_id in game_ids:
@@ -446,6 +466,11 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
             team_abbr = (team_data.get("team") or {}).get("abbreviation", "")
             opponent_abbr = next((a for a in team_scores if a != team_abbr), None)
             pts_allowed = team_scores.get(opponent_abbr) if opponent_abbr else None
+
+            if team_abbr:
+                team_def = team_def_stats.setdefault(team_abbr, {})
+                if pts_allowed is not None:
+                    team_def["ptsAllowed"] = pts_allowed
 
             for stat_group in team_data.get("statistics", []):
                 name = stat_group.get("name")
@@ -492,8 +517,22 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
                         s["recTds"] = s.get("recTds", 0) + _stat_val(keys, stats_arr, "receivingTouchdowns")
                         s["targets"] = s.get("targets", 0) + _stat_val(keys, stats_arr, "receivingTargets")
                     elif name == "kicking":
-                        fg_made, fg_att = _split_slash(keys, stats_arr, "fieldGoalsMadeFieldGoalsAttempted")
-                        xp_made, _ = _split_slash(keys, stats_arr, "extraPointsMadeExtraPointsAttempted")
+                        # Bug fixed 2026-08-22: ESPN's real key here is
+                        # "fieldGoalsMade/fieldGoalAttempts" (confirmed live
+                        # against a real box score) — not
+                        # "fieldGoalsMadeFieldGoalsAttempted", which never
+                        # matched, so every kicker's fgMade/fgAtt/xpMade
+                        # silently stayed 0 and got filtered out entirely
+                        # further down. Same root-cause class as the
+                        # already-documented passing-key variance above.
+                        fg_made, fg_att = _split_slash_first(
+                            keys, stats_arr,
+                            "fieldGoalsMade/fieldGoalAttempts", "fieldGoalsMadeFieldGoalsAttempted",
+                        )
+                        xp_made, _ = _split_slash_first(
+                            keys, stats_arr,
+                            "extraPointsMade/extraPointAttempts", "extraPointsMadeExtraPointsAttempted",
+                        )
                         s["fgMade"] = s.get("fgMade", 0) + fg_made
                         s["fgAtt"] = s.get("fgAtt", 0) + fg_att
                         s["xpMade"] = s.get("xpMade", 0) + xp_made
@@ -503,16 +542,48 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
                         if not player_map[pid]["pos"]:
                             player_map[pid]["pos"] = "K"
                     elif name == "defensive":
-                        s["sacks"] = s.get("sacks", 0) + _stat_val(keys, stats_arr, "sacks")
-                        s["ints"] = s.get("ints", 0) + _stat_val(keys, stats_arr, "interceptions")
-                        s["fumRec"] = s.get("fumRec", 0) + _stat_val(keys, stats_arr, "fumbleRecoveries")
-                        s["tds"] = s.get("tds", 0) + _stat_val(keys, stats_arr, "defensiveTouchdowns")
-                        s["safeties"] = s.get("safeties", 0) + _stat_val(keys, stats_arr, "safeties")
+                        d_sacks = _stat_val(keys, stats_arr, "sacks")
+                        d_ints = _stat_val(keys, stats_arr, "interceptions")
+                        d_fumRec = _stat_val(keys, stats_arr, "fumbleRecoveries")
+                        d_tds = _stat_val(keys, stats_arr, "defensiveTouchdowns")
+                        d_safeties = _stat_val(keys, stats_arr, "safeties")
+                        s["sacks"] = s.get("sacks", 0) + d_sacks
+                        s["ints"] = s.get("ints", 0) + d_ints
+                        s["fumRec"] = s.get("fumRec", 0) + d_fumRec
+                        s["tds"] = s.get("tds", 0) + d_tds
+                        s["safeties"] = s.get("safeties", 0) + d_safeties
+                        # Mirror into the team-level D/ST accumulator — see
+                        # docstring note above on why this exists.
+                        if team_abbr:
+                            team_def = team_def_stats.setdefault(team_abbr, {})
+                            team_def["sacks"] = team_def.get("sacks", 0) + d_sacks
+                            team_def["ints"] = team_def.get("ints", 0) + d_ints
+                            team_def["fumRec"] = team_def.get("fumRec", 0) + d_fumRec
+                            team_def["tds"] = team_def.get("tds", 0) + d_tds
+                            team_def["safeties"] = team_def.get("safeties", 0) + d_safeties
                     elif name == "fumbles":
                         s["fumLost"] = s.get("fumLost", 0) + _stat_val_first(keys, stats_arr, "fumblesLost", "lost")
 
                     if pts_allowed is not None:
                         s["ptsAllowed"] = pts_allowed
+
+    # Emit one synthetic "{TEAM} D/ST" entry per team from the accumulator
+    # built during the loop above. Included whenever we have a points-allowed
+    # figure for that team (i.e. the game has a score) — a shutout defense
+    # with zero sacks/turnovers still has a real, nonzero DST fantasy score
+    # from points allowed alone, so gating on sacks/ints/tds like individual
+    # skill players would incorrectly drop them.
+    dst_entries = []
+    for team_abbr, def_stats in team_def_stats.items():
+        if def_stats.get("ptsAllowed") is None:
+            continue
+        dst_entries.append({
+            "id": f"DST_{team_abbr}",
+            "name": f"{team_abbr} D/ST",
+            "pos": "DST",
+            "team": team_abbr,
+            "stats": dict(def_stats),
+        })
 
     pos_norm = {"HB": "RB", "FB": "RB", "WB": "RB", "FL": "WR", "SE": "WR", "SWR": "WR", "D/ST": "DST", "DEF": "DST", "PK": "K"}
     for p in player_map.values():
@@ -532,7 +603,7 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
         if any(p["stats"].get(k, 0) for k in ("passYds", "rushYds", "recYds", "rec", "fgMade", "fgAtt", "sacks", "ints", "tds"))
         or p["stats"].get("xpMade", 0) > 0
     ]
-    return players
+    return players + dst_entries
 
 
 # -- Scoring (must match app/src/lib/liveScoring.js exactly) --------------
@@ -551,12 +622,42 @@ def get_scoring_rules() -> dict:
     }
 
 
-def calc_fantasy_pts(stats: dict, rules: dict) -> float:
+def _dst_pts_allowed_bonus(pts_allowed) -> float:
+    """Standard points-allowed tier table — same values as ScoringTest.jsx's
+    applyScoring() DST branch (the app's one other place DST gets scored)."""
+    pa = float(pts_allowed)
+    if pa == 0:
+        return 10
+    if pa <= 6:
+        return 7
+    if pa <= 13:
+        return 4
+    if pa <= 20:
+        return 1
+    if pa <= 27:
+        return 0
+    if pa <= 34:
+        return -1
+    return -4
+
+
+def calc_fantasy_pts(stats: dict, rules: dict, pos: str = None) -> float:
     s = stats or {}
     r = rules or {}
     fg_made50 = s.get("fgMade50", 0)
     fg_made_under50 = max(0, s.get("fgMade", 0) - fg_made50)
     fg_missed = max(0, s.get("fgAtt", 0) - s.get("fgMade", 0))
+    # DST scoring must be gated on pos == "DST" explicitly, not just on the
+    # presence of these fields. sacks/ints/fumRec/tds/safeties are also
+    # populated on INDIVIDUAL defensive players' own stat lines (a real
+    # cornerback's own interception count, not just the team total), and
+    # ptsAllowed is tagged onto every player on a team regardless of
+    # position (see the comment on _infer_pos above). Without this gate, a
+    # kicker or an individual defender would silently pick up bonus points
+    # that belong only to the team DST entry — confirmed live 2026-08-22:
+    # Joey Slye (K) was scoring +4 bogus points from his team's points-
+    # allowed tier before this fix.
+    is_dst = pos == "DST"
     pts = (
         s.get("passYds", 0) * r.get("passYd", 0.04)
         + s.get("passTds", 0) * r.get("passTD", 4)
@@ -570,6 +671,17 @@ def calc_fantasy_pts(stats: dict, rules: dict) -> float:
         + fg_made50 * r.get("kFg50", 5)
         + fg_made_under50 * r.get("kFgUnder50", 3)
         + fg_missed * r.get("kFgMiss", -1)
+        # DST — bug fixed 2026-08-22: this whole block was missing, so even
+        # the synthetic D/ST entries fetch_player_stats() now emits always
+        # scored 0. Same rule keys/tiers as ScoringTest.jsx's applyScoring().
+        + (s.get("sacks", 0) * r.get("dstSack", 1) if is_dst else 0)
+        + (s.get("ints", 0) * r.get("dstInt", 2) if is_dst else 0)
+        + (s.get("fumRec", 0) * r.get("dstFumRec", 2) if is_dst else 0)
+        + (s.get("safeties", 0) * r.get("dstSafety", 2) if is_dst else 0)
+        + (s.get("tds", 0) * r.get("dstTd", 6) if is_dst else 0)
+        + (_dst_pts_allowed_bonus(s["ptsAllowed"])
+           if is_dst and r.get("dstPtsAllowed", True) and s.get("ptsAllowed") is not None
+           else 0)
     )
     return round(max(0.0, pts), 2)
 
@@ -597,7 +709,7 @@ def run_once(week: int, season: int, season_type: str, dry_run: bool, print_top5
 
     rules = get_scoring_rules()
     scored_players = [
-        {**p, "pts": calc_fantasy_pts(p["stats"], rules)}
+        {**p, "pts": calc_fantasy_pts(p["stats"], rules, p.get("pos"))}
         for p in raw_players
     ]
     scored_players.sort(key=lambda p: -p["pts"])

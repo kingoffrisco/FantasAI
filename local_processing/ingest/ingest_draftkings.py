@@ -132,8 +132,22 @@ def parse_slate(draft_group_id: int, meta: dict, draftables_resp: dict) -> tuple
         "fetched_at":     now,
     }
 
+    # DK returns one draftable ROW per (player, eligible-slot-type) pair, not one
+    # row per player — a FLEX-eligible RB/WR/TE gets a second row with a different
+    # draftableId (same playerDkId, same salary) purely for FLEX-slot eligibility.
+    # Confirmed live 2026-08-22: Jahmyr Gibbs had draftableId 43727325 (rosterSlotId
+    # 67=RB) AND 43727326 (rosterSlotId 70=FLEX), identical salary/stats otherwise.
+    # Keeping both as separate optimizer candidates let the ILP solver "use" the
+    # same real player twice (once as e.g. WR, once as FLEX) since they're
+    # independent binary variables — dedupe by playerDkId to prevent that.
+    seen_player_ids: set = set()
     player_rows = []
     for p in draftables:
+        player_dk_id = p.get("playerDkId")
+        if player_dk_id is not None:
+            if player_dk_id in seen_player_ids:
+                continue
+            seen_player_ids.add(player_dk_id)
         comp = p.get("competition") or {}
         team = p.get("teamAbbreviation", "")
         comp_name = comp.get("name", "")  # e.g. "BUF @ HOU"

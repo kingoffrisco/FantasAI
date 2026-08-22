@@ -41,10 +41,11 @@ export default function DfsOptimizerScreen() {
 
   const poolForSlate = React.useMemo(() => {
     if (!draftGroupId) return [];
-    return salaries
+    const mapped = salaries
       .filter(p => p.draft_group_id === draftGroupId)
       .map(p => ({
         id: p.draftable_id,
+        dkPlayerId: p.player_dk_id,
         name: p.display_name,
         team: p.team,
         opponent: p.opponent,
@@ -52,8 +53,22 @@ export default function DfsOptimizerScreen() {
         salary: p.salary,
         projection: p.dk_avg_points,
         status: p.status,
-      }))
-      .sort((a, b) => (b.projection || 0) - (a.projection || 0));
+      }));
+    // DK sends one row per (player, eligible-slot-type) — a FLEX-eligible
+    // RB/WR/TE gets a second row (different draftable id, same player) just
+    // for FLEX-slot eligibility. Older cached R2 payloads may still have
+    // this before the fix in ingest_draftkings.py takes effect — dedupe
+    // defensively here too so the pool and the optimizer never see a real
+    // player as two distinct candidates.
+    const seen = new Set();
+    const deduped = [];
+    for (const p of mapped) {
+      const key = p.dkPlayerId ?? p.name;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(p);
+    }
+    return deduped.sort((a, b) => (b.projection || 0) - (a.projection || 0));
   }, [salaries, draftGroupId]);
 
   const optimized = React.useMemo(() => {
@@ -167,6 +182,13 @@ export default function DfsOptimizerScreen() {
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot>
+                      <tr style={{ borderTop: '2px solid var(--border)' }}>
+                        <td colSpan={4} style={{ padding: '8px 12px', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-faint)' }}>Total</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800 }}>{money(optimized.totalSalary)}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#4caf82' }}>{optimized.totalProjection.toFixed(1)}</td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               )}

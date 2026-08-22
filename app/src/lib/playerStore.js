@@ -178,6 +178,8 @@ export function normalizePlayerList(rawArr) {
     // proj: R2 export uses season_avg_points_2025; older schemas use proj / projected_avg_points
     const projRaw    = Number(p.proj) || Number(p.projected_avg_points)
                     || Number(p.season_avg_points_2025) || Number(p.career_ppg) || 0;
+    const depthChartOrder = Number(p.depth_chart_order) || null;
+    const depthChartPos   = p.depth_chart_position || null;
     // ECR: use positionRank → p.ecr → 999. Never use search_rank (Sleeper popularity index, not a rank).
     let posRank    = Number(p.positionRank || p.position_rank) || null;
     const searchRank = Number(p.ecr) || null;
@@ -218,7 +220,22 @@ export function normalizePlayerList(rawArr) {
         const base  = { QB: 26, RB: 22, WR: 20, TE: 16, K: 10 }[pos] ?? 18;
         const slope = { QB: 0.5, RB: 0.5, WR: 0.5, TE: 0.65, K: 0.4 }[pos] ?? 0.5;
         const floor = { QB: 10, RB: 5,  WR: 5,  TE: 5,  K:  4 }[pos] ?? 5;
-        proj = parseFloat(Math.max(floor, base - ecr * slope).toFixed(1));
+        let estimate = Math.max(floor, base - ecr * slope);
+        // ECR here often comes from Sleeper's search_rank/positionRank — a popularity
+        // proxy, not a guarantee of playing time. The team's own depth chart is a
+        // stronger, more direct signal.
+        // Real example this fixed: Jaden Nixon (GB RB, no depth_chart_order at all —
+        // unlisted behind Jacobs/Lloyd/Brooks/Martinez/Strong) was estimated at 9.7.
+        const buriedCutoff = { RB: 3, WR: 4, TE: 2 }[pos];
+        if (depthChartOrder == null) {
+          // Not on the team's confirmed depth chart at this position at all —
+          // no basis for any nonzero estimate, regardless of popularity rank.
+          estimate = 0;
+        } else if (buriedCutoff != null && depthChartOrder > buriedCutoff) {
+          // Has a real, confirmed slot, just a deep one — floor, not zero.
+          estimate = floor;
+        }
+        proj = parseFloat(estimate.toFixed(1));
       }
     }
 
@@ -251,6 +268,8 @@ export function normalizePlayerList(rawArr) {
       rookie:      p.pos !== 'DST' && (p.is_rookie === true || p.is_rookie === 'true' || (p.years_exp != null && Number(p.years_exp) === 0)),
       trend,
       depth:       Number(p.depth)        || 1,
+      depthChartOrder,
+      depthChartPos,
       targetShare: Number(p.targetShare || p.target_share) || 0,
       routes:      Number(p.routes)       || 0,
       yac:         Number(p.yac)          || 0,

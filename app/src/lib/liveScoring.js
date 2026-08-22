@@ -16,12 +16,33 @@ export function getScoringRules() {
   return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2, kFg50: 5, kFgUnder50: 3, kFgMiss: -1 };
 }
 
-export function calcFantasyPts(stats, rules) {
+// Standard points-allowed tier table — same values as ScoringTest.jsx's
+// applyScoring() DST branch (the app's one other place DST gets scored).
+function dstPtsAllowedBonus(ptsAllowed) {
+  const pa = Number(ptsAllowed);
+  if (pa === 0) return 10;
+  if (pa <= 6) return 7;
+  if (pa <= 13) return 4;
+  if (pa <= 20) return 1;
+  if (pa <= 27) return 0;
+  if (pa <= 34) return -1;
+  return -4;
+}
+
+export function calcFantasyPts(stats, rules, pos) {
   const s = stats || {};
   const r = rules || {};
   const fgMade50 = s.fgMade50 ?? 0;
   const fgMadeUnder50 = Math.max(0, (s.fgMade ?? 0) - fgMade50);
   const fgMissed = Math.max(0, (s.fgAtt ?? 0) - (s.fgMade ?? 0));
+  // DST scoring must be gated on pos === 'DST' explicitly, not just on these
+  // fields being present. sacks/ints/fumRec/tds/safeties also live on
+  // INDIVIDUAL defensive players' own stat lines, and ptsAllowed is tagged
+  // onto every player on a team regardless of position — without this gate
+  // a kicker or defender would silently pick up bonus points that belong
+  // only to the team DST entry (confirmed live: a kicker was scoring +4
+  // bogus points from his team's points-allowed tier before this fix).
+  const isDst = pos === 'DST';
   return Math.max(0,
     (s.passYds ?? 0) * (r.passYd ?? 0.04) +
     (s.passTds ?? 0) * (r.passTD ?? 4) +
@@ -34,7 +55,16 @@ export function calcFantasyPts(stats, rules) {
     (s.fumLost ?? 0) * (r.fumbleLost ?? -2) +
     fgMade50 * (r.kFg50 ?? 5) +
     fgMadeUnder50 * (r.kFgUnder50 ?? 3) +
-    fgMissed * (r.kFgMiss ?? -1)
+    fgMissed * (r.kFgMiss ?? -1) +
+    // DST — bug fixed 2026-08-22: this whole block was missing, so team
+    // defense entries always scored 0 even when their stats were present.
+    // Same rule keys/tiers as ScoringTest.jsx's applyScoring().
+    (isDst ? (s.sacks ?? 0) * (r.dstSack ?? 1) : 0) +
+    (isDst ? (s.ints ?? 0) * (r.dstInt ?? 2) : 0) +
+    (isDst ? (s.fumRec ?? 0) * (r.dstFumRec ?? 2) : 0) +
+    (isDst ? (s.safeties ?? 0) * (r.dstSafety ?? 2) : 0) +
+    (isDst ? (s.tds ?? 0) * (r.dstTd ?? 6) : 0) +
+    (isDst && (r.dstPtsAllowed ?? true) && s.ptsAllowed != null ? dstPtsAllowedBonus(s.ptsAllowed) : 0)
   );
 }
 

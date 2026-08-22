@@ -2615,6 +2615,16 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     return allPlayersForRank.filter(p => p.pos === player.pos && (p.pts2025 > 0 || p.avg > 0));
   }, [allPlayersForRank, player.pos]);
 
+  // Team depth chart at this player's position — same team, same pos, ordered by
+  // depth_chart_order (unranked/no-slot players sort last, not first, so a buried
+  // or unlisted player doesn't get displayed as if he were the starter).
+  const teamDepthChart = React.useMemo(() => {
+    if (!player.team || !player.pos) return [];
+    return allPlayersForRank
+      .filter(p => p.team === player.team && p.pos === player.pos)
+      .sort((a, b) => (a.depthChartOrder ?? 999) - (b.depthChartOrder ?? 999));
+  }, [allPlayersForRank, player.team, player.pos]);
+
   const leagueRankOf = React.useCallback((field) => {
     const sorted = [...posPlayers].sort((a, b) => (b[field] || 0) - (a[field] || 0));
     const rank = sorted.findIndex(p => p.id === player.id) + 1;
@@ -3143,6 +3153,52 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   </div>
                 );
               })()}
+
+              {/* Team depth chart at this position — context for whether proj is realistic */}
+              {teamDepthChart.length > 0 && (
+                <div className="muted-card" style={{ marginBottom: 16, borderLeft: '3px solid var(--text-faint)' }}>
+                  <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>
+                      {player.team} {player.pos} Depth Chart
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {teamDepthChart.map(p => {
+                      const isThisPlayer = p.id === player.id;
+                      const unranked = p.depthChartOrder == null;
+                      return (
+                        <div
+                          key={p.id}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8, fontSize: 12,
+                            padding: '4px 8px', borderRadius: 5,
+                            background: isThisPlayer ? 'rgba(198,255,58,.10)' : 'transparent',
+                            border: isThisPlayer ? '1px solid rgba(198,255,58,.3)' : '1px solid transparent',
+                          }}
+                        >
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11, width: 18, flexShrink: 0, color: unranked ? 'var(--text-faint)' : 'var(--text-dim)' }}>
+                            {unranked ? '—' : p.depthChartOrder}
+                          </span>
+                          <span style={{ fontWeight: isThisPlayer ? 800 : 500, color: isThisPlayer ? 'var(--accent)' : 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {p.name}
+                          </span>
+                          {p.depthChartPos && p.depthChartPos !== p.pos && (
+                            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{p.depthChartPos}</span>
+                          )}
+                          {p.avg > 0 && (
+                            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{p.avg.toFixed(1)} avg</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {player.depthChartOrder == null && (
+                    <div style={{ marginTop: 8, fontSize: 10, color: '#ffb547', lineHeight: 1.5 }}>
+                      Not on {player.team}'s confirmed {player.pos} depth chart — no meaningful projection can be generated until he has a real slot.
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* AI insight — Qwen writeup when available, template fallback */}
               <div className="muted-card" style={{ marginBottom:16, borderLeft:'3px solid var(--accent-2)' }}>

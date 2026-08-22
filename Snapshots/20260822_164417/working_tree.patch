@@ -1,0 +1,3261 @@
+diff --git a/app/src/lib/liveScoring.js b/app/src/lib/liveScoring.js
+index 3bde4b4..4653533 100644
+--- a/app/src/lib/liveScoring.js
++++ b/app/src/lib/liveScoring.js
+@@ -16,12 +16,33 @@ export function getScoringRules() {
+   return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2, kFg50: 5, kFgUnder50: 3, kFgMiss: -1 };
+ }
+ 
+-export function calcFantasyPts(stats, rules) {
++// Standard points-allowed tier table — same values as ScoringTest.jsx's
++// applyScoring() DST branch (the app's one other place DST gets scored).
++function dstPtsAllowedBonus(ptsAllowed) {
++  const pa = Number(ptsAllowed);
++  if (pa === 0) return 10;
++  if (pa <= 6) return 7;
++  if (pa <= 13) return 4;
++  if (pa <= 20) return 1;
++  if (pa <= 27) return 0;
++  if (pa <= 34) return -1;
++  return -4;
++}
++
++export function calcFantasyPts(stats, rules, pos) {
+   const s = stats || {};
+   const r = rules || {};
+   const fgMade50 = s.fgMade50 ?? 0;
+   const fgMadeUnder50 = Math.max(0, (s.fgMade ?? 0) - fgMade50);
+   const fgMissed = Math.max(0, (s.fgAtt ?? 0) - (s.fgMade ?? 0));
++  // DST scoring must be gated on pos === 'DST' explicitly, not just on these
++  // fields being present. sacks/ints/fumRec/tds/safeties also live on
++  // INDIVIDUAL defensive players' own stat lines, and ptsAllowed is tagged
++  // onto every player on a team regardless of position — without this gate
++  // a kicker or defender would silently pick up bonus points that belong
++  // only to the team DST entry (confirmed live: a kicker was scoring +4
++  // bogus points from his team's points-allowed tier before this fix).
++  const isDst = pos === 'DST';
+   return Math.max(0,
+     (s.passYds ?? 0) * (r.passYd ?? 0.04) +
+     (s.passTds ?? 0) * (r.passTD ?? 4) +
+@@ -34,7 +55,16 @@ export function calcFantasyPts(stats, rules) {
+     (s.fumLost ?? 0) * (r.fumbleLost ?? -2) +
+     fgMade50 * (r.kFg50 ?? 5) +
+     fgMadeUnder50 * (r.kFgUnder50 ?? 3) +
+-    fgMissed * (r.kFgMiss ?? -1)
++    fgMissed * (r.kFgMiss ?? -1) +
++    // DST — bug fixed 2026-08-22: this whole block was missing, so team
++    // defense entries always scored 0 even when their stats were present.
++    // Same rule keys/tiers as ScoringTest.jsx's applyScoring().
++    (isDst ? (s.sacks ?? 0) * (r.dstSack ?? 1) : 0) +
++    (isDst ? (s.ints ?? 0) * (r.dstInt ?? 2) : 0) +
++    (isDst ? (s.fumRec ?? 0) * (r.dstFumRec ?? 2) : 0) +
++    (isDst ? (s.safeties ?? 0) * (r.dstSafety ?? 2) : 0) +
++    (isDst ? (s.tds ?? 0) * (r.dstTd ?? 6) : 0) +
++    (isDst && (r.dstPtsAllowed ?? true) && s.ptsAllowed != null ? dstPtsAllowedBonus(s.ptsAllowed) : 0)
+   );
+ }
+ 
+diff --git a/app/src/lib/playerStore.js b/app/src/lib/playerStore.js
+index f211a4d..c842bf9 100644
+--- a/app/src/lib/playerStore.js
++++ b/app/src/lib/playerStore.js
+@@ -178,6 +178,8 @@ export function normalizePlayerList(rawArr) {
+     // proj: R2 export uses season_avg_points_2025; older schemas use proj / projected_avg_points
+     const projRaw    = Number(p.proj) || Number(p.projected_avg_points)
+                     || Number(p.season_avg_points_2025) || Number(p.career_ppg) || 0;
++    const depthChartOrder = Number(p.depth_chart_order) || null;
++    const depthChartPos   = p.depth_chart_position || null;
+     // ECR: use positionRank → p.ecr → 999. Never use search_rank (Sleeper popularity index, not a rank).
+     let posRank    = Number(p.positionRank || p.position_rank) || null;
+     const searchRank = Number(p.ecr) || null;
+@@ -218,7 +220,22 @@ export function normalizePlayerList(rawArr) {
+         const base  = { QB: 26, RB: 22, WR: 20, TE: 16, K: 10 }[pos] ?? 18;
+         const slope = { QB: 0.5, RB: 0.5, WR: 0.5, TE: 0.65, K: 0.4 }[pos] ?? 0.5;
+         const floor = { QB: 10, RB: 5,  WR: 5,  TE: 5,  K:  4 }[pos] ?? 5;
+-        proj = parseFloat(Math.max(floor, base - ecr * slope).toFixed(1));
++        let estimate = Math.max(floor, base - ecr * slope);
++        // ECR here often comes from Sleeper's search_rank/positionRank — a popularity
++        // proxy, not a guarantee of playing time. The team's own depth chart is a
++        // stronger, more direct signal.
++        // Real example this fixed: Jaden Nixon (GB RB, no depth_chart_order at all —
++        // unlisted behind Jacobs/Lloyd/Brooks/Martinez/Strong) was estimated at 9.7.
++        const buriedCutoff = { RB: 3, WR: 4, TE: 2 }[pos];
++        if (depthChartOrder == null) {
++          // Not on the team's confirmed depth chart at this position at all —
++          // no basis for any nonzero estimate, regardless of popularity rank.
++          estimate = 0;
++        } else if (buriedCutoff != null && depthChartOrder > buriedCutoff) {
++          // Has a real, confirmed slot, just a deep one — floor, not zero.
++          estimate = floor;
++        }
++        proj = parseFloat(estimate.toFixed(1));
+       }
+     }
+ 
+@@ -251,6 +268,8 @@ export function normalizePlayerList(rawArr) {
+       rookie:      p.pos !== 'DST' && (p.is_rookie === true || p.is_rookie === 'true' || (p.years_exp != null && Number(p.years_exp) === 0)),
+       trend,
+       depth:       Number(p.depth)        || 1,
++      depthChartOrder,
++      depthChartPos,
+       targetShare: Number(p.targetShare || p.target_share) || 0,
+       routes:      Number(p.routes)       || 0,
+       yac:         Number(p.yac)          || 0,
+diff --git a/app/src/screens/CurrentRoster.jsx b/app/src/screens/CurrentRoster.jsx
+index eff45a1..1b91308 100644
+--- a/app/src/screens/CurrentRoster.jsx
++++ b/app/src/screens/CurrentRoster.jsx
+@@ -304,11 +304,13 @@ function RosterWriteupBlock({ writeup, aiNotes, notesList, borderTop, isDynasty
+   if (writeup?.writeup) {
+     const paragraphs = writeup.writeup.split(/\n\n+/).filter(Boolean);
+     const genDate = writeup.generated_at ? new Date(writeup.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
++    // _model comes back as e.g. "qwen3:14b" — shorten to "3-14b" to fit inline.
++    const modelTag = writeup._model ? writeup._model.replace(/^qwen/i, '').replace(':', '-') : null;
+     return (
+       <div style={{ borderTop, paddingTop: borderTop !== 'none' ? 6 : 0 }}>
+         <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+           <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, padding: '1px 5px', borderRadius: 3, background: 'rgba(198,255,58,.12)', color: '#c6ff3a', border: '1px solid rgba(198,255,58,.25)', whiteSpace: 'nowrap' }}>FantasAI</span>
+-          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>Qwen · {genDate || 'local'}</span>
++          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>Qwen{modelTag ? ` ${modelTag}` : ''} · {genDate || 'local'}</span>
+         </div>
+         <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.55 }}>
+           {(expanded ? paragraphs : paragraphs.slice(0, 1)).map((para, i) => (
+diff --git a/app/src/screens/DfsOptimizer.jsx b/app/src/screens/DfsOptimizer.jsx
+index 3ea0e39..9072c3a 100644
+--- a/app/src/screens/DfsOptimizer.jsx
++++ b/app/src/screens/DfsOptimizer.jsx
+@@ -41,10 +41,11 @@ export default function DfsOptimizerScreen() {
+ 
+   const poolForSlate = React.useMemo(() => {
+     if (!draftGroupId) return [];
+-    return salaries
++    const mapped = salaries
+       .filter(p => p.draft_group_id === draftGroupId)
+       .map(p => ({
+         id: p.draftable_id,
++        dkPlayerId: p.player_dk_id,
+         name: p.display_name,
+         team: p.team,
+         opponent: p.opponent,
+@@ -52,8 +53,22 @@ export default function DfsOptimizerScreen() {
+         salary: p.salary,
+         projection: p.dk_avg_points,
+         status: p.status,
+-      }))
+-      .sort((a, b) => (b.projection || 0) - (a.projection || 0));
++      }));
++    // DK sends one row per (player, eligible-slot-type) — a FLEX-eligible
++    // RB/WR/TE gets a second row (different draftable id, same player) just
++    // for FLEX-slot eligibility. Older cached R2 payloads may still have
++    // this before the fix in ingest_draftkings.py takes effect — dedupe
++    // defensively here too so the pool and the optimizer never see a real
++    // player as two distinct candidates.
++    const seen = new Set();
++    const deduped = [];
++    for (const p of mapped) {
++      const key = p.dkPlayerId ?? p.name;
++      if (seen.has(key)) continue;
++      seen.add(key);
++      deduped.push(p);
++    }
++    return deduped.sort((a, b) => (b.projection || 0) - (a.projection || 0));
+   }, [salaries, draftGroupId]);
+ 
+   const optimized = React.useMemo(() => {
+@@ -167,6 +182,13 @@ export default function DfsOptimizerScreen() {
+                         </tr>
+                       ))}
+                     </tbody>
++                    <tfoot>
++                      <tr style={{ borderTop: '2px solid var(--border)' }}>
++                        <td colSpan={4} style={{ padding: '8px 12px', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-faint)' }}>Total</td>
++                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800 }}>{money(optimized.totalSalary)}</td>
++                        <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#4caf82' }}>{optimized.totalProjection.toFixed(1)}</td>
++                      </tr>
++                    </tfoot>
+                   </table>
+                 </div>
+               )}
+diff --git a/app/src/screens/HeadToHead.jsx b/app/src/screens/HeadToHead.jsx
+index 5477cb5..fc38192 100644
+--- a/app/src/screens/HeadToHead.jsx
++++ b/app/src/screens/HeadToHead.jsx
+@@ -175,7 +175,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
+       for (const p of players) {
+         const key = (p.name || '').toLowerCase().trim();
+         if (!key) continue;
+-        ptsByName[key] = { name: p.name, pos: p.pos, team: p.team, pts: p.pts ?? calcFantasyPts(p.stats, rules), stats: p.stats };
++        ptsByName[key] = { name: p.name, pos: p.pos, team: p.team, pts: p.pts ?? calcFantasyPts(p.stats, rules, p.pos), stats: p.stats };
+       }
+       setLivePlayerPts(ptsByName);
+       setLiveSource(source);
+@@ -822,7 +822,7 @@ function NflScores({ week, seasonType }) {
+       .then(([board, stats]) => {
+         setData(board);
+         const rules = getScoringRules();
+-        setPlayers((stats.players || []).map(p => ({ ...p, pts: p.pts ?? calcFantasyPts(p.stats, rules) })));
++        setPlayers((stats.players || []).map(p => ({ ...p, pts: p.pts ?? calcFantasyPts(p.stats, rules, p.pos) })));
+         setLoading(false);
+       })
+       .catch(() => { setError('fetch_failed'); setLoading(false); });
+diff --git a/app/src/screens/Players.jsx b/app/src/screens/Players.jsx
+index cd17462..c2f3932 100644
+--- a/app/src/screens/Players.jsx
++++ b/app/src/screens/Players.jsx
+@@ -2615,6 +2615,16 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
+     return allPlayersForRank.filter(p => p.pos === player.pos && (p.pts2025 > 0 || p.avg > 0));
+   }, [allPlayersForRank, player.pos]);
+ 
++  // Team depth chart at this player's position — same team, same pos, ordered by
++  // depth_chart_order (unranked/no-slot players sort last, not first, so a buried
++  // or unlisted player doesn't get displayed as if he were the starter).
++  const teamDepthChart = React.useMemo(() => {
++    if (!player.team || !player.pos) return [];
++    return allPlayersForRank
++      .filter(p => p.team === player.team && p.pos === player.pos)
++      .sort((a, b) => (a.depthChartOrder ?? 999) - (b.depthChartOrder ?? 999));
++  }, [allPlayersForRank, player.team, player.pos]);
++
+   const leagueRankOf = React.useCallback((field) => {
+     const sorted = [...posPlayers].sort((a, b) => (b[field] || 0) - (a[field] || 0));
+     const rank = sorted.findIndex(p => p.id === player.id) + 1;
+@@ -3144,6 +3154,52 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
+                 );
+               })()}
+ 
++              {/* Team depth chart at this position — context for whether proj is realistic */}
++              {teamDepthChart.length > 0 && (
++                <div className="muted-card" style={{ marginBottom: 16, borderLeft: '3px solid var(--text-faint)' }}>
++                  <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 8 }}>
++                    <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>
++                      {player.team} {player.pos} Depth Chart
++                    </span>
++                  </div>
++                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
++                    {teamDepthChart.map(p => {
++                      const isThisPlayer = p.id === player.id;
++                      const unranked = p.depthChartOrder == null;
++                      return (
++                        <div
++                          key={p.id}
++                          style={{
++                            display: 'flex', alignItems: 'center', gap: 8, fontSize: 12,
++                            padding: '4px 8px', borderRadius: 5,
++                            background: isThisPlayer ? 'rgba(198,255,58,.10)' : 'transparent',
++                            border: isThisPlayer ? '1px solid rgba(198,255,58,.3)' : '1px solid transparent',
++                          }}
++                        >
++                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11, width: 18, flexShrink: 0, color: unranked ? 'var(--text-faint)' : 'var(--text-dim)' }}>
++                            {unranked ? '—' : p.depthChartOrder}
++                          </span>
++                          <span style={{ fontWeight: isThisPlayer ? 800 : 500, color: isThisPlayer ? 'var(--accent)' : 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
++                            {p.name}
++                          </span>
++                          {p.depthChartPos && p.depthChartPos !== p.pos && (
++                            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{p.depthChartPos}</span>
++                          )}
++                          {p.avg > 0 && (
++                            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{p.avg.toFixed(1)} avg</span>
++                          )}
++                        </div>
++                      );
++                    })}
++                  </div>
++                  {player.depthChartOrder == null && (
++                    <div style={{ marginTop: 8, fontSize: 10, color: '#ffb547', lineHeight: 1.5 }}>
++                      Not on {player.team}'s confirmed {player.pos} depth chart — no meaningful projection can be generated until he has a real slot.
++                    </div>
++                  )}
++                </div>
++              )}
++
+               {/* AI insight — Qwen writeup when available, template fallback */}
+               <div className="muted-card" style={{ marginBottom:16, borderLeft:'3px solid var(--accent-2)' }}>
+                 <div className="flex gap-8" style={{ alignItems:'center', marginBottom:8 }}>
+diff --git a/local_processing/ingest/ingest_draftkings.py b/local_processing/ingest/ingest_draftkings.py
+index 2e3a80f..1704a28 100644
+--- a/local_processing/ingest/ingest_draftkings.py
++++ b/local_processing/ingest/ingest_draftkings.py
+@@ -132,8 +132,22 @@ def parse_slate(draft_group_id: int, meta: dict, draftables_resp: dict) -> tuple
+         "fetched_at":     now,
+     }
+ 
++    # DK returns one draftable ROW per (player, eligible-slot-type) pair, not one
++    # row per player — a FLEX-eligible RB/WR/TE gets a second row with a different
++    # draftableId (same playerDkId, same salary) purely for FLEX-slot eligibility.
++    # Confirmed live 2026-08-22: Jahmyr Gibbs had draftableId 43727325 (rosterSlotId
++    # 67=RB) AND 43727326 (rosterSlotId 70=FLEX), identical salary/stats otherwise.
++    # Keeping both as separate optimizer candidates let the ILP solver "use" the
++    # same real player twice (once as e.g. WR, once as FLEX) since they're
++    # independent binary variables — dedupe by playerDkId to prevent that.
++    seen_player_ids: set = set()
+     player_rows = []
+     for p in draftables:
++        player_dk_id = p.get("playerDkId")
++        if player_dk_id is not None:
++            if player_dk_id in seen_player_ids:
++                continue
++            seen_player_ids.add(player_dk_id)
+         comp = p.get("competition") or {}
+         team = p.get("teamAbbreviation", "")
+         comp_name = comp.get("name", "")  # e.g. "BUF @ HOU"
+diff --git a/local_processing/job4_weekly_startsit.py b/local_processing/job4_weekly_startsit.py
+index c558f7a..b0957e3 100644
+--- a/local_processing/job4_weekly_startsit.py
++++ b/local_processing/job4_weekly_startsit.py
+@@ -28,14 +28,23 @@ Writes:
+   fantasai/analysis/weekly_startsit.json
+ 
+ Usage:
+-  python job4_weekly_startsit.py                 # top 200 players, auto-detect week
++  python job4_weekly_startsit.py                 # top 650 players, auto-detect week
+   python job4_weekly_startsit.py --dry-run       # run models, don't upload
+   python job4_weekly_startsit.py --week 3        # force specific NFL week
+   python job4_weekly_startsit.py --limit 10      # cap players (fast test)
+   python job4_weekly_startsit.py --pos QB,RB     # specific positions only
+   python job4_weekly_startsit.py --full          # ignore cache, regenerate all
+-  python job4_weekly_startsit.py --top 300       # change pool size (default 200)
++  python job4_weekly_startsit.py --top 300       # change pool size (default 650)
+   python job4_weekly_startsit.py --all           # all skill players (monthly full run)
++
++Pool size bumped 200 -> 650 on 2026-08-22: 574 players already have real 2025
++production data alone, which filled the entire 200-slot quota before any
++depth-chart-only rookie/backup (e.g. a rookie with a confirmed depth chart
++slot but no 2025 games yet) could be reached. 650 gives real headroom above
++that 574 floor. Most of this pool is scored deterministically — only
++borderline cases (score 35-65) trigger an actual Qwen 14B call — so the
++LLM-cost impact of the larger pool is smaller than the raw player count
++increase suggests, but runtime will still be longer; watch the first run.
+ """
+ 
+ import argparse
+@@ -387,7 +396,7 @@ def load_player_list() -> list:
+     return []
+ 
+ 
+-def load_rostered_names(top_n: int = 200) -> set:
++def load_rostered_names(top_n: int = 650) -> set:
+     """Top N players by real 2025 production, falling back to ECR/ADP, as
+     the analysis pool.
+ 
+@@ -408,6 +417,14 @@ def load_rostered_names(top_n: int = 200) -> set:
+     with no 2025 games (rookies, injured all season). This is the same
+     "prefer real data over an estimate" priority the app already documents
+     elsewhere (see the Current Roster legend's proj-column priority chain).
++
++    Extended 2026-08-22: a rookie with no 2025 games can still have a real,
++    confirmed depth_chart_order (an actual roster role, not a guess) even
++    with zero ADP coverage. Rookies in that spot now rank above the ADP/ECR
++    fallback tier instead of tying with everyone else at 9999. Real example:
++    Makai Lemon (PHI's #2 slot WR, depth_chart_order=2) had no 2025 stats
++    and no adp_rank, so he tied at 9999 with hundreds of others and missed
++    the top-N pool despite having a genuine starting-unit role.
+     """
+     raw = load_player_list()
+     ranked = []
+@@ -417,14 +434,17 @@ def load_rostered_names(top_n: int = 200) -> set:
+         if not name or pos not in SKILL_POS:
+             continue
+         avg_pts = p.get("season_avg_points_2025")
++        depth_chart_order = p.get("depth_chart_order")
+         ecr = float(p.get("positionRank") or p.get("position_rank")
+                      or p.get("ecr") or 9999)
+         adp = float(p.get("adp") or p.get("adp_ppr") or p.get("adp_rank_ppr")
+                      or p.get("adp_rank") or 9999)
+         if avg_pts is not None and avg_pts > 0:
+-            rank = (0, -float(avg_pts))       # tier 0: real production, best points first
++            rank = (0, -float(avg_pts))               # tier 0: real production, best points first
++        elif depth_chart_order is not None:
++            rank = (1, float(depth_chart_order))       # tier 1: no stats yet, but a confirmed roster slot
+         else:
+-            rank = (1, min(ecr, adp))         # tier 1: no 2025 data, fall back to ADP/ECR
++            rank = (2, min(ecr, adp))                  # tier 2: no signal at all, fall back to ADP/ECR
+         ranked.append((rank, name.lower()))
+     ranked.sort()
+     names = set(n for _, n in ranked[:top_n])
+@@ -1036,7 +1056,7 @@ def main():
+     parser.add_argument("--dry-run", action="store_true")
+     parser.add_argument("--full",    action="store_true")
+     parser.add_argument("--all",     action="store_true", help="All skill players, not just top N")
+-    parser.add_argument("--top",     type=int, default=200, help="Pool size (default 200)")
++    parser.add_argument("--top",     type=int, default=650, help="Pool size (default 650)")
+     args = parser.parse_args()
+ 
+     pos_filter = set(p.strip().upper() for p in args.pos.split(",")) if args.pos else None
+diff --git a/local_processing/job_live_scores.py b/local_processing/job_live_scores.py
+index cb56533..5e9b47e 100644
+--- a/local_processing/job_live_scores.py
++++ b/local_processing/job_live_scores.py
+@@ -382,6 +382,13 @@ def _stat_val_first(keys: list, stats: list, *candidates) -> float:
+     return 0.0
+ 
+ 
++def _split_slash_first(keys: list, stats: list, *candidates) -> tuple:
++    for k in candidates:
++        if k in keys:
++            return _split_slash(keys, stats, k)
++    return 0.0, 0.0
++
++
+ def _fetch_summaries(game_ids: list) -> dict:
+     """Fetch every game's box score concurrently instead of one at a time —
+     a full 16-game Sunday slate was previously ~16 sequential ESPN
+@@ -425,9 +432,22 @@ def _infer_pos(stats: dict) -> str:
+ 
+ 
+ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
+-    """Port of worker-api's handleNflPlayerStats box-score parsing loop."""
++    """Port of worker-api's handleNflPlayerStats box-score parsing loop.
++
++    Bug fixed 2026-08-22: DST/team-defense scoring was completely absent.
++    ESPN's box score only lists INDIVIDUAL defensive players (each
++    linebacker/corner/safety with their own sacks/INTs/etc.) — there was no
++    code path that ever aggregated those into a single team-level "D/ST"
++    entry the way DK/Sleeper scoring needs. Fixed by mirroring each
++    individual defender's sacks/ints/fumRec/tds/safeties into a per-team
++    accumulator during the same loop, then emitting one synthetic
++    "{TEAM} D/ST" entry per team afterward — same naming convention as the
++    export_players_2026_draft.json roster (confirmed: "ARI D/ST", etc.), so
++    it matches rostered DST players by name like everything else does.
++    """
+     game_ids = [e["id"] for e in events[:16]]
+     player_map: dict = {}
++    team_def_stats: dict = {}  # team_abbr -> aggregated defensive stat dict
+     summaries = _fetch_summaries(game_ids)
+ 
+     for game_id in game_ids:
+@@ -447,6 +467,11 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
+             opponent_abbr = next((a for a in team_scores if a != team_abbr), None)
+             pts_allowed = team_scores.get(opponent_abbr) if opponent_abbr else None
+ 
++            if team_abbr:
++                team_def = team_def_stats.setdefault(team_abbr, {})
++                if pts_allowed is not None:
++                    team_def["ptsAllowed"] = pts_allowed
++
+             for stat_group in team_data.get("statistics", []):
+                 name = stat_group.get("name")
+                 keys = stat_group.get("keys") or []
+@@ -492,8 +517,22 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
+                         s["recTds"] = s.get("recTds", 0) + _stat_val(keys, stats_arr, "receivingTouchdowns")
+                         s["targets"] = s.get("targets", 0) + _stat_val(keys, stats_arr, "receivingTargets")
+                     elif name == "kicking":
+-                        fg_made, fg_att = _split_slash(keys, stats_arr, "fieldGoalsMadeFieldGoalsAttempted")
+-                        xp_made, _ = _split_slash(keys, stats_arr, "extraPointsMadeExtraPointsAttempted")
++                        # Bug fixed 2026-08-22: ESPN's real key here is
++                        # "fieldGoalsMade/fieldGoalAttempts" (confirmed live
++                        # against a real box score) — not
++                        # "fieldGoalsMadeFieldGoalsAttempted", which never
++                        # matched, so every kicker's fgMade/fgAtt/xpMade
++                        # silently stayed 0 and got filtered out entirely
++                        # further down. Same root-cause class as the
++                        # already-documented passing-key variance above.
++                        fg_made, fg_att = _split_slash_first(
++                            keys, stats_arr,
++                            "fieldGoalsMade/fieldGoalAttempts", "fieldGoalsMadeFieldGoalsAttempted",
++                        )
++                        xp_made, _ = _split_slash_first(
++                            keys, stats_arr,
++                            "extraPointsMade/extraPointAttempts", "extraPointsMadeExtraPointsAttempted",
++                        )
+                         s["fgMade"] = s.get("fgMade", 0) + fg_made
+                         s["fgAtt"] = s.get("fgAtt", 0) + fg_att
+                         s["xpMade"] = s.get("xpMade", 0) + xp_made
+@@ -503,17 +542,49 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
+                         if not player_map[pid]["pos"]:
+                             player_map[pid]["pos"] = "K"
+                     elif name == "defensive":
+-                        s["sacks"] = s.get("sacks", 0) + _stat_val(keys, stats_arr, "sacks")
+-                        s["ints"] = s.get("ints", 0) + _stat_val(keys, stats_arr, "interceptions")
+-                        s["fumRec"] = s.get("fumRec", 0) + _stat_val(keys, stats_arr, "fumbleRecoveries")
+-                        s["tds"] = s.get("tds", 0) + _stat_val(keys, stats_arr, "defensiveTouchdowns")
+-                        s["safeties"] = s.get("safeties", 0) + _stat_val(keys, stats_arr, "safeties")
++                        d_sacks = _stat_val(keys, stats_arr, "sacks")
++                        d_ints = _stat_val(keys, stats_arr, "interceptions")
++                        d_fumRec = _stat_val(keys, stats_arr, "fumbleRecoveries")
++                        d_tds = _stat_val(keys, stats_arr, "defensiveTouchdowns")
++                        d_safeties = _stat_val(keys, stats_arr, "safeties")
++                        s["sacks"] = s.get("sacks", 0) + d_sacks
++                        s["ints"] = s.get("ints", 0) + d_ints
++                        s["fumRec"] = s.get("fumRec", 0) + d_fumRec
++                        s["tds"] = s.get("tds", 0) + d_tds
++                        s["safeties"] = s.get("safeties", 0) + d_safeties
++                        # Mirror into the team-level D/ST accumulator — see
++                        # docstring note above on why this exists.
++                        if team_abbr:
++                            team_def = team_def_stats.setdefault(team_abbr, {})
++                            team_def["sacks"] = team_def.get("sacks", 0) + d_sacks
++                            team_def["ints"] = team_def.get("ints", 0) + d_ints
++                            team_def["fumRec"] = team_def.get("fumRec", 0) + d_fumRec
++                            team_def["tds"] = team_def.get("tds", 0) + d_tds
++                            team_def["safeties"] = team_def.get("safeties", 0) + d_safeties
+                     elif name == "fumbles":
+                         s["fumLost"] = s.get("fumLost", 0) + _stat_val_first(keys, stats_arr, "fumblesLost", "lost")
+ 
+                     if pts_allowed is not None:
+                         s["ptsAllowed"] = pts_allowed
+ 
++    # Emit one synthetic "{TEAM} D/ST" entry per team from the accumulator
++    # built during the loop above. Included whenever we have a points-allowed
++    # figure for that team (i.e. the game has a score) — a shutout defense
++    # with zero sacks/turnovers still has a real, nonzero DST fantasy score
++    # from points allowed alone, so gating on sacks/ints/tds like individual
++    # skill players would incorrectly drop them.
++    dst_entries = []
++    for team_abbr, def_stats in team_def_stats.items():
++        if def_stats.get("ptsAllowed") is None:
++            continue
++        dst_entries.append({
++            "id": f"DST_{team_abbr}",
++            "name": f"{team_abbr} D/ST",
++            "pos": "DST",
++            "team": team_abbr,
++            "stats": dict(def_stats),
++        })
++
+     pos_norm = {"HB": "RB", "FB": "RB", "WB": "RB", "FL": "WR", "SE": "WR", "SWR": "WR", "D/ST": "DST", "DEF": "DST", "PK": "K"}
+     for p in player_map.values():
+         p["pos"] = pos_norm.get(p["pos"], p["pos"])
+@@ -532,7 +603,7 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
+         if any(p["stats"].get(k, 0) for k in ("passYds", "rushYds", "recYds", "rec", "fgMade", "fgAtt", "sacks", "ints", "tds"))
+         or p["stats"].get("xpMade", 0) > 0
+     ]
+-    return players
++    return players + dst_entries
+ 
+ 
+ # -- Scoring (must match app/src/lib/liveScoring.js exactly) --------------
+@@ -551,12 +622,42 @@ def get_scoring_rules() -> dict:
+     }
+ 
+ 
+-def calc_fantasy_pts(stats: dict, rules: dict) -> float:
++def _dst_pts_allowed_bonus(pts_allowed) -> float:
++    """Standard points-allowed tier table — same values as ScoringTest.jsx's
++    applyScoring() DST branch (the app's one other place DST gets scored)."""
++    pa = float(pts_allowed)
++    if pa == 0:
++        return 10
++    if pa <= 6:
++        return 7
++    if pa <= 13:
++        return 4
++    if pa <= 20:
++        return 1
++    if pa <= 27:
++        return 0
++    if pa <= 34:
++        return -1
++    return -4
++
++
++def calc_fantasy_pts(stats: dict, rules: dict, pos: str = None) -> float:
+     s = stats or {}
+     r = rules or {}
+     fg_made50 = s.get("fgMade50", 0)
+     fg_made_under50 = max(0, s.get("fgMade", 0) - fg_made50)
+     fg_missed = max(0, s.get("fgAtt", 0) - s.get("fgMade", 0))
++    # DST scoring must be gated on pos == "DST" explicitly, not just on the
++    # presence of these fields. sacks/ints/fumRec/tds/safeties are also
++    # populated on INDIVIDUAL defensive players' own stat lines (a real
++    # cornerback's own interception count, not just the team total), and
++    # ptsAllowed is tagged onto every player on a team regardless of
++    # position (see the comment on _infer_pos above). Without this gate, a
++    # kicker or an individual defender would silently pick up bonus points
++    # that belong only to the team DST entry — confirmed live 2026-08-22:
++    # Joey Slye (K) was scoring +4 bogus points from his team's points-
++    # allowed tier before this fix.
++    is_dst = pos == "DST"
+     pts = (
+         s.get("passYds", 0) * r.get("passYd", 0.04)
+         + s.get("passTds", 0) * r.get("passTD", 4)
+@@ -570,6 +671,17 @@ def calc_fantasy_pts(stats: dict, rules: dict) -> float:
+         + fg_made50 * r.get("kFg50", 5)
+         + fg_made_under50 * r.get("kFgUnder50", 3)
+         + fg_missed * r.get("kFgMiss", -1)
++        # DST — bug fixed 2026-08-22: this whole block was missing, so even
++        # the synthetic D/ST entries fetch_player_stats() now emits always
++        # scored 0. Same rule keys/tiers as ScoringTest.jsx's applyScoring().
++        + (s.get("sacks", 0) * r.get("dstSack", 1) if is_dst else 0)
++        + (s.get("ints", 0) * r.get("dstInt", 2) if is_dst else 0)
++        + (s.get("fumRec", 0) * r.get("dstFumRec", 2) if is_dst else 0)
++        + (s.get("safeties", 0) * r.get("dstSafety", 2) if is_dst else 0)
++        + (s.get("tds", 0) * r.get("dstTd", 6) if is_dst else 0)
++        + (_dst_pts_allowed_bonus(s["ptsAllowed"])
++           if is_dst and r.get("dstPtsAllowed", True) and s.get("ptsAllowed") is not None
++           else 0)
+     )
+     return round(max(0.0, pts), 2)
+ 
+@@ -597,7 +709,7 @@ def run_once(week: int, season: int, season_type: str, dry_run: bool, print_top5
+ 
+     rules = get_scoring_rules()
+     scored_players = [
+-        {**p, "pts": calc_fantasy_pts(p["stats"], rules)}
++        {**p, "pts": calc_fantasy_pts(p["stats"], rules, p.get("pos"))}
+         for p in raw_players
+     ]
+     scored_players.sort(key=lambda p: -p["pts"])
+diff --git a/local_processing/job_live_scores_dry_run.json b/local_processing/job_live_scores_dry_run.json
+index e13083e..2d78710 100644
+--- a/local_processing/job_live_scores_dry_run.json
++++ b/local_processing/job_live_scores_dry_run.json
+@@ -1,7 +1,7 @@
+ {
+   "scoreboard": {
+     "source": "espn-local",
+-    "fetchedAt": "2026-08-21T04:09:31.875010+00:00",
++    "fetchedAt": "2026-08-22T21:42:33.063710+00:00",
+     "season": 2026,
+     "week": 1,
+     "type": "pre",
+@@ -395,7 +395,7 @@
+   },
+   "player_stats": {
+     "source": "espn-local",
+-    "fetchedAt": "2026-08-21T04:09:31.875020+00:00",
++    "fetchedAt": "2026-08-22T21:42:33.063720+00:00",
+     "season": 2026,
+     "week": 1,
+     "type": "pre",
+@@ -403,7 +403,7 @@
+       {
+         "id": "4878878",
+         "name": "Amar Johnson",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "LAC",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -452,7 +452,7 @@
+       {
+         "id": "5082269",
+         "name": "Dean Connors",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "LAR",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -492,7 +492,7 @@
+       {
+         "id": "4685246",
+         "name": "Kaytron Allen",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "WSH",
+         "stats": {
+           "rushAtt": 23.0,
+@@ -523,7 +523,7 @@
+       {
+         "id": "4243315",
+         "name": "Salvon Ahmed",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CHI",
+         "stats": {
+           "rushAtt": 2.0,
+@@ -657,6 +657,34 @@
+         },
+         "pts": 12.04
+       },
++      {
++        "id": "3124084",
++        "name": "Joey Slye",
++        "pos": "K",
++        "team": "TEN",
++        "stats": {
++          "fgMade": 4.0,
++          "fgAtt": 4.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 13
++        },
++        "pts": 12.0
++      },
++      {
++        "id": "3055899",
++        "name": "Harrison Butker",
++        "pos": "K",
++        "team": "KC",
++        "stats": {
++          "fgMade": 4.0,
++          "fgAtt": 4.0,
++          "xpMade": 0.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 20
++        },
++        "pts": 12.0
++      },
+       {
+         "id": "3914307",
+         "name": "Maurice Alexander",
+@@ -709,7 +737,7 @@
+       {
+         "id": "4685526",
+         "name": "Adam Randall",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "BAL",
+         "stats": {
+           "rushAtt": 12.0,
+@@ -758,7 +786,7 @@
+       {
+         "id": "4362523",
+         "name": "Will Mallory",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "IND",
+         "stats": {
+           "rec": 6.0,
+@@ -772,7 +800,7 @@
+       {
+         "id": "4429805",
+         "name": "Frank Gore Jr.",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "BUF",
+         "stats": {
+           "rushAtt": 7.0,
+@@ -786,6 +814,36 @@
+         },
+         "pts": 11.0
+       },
++      {
++        "id": "DST_DEN",
++        "name": "DEN D/ST",
++        "pos": "DST",
++        "team": "DEN",
++        "stats": {
++          "ptsAllowed": 7,
++          "sacks": 1.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 1.0,
++          "safeties": 0.0
++        },
++        "pts": 11.0
++      },
++      {
++        "id": "DST_TB",
++        "name": "TB D/ST",
++        "pos": "DST",
++        "team": "TB",
++        "stats": {
++          "ptsAllowed": 16,
++          "sacks": 4.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 1.0,
++          "safeties": 0.0
++        },
++        "pts": 11.0
++      },
+       {
+         "id": "4682648",
+         "name": "Malachi Fields",
+@@ -862,7 +920,7 @@
+       {
+         "id": "5085189",
+         "name": "Jack Endries",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CIN",
+         "stats": {
+           "rec": 3.0,
+@@ -876,7 +934,7 @@
+       {
+         "id": "4428119",
+         "name": "Lew Nichols",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "PIT",
+         "stats": {
+           "rushAtt": 10.0,
+@@ -956,7 +1014,7 @@
+       {
+         "id": "4383429",
+         "name": "Jacob Saylors",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "DET",
+         "stats": {
+           "rushAtt": 8.0,
+@@ -1063,7 +1121,7 @@
+       {
+         "id": "4568024",
+         "name": "Josh Williams",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "TB",
+         "stats": {
+           "rushAtt": 8.0,
+@@ -1175,10 +1233,38 @@
+         },
+         "pts": 9.2
+       },
++      {
++        "id": "4360234",
++        "name": "Evan McPherson",
++        "pos": "K",
++        "team": "CIN",
++        "stats": {
++          "fgMade": 3.0,
++          "fgAtt": 3.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 14
++        },
++        "pts": 9.0
++      },
++      {
++        "id": "4869461",
++        "name": "Trey Smack",
++        "pos": "K",
++        "team": "GB",
++        "stats": {
++          "fgMade": 3.0,
++          "fgAtt": 3.0,
++          "xpMade": 0.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 28
++        },
++        "pts": 9.0
++      },
+       {
+         "id": "4036032",
+         "name": "Brittain Brown",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CHI",
+         "stats": {
+           "rushAtt": 5.0,
+@@ -1192,6 +1278,35 @@
+         },
+         "pts": 9.0
+       },
++      {
++        "id": "4686361",
++        "name": "Cam Little",
++        "pos": "K",
++        "team": "JAX",
++        "stats": {
++          "fgMade": 3.0,
++          "fgAtt": 3.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 20
++        },
++        "pts": 9.0
++      },
++      {
++        "id": "DST_PIT",
++        "name": "PIT D/ST",
++        "pos": "DST",
++        "team": "PIT",
++        "stats": {
++          "ptsAllowed": 9,
++          "sacks": 5.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 9.0
++      },
+       {
+         "id": "4258170",
+         "name": "Tarik Black",
+@@ -1209,7 +1324,7 @@
+       {
+         "id": "4429086",
+         "name": "Michael Mayer",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "LV",
+         "stats": {
+           "rec": 2.0,
+@@ -1252,7 +1367,7 @@
+       {
+         "id": "4870808",
+         "name": "Jeremiyah Love",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "ARI",
+         "stats": {
+           "rushAtt": 11.0,
+@@ -1269,7 +1384,7 @@
+       {
+         "id": "4569682",
+         "name": "Audric Estime",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NO",
+         "stats": {
+           "rushAtt": 5.0,
+@@ -1305,7 +1420,7 @@
+       {
+         "id": "4702559",
+         "name": "Oscar Delp",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "NO",
+         "stats": {
+           "rec": 3.0,
+@@ -1367,7 +1482,7 @@
+       {
+         "id": "4832955",
+         "name": "Emmett Johnson",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "KC",
+         "stats": {
+           "rushAtt": 12.0,
+@@ -1402,7 +1517,7 @@
+       {
+         "id": "4431431",
+         "name": "Corey Kiner",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "ARI",
+         "stats": {
+           "rushAtt": 10.0,
+@@ -1451,7 +1566,7 @@
+       {
+         "id": "2975674",
+         "name": "Robert Tonyan",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "PIT",
+         "stats": {
+           "rec": 4.0,
+@@ -1479,6 +1594,35 @@
+         },
+         "pts": 8.1
+       },
++      {
++        "id": "3917232",
++        "name": "Tyler Bass",
++        "pos": "K",
++        "team": "BUF",
++        "stats": {
++          "fgMade": 3.0,
++          "fgAtt": 4.0,
++          "xpMade": 2.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 14
++        },
++        "pts": 8.0
++      },
++      {
++        "id": "DST_MIN",
++        "name": "MIN D/ST",
++        "pos": "DST",
++        "team": "MIN",
++        "stats": {
++          "ptsAllowed": 10,
++          "sacks": 4.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 8.0
++      },
+       {
+         "id": "4430870",
+         "name": "KeAndre Lambert-Smith",
+@@ -1496,7 +1640,7 @@
+       {
+         "id": "4039358",
+         "name": "Patrick Taylor Jr.",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "SF",
+         "stats": {
+           "rushAtt": 5.0,
+@@ -1602,7 +1746,7 @@
+       {
+         "id": "4722893",
+         "name": "Jaleel McLaughlin",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "DEN",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -1625,7 +1769,7 @@
+       {
+         "id": "4429847",
+         "name": "Garrett Greene",
+-        "pos": "WR",
++        "pos": "QB",
+         "team": "TB",
+         "stats": {
+           "rec": 4.0,
+@@ -1653,7 +1797,7 @@
+       {
+         "id": "4429501",
+         "name": "Ray Davis",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "BUF",
+         "stats": {
+           "rushAtt": 3.0,
+@@ -1721,7 +1865,7 @@
+       {
+         "id": "4833029",
+         "name": "Max Klare",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "LAR",
+         "stats": {
+           "rec": 7.0,
+@@ -1791,10 +1935,40 @@
+         },
+         "pts": 7.0
+       },
++      {
++        "id": "DST_CHI",
++        "name": "CHI D/ST",
++        "pos": "DST",
++        "team": "CHI",
++        "stats": {
++          "ptsAllowed": 10,
++          "sacks": 3.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 7.0
++      },
++      {
++        "id": "DST_DAL",
++        "name": "DAL D/ST",
++        "pos": "DST",
++        "team": "DAL",
++        "stats": {
++          "ptsAllowed": 7,
++          "sacks": 3.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 7.0
++      },
+       {
+         "id": "4693370",
+         "name": "Riley Nowakowski",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "PIT",
+         "stats": {
+           "rec": 1.0,
+@@ -1808,7 +1982,7 @@
+       {
+         "id": "4698253",
+         "name": "Lan Larison",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NE",
+         "stats": {
+           "rushAtt": 7.0,
+@@ -1856,7 +2030,7 @@
+       {
+         "id": "4239944",
+         "name": "Hunter Long",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "JAX",
+         "stats": {
+           "rec": 1.0,
+@@ -1870,7 +2044,7 @@
+       {
+         "id": "4876311",
+         "name": "Elijah Tau-Tolliver",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "BAL",
+         "stats": {
+           "rushAtt": 10.0,
+@@ -1901,7 +2075,7 @@
+       {
+         "id": "4686658",
+         "name": "Mike Washington Jr.",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "LV",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -1918,7 +2092,7 @@
+       {
+         "id": "4035886",
+         "name": "Khalil Herbert",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "SF",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -1940,7 +2114,7 @@
+       {
+         "id": "4431346",
+         "name": "Mark Redman",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "LAR",
+         "stats": {
+           "rec": 3.0,
+@@ -2002,6 +2176,39 @@
+         },
+         "pts": 6.04
+       },
++      {
++        "id": "4689936",
++        "name": "Jake Bates",
++        "pos": "K",
++        "team": "DET",
++        "stats": {
++          "sacks": 0.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0,
++          "ptsAllowed": 16,
++          "fgMade": 2.0,
++          "fgAtt": 2.0,
++          "xpMade": 0.0,
++          "fgMade50": 0.0
++        },
++        "pts": 6.0
++      },
++      {
++        "id": "4571557",
++        "name": "Spencer Shrader",
++        "pos": "K",
++        "team": "IND",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 2.0,
++          "xpMade": 0.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 13
++        },
++        "pts": 6.0
++      },
+       {
+         "id": "14880",
+         "name": "Kirk Cousins",
+@@ -2017,6 +2224,121 @@
+         },
+         "pts": 6.0
+       },
++      {
++        "id": "4362081",
++        "name": "Cameron Dicker",
++        "pos": "K",
++        "team": "LAC",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 2.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 7
++        },
++        "pts": 6.0
++      },
++      {
++        "id": "4428963",
++        "name": "Cade York",
++        "pos": "K",
++        "team": "NYJ",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 2.0,
++          "xpMade": 0.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 24
++        },
++        "pts": 6.0
++      },
++      {
++        "id": "4567104",
++        "name": "Will Reichard",
++        "pos": "K",
++        "team": "MIN",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 2.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 10
++        },
++        "pts": 6.0
++      },
++      {
++        "id": "4574716",
++        "name": "Harrison Mevis",
++        "pos": "K",
++        "team": "LAR",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 2.0,
++          "xpMade": 2.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 12
++        },
++        "pts": 6.0
++      },
++      {
++        "id": "4696736",
++        "name": "Tanner Brown",
++        "pos": "K",
++        "team": "NO",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 2.0,
++          "xpMade": 0.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 24
++        },
++        "pts": 6.0
++      },
++      {
++        "id": "DST_IND",
++        "name": "IND D/ST",
++        "pos": "DST",
++        "team": "IND",
++        "stats": {
++          "ptsAllowed": 13,
++          "sacks": 2.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 6.0
++      },
++      {
++        "id": "DST_TEN",
++        "name": "TEN D/ST",
++        "pos": "DST",
++        "team": "TEN",
++        "stats": {
++          "ptsAllowed": 13,
++          "sacks": 2.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 6.0
++      },
++      {
++        "id": "DST_LAR",
++        "name": "LAR D/ST",
++        "pos": "DST",
++        "team": "LAR",
++        "stats": {
++          "ptsAllowed": 12,
++          "sacks": 2.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 6.0
++      },
+       {
+         "id": "4432215",
+         "name": "Stephen Gosnell",
+@@ -2034,7 +2356,7 @@
+       {
+         "id": "5081397",
+         "name": "Dylan Sampson",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CLE",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -2097,7 +2419,7 @@
+       {
+         "id": "4685477",
+         "name": "Jam Miller",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NE",
+         "stats": {
+           "rushAtt": 14.0,
+@@ -2174,7 +2496,7 @@
+       {
+         "id": "4873485",
+         "name": "Johnny Pascuzzi",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "LAC",
+         "stats": {
+           "rec": 3.0,
+@@ -2202,7 +2524,7 @@
+       {
+         "id": "4688552",
+         "name": "Keleki Latu",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "BUF",
+         "stats": {
+           "rec": 4.0,
+@@ -2372,10 +2694,66 @@
+         },
+         "pts": 5.04
+       },
++      {
++        "id": "4363538",
++        "name": "Chad Ryland",
++        "pos": "K",
++        "team": "ARI",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 3.0,
++          "xpMade": 3.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 14
++        },
++        "pts": 5.0
++      },
++      {
++        "id": "4034949",
++        "name": "Eddy Pineiro",
++        "pos": "K",
++        "team": "SF",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 3.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 19
++        },
++        "pts": 5.0
++      },
++      {
++        "id": "2985659",
++        "name": "Wil Lutz",
++        "pos": "K",
++        "team": "DEN",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 3.0,
++          "xpMade": 3.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 7
++        },
++        "pts": 5.0
++      },
++      {
++        "id": "17427",
++        "name": "Cairo Santos",
++        "pos": "K",
++        "team": "CHI",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 3.0,
++          "xpMade": 4.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 10
++        },
++        "pts": 5.0
++      },
+       {
+         "id": "4685489",
+         "name": "Jaydn Ott",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "KC",
+         "stats": {
+           "rec": 2.0,
+@@ -2389,7 +2767,7 @@
+       {
+         "id": "4594749",
+         "name": "Michael Trigg",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "DAL",
+         "stats": {
+           "rec": 4.0,
+@@ -2400,6 +2778,111 @@
+         },
+         "pts": 5.0
+       },
++      {
++        "id": "DST_NE",
++        "name": "NE D/ST",
++        "pos": "DST",
++        "team": "NE",
++        "stats": {
++          "ptsAllowed": 13,
++          "sacks": 1.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 5.0
++      },
++      {
++        "id": "DST_LAC",
++        "name": "LAC D/ST",
++        "pos": "DST",
++        "team": "LAC",
++        "stats": {
++          "ptsAllowed": 7,
++          "sacks": 1.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 5.0
++      },
++      {
++        "id": "DST_WSH",
++        "name": "WSH D/ST",
++        "pos": "DST",
++        "team": "WSH",
++        "stats": {
++          "ptsAllowed": 7,
++          "sacks": 1.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 5.0
++      },
++      {
++        "id": "DST_BUF",
++        "name": "BUF D/ST",
++        "pos": "DST",
++        "team": "BUF",
++        "stats": {
++          "ptsAllowed": 14,
++          "sacks": 4.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 5.0
++      },
++      {
++        "id": "DST_NYG",
++        "name": "NYG D/ST",
++        "pos": "DST",
++        "team": "NYG",
++        "stats": {
++          "ptsAllowed": 13,
++          "sacks": 1.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 5.0
++      },
++      {
++        "id": "DST_JAX",
++        "name": "JAX D/ST",
++        "pos": "DST",
++        "team": "JAX",
++        "stats": {
++          "ptsAllowed": 20,
++          "sacks": 4.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 5.0
++      },
++      {
++        "id": "DST_BAL",
++        "name": "BAL D/ST",
++        "pos": "DST",
++        "team": "BAL",
++        "stats": {
++          "ptsAllowed": 7,
++          "sacks": 1.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 5.0
++      },
+       {
+         "id": "4872957",
+         "name": "Raylen Sharpe",
+@@ -2431,7 +2914,7 @@
+       {
+         "id": "4040761",
+         "name": "Devin Singletary",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NYG",
+         "stats": {
+           "rushAtt": 3.0,
+@@ -2525,7 +3008,7 @@
+       {
+         "id": "4570561",
+         "name": "Eric Gray",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NYG",
+         "stats": {
+           "rushAtt": 8.0,
+@@ -2652,7 +3135,7 @@
+       {
+         "id": "4362452",
+         "name": "Jaret Patterson",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "LAC",
+         "stats": {
+           "rushAtt": 5.0,
+@@ -2669,7 +3152,7 @@
+       {
+         "id": "4685350",
+         "name": "Trevor Etienne",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CAR",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -2686,7 +3169,7 @@
+       {
+         "id": "4428557",
+         "name": "Tyjae Spears",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "TEN",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -2703,7 +3186,7 @@
+       {
+         "id": "4890373",
+         "name": "Bauer Sharp",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "TB",
+         "stats": {
+           "rec": 4.0,
+@@ -2737,7 +3220,7 @@
+       {
+         "id": "4431196",
+         "name": "Jake Briningstool",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "KC",
+         "stats": {
+           "rec": 3.0,
+@@ -2751,7 +3234,7 @@
+       {
+         "id": "4685279",
+         "name": "Jaydon Blue",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "DAL",
+         "stats": {
+           "rushAtt": 8.0,
+@@ -2811,7 +3294,7 @@
+       {
+         "id": "4596602",
+         "name": "Brashard Smith",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "KC",
+         "stats": {
+           "rushAtt": 8.0,
+@@ -2842,7 +3325,7 @@
+       {
+         "id": "4426386",
+         "name": "Roschon Johnson",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CHI",
+         "stats": {
+           "rushAtt": 8.0,
+@@ -2887,7 +3370,7 @@
+       {
+         "id": "4432631",
+         "name": "Noah Whittington",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "HOU",
+         "stats": {
+           "rushAtt": 13.0,
+@@ -2992,6 +3475,51 @@
+         },
+         "pts": 4.0
+       },
++      {
++        "id": "DST_SF",
++        "name": "SF D/ST",
++        "pos": "DST",
++        "team": "SF",
++        "stats": {
++          "ptsAllowed": 19,
++          "sacks": 3.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 4.0
++      },
++      {
++        "id": "DST_MIA",
++        "name": "MIA D/ST",
++        "pos": "DST",
++        "team": "MIA",
++        "stats": {
++          "ptsAllowed": 20,
++          "sacks": 3.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 4.0
++      },
++      {
++        "id": "DST_NO",
++        "name": "NO D/ST",
++        "pos": "DST",
++        "team": "NO",
++        "stats": {
++          "ptsAllowed": 24,
++          "sacks": 4.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 4.0
++      },
+       {
+         "id": "11394",
+         "name": "Josh Johnson",
+@@ -3046,7 +3574,7 @@
+       {
+         "id": "4430482",
+         "name": "Joshua Simon",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "ATL",
+         "stats": {
+           "rec": 2.0,
+@@ -3074,7 +3602,7 @@
+       {
+         "id": "4711533",
+         "name": "Ollie Gordon II",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "MIA",
+         "stats": {
+           "rushAtt": 7.0,
+@@ -3091,7 +3619,7 @@
+       {
+         "id": "4709392",
+         "name": "Anthony Tyus III",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CAR",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -3108,7 +3636,7 @@
+       {
+         "id": "4239934",
+         "name": "AJ Dillon",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CAR",
+         "stats": {
+           "rec": 2.0,
+@@ -3200,7 +3728,7 @@
+       {
+         "id": "4430104",
+         "name": "Sincere McCormick",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "SF",
+         "stats": {
+           "rushAtt": 10.0,
+@@ -3217,7 +3745,7 @@
+       {
+         "id": "4432374",
+         "name": "Ahmani Marshall",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CLE",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -3274,7 +3802,7 @@
+       {
+         "id": "4360248",
+         "name": "Kyle Pitts Sr.",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "ATL",
+         "stats": {
+           "rec": 3.0,
+@@ -3301,7 +3829,7 @@
+       {
+         "id": "4240631",
+         "name": "DeeJay Dallas",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "JAX",
+         "stats": {
+           "rushAtt": 10.0,
+@@ -3368,7 +3896,7 @@
+       {
+         "id": "4695705",
+         "name": "Marlin Klein",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "HOU",
+         "stats": {
+           "rec": 1.0,
+@@ -3396,7 +3924,7 @@
+       {
+         "id": "4429202",
+         "name": "Israel Abanikanda",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "DAL",
+         "stats": {
+           "rushAtt": 7.0,
+@@ -3552,7 +4080,7 @@
+       {
+         "id": "4361088",
+         "name": "Colson Yankoff",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "WSH",
+         "stats": {
+           "rec": 2.0,
+@@ -3671,7 +4199,7 @@
+       {
+         "id": "4391845",
+         "name": "Cody Schrader",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "DEN",
+         "stats": {
+           "rushAtt": 7.0,
+@@ -3688,7 +4216,7 @@
+       {
+         "id": "4429676",
+         "name": "Tyler Goodson",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "ATL",
+         "stats": {
+           "rushAtt": 7.0,
+@@ -3705,7 +4233,7 @@
+       {
+         "id": "4430871",
+         "name": "Sean Tucker",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "TB",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -3786,7 +4314,7 @@
+       {
+         "id": "5084402",
+         "name": "Ty Pezza",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "BAL",
+         "stats": {
+           "rec": 2.0,
+@@ -3868,7 +4396,7 @@
+       {
+         "id": "4595342",
+         "name": "Oronde Gadsden",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "LAC",
+         "stats": {
+           "rec": 2.0,
+@@ -3909,7 +4437,7 @@
+       {
+         "id": "4430684",
+         "name": "Treyton Welch",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "NO",
+         "stats": {
+           "rec": 3.0,
+@@ -3952,7 +4480,7 @@
+       {
+         "id": "3050481",
+         "name": "Tanner Hudson",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CIN",
+         "stats": {
+           "rec": 2.0,
+@@ -3982,10 +4510,24 @@
+         },
+         "pts": 3.0
+       },
++      {
++        "id": "4569923",
++        "name": "Andy Borregales",
++        "pos": "K",
++        "team": "NE",
++        "stats": {
++          "fgMade": 2.0,
++          "fgAtt": 5.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 13
++        },
++        "pts": 3.0
++      },
+       {
+         "id": "4366963",
+         "name": "Dylan Laube",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "LV",
+         "stats": {
+           "rushAtt": 5.0,
+@@ -3999,6 +4541,34 @@
+         },
+         "pts": 3.0
+       },
++      {
++        "id": "3150744",
++        "name": "Chase McLaughlin",
++        "pos": "K",
++        "team": "TB",
++        "stats": {
++          "fgMade": 1.0,
++          "fgAtt": 1.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 16
++        },
++        "pts": 3.0
++      },
++      {
++        "id": "3124679",
++        "name": "Jason Sanders",
++        "pos": "K",
++        "team": "NYJ",
++        "stats": {
++          "fgMade": 1.0,
++          "fgAtt": 1.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 24
++        },
++        "pts": 3.0
++      },
+       {
+         "id": "4569603",
+         "name": "Malik Washington",
+@@ -4013,6 +4583,34 @@
+         },
+         "pts": 3.0
+       },
++      {
++        "id": "4372066",
++        "name": "Jake Moody",
++        "pos": "K",
++        "team": "WSH",
++        "stats": {
++          "fgMade": 1.0,
++          "fgAtt": 1.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 7
++        },
++        "pts": 3.0
++      },
++      {
++        "id": "5081335",
++        "name": "Drew Stevens",
++        "pos": "K",
++        "team": "WSH",
++        "stats": {
++          "fgMade": 1.0,
++          "fgAtt": 1.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 7
++        },
++        "pts": 3.0
++      },
+       {
+         "id": "4428796",
+         "name": "Casey Washington",
+@@ -4027,6 +4625,34 @@
+         },
+         "pts": 3.0
+       },
++      {
++        "id": "4258620",
++        "name": "Andre Szmyt",
++        "pos": "K",
++        "team": "CLE",
++        "stats": {
++          "fgMade": 1.0,
++          "fgAtt": 1.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 34
++        },
++        "pts": 3.0
++      },
++      {
++        "id": "4566158",
++        "name": "Ben Sauls",
++        "pos": "K",
++        "team": "NYG",
++        "stats": {
++          "fgMade": 1.0,
++          "fgAtt": 1.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 13
++        },
++        "pts": 3.0
++      },
+       {
+         "id": "4372716",
+         "name": "Nikko Remigio",
+@@ -4058,7 +4684,7 @@
+       {
+         "id": "4248557",
+         "name": "E.J. Jenkins",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "PHI",
+         "stats": {
+           "rec": 2.0,
+@@ -4088,10 +4714,84 @@
+         },
+         "pts": 3.0
+       },
++      {
++        "id": "3953687",
++        "name": "Brandon Aubrey",
++        "pos": "K",
++        "team": "DAL",
++        "stats": {
++          "fgMade": 1.0,
++          "fgAtt": 1.0,
++          "xpMade": 2.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 7
++        },
++        "pts": 3.0
++      },
++      {
++        "id": "DST_DET",
++        "name": "DET D/ST",
++        "pos": "DST",
++        "team": "DET",
++        "stats": {
++          "ptsAllowed": 16,
++          "sacks": 2.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 3.0
++      },
++      {
++        "id": "DST_CIN",
++        "name": "CIN D/ST",
++        "pos": "DST",
++        "team": "CIN",
++        "stats": {
++          "ptsAllowed": 14,
++          "sacks": 2.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 3.0
++      },
++      {
++        "id": "DST_ARI",
++        "name": "ARI D/ST",
++        "pos": "DST",
++        "team": "ARI",
++        "stats": {
++          "ptsAllowed": 14,
++          "sacks": 2.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 3.0
++      },
++      {
++        "id": "DST_PHI",
++        "name": "PHI D/ST",
++        "pos": "DST",
++        "team": "PHI",
++        "stats": {
++          "ptsAllowed": 24,
++          "sacks": 3.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 3.0
++      },
+       {
+         "id": "3116389",
+         "name": "Samaje Perine",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CIN",
+         "stats": {
+           "rushAtt": 1.0,
+@@ -4122,7 +4822,7 @@
+       {
+         "id": "3051876",
+         "name": "Evan Engram",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "DEN",
+         "stats": {
+           "rec": 1.0,
+@@ -4150,7 +4850,7 @@
+       {
+         "id": "4808766",
+         "name": "Mason Taylor",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "NYJ",
+         "stats": {
+           "rec": 2.0,
+@@ -4178,7 +4878,7 @@
+       {
+         "id": "4242431",
+         "name": "Ty Chandler",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NO",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -4214,7 +4914,7 @@
+       {
+         "id": "4037457",
+         "name": "Travis Homer",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "PIT",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -4245,7 +4945,7 @@
+       {
+         "id": "4240657",
+         "name": "Michael Carter",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "TEN",
+         "stats": {
+           "rushAtt": 2.0,
+@@ -4424,7 +5124,7 @@
+       {
+         "id": "4700138",
+         "name": "Sam Scott",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NYJ",
+         "stats": {
+           "rushAtt": 3.0,
+@@ -4477,7 +5177,7 @@
+       {
+         "id": "3042519",
+         "name": "Aaron Jones Sr.",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "MIN",
+         "stats": {
+           "rushAtt": 3.0,
+@@ -4508,7 +5208,7 @@
+       {
+         "id": "4431574",
+         "name": "Eli Stowers",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "PHI",
+         "stats": {
+           "rec": 3.0,
+@@ -4590,7 +5290,7 @@
+       {
+         "id": "4601080",
+         "name": "Raheim Sanders",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CLE",
+         "stats": {
+           "rushAtt": 2.0,
+@@ -4648,7 +5348,7 @@
+       {
+         "id": "4685504",
+         "name": "Sam Roush",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CHI",
+         "stats": {
+           "rec": 2.0,
+@@ -4750,7 +5450,7 @@
+       {
+         "id": "4429299",
+         "name": "Tahj Brooks",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CIN",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -4822,7 +5522,7 @@
+       {
+         "id": "4034948",
+         "name": "Feleipe Franks",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CAR",
+         "stats": {
+           "rec": 3.0,
+@@ -4867,7 +5567,7 @@
+       {
+         "id": "4362770",
+         "name": "Messiah Swinson",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "GB",
+         "stats": {
+           "rec": 2.0,
+@@ -4951,7 +5651,7 @@
+       {
+         "id": "4602969",
+         "name": "Bryson Nesbit",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "MIN",
+         "stats": {
+           "rec": 2.0,
+@@ -5025,7 +5725,7 @@
+       {
+         "id": "4722908",
+         "name": "Drew Ogletree",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "IND",
+         "stats": {
+           "rec": 1.0,
+@@ -5039,7 +5739,7 @@
+       {
+         "id": "4360978",
+         "name": "David Martin-Robinson",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "TEN",
+         "stats": {
+           "rec": 1.0,
+@@ -5067,7 +5767,7 @@
+       {
+         "id": "3914151",
+         "name": "Josiah Deguara",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "SF",
+         "stats": {
+           "rec": 2.0,
+@@ -5081,7 +5781,7 @@
+       {
+         "id": "4682745",
+         "name": "Jaylen Wright",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "MIA",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -5231,7 +5931,7 @@
+       {
+         "id": "4686728",
+         "name": "Gunnar Helm",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "TEN",
+         "stats": {
+           "rec": 1.0,
+@@ -5318,7 +6018,7 @@
+       {
+         "id": "4361050",
+         "name": "Isaiah Likely",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "NYG",
+         "stats": {
+           "rec": 2.0,
+@@ -5432,7 +6132,7 @@
+       {
+         "id": "4685784",
+         "name": "Tre Watson",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "KC",
+         "stats": {
+           "rec": 2.0,
+@@ -5457,20 +6157,94 @@
+         },
+         "pts": 2.0
+       },
++      {
++        "id": "4697745",
++        "name": "Tyler Loop",
++        "pos": "K",
++        "team": "BAL",
++        "stats": {
++          "fgMade": 1.0,
++          "fgAtt": 2.0,
++          "xpMade": 3.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 7
++        },
++        "pts": 2.0
++      },
+       {
+         "id": "4431562",
+         "name": "Phil Mafah",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "DAL",
+         "stats": {
+-          "rushAtt": 4.0,
+-          "rushYds": 9.0,
+-          "rushTds": 0.0,
+-          "ptsAllowed": 7,
+-          "rec": 1.0,
+-          "recYds": 6.0,
+-          "recTds": 0.0,
+-          "targets": 1.0
++          "rushAtt": 4.0,
++          "rushYds": 9.0,
++          "rushTds": 0.0,
++          "ptsAllowed": 7,
++          "rec": 1.0,
++          "recYds": 6.0,
++          "recTds": 0.0,
++          "targets": 1.0
++        },
++        "pts": 2.0
++      },
++      {
++        "id": "DST_GB",
++        "name": "GB D/ST",
++        "pos": "DST",
++        "team": "GB",
++        "stats": {
++          "ptsAllowed": 28,
++          "sacks": 3.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 2.0
++      },
++      {
++        "id": "DST_LV",
++        "name": "LV D/ST",
++        "pos": "DST",
++        "team": "LV",
++        "stats": {
++          "ptsAllowed": 27,
++          "sacks": 2.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 2.0
++      },
++      {
++        "id": "DST_HOU",
++        "name": "HOU D/ST",
++        "pos": "DST",
++        "team": "HOU",
++        "stats": {
++          "ptsAllowed": 27,
++          "sacks": 2.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 2.0
++      },
++      {
++        "id": "DST_CAR",
++        "name": "CAR D/ST",
++        "pos": "DST",
++        "team": "CAR",
++        "stats": {
++          "ptsAllowed": 29,
++          "sacks": 3.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
+         },
+         "pts": 2.0
+       },
+@@ -5511,7 +6285,7 @@
+       {
+         "id": "4566198",
+         "name": "Lake McRee",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "PIT",
+         "stats": {
+           "rec": 2.0,
+@@ -5588,7 +6362,7 @@
+       {
+         "id": "4361112",
+         "name": "Devin Culp",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "TB",
+         "stats": {
+           "rec": 1.0,
+@@ -5621,7 +6395,7 @@
+       {
+         "id": "4678008",
+         "name": "Jonathon Brooks",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CAR",
+         "stats": {
+           "rushAtt": 3.0,
+@@ -5754,7 +6528,7 @@
+       {
+         "id": "4245645",
+         "name": "Gary Brightwell",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CIN",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -5771,7 +6545,7 @@
+       {
+         "id": "4569609",
+         "name": "Evan Hull",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "ARI",
+         "stats": {
+           "rushAtt": 5.0,
+@@ -5877,7 +6651,7 @@
+       {
+         "id": "4257364",
+         "name": "Zavier Scott",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "MIN",
+         "stats": {
+           "rushAtt": 2.0,
+@@ -5894,7 +6668,7 @@
+       {
+         "id": "4566195",
+         "name": "Marshall Lang",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "MIN",
+         "stats": {
+           "rec": 1.0,
+@@ -5922,7 +6696,7 @@
+       {
+         "id": "4678006",
+         "name": "Elijah Arroyo",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "SEA",
+         "stats": {
+           "rec": 1.0,
+@@ -5949,7 +6723,7 @@
+       {
+         "id": "4890973",
+         "name": "Ashton Jeanty",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "LV",
+         "stats": {
+           "rushAtt": 3.0,
+@@ -5979,7 +6753,7 @@
+       {
+         "id": "4605841",
+         "name": "Nathan Carter",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "ATL",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -6009,7 +6783,7 @@
+       {
+         "id": "4690923",
+         "name": "Ben Sinnott",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "WSH",
+         "stats": {
+           "rec": 1.0,
+@@ -6037,7 +6811,7 @@
+       {
+         "id": "3948283",
+         "name": "Stephen Carlson",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CHI",
+         "stats": {
+           "rec": 1.0,
+@@ -6070,7 +6844,7 @@
+       {
+         "id": "4690972",
+         "name": "Ja'Quinden Jackson",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "PHI",
+         "stats": {
+           "rec": 1.0,
+@@ -6084,7 +6858,7 @@
+       {
+         "id": "4876132",
+         "name": "Josh Cuevas",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "BAL",
+         "stats": {
+           "rec": 1.0,
+@@ -6128,7 +6902,7 @@
+       {
+         "id": "3915486",
+         "name": "Tyler Conklin",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "DET",
+         "stats": {
+           "rec": 2.0,
+@@ -6142,7 +6916,7 @@
+       {
+         "id": "4877824",
+         "name": "Zach Horton",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "DET",
+         "stats": {
+           "rec": 2.0,
+@@ -6206,7 +6980,7 @@
+       {
+         "id": "4035537",
+         "name": "Kene Nwangwu",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NYJ",
+         "stats": {
+           "rushAtt": 6.0,
+@@ -6228,7 +7002,7 @@
+       {
+         "id": "4695223",
+         "name": "Chase Curtis",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "NYJ",
+         "stats": {
+           "rec": 1.0,
+@@ -6242,7 +7016,7 @@
+       {
+         "id": "4240472",
+         "name": "Noah Gray",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "KC",
+         "stats": {
+           "rec": 1.0,
+@@ -6256,7 +7030,7 @@
+       {
+         "id": "2576399",
+         "name": "Nick Vannett",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "SEA",
+         "stats": {
+           "rec": 1.0,
+@@ -6307,7 +7081,7 @@
+       {
+         "id": "4429023",
+         "name": "MarShawn Lloyd",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "GB",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -6338,7 +7112,7 @@
+       {
+         "id": "4426689",
+         "name": "Ulysses Bentley IV",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "IND",
+         "stats": {
+           "rushAtt": 2.0,
+@@ -6443,7 +7217,7 @@
+       {
+         "id": "4430723",
+         "name": "Jared Wiley",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "KC",
+         "stats": {
+           "rec": 1.0,
+@@ -6500,7 +7274,7 @@
+       {
+         "id": "4429012",
+         "name": "Kendall Milton",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CIN",
+         "stats": {
+           "rushAtt": 9.0,
+@@ -6532,7 +7306,7 @@
+       {
+         "id": "4831959",
+         "name": "Eli Raridon",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "NE",
+         "stats": {
+           "rec": 1.0,
+@@ -6629,7 +7403,7 @@
+       {
+         "id": "4241374",
+         "name": "Grant Calcaterra",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "PHI",
+         "stats": {
+           "rec": 1.0,
+@@ -6661,7 +7435,7 @@
+       {
+         "id": "4683165",
+         "name": "Jaden Nixon",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "GB",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -6763,7 +7537,7 @@
+       {
+         "id": "4361988",
+         "name": "James Mitchell",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CAR",
+         "stats": {
+           "rec": 2.0,
+@@ -6796,7 +7570,7 @@
+       {
+         "id": "4433959",
+         "name": "Ben Yurosek",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "MIN",
+         "stats": {
+           "rec": 1.0,
+@@ -6865,7 +7639,7 @@
+       {
+         "id": "4588298",
+         "name": "Jameson Geers",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "ARI",
+         "stats": {
+           "rec": 1.0,
+@@ -6879,7 +7653,7 @@
+       {
+         "id": "4035115",
+         "name": "Albert Okwuegbunam Jr.",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "LV",
+         "stats": {
+           "rec": 1.0,
+@@ -6893,7 +7667,7 @@
+       {
+         "id": "4045305",
+         "name": "Ian Thomas",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "LV",
+         "stats": {
+           "rec": 1.0,
+@@ -6921,7 +7695,7 @@
+       {
+         "id": "4361438",
+         "name": "Cole Turner",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "MIA",
+         "stats": {
+           "rec": 1.0,
+@@ -6935,7 +7709,7 @@
+       {
+         "id": "4372780",
+         "name": "Tommy Tremble",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CAR",
+         "stats": {
+           "rec": 1.0,
+@@ -6949,7 +7723,7 @@
+       {
+         "id": "4573699",
+         "name": "Jackson Hawes",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "BUF",
+         "stats": {
+           "rec": 1.0,
+@@ -6963,7 +7737,7 @@
+       {
+         "id": "4362018",
+         "name": "Blake Whiteheart",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CLE",
+         "stats": {
+           "rec": 1.0,
+@@ -6977,7 +7751,7 @@
+       {
+         "id": "4685540",
+         "name": "Carsen Ryan",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CLE",
+         "stats": {
+           "rec": 1.0,
+@@ -6991,7 +7765,7 @@
+       {
+         "id": "4429148",
+         "name": "Theo Johnson",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "NYG",
+         "stats": {
+           "rec": 1.0,
+@@ -7005,7 +7779,7 @@
+       {
+         "id": "4569547",
+         "name": "Nick Kallerup",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "SEA",
+         "stats": {
+           "rec": 1.0,
+@@ -7033,7 +7807,7 @@
+       {
+         "id": "4569615",
+         "name": "Thomas Gordon",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "DET",
+         "stats": {
+           "rec": 1.0,
+@@ -7086,6 +7860,81 @@
+         },
+         "pts": 1.0
+       },
++      {
++        "id": "DST_ATL",
++        "name": "ATL D/ST",
++        "pos": "DST",
++        "team": "ATL",
++        "stats": {
++          "ptsAllowed": 27,
++          "sacks": 1.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 1.0
++      },
++      {
++        "id": "DST_NYJ",
++        "name": "NYJ D/ST",
++        "pos": "DST",
++        "team": "NYJ",
++        "stats": {
++          "ptsAllowed": 24,
++          "sacks": 1.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 1.0
++      },
++      {
++        "id": "DST_CLE",
++        "name": "CLE D/ST",
++        "pos": "DST",
++        "team": "CLE",
++        "stats": {
++          "ptsAllowed": 34,
++          "sacks": 2.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 1.0
++      },
++      {
++        "id": "DST_KC",
++        "name": "KC D/ST",
++        "pos": "DST",
++        "team": "KC",
++        "stats": {
++          "ptsAllowed": 20,
++          "sacks": 0.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 1.0
++      },
++      {
++        "id": "DST_SEA",
++        "name": "SEA D/ST",
++        "pos": "DST",
++        "team": "SEA",
++        "stats": {
++          "ptsAllowed": 17,
++          "sacks": 0.0,
++          "ints": 0.0,
++          "fumRec": 0.0,
++          "tds": 0.0,
++          "safeties": 0.0
++        },
++        "pts": 1.0
++      },
+       {
+         "id": "3039707",
+         "name": "Mitchell Trubisky",
+@@ -7104,7 +7953,7 @@
+       {
+         "id": "4819215",
+         "name": "Josh Kattus",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CIN",
+         "stats": {
+           "rec": 1.0,
+@@ -7131,7 +7980,7 @@
+       {
+         "id": "4429466",
+         "name": "Drake Dabney",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "GB",
+         "stats": {
+           "rec": 1.0,
+@@ -7159,7 +8008,7 @@
+       {
+         "id": "4374045",
+         "name": "Teagan Quitoriano",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "ARI",
+         "stats": {
+           "rec": 1.0,
+@@ -7173,7 +8022,7 @@
+       {
+         "id": "4360231",
+         "name": "Lucas Krull",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "DEN",
+         "stats": {
+           "rec": 1.0,
+@@ -7325,7 +8174,7 @@
+       {
+         "id": "4360086",
+         "name": "Josh Whyle",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "GB",
+         "stats": {
+           "rec": 1.0,
+@@ -7339,7 +8188,7 @@
+       {
+         "id": "4605858",
+         "name": "Rivaldo Fairweather",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "ARI",
+         "stats": {
+           "rec": 1.0,
+@@ -7353,7 +8202,7 @@
+       {
+         "id": "4430968",
+         "name": "Kimani Vidal",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "LAC",
+         "stats": {
+           "rushAtt": 5.0,
+@@ -7406,7 +8255,7 @@
+       {
+         "id": "4881826",
+         "name": "Cash Jones",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "ATL",
+         "stats": {
+           "rushAtt": 3.0,
+@@ -7423,7 +8272,7 @@
+       {
+         "id": "4431588",
+         "name": "Ja'Tavion Sanders",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CAR",
+         "stats": {
+           "rec": 1.0,
+@@ -7482,7 +8331,7 @@
+       {
+         "id": "3127310",
+         "name": "Drew Sample",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "CIN",
+         "stats": {
+           "rec": 1.0,
+@@ -7496,7 +8345,7 @@
+       {
+         "id": "4361411",
+         "name": "Pat Freiermuth",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "PIT",
+         "stats": {
+           "rec": 1.0,
+@@ -7537,7 +8386,7 @@
+       {
+         "id": "4241410",
+         "name": "Jelani Woods",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "NYJ",
+         "stats": {
+           "rec": 1.0,
+@@ -7551,7 +8400,7 @@
+       {
+         "id": "4878695",
+         "name": "Max Bredeson",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "MIN",
+         "stats": {
+           "rec": 1.0,
+@@ -7584,7 +8433,7 @@
+       {
+         "id": "4710711",
+         "name": "DJ Rogers",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "DAL",
+         "stats": {
+           "rec": 1.0,
+@@ -7665,7 +8514,7 @@
+       {
+         "id": "4912052",
+         "name": "Justin Joly",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "DEN",
+         "stats": {
+           "rec": 1.0,
+@@ -7679,7 +8528,7 @@
+       {
+         "id": "4613105",
+         "name": "Miles Davis",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "CAR",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -7696,7 +8545,7 @@
+       {
+         "id": "4360516",
+         "name": "Tyrone Tracy Jr.",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NYG",
+         "stats": {
+           "rushAtt": 2.0,
+@@ -7713,7 +8562,7 @@
+       {
+         "id": "5081999",
+         "name": "CJ Donaldson",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "NO",
+         "stats": {
+           "rushAtt": 4.0,
+@@ -7730,7 +8579,7 @@
+       {
+         "id": "4429013",
+         "name": "Tank Bigsby",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "PHI",
+         "stats": {
+           "rushAtt": 2.0,
+@@ -7792,7 +8641,7 @@
+       {
+         "id": "3917315",
+         "name": "Kyler Murray",
+-        "pos": "",
++        "pos": "QB",
+         "team": "MIN",
+         "stats": {
+           "passComp": 2.0,
+@@ -7820,7 +8669,7 @@
+       {
+         "id": "4241401",
+         "name": "Trey Sermon",
+-        "pos": "WR",
++        "pos": "RB",
+         "team": "ATL",
+         "stats": {
+           "rushAtt": 1.0,
+@@ -7837,7 +8686,7 @@
+       {
+         "id": "4361417",
+         "name": "Zack Kuntz",
+-        "pos": "WR",
++        "pos": "TE",
+         "team": "DAL",
+         "stats": {
+           "rec": 1.0,
+@@ -7869,7 +8718,7 @@
+       {
+         "id": "4573398",
+         "name": "Max Brosmer",
+-        "pos": "",
++        "pos": "QB",
+         "team": "MIN",
+         "stats": {
+           "passComp": 1.0,
+@@ -7902,7 +8751,7 @@
+       {
+         "id": "4372414",
+         "name": "Elijah Moore",
+-        "pos": "RB",
++        "pos": "WR",
+         "team": "PHI",
+         "stats": {
+           "rushAtt": 1.0,
+@@ -7974,7 +8823,7 @@
+       {
+         "id": "4259592",
+         "name": "Sean Clifford",
+-        "pos": "",
++        "pos": "QB",
+         "team": "CIN",
+         "stats": {
+           "passComp": 1.0,
+@@ -8154,6 +9003,34 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "4710727",
++        "name": "Laith Marjan",
++        "pos": "K",
++        "team": "PIT",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 0.0,
++          "xpMade": 3.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 9
++        },
++        "pts": 0.0
++      },
++      {
++        "id": "17372",
++        "name": "Chris Boswell",
++        "pos": "K",
++        "team": "PIT",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 0.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 9
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4686468",
+         "name": "Seth McGowan",
+@@ -8198,6 +9075,20 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "4259619",
++        "name": "Blake Grupe",
++        "pos": "K",
++        "team": "IND",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 1.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 13
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4611993",
+         "name": "Joshua Farmer",
+@@ -8273,6 +9164,34 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "4249087",
++        "name": "Matt Gay",
++        "pos": "K",
++        "team": "LV",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 0.0,
++          "xpMade": 2.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 27
++        },
++        "pts": 0.0
++      },
++      {
++        "id": "5158921",
++        "name": "Kansei Matsuzawa",
++        "pos": "K",
++        "team": "LV",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 1.0,
++          "xpMade": 0.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 27
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4429371",
+         "name": "Jahmeer Carter",
+@@ -8318,6 +9237,20 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "4577793",
++        "name": "Chris Freeman",
++        "pos": "K",
++        "team": "HOU",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 1.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 27
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4833031",
+         "name": "Mani Powell",
+@@ -8498,6 +9431,20 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "10621",
++        "name": "Nick Folk",
++        "pos": "K",
++        "team": "ATL",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 0.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 27
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4567480",
+         "name": "Damarion Williams",
+@@ -8558,6 +9505,20 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "4360317",
++        "name": "B.T. Potter",
++        "pos": "K",
++        "team": "TB",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 0.0,
++          "xpMade": 2.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 16
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4250360",
+         "name": "Bailey Zappe",
+@@ -8628,7 +9589,7 @@
+       {
+         "id": "4431536",
+         "name": "Donovan Edwards",
+-        "pos": "",
++        "pos": "RB",
+         "team": "MIA",
+         "stats": {
+           "rushAtt": 1.0,
+@@ -8703,6 +9664,20 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "4243371",
++        "name": "Riley Patterson",
++        "pos": "K",
++        "team": "MIA",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 0.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 20
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4428343",
+         "name": "Ricky Barber",
+@@ -8778,6 +9753,20 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "4568263",
++        "name": "Ryan Fitzgerald",
++        "pos": "K",
++        "team": "CAR",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 0.0,
++          "xpMade": 2.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 29
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4831989",
+         "name": "Deone Walker",
+@@ -9181,6 +10170,20 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "5208518",
++        "name": "Charlie Smyth",
++        "pos": "K",
++        "team": "NO",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 1.0,
++          "xpMade": 2.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 24
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4432777",
+         "name": "Jeremiah Trotter Jr.",
+@@ -9226,6 +10229,20 @@
+         },
+         "pts": 0.0
+       },
++      {
++        "id": "3050478",
++        "name": "Jake Elliott",
++        "pos": "K",
++        "team": "PHI",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 0.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 24
++        },
++        "pts": 0.0
++      },
+       {
+         "id": "4694334",
+         "name": "Keyon Martin",
+@@ -9300,6 +10317,20 @@
+           "ptsAllowed": 7
+         },
+         "pts": 0.0
++      },
++      {
++        "id": "2473037",
++        "name": "Jason Myers",
++        "pos": "K",
++        "team": "SEA",
++        "stats": {
++          "fgMade": 0.0,
++          "fgAtt": 1.0,
++          "xpMade": 1.0,
++          "fgMade50": 0.0,
++          "ptsAllowed": 17
++        },
++        "pts": 0.0
+       }
+     ]
+   }

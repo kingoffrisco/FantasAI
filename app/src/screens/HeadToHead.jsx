@@ -175,7 +175,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
       for (const p of players) {
         const key = (p.name || '').toLowerCase().trim();
         if (!key) continue;
-        ptsByName[key] = { name: p.name, pos: p.pos, team: p.team, pts: p.pts ?? calcFantasyPts(p.stats, rules), stats: p.stats };
+        ptsByName[key] = { name: p.name, pos: p.pos, team: p.team, pts: p.pts ?? calcFantasyPts(p.stats, rules, p.pos), stats: p.stats };
       }
       setLivePlayerPts(ptsByName);
       setLiveSource(source);
@@ -822,7 +822,7 @@ function NflScores({ week, seasonType }) {
       .then(([board, stats]) => {
         setData(board);
         const rules = getScoringRules();
-        setPlayers((stats.players || []).map(p => ({ ...p, pts: p.pts ?? calcFantasyPts(p.stats, rules) })));
+        setPlayers((stats.players || []).map(p => ({ ...p, pts: p.pts ?? calcFantasyPts(p.stats, rules, p.pos) })));
         setLoading(false);
       })
       .catch(() => { setError('fetch_failed'); setLoading(false); });

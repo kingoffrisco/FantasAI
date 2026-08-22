@@ -304,11 +304,13 @@ function RosterWriteupBlock({ writeup, aiNotes, notesList, borderTop, isDynasty 
   if (writeup?.writeup) {
     const paragraphs = writeup.writeup.split(/\n\n+/).filter(Boolean);
     const genDate = writeup.generated_at ? new Date(writeup.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+    // _model comes back as e.g. "qwen3:14b" — shorten to "3-14b" to fit inline.
+    const modelTag = writeup._model ? writeup._model.replace(/^qwen/i, '').replace(':', '-') : null;
     return (
       <div style={{ borderTop, paddingTop: borderTop !== 'none' ? 6 : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
           <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, padding: '1px 5px', borderRadius: 3, background: 'rgba(198,255,58,.12)', color: '#c6ff3a', border: '1px solid rgba(198,255,58,.25)', whiteSpace: 'nowrap' }}>FantasAI</span>
-          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>Qwen · {genDate || 'local'}</span>
+          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>Qwen{modelTag ? ` ${modelTag}` : ''} · {genDate || 'local'}</span>
         </div>
         <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.55 }}>
           {(expanded ? paragraphs : paragraphs.slice(0, 1)).map((para, i) => (
