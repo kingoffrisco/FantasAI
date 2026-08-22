@@ -11,8 +11,12 @@ Each writeup covers:
   - Current news / injury context
   - 2026 fantasy outlook with draft positioning
 
-Incremental: caches by a hash of injury_status + recent_news_count + adp_rank.
-             Only regenerates when those fields change.
+Incremental: caches by a hash of injury_status + recent_news_count + adp_rank +
+             recent headline text + total_fantasy_points_2025. Regenerates when
+             any of those change, OR unconditionally once a cached entry is
+             older than MAX_CACHE_KEY_SKIP_DAYS (21 days) — a hard ceiling so a
+             writeup can never go stale forever just because those specific
+             signals happened to stay flat.
 
 Two modes:
   --mode rostered   Only players currently on a fantasy roster (nightly, ~15 min)
@@ -157,12 +161,34 @@ def _news_block(profile: dict, notes_lookup: dict) -> str:
     return "\n".join(lines) if lines else "No recent news."
 
 
+def _recent_headline_titles(profile: dict) -> list[str]:
+    """Extract just the headline text from profile['recent_news'], same
+    defensive shape-handling as _news_block (dict / list-tuple / skip)."""
+    titles = []
+    for item in (profile.get("recent_news") or [])[:5]:
+        if isinstance(item, dict):
+            title = item.get("title") or item.get("headline") or ""
+        elif isinstance(item, (list, tuple)):
+            title = str(item[0]) if len(item) > 0 and item[0] else ""
+        else:
+            continue
+        if title:
+            titles.append(title)
+    return titles
+
+
 def _cache_key(profile: dict) -> str:
+    # NOTE: recent_news_count staying flat does NOT mean nothing happened —
+    # a rolling news window can hold the same *count* of totally different
+    # articles (e.g. a contract extension replacing an older story). Hashing
+    # the actual headline text, not just how many there are, is what makes
+    # the cache actually bust when something newsworthy happens.
     sig = "|".join([
         str(profile.get("injury_status") or ""),
         str(profile.get("recent_news_count") or 0),
         str(profile.get("adp_rank_ppr") or 0),
         str(profile.get("total_fantasy_points_2025") or 0),
+        "|".join(_recent_headline_titles(profile)),
     ])
     return hashlib.md5(sig.encode()).hexdigest()[:12]
 
@@ -182,6 +208,29 @@ def _already_fresh(entry: dict, mode: str) -> bool:
             return age_hours < 6 * 24    # skip if generated within the last 6 days
     except Exception:
         return False
+
+
+MAX_CACHE_KEY_SKIP_DAYS = 21  # hard ceiling — see _too_stale_to_trust_cache_key
+
+
+def _too_stale_to_trust_cache_key(entry: dict) -> bool:
+    """A matching _cache_key means the signature fields haven't moved, but
+    that's a handful of narrow signals (injury/adp/news-count/points) — not
+    a guarantee nothing fantasy-relevant happened. This shipped a real bug:
+    Bijan Robinson's writeup sat unchanged for 2+ months across every weekly
+    "all" run because his cache_key never budged, even through a real
+    contract extension. Past this ceiling, force a regenerate regardless of
+    cache_key — a stale writeup is worse than a wasted Qwen call.
+    """
+    ts = entry.get("generated_at")
+    if not ts:
+        return True
+    try:
+        generated = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        age_days = (datetime.now(timezone.utc) - generated).total_seconds() / 86400
+        return age_days >= MAX_CACHE_KEY_SKIP_DAYS
+    except Exception:
+        return True
 
 
 # ── R2 helpers ──────────────────────────────────────────────────────────────
@@ -805,7 +854,7 @@ def main():
                 players_out[name] = entry
                 print(f"  [{i+1}/{len(candidates)}] {name} (fresh — skipping)")
                 continue
-            if entry.get("_cache_key") == cache_key:
+            if entry.get("_cache_key") == cache_key and not _too_stale_to_trust_cache_key(entry):
                 players_out[name] = entry
                 print(f"  [{i+1}/{len(candidates)}] {name} (cached — data unchanged)")
                 continue

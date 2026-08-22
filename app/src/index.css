@@ -646,7 +646,9 @@ select.input { appearance: none; padding-right: 28px; background-image: url("dat
   .shell, .shell.has-ai { grid-template-columns: 1fr; grid-template-rows: 56px 1fr 56px; grid-template-areas: "topbar" "main" "mobnav"; }
   .logo-area, .side, .ai { display: none; }
   .draft-grid { grid-template-columns: 1fr; grid-template-rows: 84px auto auto; grid-template-areas: "clock" "board" "roster"; }
-  .draft-roster { display: none; }
+  .draft-roster { min-width: 0; width: 100%; }
+  .draft-board { min-width: 0; width: 100%; max-width: 100%; }
+  .draft-board, .draft-roster { overflow-x: auto; }
   .draft-resize-handle { display: none; }
   .trade-panels { grid-template-columns: 1fr; }
   .page-head { padding: 14px 16px; }
@@ -675,6 +677,70 @@ select.input { appearance: none; padding-right: 28px; background-image: url("dat
 }
 .mob-nav .item:active { opacity: .7; }
 .mob-nav .item.active { color: var(--accent); }
+
+/* App-level mobile preview mode (used by TopBar toggle) */
+.shell.mobile-mode,
+.shell.mobile-mode.has-ai {
+  grid-template-columns: 1fr;
+  grid-template-rows: 56px 1fr 56px;
+  grid-template-areas: "topbar" "main" "mobnav";
+}
+.shell.mobile-mode .logo-area,
+.shell.mobile-mode .side,
+.shell.mobile-mode .ai {
+  display: none;
+}
+.shell.mobile-mode .mob-nav {
+  display: flex;
+}
+.shell.mobile-mode .hide-mobile:not(.view-toggle) {
+  display: none !important;
+}
+/* Keep the Mobile/Desktop toggle visible in mobile-preview mode — otherwise
+   clicking "Mobile" hides the only control that can switch back. */
+.shell.mobile-mode .view-toggle {
+  display: flex !important;
+}
+.shell.mobile-mode .main {
+  overflow-x: hidden;
+}
+.shell.mobile-mode .main > * {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.shell.mobile-mode .draft-grid {
+  grid-template-columns: 1fr;
+  grid-template-rows: 84px auto auto;
+  grid-template-areas: "clock" "board" "roster";
+}
+.shell.mobile-mode .draft-roster {
+  min-width: 0;
+  width: 100%;
+}
+.shell.mobile-mode .draft-board {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+.shell.mobile-mode .draft-board,
+.shell.mobile-mode .draft-roster {
+  overflow-x: auto;
+}
+.shell.mobile-mode .draft-resize-handle {
+  display: none;
+}
+/* The "More" sheet uses position: fixed, which anchors to the real browser
+   viewport — fine on an actual phone, but in the manual mobile-preview
+   toggle the .shell is just a 414px box on a wide desktop viewport, so a
+   fixed-position sheet spans the full desktop width instead of the preview
+   frame. Scope it to the frame itself instead. */
+.shell.mobile-mode {
+  position: relative;
+}
+.shell.mobile-mode .mob-menu-overlay {
+  position: absolute;
+}
 
 /* More menu — slide-up sheet */
 .mob-menu-overlay {

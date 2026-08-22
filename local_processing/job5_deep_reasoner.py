@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -205,6 +206,37 @@ Rules:
 """
 
 
+def _consistency_warning(breakout_score: int, recommendation: str) -> str:
+    """Flag model output where the recommendation contradicts its own score.
+
+    qwen3:30b occasionally returns e.g. breakout_score=0 with
+    recommendation=BUY. There's no cheap way to force the model to be
+    internally consistent, so instead of trusting it silently, tag it —
+    downstream consumers (and whoever reviews deep_reasoning.json) can see
+    which rows to distrust.
+    """
+    rec = (recommendation or "").upper()
+    if rec == "BUY" and breakout_score < 30:
+        return f"BUY with low breakout_score ({breakout_score})"
+    if rec == "AVOID" and breakout_score > 70:
+        return f"AVOID with high breakout_score ({breakout_score})"
+    return ""
+
+
+def _dedup_stutter(text: str) -> str:
+    """Collapse an exact immediate word repeat qwen3:30b sometimes emits at the
+    end of a generated string (e.g. "...offense offense" -> "...offense").
+    Deliberately narrow — only removes an EXACT repeated word, so it can't
+    mangle legitimate text. Partial-word stutters ("wit with", "sentime
+    sentiment") aren't safely detectable this way and are left alone; they
+    show up occasionally and are a known qwen3 flakiness pattern, not a bug
+    in this script — flag for a human reviewer instead of guessing a fix.
+    """
+    if not text:
+        return text
+    return re.sub(r"\b(\w+)(\s+\1)+\b", r"\1", text, flags=re.IGNORECASE)
+
+
 def reason_about_player(packet: dict) -> dict:
     prompt = PROMPT_TEMPLATE.format(
         packet_json=json.dumps(packet, indent=2, sort_keys=True, default=str)
@@ -253,12 +285,26 @@ def main():
         existing_players = existing_data.get("players", {})
 
     ranked = []
+    skipped_unidentified = 0
     for name, player in player_scores.items():
         packet = build_packet(name, player, breakout_lookup, notes_lookup)
         priority = candidate_priority(player, packet)
         if priority <= 0:
             continue
+        # No position/team means upstream couldn't confirm this is a real
+        # roster player (team names, group references, retired/unrostered
+        # names occasionally slip through job1/job2). Not worth spending
+        # 30B-model time reasoning about an unidentified entity.
+        if not packet.get("position") and not packet.get("team"):
+            skipped_unidentified += 1
+            continue
         ranked.append((priority, name, packet))
+
+    if skipped_unidentified:
+        print(
+            f"[Job 5] Skipped {skipped_unidentified} candidates with no "
+            f"position/team (likely non-roster names from upstream)"
+        )
 
     ranked.sort(key=lambda item: (-item[0], item[1]))
     selected = ranked[: max(args.limit, 0)]
@@ -281,25 +327,30 @@ def main():
             t0 = datetime.now(timezone.utc)
             output = reason_about_player(packet)
             elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
+            breakout_score = int(output.get("breakout_score", 0))
+            recommendation = output.get("recommendation", "HOLD")
+            warning = _consistency_warning(breakout_score, recommendation)
             results[name] = {
                 "player_name": name,
                 "position": packet.get("position", ""),
                 "team": packet.get("team", ""),
                 "priority": round(priority, 2),
                 "input_hash": input_hash,
-                "breakout_score": int(output.get("breakout_score", 0)),
+                "breakout_score": breakout_score,
                 "confidence": int(output.get("confidence", 0)),
-                "primary_reason": output.get("primary_reason", ""),
-                "risk_flag": output.get("risk_flag", ""),
-                "recommendation": output.get("recommendation", "HOLD"),
+                "primary_reason": _dedup_stutter(output.get("primary_reason", "")),
+                "risk_flag": str(output.get("risk_flag", "")).strip().lower(),
+                "recommendation": recommendation,
+                "_consistency_warning": warning,
                 "packet": packet,
                 "_elapsed_sec": round(elapsed, 2),
             }
+            flag = f" [!] {warning}" if warning else ""
             print(
                 f"  [{idx}/{len(selected)}] {name} "
                 f"score={results[name]['breakout_score']} "
                 f"rec={results[name]['recommendation']} "
-                f"({results[name]['_elapsed_sec']}s)"
+                f"({results[name]['_elapsed_sec']}s){flag}"
             )
         except Exception as exc:
             errors += 1
@@ -316,7 +367,7 @@ def main():
     if args.dry_run:
         out = Path(__file__).parent / "job5_deep_reasoner_dry_run.json"
         out.write_text(json.dumps(master, indent=2, default=str))
-        print(f"[Job 5] Dry run saved → {out}")
+        print(f"[Job 5] Dry run saved -> {out}")
         return
 
     print("[Job 5] Uploading to R2...")

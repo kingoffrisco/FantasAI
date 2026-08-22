@@ -1,127 +1,80 @@
 # FantasAI Documentation
 
-**Project Status:** ✅ Production Ready  
-**Last Updated:** June 4, 2026
+**Project Status:** ✅ Production (local pipeline, some legacy Databricks-backed endpoints unconfirmed live)
+**Last Updated:** August 22, 2026
+
+> **August 22, 2026:** This index and quick-start were written for the old Databricks-backed system and were badly stale (the platform migrated to a fully local DuckDB pipeline on June 15, 2026, and has grown substantially since). Rewritten from a full audit of the current codebase. See [../ARCHITECTURE.md](../ARCHITECTURE.md) for the canonical, detailed architecture reference — this page is just a quick-start pointer into it.
 
 ---
 
 ## 📚 Documentation Index
 
-### For UI Developers
-- **[UI_INTEGRATION_GUIDE.md](./UI_INTEGRATION_GUIDE.md)** - Complete guide for integrating with FantasAI ML tables
-  - Table schemas and example queries
-  - Performance expectations
-  - Best practices and common pitfalls
-  - Data refresh strategy
-  - 12KB comprehensive reference
-
-- **[WEEKLY_DEEP_REASONING_TASK.md](./WEEKLY_DEEP_REASONING_TASK.md)** - Copy-paste Windows Task Scheduler setup for the dedicated Qwen3:30b overnight reasoning job
-
-### For Data Engineers
-- **[CHANGELOG.md](./CHANGELOG.md)** - Project history and version tracking
-  - Recent changes and improvements
-  - Table creation history
-  - Model registration records
-  - Performance optimizations
+- **[../ARCHITECTURE.md](../ARCHITECTURE.md)** — Canonical architecture reference: system inventory, DuckDB schema (~33 tables), job schedules (14 live Task Scheduler tasks), AI pipeline (Jobs 1-5), repository structure, known issues
+- **[API_ENDPOINTS.md](./API_ENDPOINTS.md)** — Every worker-api route, grouped by feature, with R2-backed vs. still-Databricks-backed status flagged per endpoint
+- **[DATA_SCHEMAS.md](./DATA_SCHEMAS.md)** — JSON shape for every R2 export/endpoint, including the new ones (player scores, deep reasoning, live scoring, O-Line Index/Stability, offensive ecosystem, rookie scores)
+- **[../app/BACKEND_TO_FRONTEND.md](../app/BACKEND_TO_FRONTEND.md)** — Frontend integration guide: `app/src/api.js` function-to-endpoint map, screen inventory, known frontend issues
+- **[BETTING_DATA_SOURCES.md](./BETTING_DATA_SOURCES.md)** — DraftKings DFS + Kalshi prediction-market ingestion (new, 2026-08-22): what's live, provider cost comparison, risk notes
+- **[WEEKLY_DEEP_REASONING_TASK.md](./WEEKLY_DEEP_REASONING_TASK.md)** — Task Scheduler setup for the Job 5 (Qwen3:30B) overnight reasoning job — current and accurate
+- **[LOCAL_MIGRATION_CHECKLIST.md](./LOCAL_MIGRATION_CHECKLIST.md)** — Historical record of the June 2026 Databricks → local migration
+- **[HUMAN_IN_THE_LOOP_INTEGRATION.md](./HUMAN_IN_THE_LOOP_INTEGRATION.md)** — Article labeling feedback loop
+- **[CHANGELOG.md](./CHANGELOG.md)** — Project history
 
 ---
 
-## 🚀 Quick Start for UI Team
+## 🚀 Quick Start
 
-### 1. Connect to Database
-```python
-from databricks import sql
-
-connection = sql.connect(
-    server_hostname=os.getenv("DATABRICKS_SERVER_HOSTNAME"),
-    http_path=os.getenv("DATABRICKS_HTTP_PATH"),
-    access_token=os.getenv("DATABRICKS_TOKEN")
-)
+### Fetch 2026 draft players (recommended — R2, local pipeline)
+```js
+const res = await fetch('https://api.fantasai.net/api/v1/r2/fantasai/players/export_players_2026_draft.json');
+const { data } = await res.json();
 ```
 
-### 2. Fetch 2026 Players (Frontend — via Worker API)
+### Fetch player news (recommended — R2, local pipeline)
+```js
+const res = await fetch('https://api.fantasai.net/api/v1/r2/fantasai/analysis/player_news.json');
+const { data } = await res.json();
+```
+
+### Legacy Databricks-backed convenience endpoint (status unconfirmed — see API_ENDPOINTS.md)
 ```js
 const { players } = await fetch('https://api.fantasai.net/api/v1/db/players').then(r => r.json());
-// 997 players, all isDraftable: "true"
-// Fields: playerId, name, position, team, proj, avg, last, trend, positionRank, percentile, tier, status, experience, isRookie
 ```
+This route still issues a live Databricks SQL Warehouse query. Whether Databricks credentials are still provisioned was not confirmed in the August 22 audit — prefer the R2-backed endpoint above unless you've verified this one works.
 
-Or query Databricks directly (internal tooling only):
-```sql
-SELECT * FROM main.fantasai.export_players_2026_draft LIMIT 2500;
-```
-
-### 3. Verify Performance
-Expected query latency: **< 300ms**
+### Auth
+Most reads are open. A subset of routes (raw R2 access, some Sleeper/CBS proxies, admin routes) require an `X-FantasAI-Key` header. See [API_ENDPOINTS.md](./API_ENDPOINTS.md) for which.
 
 ---
 
-## 📊 Available Tables
+## 📊 Key Data Exports (R2, local pipeline)
 
-| Table | Rows | Purpose |
-|-------|------|---------|
-| `export_players_2026_draft` | 997 | Draft board — all active 2026 players (all draftable) |
-| `export_player_news` | ~86 | AI-enriched news with fantasy insights |
-| `export_defense_performance` | 606 | Weekly matchup rankings |
-| `export_breakout_candidates` | ~7 | ML-powered sleeper picks |
-| `export_sleeper_picks` | ~24 | High-value waiver targets |
-| `ml_weekly_predictions` | 24,862 | Weekly projections (internal) |
-| `ml_player_features` | 162,896 | Full feature dataset (internal) |
+| Export | R2 Key | Purpose |
+|---|---|---|
+| Draft board | `fantasai/players/export_players_2026_draft.json` | All active draftable players |
+| Player news | `fantasai/analysis/player_news.json` | AI-enriched news |
+| Player scores | `fantasai/analysis/player_scores.json` | Job 2 waiver/trade/start/sit/dynasty scores |
+| Deep reasoning | `fantasai/analysis/deep_reasoning.json` | Job 5 — weekly, top ~20 candidates only |
+| Live scores | `fantasai/live/scoreboard_{season}_{type}_{week}.json` | In-game scoring |
+| O-Line Index / Stability | `fantasai/analysis/oline_index.json`, `oline_stability.json` | Proprietary O-line metrics |
+
+Full list: [DATA_SCHEMAS.md](./DATA_SCHEMAS.md).
 
 ---
 
 ## 🔑 Critical Rules
 
-1. **Always filter by** `is_draftable = TRUE`
-2. **Sort by** `projected_avg_points DESC`
-3. **Label as** "2026 Players" (not "active")
-4. **Handle nulls** in combine metrics (~60% missing)
-5. **Refresh weekly** during NFL season
+1. Prefer R2-backed endpoints (`/api/v1/r2/{key}`) over the legacy `/api/v1/db/*` and `/api/v1/news/{latest,critical,ai-summaries}` routes — the latter are still Databricks-backed and unconfirmed live.
+2. Handle nulls in combine metrics and Job 5 deep-reasoning fields (deep reasoning only covers ~20 players/week, not the full pool).
+3. Live scoring keys return empty arrays (not an error) if `job_live_scores.py` hasn't run for that week yet.
+4. Refresh cadence varies by export — see [ARCHITECTURE.md → Job Schedules](../ARCHITECTURE.md#job-schedules) for the authoritative per-job schedule rather than assuming daily/weekly uniformly.
 
 ---
 
 ## 📞 Support
 
 - **Primary Contact:** kingoffrisco@yahoo.com
-- **Job Orchestrator:** [Job 763487314454311](https://dbc-60fb4a1c-8bce.cloud.databricks.com/jobs/763487314454311)
-- **Database:** Unity Catalog `main.fantasai`
 
 ---
 
-## 🎯 Current Status
-
-### ✅ Completed
-- [x] ML pipeline operational
-- [x] Features table (70 features, 162,896 rows)
-- [x] Predictions table (24,862 predictions)
-- [x] 2026 players table (997 active, all draftable — retired players removed June 12, 2026)
-- [x] R2 optimization enabled
-- [x] Documentation complete
-
-### ⏳ Pending
-- [ ] Model serving endpoints (manual UI setup)
-- [ ] Feature importance visualization
-- [ ] Weekly refresh automation
-- [ ] UI integration testing
-
----
-
-## 📖 Additional Resources
-
-### Notebooks
-- Feature Engineering: `/Repos/.../notebooks/03_ML_Training/`
-- Job Orchestrator: `/Repos/.../notebooks/05_Scheduled_Jobs/`
-
-### Models
-- Experiment: `fantasai_weekly_predictions` (ID: 4060439875893869)
-- Registry: `main.fantasai.player_performance_predictor_*` (QB/RB/WR/TE)
-
-### Performance Metrics
-- **QB Model:** RMSE=4.92, MAE=2.73, R²=0.776
-- **Query Speed:** < 300ms average
-- **Table Optimization:** Auto (R2 enabled)
-
----
-
-**Version:** 1.2.0  
-**Last Modified:** June 4, 2026
+**Version:** 2.0.0
+**Last Modified:** August 22, 2026

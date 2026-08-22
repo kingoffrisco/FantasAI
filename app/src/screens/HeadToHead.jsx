@@ -1,7 +1,8 @@
 import React from 'react';
 import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters } from '../lib/data.js';
-import { findPlayer, usePlayers } from '../lib/playerStore.js';
+import { findPlayer, findPlayerByName, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
+import { getScoringRules, calcFantasyPts, normalizeTeamAbbr, getGameProgress, blendProjectedFinal, fetchEspnScoreboardDirect, fetchEspnPlayerStatsDirect } from '../lib/liveScoring.js';
 
 const NUM_WEEKS = 14;
 
@@ -34,29 +35,68 @@ function computeScore(roster) {
   }, 0);
 }
 
-function loadLockedScores(season, week) {
-  try {
-    const key = `fantasai_week_scores_${season}_${week}`;
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
+// Live per-player lookup: matches by lowercased/trimmed name against the
+// player-stats response from /api/v1/nfl/player-stats, same matching
+// convention the old locked-score system used.
+function findLivePlayerEntry(livePlayerPts, p) {
+  if (!p || !livePlayerPts) return null;
+  return livePlayerPts[(p.name || '').toLowerCase().trim()] || null;
 }
 
-function getActualPtsFromLocked(locked, roster) {
-  if (!locked?.players) return null;
+// Real, current score — derived only from recorded stats via the scoring
+// rules, never blended with projection. A player with no live stat entry
+// contributes 0, whether that's because their game hasn't started, they
+// haven't recorded anything yet, or they have no game this slate at all.
+// This is the "what has actually happened" number.
+function computeActualTeamTotal(roster, livePlayerPts) {
   const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
   let total = 0;
-  let matched = 0;
   for (const entry of starters) {
     const p = findPlayer(entry.playerId);
     if (!p) continue;
-    const lockedPlayer = locked.players.find(lp =>
-      lp.name?.toLowerCase().trim() === p.name?.toLowerCase().trim()
-    );
-    if (lockedPlayer) { total += lockedPlayer.pts || 0; matched++; }
+    const liveEntry = findLivePlayerEntry(livePlayerPts, p);
+    total += liveEntry?.pts ?? 0;
   }
-  return matched > 0 ? Math.round(total * 10) / 10 : null;
+  return Math.round(total * 10) / 10;
+}
+
+// Projected final — actual-so-far blended with a pace-adjusted remaining
+// projection. Falls back to the static proj for any player with no live
+// game info at all (bye week, not playing this slate). This is a distinct
+// "what we expect the final to be" estimate — shown separately from the
+// real/actual score above, never as the main score.
+function computeBlendedTeamTotal(roster, liveGameStatus, livePlayerPts) {
+  const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
+  let total = 0;
+  for (const entry of starters) {
+    const p = findPlayer(entry.playerId);
+    if (!p) continue;
+    const proj = playerProjPts(p);
+    const gameStatus = liveGameStatus?.[normalizeTeamAbbr(p.team)];
+    if (!gameStatus) { total += proj; continue; }
+    const progress = getGameProgress(gameStatus);
+    const liveEntry = findLivePlayerEntry(livePlayerPts, p);
+    total += blendProjectedFinal(liveEntry?.pts ?? 0, proj, progress);
+  }
+  return Math.round(total * 10) / 10;
+}
+
+// Real isLive/isFinal from actual ESPN game status for this matchup's
+// rostered players, falling back to the calendar heuristic when no live
+// data is available yet (e.g. Worker not configured, or a week ESPN
+// hasn't published games for).
+function deriveMatchupStatus(homeRoster, awayRoster, liveGameStatus, fallbackIsLive, fallbackIsFinal) {
+  const rosters = [...homeRoster, ...awayRoster].filter(r => r.slot !== 'BENCH' && r.playerId);
+  const statuses = rosters
+    .map(entry => {
+      const p = findPlayer(entry.playerId);
+      return p ? liveGameStatus?.[normalizeTeamAbbr(p.team)] : null;
+    })
+    .filter(Boolean);
+  if (statuses.length === 0) return { isLive: fallbackIsLive, isFinal: fallbackIsFinal };
+  const allPre  = statuses.every(s => s.state === 'pre');
+  const allPost = statuses.every(s => s.state === 'post' || s.completed);
+  return { isLive: !allPre && !allPost, isFinal: allPost };
 }
 
 // Per-player projection: prefer p.proj (same source as Current Roster), fall back to p.avg
@@ -81,13 +121,16 @@ function parseRecord(r = '0-0') {
   return { w: w || 0, l: l || 0 };
 }
 
-export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slotOverrides }) {
+export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slotOverrides, showMobile = false }) {
+  const isMobile = showMobile;
   const allPlayers = usePlayers(); // subscribe so roster re-assigns when player data loads
   const [week, setWeek] = React.useState(CURRENT_WEEK);
   const [expanded, setExpanded] = React.useState(0);
   const [h2hTab, setH2hTab] = React.useState('mine'); // 'mine' | 'all' | 'scores'
   const showAll = h2hTab === 'all';
-  const [mobileScoringOpen, setMobileScoringOpen] = React.useState(false);
+  // 'regular' by default (unchanged behavior); 'pre' lets us test scoring
+  // against real preseason games before the real season starts.
+  const [seasonType, setSeasonType] = React.useState('regular');
 
   // Sync TEAM_ROSTERS from localStorage whenever H2H is opened so drafted players appear
   const [rosterVersion, setRosterVersion] = React.useState(0);
@@ -95,6 +138,112 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     refreshTeamRosters();
     setRosterVersion(v => v + 1);
   }, []);
+
+  // Live per-player stats + per-game status. Primary source is the Worker's
+  // R2 cache (populated by local_processing/job_live_scores.py, since ESPN
+  // started blocking the Worker's own outbound requests). If that cache has
+  // no data yet for the requested week/season/type, fall back to fetching
+  // ESPN directly from this browser — display-only for this viewer, never
+  // written back to R2 (see fetchEspnScoreboardDirect's comment).
+  // liveGameStatus is keyed by ESPN team abbreviation; livePlayerPts by
+  // lowercased/trimmed player name → {pts, stats}.
+  const [liveGameStatus, setLiveGameStatus] = React.useState({});
+  const [livePlayerPts, setLivePlayerPts] = React.useState({});
+  const [liveSource, setLiveSource] = React.useState(null); // 'r2' | 'browser' | 'none'
+  const [liveRefreshing, setLiveRefreshing] = React.useState(false);
+  const [refreshTick, setRefreshTick] = React.useState(0);
+
+  React.useEffect(() => {
+    const workerUrl = (localStorage.getItem('fantasai.workerUrl') || '').replace(/\/$/, '');
+    if (!workerUrl) { setLiveGameStatus({}); setLivePlayerPts({}); setLiveSource('none'); return; }
+
+    let cancelled = false;
+    let pollId = null;
+
+    function applyLiveData(games, players, source) {
+      const statusByTeam = {};
+      for (const g of games) {
+        // Carry the game's kickoff time + opponent alongside status so the
+        // roster breakdown can show "when to expect points" per player.
+        if (g.home?.abbr) statusByTeam[g.home.abbr] = { ...g.status, kickoff: g.date, opp: g.away?.abbr || null };
+        if (g.away?.abbr) statusByTeam[g.away.abbr] = { ...g.status, kickoff: g.date, opp: g.home?.abbr || null, isAway: true };
+      }
+      setLiveGameStatus(statusByTeam);
+
+      const rules = getScoringRules();
+      const ptsByName = {};
+      for (const p of players) {
+        const key = (p.name || '').toLowerCase().trim();
+        if (!key) continue;
+        ptsByName[key] = { name: p.name, pos: p.pos, team: p.team, pts: p.pts ?? calcFantasyPts(p.stats, rules), stats: p.stats };
+      }
+      setLivePlayerPts(ptsByName);
+      setLiveSource(source);
+      return statusByTeam;
+    }
+
+    async function fetchLive() {
+      setLiveRefreshing(true);
+      try {
+        const [boardRes, statsRes] = await Promise.all([
+          fetch(`${workerUrl}/api/v1/nfl/scoreboard?week=${week}&season=${CURRENT_SEASON}&type=${seasonType}`),
+          fetch(`${workerUrl}/api/v1/nfl/player-stats?week=${week}&season=${CURRENT_SEASON}&type=${seasonType}`),
+        ]);
+        const board = await boardRes.json();
+        const stats = await statsRes.json();
+        if (cancelled) return;
+
+        let statusByTeam;
+        if ((board.games || []).length > 0) {
+          statusByTeam = applyLiveData(board.games, stats.players || [], 'r2');
+        } else {
+          // R2 cache has nothing for this week/season/type yet — fall back
+          // to fetching ESPN directly from this browser.
+          try {
+            const games = await fetchEspnScoreboardDirect(week, CURRENT_SEASON, seasonType);
+            const players = games.length > 0 ? await fetchEspnPlayerStatsDirect(games) : [];
+            statusByTeam = applyLiveData(games, players, 'browser');
+          } catch {
+            statusByTeam = applyLiveData([], [], 'none');
+          }
+        }
+        if (cancelled) return;
+
+        // Keep polling only while at least one game is actually in progress.
+        // 60s, matching job_live_scores.py's tightest tier (LIVE_INTERVAL)
+        // — this only hits our own Worker/R2, not ESPN, so there's no
+        // rate-limit concern here; no reason to lag behind the backend's
+        // freshest cadence during live play.
+        const anyLive = Object.values(statusByTeam).some(s => s.state === 'in');
+        if (anyLive && !cancelled && !pollId) {
+          pollId = setInterval(fetchLive, 60000);
+        } else if (!anyLive && pollId) {
+          clearInterval(pollId);
+          pollId = null;
+        }
+      } catch {
+        // Leave prior live data in place on a transient fetch failure.
+      } finally {
+        if (!cancelled) setLiveRefreshing(false);
+      }
+    }
+
+    function onVisibilityChange() {
+      if (document.hidden) {
+        if (pollId) { clearInterval(pollId); pollId = null; }
+      } else {
+        fetchLive();
+      }
+    }
+
+    fetchLive();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      cancelled = true;
+      if (pollId) clearInterval(pollId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [week, seasonType, refreshTick]);
 
   const myTeamId = user?.teamId ?? LEAGUE_TEAMS.find(t => t.me)?.id;
 
@@ -160,14 +309,8 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexWrap: 'nowrap' }}>
-            <button
-              className="btn"
-              style={{ background: '#22c55e', border: 'none', color: '#fff', fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}
-              onClick={() => setMobileScoringOpen(true)}
-            >📱 Mobile Scoring</button>
-
             <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: 'var(--panel)', borderRadius: 8, padding: 3, flexShrink: 0 }}>
-              {[{ id: 'mine', label: 'My H2H' }, { id: 'all', label: 'All Matchups' }, { id: 'scores', label: 'Live Scores' }].map(opt => (
+              {[{ id: 'mine', label: 'My H2H' }, { id: 'all', label: 'All Matchups' }, { id: 'scores', label: 'Live Scores' }, { id: 'playertest', label: 'Player Scores' }].map(opt => (
                 <button
                   key={opt.id}
                   onClick={() => { setH2hTab(opt.id); setExpanded(opt.id === 'all' ? null : 0); }}
@@ -184,19 +327,66 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
               ))}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, auto)', gridAutoFlow: 'row', gap: 3 }}>
-              {Array.from({ length: NUM_WEEKS }, (_, i) => i + 1).map(w => (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0, background: 'var(--panel)', borderRadius: 8, padding: 3, flexShrink: 0 }} title="Preseason lets you test live scoring against real games before the regular season starts">
+              {[{ id: 'pre', label: 'Pre' }, { id: 'regular', label: 'Reg' }, { id: 'post', label: 'Post' }].map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => {
+                    setSeasonType(opt.id);
+                    // Preseason only has 3 real weeks — clamp so switching
+                    // types never lands on a week that doesn't exist for it.
+                    if (opt.id === 'pre' && week > 3) setWeek(1);
+                    if (opt.id !== 'pre' && seasonType === 'pre') setWeek(CURRENT_WEEK);
+                  }}
+                  style={{
+                    padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: seasonType === opt.id ? 700 : 500,
+                    cursor: 'pointer', border: 'none', whiteSpace: 'nowrap',
+                    background: seasonType === opt.id ? 'var(--accent)' : 'transparent',
+                    color: seasonType === opt.id ? 'var(--accent-ink)' : 'var(--text-dim)',
+                    transition: 'background .15s, color .15s',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setRefreshTick(t => t + 1)}
+              disabled={liveRefreshing}
+              title={
+                liveSource === 'r2' ? 'Live data from the local scoring pipeline'
+                : liveSource === 'browser' ? 'No pipeline data cached yet — pulling live scores directly from ESPN in this browser'
+                : 'No live data available for this week yet'
+              }
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap',
+                padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                cursor: liveRefreshing ? 'default' : 'pointer', border: '1px solid var(--border)',
+                background: 'var(--panel)', color: 'var(--text-dim)',
+                opacity: liveRefreshing ? 0.6 : 1,
+              }}
+            >
+              <span style={{ display: 'inline-block', transform: liveRefreshing ? 'rotate(180deg)' : 'none', transition: 'transform .4s' }}>⟳</span>
+              {liveRefreshing ? 'Refreshing…' : 'Refresh Scores'}
+              {liveSource === 'browser' && !liveRefreshing && (
+                <span style={{ fontSize: 8, fontWeight: 800, color: '#4ea8ff', letterSpacing: '.05em' }}>BROWSER</span>
+              )}
+            </button>
+
+            <div style={{ display: 'grid', gridTemplateColumns: seasonType === 'pre' ? 'repeat(3, auto)' : 'repeat(7, auto)', gridAutoFlow: 'row', gap: 3 }}>
+              {Array.from({ length: seasonType === 'pre' ? 3 : NUM_WEEKS }, (_, i) => i + 1).map(w => (
                 <button
                   key={w}
                   onClick={() => { setWeek(w); setExpanded(showAll ? null : 0); }}
                   style={{
                     padding: '4px 6px', borderRadius: 5, fontSize: 10, fontWeight: 600,
                     cursor: 'pointer', border: '1px solid var(--border)', whiteSpace: 'nowrap',
-                    background: w === week ? 'var(--accent)' : w < CURRENT_WEEK ? 'var(--panel)' : 'transparent',
-                    color: w === week ? 'var(--accent-ink)' : w < CURRENT_WEEK ? 'var(--text)' : 'var(--text-dim)',
+                    background: w === week ? 'var(--accent)' : (seasonType !== 'pre' && w < CURRENT_WEEK) ? 'var(--panel)' : 'transparent',
+                    color: w === week ? 'var(--accent-ink)' : (seasonType !== 'pre' && w < CURRENT_WEEK) ? 'var(--text)' : 'var(--text-dim)',
                   }}
                 >
-                  {w === CURRENT_WEEK ? `Wk ${w}●` : `Wk ${w}`}
+                  {seasonType === 'pre' ? `Pre ${w}` : (w === CURRENT_WEEK ? `Wk ${w}●` : `Wk ${w}`)}
                 </button>
               ))}
             </div>
@@ -206,8 +396,10 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
 
       {h2hTab === 'scores' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 460 }}>
-          <NflScores week={week} />
+          <NflScores week={week} seasonType={seasonType} />
         </div>
+      ) : h2hTab === 'playertest' ? (
+        <PlayerScoresTab livePlayerPts={livePlayerPts} seasonType={seasonType} week={week} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {matchups.map(([homeId, awayId], idx) => {
@@ -219,9 +411,10 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
                 homeId={homeId}
                 awayId={awayId}
                 week={week}
-                season={CURRENT_SEASON}
-                isLive={week === CURRENT_WEEK}
-                isFinal={week < CURRENT_WEEK}
+                fallbackIsLive={week === CURRENT_WEEK}
+                fallbackIsFinal={week < CURRENT_WEEK}
+                liveGameStatus={liveGameStatus}
+                livePlayerPts={livePlayerPts}
                 expanded={expanded === idx}
                 onToggle={() => setExpanded(expanded === idx ? null : idx)}
                 onOpenPlayer={onOpenPlayer}
@@ -230,106 +423,81 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
                 allTeamRosters={allTeamRosters}
                 homeRecord={homeRec ? `${homeRec.w}–${homeRec.l}` : null}
                 awayRecord={awayRec ? `${awayRec.w}–${awayRec.l}` : null}
+                isMobile={isMobile}
               />
             );
           })}
         </div>
       )}
 
-      {mobileScoringOpen && (
-        <MobileScoringPopup
-          onClose={() => setMobileScoringOpen(false)}
-          myTeamId={myTeamId}
-          week={week}
-          matchups={allMatchups}
-        />
+    </div>
+  );
+}
+
+// Every player who recorded a stat this week, scored with the league's
+// actual Rules & Settings scoring config — a direct look at what the live
+// pipeline is computing, independent of any roster. Reuses the same
+// livePlayerPts already fetched for the matchup cards; no separate request.
+function PlayerScoresTab({ livePlayerPts, seasonType, week }) {
+  const [posFilter, setPosFilter] = React.useState('ALL');
+  const players = Object.values(livePlayerPts || {});
+  const sorted = [...(posFilter === 'ALL' ? players : players.filter(p => p.pos === posFilter))]
+    .sort((a, b) => b.pts - a.pts);
+  const positions = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'DST'];
+  const seasonLabel = seasonType === 'pre' ? 'Preseason' : seasonType === 'post' ? 'Postseason' : 'Regular Season';
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title" style={{ flex: 1 }}>{seasonLabel} Week {week} · Player Scores</div>
+        <span style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+          {sorted.length} players · Rules &amp; Settings scoring
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 4, padding: '8px 14px', flexWrap: 'wrap' }}>
+        {positions.map(pos => (
+          <button key={pos} onClick={() => setPosFilter(pos)}
+            style={{
+              padding: '3px 10px', borderRadius: 5, fontSize: 11, fontWeight: posFilter === pos ? 700 : 500,
+              cursor: 'pointer', border: '1px solid var(--border)',
+              background: posFilter === pos ? 'var(--accent)' : 'transparent',
+              color: posFilter === pos ? 'var(--accent-ink)' : 'var(--text-dim)',
+            }}
+          >{pos}</button>
+        ))}
+      </div>
+      {sorted.length === 0 ? (
+        <div style={{ padding: '20px 14px', textAlign: 'center', color: 'var(--text-faint)', fontSize: 12, lineHeight: 1.6 }}>
+          No player stats yet for this week — either games haven't started, ESPN hasn't published this slate, or the Worker URL isn't configured in <strong>Sources</strong>.
+        </div>
+      ) : (
+        <div>
+          <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr 40px 1fr 60px', padding: '4px 14px', borderBottom: '1px solid var(--border)', fontSize: 9, fontWeight: 700, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+            <span />
+            <span>Player</span>
+            <span>Team</span>
+            <span>Stats</span>
+            <span style={{ textAlign: 'right' }}>Pts</span>
+          </div>
+          {sorted.map(p => {
+            const statLine = formatStatLine({ pos: p.pos }, p.stats);
+            return (
+              <div key={p.name} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 40px 1fr 60px', alignItems: 'center', padding: '6px 14px', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,.04)' }}>
+                <PosBadge pos={p.pos} />
+                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{p.team}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{statLine || '—'}</span>
+                <span style={{ textAlign: 'right', fontWeight: 800, color: p.pts >= 15 ? 'var(--accent)' : p.pts >= 8 ? '#4ea8ff' : 'var(--text)' }}>{p.pts.toFixed(1)}</span>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
 }
 
-function MobileScoringPopup({ onClose, myTeamId, week, matchups }) {
-  function computeTeamScore(teamId) {
-    const roster   = TEAM_ROSTERS[teamId] || [];
-    const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
-    return starters.reduce((total, r) => {
-      const p = findPlayer(r.playerId);
-      return total + (p ? (p.proj || p.avg || 0) : 0);
-    }, 0);
-  }
-
-  const TeamRow = ({ team, teamId, score, winning }) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <span style={{
-        width: 44, height: 44, borderRadius: 10,
-        background: team?.color || '#555',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 18, fontWeight: 900, color: '#fff', flexShrink: 0,
-      }}>
-        {team?.logo || '??'}
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{team?.name || 'Team'}</div>
-        {teamId === myTeamId && (
-          <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 800, letterSpacing: '.06em' }}>YOU</span>
-        )}
-      </div>
-      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontStretch: '75%', fontSize: 32, color: '#4ea8ff', lineHeight: 1 }}>
-        {score.toFixed(1)}
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <div>
-          <div style={{ fontWeight: 900, fontSize: 18, letterSpacing: '-.01em' }}>Week {week ?? '—'} Scores</div>
-          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 2 }}>H2H Matchup Projections</div>
-        </div>
-        <button
-          onClick={onClose}
-          style={{ background: 'rgba(255,255,255,.08)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 20, cursor: 'pointer', borderRadius: '50%', width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, flexShrink: 0 }}
-        >✕</button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 32px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {matchups.length === 0 ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 14, marginTop: 48 }}>No matchups found for this week.</div>
-        ) : (
-          matchups.map(([aId, bId]) => {
-            const teamA = LEAGUE_TEAMS.find(t => t.id === aId);
-            const teamB = LEAGUE_TEAMS.find(t => t.id === bId);
-            const scoreA = computeTeamScore(aId);
-            const scoreB = computeTeamScore(bId);
-            const isMyMatch = aId === myTeamId || bId === myTeamId;
-            const aWinning = scoreA >= scoreB;
-            const diff = Math.abs(scoreA - scoreB);
-            return (
-              <div key={`${aId}-${bId}`} style={{
-                background: 'var(--panel)',
-                border: `1px solid ${isMyMatch ? 'rgba(198,255,58,.35)' : 'var(--border)'}`,
-                borderRadius: 14, padding: '16px 18px',
-                ...(isMyMatch ? { boxShadow: '0 0 0 1px rgba(198,255,58,.1)' } : {}),
-              }}>
-                <TeamRow team={teamA} teamId={aId} score={scoreA} winning={aWinning} />
-                <div style={{ margin: '12px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                  <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 800, color: aWinning ? 'var(--good)' : 'var(--danger)', background: aWinning ? 'rgba(76,175,130,.12)' : 'rgba(255,90,110,.12)', border: `1px solid ${aWinning ? 'rgba(76,175,130,.3)' : 'rgba(255,90,110,.3)'}`, borderRadius: 6, padding: '2px 10px' }}>
-                    {diff.toFixed(1)}
-                  </span>
-                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                </div>
-                <TeamRow team={teamB} teamId={bId} score={scoreB} winning={!aWinning} />
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-function MatchupCard({ homeId, awayId, week, season, isLive, isFinal, expanded, onToggle, onOpenPlayer, myTeamId, myLiveRoster, allTeamRosters, homeRecord, awayRecord }) {
+function MatchupCard({ homeId, awayId, week, fallbackIsLive, fallbackIsFinal, liveGameStatus, livePlayerPts, expanded, onToggle, onOpenPlayer, myTeamId, myLiveRoster, allTeamRosters, homeRecord, awayRecord }) {
   const home = findTeam(homeId);
   const away = findTeam(awayId);
 
@@ -340,53 +508,63 @@ function MatchupCard({ homeId, awayId, week, season, isLive, isFinal, expanded, 
   const homeProj  = computeScore(homeRoster);
   const awayProj  = computeScore(awayRoster);
 
-  const locked = React.useMemo(() => loadLockedScores(season, week), [season, week]);
-  const homeActual = locked ? getActualPtsFromLocked(locked, homeRoster) : null;
-  const awayActual = locked ? getActualPtsFromLocked(locked, awayRoster) : null;
+  const { isLive, isFinal } = deriveMatchupStatus(homeRoster, awayRoster, liveGameStatus, fallbackIsLive, fallbackIsFinal);
+  const hasActual = isLive || isFinal;
+
+  // Two distinct numbers: the real/actual score (stats only, never
+  // blended — this is the main score shown) and a separate projected-final
+  // estimate (blended with pace) shown only via the win-probability bar's
+  // "proj. final" caption, never as the primary number.
+  const homeActual  = computeActualTeamTotal(homeRoster, livePlayerPts);
+  const awayActual  = computeActualTeamTotal(awayRoster, livePlayerPts);
+  const homeBlended = computeBlendedTeamTotal(homeRoster, liveGameStatus, livePlayerPts);
+  const awayBlended = computeBlendedTeamTotal(awayRoster, liveGameStatus, livePlayerPts);
 
   const homeStarterProj = rosterGroupPts(homeRoster, 'STARTERS');
   const homeBenchProj   = rosterGroupPts(homeRoster, 'BENCH');
   const awayStarterProj = rosterGroupPts(awayRoster, 'STARTERS');
   const awayBenchProj   = rosterGroupPts(awayRoster, 'BENCH');
 
-  const homePts = homeActual ?? homeProj;
-  const awayPts = awayActual ?? awayProj;
+  const homePts = hasActual ? homeActual : homeProj;
+  const awayPts = hasActual ? awayActual : awayProj;
   const homeWin      = homePts > awayPts;
   const awayWin      = awayPts > homePts;
   const homeRosterOk = isRosterValid(homeRoster);
   const awayRosterOk = isRosterValid(awayRoster);
-  const hasActual    = homeActual !== null || awayActual !== null;
-  const label        = isFinal ? (hasActual ? 'Final (Actual)' : 'Final') : isLive ? 'Live' : 'Upcoming';
+  const label        = isFinal ? 'Final' : isLive ? 'Live' : 'Upcoming';
   const labelColor   = isLive ? 'var(--accent)' : isFinal ? 'var(--text-dim)' : 'var(--text-faint)';
   const isMyMatchup  = homeId === myTeamId || awayId === myTeamId;
 
   return (
     <div className="card" style={{ overflow: 'hidden', borderLeft: isMyMatchup ? '3px solid #4caf82' : undefined, background: isMyMatchup ? 'rgba(76,175,130,.06)' : undefined }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, cursor: 'pointer' }} onClick={onToggle}>
-        <TeamScore team={home} pts={homePts} projPts={homeActual !== null ? homeProj : null} win={homeWin} side="home" showPts={isLive || isFinal} isMe={homeId === myTeamId} rosterOk={homeRosterOk} record={homeRecord} hasActual={homeActual !== null} starterProj={homeStarterProj} benchProj={homeBenchProj} />
+        <TeamScore team={home} pts={homePts} projPts={hasActual ? homeProj : null} win={homeWin} side="home" showPts={isLive || isFinal} isMe={homeId === myTeamId} rosterOk={homeRosterOk} record={homeRecord} hasActual={hasActual} starterProj={homeStarterProj} benchProj={homeBenchProj} />
         <div style={{ flexShrink: 0, textAlign: 'center', padding: '0 14px', minWidth: 80 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: labelColor, letterSpacing: '.08em', marginBottom: 4 }}>{label}</div>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-faint)' }}>vs</div>
         </div>
-        <TeamScore team={away} pts={awayPts} projPts={awayActual !== null ? awayProj : null} win={awayWin} side="away" showPts={isLive || isFinal} isMe={awayId === myTeamId} rosterOk={awayRosterOk} record={awayRecord} hasActual={awayActual !== null} starterProj={awayStarterProj} benchProj={awayBenchProj} />
+        <TeamScore team={away} pts={awayPts} projPts={hasActual ? awayProj : null} win={awayWin} side="away" showPts={isLive || isFinal} isMe={awayId === myTeamId} rosterOk={awayRosterOk} record={awayRecord} hasActual={hasActual} starterProj={awayStarterProj} benchProj={awayBenchProj} />
         <div style={{ marginLeft: 'auto', paddingRight: 14, color: 'var(--text-faint)', fontSize: 12 }}>
           {expanded ? '▲' : '▼'}
         </div>
       </div>
 
-      {/* Racing bar — always visible */}
+      {/* Racing bar — always visible. Fed the live-blended totals, which
+          equal the static proj sums until a game actually starts, so this
+          matches today's look exactly outside of live windows. */}
       <WinProbabilityBar
         homeTeam={home}
         awayTeam={away}
-        homeExpected={homeStarterProj}
-        awayExpected={awayStarterProj}
+        homeExpected={homeBlended}
+        awayExpected={awayBlended}
+        isLive={hasActual}
       />
 
       {expanded && (
         <>
           <div style={{ borderTop: '1px solid var(--border)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
-            <RosterBreakdown roster={homeRoster} teamId={homeId} week={week} onOpenPlayer={onOpenPlayer} isProjected={!isLive && !isFinal} locked={locked} />
-            <RosterBreakdown roster={awayRoster} teamId={awayId} week={week} onOpenPlayer={onOpenPlayer} side="away" isProjected={!isLive && !isFinal} locked={locked} />
+            <RosterBreakdown roster={homeRoster} teamId={homeId} week={week} onOpenPlayer={onOpenPlayer} isProjected={!isLive && !isFinal} liveGameStatus={liveGameStatus} livePlayerPts={livePlayerPts} />
+            <RosterBreakdown roster={awayRoster} teamId={awayId} week={week} onOpenPlayer={onOpenPlayer} side="away" isProjected={!isLive && !isFinal} liveGameStatus={liveGameStatus} livePlayerPts={livePlayerPts} />
           </div>
           <SmackTalkWall matchupKey={`${week}-${homeId}-${awayId}`} homeTeam={home} awayTeam={away} />
         </>
@@ -517,12 +695,13 @@ function SmackTalkWall({ matchupKey, homeTeam, awayTeam }) {
 }
 
 /* ── Win Probability Racing Bar ─────────────────────────────────────────── */
-function WinProbabilityBar({ homeTeam, awayTeam, homeExpected, awayExpected }) {
+function WinProbabilityBar({ homeTeam, awayTeam, homeExpected, awayExpected, isLive }) {
   const total    = (homeExpected + awayExpected) || 1;
   const homeProb = homeExpected / total;
   const homePct  = Math.round(homeProb * 100);
   const awayPct  = 100 - homePct;
   const isClose  = Math.abs(homePct - awayPct) <= 6;
+  const capLabel = isLive ? 'proj. final' : 'proj';
 
   const GREEN = '#4ed87b';
   const RED   = '#ff5a6e';
@@ -535,7 +714,7 @@ function WinProbabilityBar({ homeTeam, awayTeam, homeExpected, awayExpected }) {
     <div style={{ padding: '10px 22px 14px', borderTop: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
         <span style={{ fontSize: 13, fontWeight: 800, fontFamily: 'var(--font-mono)', color: homeC }}>{homePct}%</span>
-        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', letterSpacing: '.08em', textTransform: 'uppercase' }} title="Rough estimate from projected final scores — not a calibrated model">
           {isClose ? '⚖️ Toss-Up' : 'Win Probability'}
         </span>
         <span style={{ fontSize: 13, fontWeight: 800, fontFamily: 'var(--font-mono)', color: awayC }}>{awayPct}%</span>
@@ -549,10 +728,10 @@ function WinProbabilityBar({ homeTeam, awayTeam, homeExpected, awayExpected }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5 }}>
         <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
-          {homeTeam?.name} · <span style={{ color: homeC, fontWeight: 700 }}>{homeExpected.toFixed(1)}</span> proj
+          {homeTeam?.name} · <span style={{ color: homeC, fontWeight: 700 }}>{homeExpected.toFixed(1)}</span> {capLabel}
         </span>
         <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', textAlign: 'right' }}>
-          {awayTeam?.name} · <span style={{ color: awayC, fontWeight: 700 }}>{awayExpected.toFixed(1)}</span> proj
+          {awayTeam?.name} · <span style={{ color: awayC, fontWeight: 700 }}>{awayExpected.toFixed(1)}</span> {capLabel}
         </span>
       </div>
     </div>
@@ -624,8 +803,9 @@ function TeamScore({ team, pts, projPts, win, side, showPts, isMe, rosterOk, rec
   );
 }
 
-function NflScores({ week }) {
+function NflScores({ week, seasonType }) {
   const [data, setData] = React.useState(null);
+  const [players, setPlayers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const season = 2026;
@@ -635,11 +815,30 @@ function NflScores({ week }) {
     if (!workerUrl) { setLoading(false); setError('no_worker'); return; }
     setLoading(true);
     setError(null);
-    fetch(`${workerUrl}/api/v1/nfl/scoreboard?week=${week}&season=${season}&type=regular`)
-      .then(r => r.json())
-      .then(d => { setData(d); setLoading(false); })
+    Promise.all([
+      fetch(`${workerUrl}/api/v1/nfl/scoreboard?week=${week}&season=${season}&type=${seasonType}`).then(r => r.json()),
+      fetch(`${workerUrl}/api/v1/nfl/player-stats?week=${week}&season=${season}&type=${seasonType}`).then(r => r.json()),
+    ])
+      .then(([board, stats]) => {
+        setData(board);
+        const rules = getScoringRules();
+        setPlayers((stats.players || []).map(p => ({ ...p, pts: p.pts ?? calcFantasyPts(p.stats, rules) })));
+        setLoading(false);
+      })
       .catch(() => { setError('fetch_failed'); setLoading(false); });
-  }, [week, season]);
+  }, [week, season, seasonType]);
+
+  // Every rostered player across the league, so top performers who are
+  // NOT in this set can be flagged as available on waivers.
+  const rosteredPlayerIds = React.useMemo(() => {
+    const set = new Set();
+    for (const t of LEAGUE_TEAMS) {
+      for (const entry of (TEAM_ROSTERS[t.id] || [])) {
+        if (entry.playerId) set.add(entry.playerId);
+      }
+    }
+    return set;
+  }, []);
 
   return (
     <div className="card">
@@ -647,7 +846,7 @@ function NflScores({ week }) {
         <div className="card-title" style={{ flex: 1 }}>
           {(data?.games || []).some(g => new Date(g.date) > new Date()) ? 'NFL Schedule' : 'NFL Scores'} · Wk {week}
         </div>
-        <span style={{ fontSize: 9, color: '#e05e5e', fontWeight: 800, fontFamily: 'var(--font-mono)', letterSpacing: '.06em', background: 'rgba(224,94,94,.12)', padding: '2px 6px', borderRadius: 4, border: '1px solid rgba(224,94,94,.25)' }}>ESPN</span>
+        <span style={{ fontSize: 9, color: '#e05e5e', fontWeight: 800, fontFamily: 'var(--font-mono)', letterSpacing: '.06em', background: 'rgba(224,94,94,.12)', padding: '2px 6px', borderRadius: 4, border: '1px solid rgba(224,94,94,.25)' }}>LOCAL</span>
       </div>
       <div>
         {loading && (
@@ -663,14 +862,14 @@ function NflScores({ week }) {
         )}
         {!loading && !error && data?.games?.length === 0 && (
           <div style={{ padding: '12px 14px', fontSize: 11, color: 'var(--text-faint)', lineHeight: 1.6 }}>
-            {data?.seasonAvailable === false
-              ? `${data.season || 2026} schedule not yet released by ESPN — check back closer to the season.`
-              : `No games scheduled for Week ${week}.`
+            {data?.note
+              ? data.note
+              : `No games cached for ${seasonType} week ${week} yet — run job_live_scores.py locally, or it'll pick this up automatically once it's within range.`
             }
           </div>
         )}
         {(data?.games || []).map(game => (
-          <NflGameRow key={game.id} game={game} />
+          <NflGameRow key={game.id} game={game} players={players} rosteredPlayerIds={rosteredPlayerIds} />
         ))}
         {data && (
           <div style={{ padding: '6px 14px', fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
@@ -682,7 +881,7 @@ function NflScores({ week }) {
   );
 }
 
-function NflGameRow({ game }) {
+function NflGameRow({ game, players = [], rosteredPlayerIds }) {
   const { home, away, status, broadcasts = [], date } = game;
   const gameDate = new Date(date);
   const now = new Date();
@@ -735,6 +934,60 @@ function NflGameRow({ game }) {
           </div>
         )
       ))}
+      {(isLive || isFinal) && (
+        <GameTopPerformers home={home} away={away} players={players} rosteredPlayerIds={rosteredPlayerIds} />
+      )}
+    </div>
+  );
+}
+
+// Top fantasy performers for one game — whichever rostered/available players
+// have actually recorded stats so far, ranked by fantasy points. Anyone NOT
+// currently on a league roster (i.e. sitting on waivers) is called out —
+// a hot free agent putting up points live is exactly what you want to catch.
+function GameTopPerformers({ home, away, players, rosteredPlayerIds }) {
+  const gameTeams = new Set([home?.abbr, away?.abbr].filter(Boolean));
+  const top = players
+    .filter(p => gameTeams.has(p.team) && (p.pts || 0) > 0)
+    .sort((a, b) => (b.pts || 0) - (a.pts || 0))
+    .slice(0, 5);
+
+  if (top.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ fontSize: 8, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 700 }}>
+        Top Fantasy Performers
+      </div>
+      {top.map(p => {
+        const live = findPlayerByName(p.name);
+        const isWaiver = !!live && !rosteredPlayerIds?.has(live.id);
+        const statLine = formatStatLine({ pos: p.pos }, p.stats);
+        return (
+          <div
+            key={p.name}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, fontSize: 10,
+              padding: isWaiver ? '2px 6px' : '1px 0',
+              background: isWaiver ? 'rgba(52,211,153,.12)' : 'transparent',
+              border: isWaiver ? '1px solid rgba(52,211,153,.35)' : 'none',
+              borderRadius: isWaiver ? 5 : 0,
+            }}
+          >
+            {p.pos && <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 8, color: 'var(--text-faint)', width: 22, flexShrink: 0 }}>{p.pos}</span>}
+            <span style={{ fontWeight: isWaiver ? 800 : 600, color: isWaiver ? '#34d399' : 'var(--text)', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }}>
+              {p.name}
+            </span>
+            {isWaiver && (
+              <span style={{ fontSize: 7, fontWeight: 900, color: '#34d399', background: 'rgba(52,211,153,.18)', padding: '1px 4px', borderRadius: 3, letterSpacing: '.03em', flexShrink: 0 }} title="Not on any league roster — available on waivers">
+                FA
+              </span>
+            )}
+            <span style={{ flex: 1, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{statLine || ''}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: 'var(--text)', flexShrink: 0 }}>{(p.pts || 0).toFixed(1)}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -743,47 +996,106 @@ function formatStatLine(p, lockedStats) {
   if (!p) return null;
   const s = lockedStats || {};
   const parts = [];
-  if (s.passYds || p.pos === 'QB') {
+  const pos = p.pos;
+
+  const showPassing = () => {
     if (s.passYds) parts.push(`${s.passYds}y`);
     if (s.passTds) parts.push(`${s.passTds}td`);
     if (s.passInt) parts.push(`${s.passInt}int`);
     if (s.rushYds) parts.push(`${s.rushYds} rush`);
-  } else if (p.pos === 'RB') {
+  };
+  const showRushing = () => {
     if (s.rushYds) parts.push(`${s.rushYds}y`);
     if (s.rushTds) parts.push(`${s.rushTds}td`);
     if (s.rec != null) parts.push(`${s.rec}rec`);
     if (s.recYds) parts.push(`+${s.recYds}y`);
-  } else if (['WR', 'TE'].includes(p.pos)) {
+  };
+  const showReceiving = () => {
     if (s.rec != null) parts.push(`${s.rec}rec`);
     if (s.recYds) parts.push(`${s.recYds}y`);
     if (s.recTds) parts.push(`${s.recTds}td`);
     if (s.targets) parts.push(`${s.targets}tgt`);
-  } else if (p.pos === 'K' || p.pos === 'PK') {
+  };
+  const showKicking = () => {
     if (s.fgMade) parts.push(`${s.fgMade}fg`);
     if (s.xpMade) parts.push(`${s.xpMade}xp`);
-  } else if (['DST', 'D/ST', 'DEF'].includes(p.pos)) {
+  };
+  const showDefense = () => {
     if (s.sacks) parts.push(`${s.sacks}sk`);
     if (s.ints) parts.push(`${s.ints}int`);
     if (s.ptsAllowed != null) parts.push(`${s.ptsAllowed}pa`);
+  };
+
+  if (s.passYds || pos === 'QB') showPassing();
+  else if (pos === 'RB') showRushing();
+  else if (['WR', 'TE'].includes(pos)) showReceiving();
+  else if (pos === 'K' || pos === 'PK') showKicking();
+  else if (['DST', 'D/ST', 'DEF'].includes(pos)) showDefense();
+  else {
+    // ESPN sometimes omits position on a box-score entry (a real, known
+    // gap — not every player line is tagged). Rather than show nothing for
+    // someone who clearly scored points, infer the category from whichever
+    // stats are actually present.
+    if (s.rushYds || s.rushTds) showRushing();
+    else if (s.rec != null || s.recYds || s.recTds || s.targets) showReceiving();
+    else if (s.fgMade || s.fgAtt || s.xpMade) showKicking();
+    else if (s.sacks || s.ints || s.ptsAllowed != null) showDefense();
   }
+
   if (parts.length === 0 && p.last) parts.push(`${p.last.toFixed(1)} last wk`);
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
-function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected, locked }) {
+function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected, liveGameStatus, livePlayerPts }) {
   const starters = roster.filter(r => r.slot !== 'BENCH');
   const bench    = roster.filter(r => r.slot === 'BENCH');
   const isRight  = side === 'away';
 
-  function getLockedEntry(p) {
-    if (!p || !locked?.players) return null;
-    return locked.players.find(x => x.name?.toLowerCase().trim() === p.name?.toLowerCase().trim()) || null;
+  // Per-starter: blended actual-so-far + pace-adjusted remaining projection.
+  // null gameStatus (bye week / not playing) falls back to that player's
+  // own static proj, same as computeBlendedTeamTotal does at the card level.
+  function liveInfoFor(p) {
+    const proj = playerProjPts(p);
+    if (!p) return { gameStatus: null, proj, real: 0, progress: 0, stats: null };
+    const gameStatus = liveGameStatus?.[normalizeTeamAbbr(p.team)] || null;
+    const liveEntry = findLivePlayerEntry(livePlayerPts, p);
+    return {
+      gameStatus,
+      proj,
+      // Real/actual — stats only, never blended with projection. 0 if this
+      // player hasn't recorded anything (game not started, or nothing yet).
+      real: liveEntry?.pts ?? 0,
+      progress: gameStatus ? getGameProgress(gameStatus) : 0,
+      stats: liveEntry?.stats ?? null,
+    };
+  }
+
+  // "TEAM" for byes/no data, "TEAM · Sun 1:00 PM" pre-kickoff, "TEAM · Q2 8:45"
+  // live, "TEAM · Final" once the game's over — so it's clear when a player's
+  // points will actually start moving.
+  function gameLabel(p, gameStatus) {
+    const team = p?.team || '';
+    if (p?.bye && p.bye === week) return `${team} · BYE`;
+    if (!gameStatus) return team;
+    if (gameStatus.completed || gameStatus.state === 'post') return `${team} · Final`;
+    if (gameStatus.state === 'in') {
+      const q = gameStatus.period ? `Q${gameStatus.period}` : 'Live';
+      return `${team} · ${q}${gameStatus.clock ? ` ${gameStatus.clock}` : ''}`;
+    }
+    if (gameStatus.kickoff) {
+      const d = new Date(gameStatus.kickoff);
+      if (!isNaN(d)) {
+        const when = d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+        return `${team} · ${when}${gameStatus.opp ? ` ${gameStatus.isAway ? '@' : 'vs'} ${gameStatus.opp}` : ''}`;
+      }
+    }
+    return team;
   }
 
   const totalProj = starters.reduce((s, e) => s + playerProjPts(e.playerId ? findPlayer(e.playerId) : null), 0);
-  const lockedEntries = starters.map(e => getLockedEntry(e.playerId ? findPlayer(e.playerId) : null));
-  const hasActual = locked && lockedEntries.some(v => v !== null);
-  const totalActual = hasActual ? lockedEntries.reduce((s, v) => s + (v?.pts ?? 0), 0) : null;
+  const liveInfos = starters.map(e => liveInfoFor(e.playerId ? findPlayer(e.playerId) : null));
+  const hasActual = liveInfos.some(v => v.gameStatus !== null);
+  const totalActual = hasActual ? liveInfos.reduce((s, v) => s + v.real, 0) : null;
   const total = totalActual ?? totalProj;
   const ptColor = isProjected && !hasActual ? 'var(--text-dim)' : 'var(--accent)';
 
@@ -814,14 +1126,18 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
 
       {starters.map((entry, i) => {
         const p = entry.playerId ? findPlayer(entry.playerId) : null;
-        const proj = playerProjPts(p);
-        const lockedEntry = p ? getLockedEntry(p) : null;
-        const actual = lockedEntry ? lockedEntry.pts : null;
-        const statLine = formatStatLine(p, lockedEntry?.stats || null);
+        const info = liveInfos[i];
+        const proj = info.proj;
+        const isLiveRow = info.gameStatus !== null;
+        const actual = isLiveRow ? info.real : null;
+        const statLine = formatStatLine(p, info.stats);
         const dispScore = actual ?? proj;
         const actColor = actual != null ? (dispScore >= 20 ? 'var(--accent)' : dispScore >= 10 ? '#4ea8ff' : 'var(--text)') : 'var(--text-faint)';
+        // Only judge pace once the game has actually started — a player
+        // showing 0 before kickoff hasn't underperformed, they just haven't
+        // played yet.
         let mover = '';
-        if (actual != null && proj > 0) {
+        if (actual != null && proj > 0 && info.progress > 0) {
           if (actual >= proj * 1.25) mover = '🔥';
           else if (actual < proj * 0.5) mover = '❄️';
         }
@@ -838,8 +1154,11 @@ function RosterBreakdown({ roster, teamId, week, onOpenPlayer, side, isProjected
                     <PosBadge pos={p.pos} />
                     <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
                   </div>
+                  <div style={{ fontSize: 9, color: isLiveRow && info.gameStatus?.state === 'in' ? '#4ea8ff' : 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginTop: 2, paddingLeft: 22, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {gameLabel(p, info.gameStatus)}
+                  </div>
                   {statLine && (
-                    <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginTop: 2, paddingLeft: 22, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{statLine}</div>
+                    <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', marginTop: 1, paddingLeft: 22, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{statLine}</div>
                   )}
                 </div>
                 <span style={{ textAlign: 'center', fontSize: 13, lineHeight: 1 }}>{mover}</span>

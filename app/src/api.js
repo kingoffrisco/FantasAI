@@ -162,6 +162,10 @@ export const api = {
     olineStability:       () => r2Get('fantasai/analysis/oline_stability.json'),
     playerOlineStability: () => r2Get('fantasai/analysis/player_oline_stability.json'),
     weeklyStartSit:  () => r2Get('fantasai/analysis/weekly_startsit.json'),
+    deepReasoning:   () => r2Get('fantasai/analysis/deep_reasoning.json'),
+    dkSlates:        () => r2Get('fantasai/betting/dk_slates.json'),
+    dkSalaries:      () => r2Get('fantasai/betting/dk_salaries.json'),
+    kalshiNflMarkets: () => r2Get('fantasai/betting/kalshi_nfl_markets.json'),
   },
 
   transactions: {

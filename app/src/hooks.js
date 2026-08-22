@@ -148,6 +148,7 @@ export const useR2OpponentLookup        = () => useR2Analysis(api.r2.opponentLoo
 export const useR2PlayerOwnership       = () => useR2Analysis(api.r2.playerOwnership)
 export const useR2CombineData           = () => useR2Analysis(api.r2.combineData)
 export const useR2WeeklyStartSit        = () => useR2Analysis(api.r2.weeklyStartSit)
+export const useR2DeepReasoning         = () => useR2Analysis(api.r2.deepReasoning)
 export const useR2PlayerStats2025       = () => useR2Analysis(api.r2.playerStats2025)
 export const useR2CollegeStats          = () => useR2Analysis(api.r2.collegeStats)
 export const useR2OlineIndex            = () => useR2Analysis(api.r2.olineIndex)

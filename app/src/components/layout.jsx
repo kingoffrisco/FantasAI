@@ -192,7 +192,7 @@ function SidebarPushButton({ teamId }) {
   );
 }
 
-export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds, cookieAlert = false }) => {
+export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds, cookieAlert = false, collapsed = false, onToggleCollapse }) => {
   const isAdmin = user?.isAdmin;
   const allPlayers = usePlayers(); // subscribe so h2hInfo recomputes when player projections load
 
@@ -271,6 +271,8 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     { id: 'draft',      label: 'Draft Room',        icon: '●', ...(() => { const ds = getDraftStatus(); return { badge: ds.badge, live: ds.live }; })() },
     { id: 'owners',     label: 'Owner Intel',       icon: '◉' },
     { id: 'cbs',        label: 'Player Draft Rankings',     icon: '▦' },
+    { group: 'Betting' },
+    { id: 'dfs-optimizer', label: 'DFS Optimizer',  icon: '💰' },
     { group: 'Setup' },
     { id: 'sources',  label: 'Sources',          icon: '⌁', ...(cookieAlert ? { badge: '!', alert: true } : {}) },
     { id: 'settings', label: 'Rules & Settings',  icon: '📋' },
@@ -284,23 +286,40 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
   ];
 
   return (
-    <div className="side">
+    <div className="side" style={{ padding: collapsed ? '10px 6px' : '12px 8px' }}>
+      <div style={{ display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end', marginBottom: 8 }}>
+        <button
+          className="btn ghost sm"
+          onClick={() => onToggleCollapse?.()}
+          title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          style={{
+            minWidth: collapsed ? 30 : 44,
+            height: 28,
+            padding: collapsed ? '0 6px' : '0 10px',
+            fontSize: 13,
+            lineHeight: 1,
+            justifyContent: 'center',
+          }}
+        >
+          {collapsed ? '»' : '«'}
+        </button>
+      </div>
       {(() => {
         const myTeam = findTeam(user?.teamId || 1) || LEAGUE_TEAMS[0];
         return (
-          <div className="team-card">
-            <div className="label">My Team</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <div className="team-card" style={collapsed ? { padding: 8, margin: '8px 4px' } : undefined}>
+            {!collapsed && <div className="label">My Team</div>}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : undefined, gap: 12, marginBottom: collapsed ? 0 : 8 }}>
               {myTeam.logoImg ? (
-                <img src={myTeam.logoImg} alt="logo" style={{ width: 80, height: 80, borderRadius: 14, objectFit: 'cover', flexShrink: 0, boxShadow: '0 4px 16px rgba(0,0,0,.45)' }} />
+                <img src={myTeam.logoImg} alt="logo" title={myTeam.name} style={{ width: collapsed ? 40 : 80, height: collapsed ? 40 : 80, borderRadius: collapsed ? 10 : 14, objectFit: 'cover', flexShrink: 0, boxShadow: '0 4px 16px rgba(0,0,0,.45)' }} />
               ) : (
-                <span style={{ width: 80, height: 80, borderRadius: 14, background: myTeam.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 900, color: '#000', flexShrink: 0, boxShadow: '0 4px 16px rgba(0,0,0,.45)' }}>
+                <span title={myTeam.name} style={{ width: collapsed ? 40 : 80, height: collapsed ? 40 : 80, borderRadius: collapsed ? 10 : 14, background: myTeam.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: collapsed ? 18 : 28, fontWeight: 900, color: '#000', flexShrink: 0, boxShadow: '0 4px 16px rgba(0,0,0,.45)' }}>
                   {myTeam.logo}
                 </span>
               )}
-              <div className="name" style={{ margin: 0, lineHeight: 1.2 }}>{myTeam.name}</div>
+              {!collapsed && <div className="name" style={{ margin: 0, lineHeight: 1.2 }}>{myTeam.name}</div>}
             </div>
-            {new Date() >= H2H_SEASON_START && (
+            {!collapsed && new Date() >= H2H_SEASON_START && (
             <div className="stats">
               <div><div className="k">Rec</div><div className="v">{myTeam.record || '0–0'}</div></div>
               <div><div className="k">PF</div><div className="v">{(myTeam.pf || 0).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</div></div>
@@ -310,14 +329,18 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
         );
       })()}
       {items.map((it, i) => it.group ? (
+        collapsed ? null :
         <div key={i} className="nav-section">{it.group}</div>
       ) : it.id === 'h2h' ? (
         <div key="h2h"
           className={`nav-item ${active === 'h2h' ? 'active' : ''}`}
           onClick={() => onNav('h2h')}
-          style={{ alignItems: h2hInfo ? 'flex-start' : 'center' }}>
+          title="Head to Head"
+          style={collapsed
+            ? { justifyContent: 'center', padding: '10px 8px' }
+            : { alignItems: h2hInfo ? 'flex-start' : 'center' }}>
           <span className="icon" style={{ marginTop: h2hInfo ? 2 : 0 }}>⚔</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          {!collapsed && <div style={{ flex: 1, minWidth: 0 }}>
             <span>Head to Head</span>
             {h2hInfo && (() => {
               const isClose = Math.abs(h2hInfo.winPct - 50) <= 3; // matches H2H bar: |homePct - awayPct| <= 6
@@ -337,25 +360,37 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
                 </div>
               );
             })()}
-          </div>
+          </div>}
         </div>
       ) : (
         <div key={it.id}
           className={`nav-item ${active === it.id ? 'active' : ''} ${it.live ? 'live' : ''}`}
-          onClick={() => onNav(it.id)}>
+          onClick={() => onNav(it.id)}
+          title={it.label}
+          style={collapsed ? { justifyContent: 'center', padding: '10px 8px', position: 'relative' } : undefined}>
           <span className="icon">{it.icon}</span>
-          <span style={{ flex: 1 }}>{it.label}</span>
+          {!collapsed && <span style={{ flex: 1 }}>{it.label}</span>}
           {it.badge && (
             <span
               className="badge"
-              style={it.alert ? { background: 'var(--danger)', color: '#fff', fontWeight: 900, animation: 'pulse 2s infinite' } : undefined}
+              style={
+                collapsed
+                  ? {
+                      position: 'absolute',
+                      top: 5,
+                      right: 6,
+                      marginLeft: 0,
+                      ...(it.alert ? { background: 'var(--danger)', color: '#fff', fontWeight: 900, animation: 'pulse 2s infinite' } : {}),
+                    }
+                  : (it.alert ? { background: 'var(--danger)', color: '#fff', fontWeight: 900, animation: 'pulse 2s infinite' } : undefined)
+              }
             >
               {it.badge}
             </span>
           )}
         </div>
       ))}
-      <div style={{ padding: '16px 14px', borderTop: '1px solid var(--border)', marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ padding: collapsed ? '12px 8px' : '16px 14px', borderTop: '1px solid var(--border)', marginTop: 20, display: 'flex', flexDirection: 'column', gap: 8, alignItems: collapsed ? 'center' : undefined }}>
         <SidebarPushButton teamId={user?.teamId} />
       </div>
     </div>
@@ -386,6 +421,12 @@ const BASE_SECTIONS = [
       { id: 'draft',      label: 'Draft Room',      icon: '●',  ...(() => { const ds = getDraftStatus(); return { badge: ds.badge, live: ds.live }; })() },
       { id: 'owners',     label: 'Owner Intel',    icon: '◉' },
       { id: 'cbs',        label: 'Player Draft Rankings',   icon: '▦' },
+    ],
+  },
+  {
+    group: 'Betting',
+    items: [
+      { id: 'dfs-optimizer', label: 'DFS Optimizer', icon: '💰' },
     ],
   },
   {

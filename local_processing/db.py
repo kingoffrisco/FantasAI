@@ -765,6 +765,69 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         PRIMARY KEY (season, gsis_id, team)
     );
 
+    -- =========================================================
+    -- DRAFTKINGS DFS (unofficial API — no public/supported developer API
+    -- exists for DraftKings — these are the same class of endpoint as the
+    -- ESPN ones that started 403-ing on 2026-08-20 — see job_live_scores.py.
+    -- Verified live 2026-08-22. See ingest/ingest_draftkings.py.
+    -- =========================================================
+    CREATE TABLE IF NOT EXISTS bronze_dk_slates (
+        draft_group_id   BIGINT PRIMARY KEY,
+        sport             VARCHAR,
+        game_type         VARCHAR,  -- 'Classic', 'Showdown Captain Mode', etc.
+        slate_name        VARCHAR,  -- from the largest contest seen for this draft group
+        game_count        INTEGER,
+        earliest_start     TIMESTAMP,
+        fetched_at        TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS bronze_dk_salaries (
+        draft_group_id     BIGINT,
+        draftable_id        BIGINT,
+        player_dk_id         INTEGER,
+        display_name          VARCHAR,
+        position              VARCHAR,
+        team                  VARCHAR,
+        opponent              VARCHAR,
+        is_home               BOOLEAN,
+        salary                INTEGER,
+        status                VARCHAR,   -- DK's own injury/news status string, e.g. 'None', 'Q', 'O'
+        game_start_time        TIMESTAMP,
+        dk_avg_points          DOUBLE,    -- draftStatAttributes id 90 ("AVG") — DK's own consensus projection
+        dk_position_rank        VARCHAR,  -- draftStatAttributes id -2, e.g. "13th"
+        raw_stat_attrs_json      VARCHAR, -- full draftStatAttributes array as JSON, other ids not yet decoded
+        fetched_at             TIMESTAMP,
+        PRIMARY KEY (draft_group_id, draftable_id)
+    );
+
+    -- =========================================================
+    -- KALSHI NFL MARKETS (official, documented public REST API — no auth
+    -- required for market data). Append-only: never overwrite prior rows,
+    -- so price history over time becomes a usable "line movement" signal.
+    -- Verified live 2026-08-22 at host external-api.kalshi.com — NOTE the
+    -- older documented host trading-api.kalshi.com now 401s and redirects.
+    -- See ingest/ingest_kalshi.py.
+    -- =========================================================
+    CREATE TABLE IF NOT EXISTS bronze_kalshi_nfl_markets (
+        market_ticker    VARCHAR,
+        event_ticker     VARCHAR,
+        series_ticker    VARCHAR,
+        title            VARCHAR,
+        yes_sub_title    VARCHAR,
+        no_sub_title     VARCHAR,
+        status           VARCHAR,
+        close_time       TIMESTAMP,
+        yes_bid          DOUBLE,   -- implied probability, dollars ($0.00-$1.00)
+        yes_ask          DOUBLE,
+        no_bid           DOUBLE,
+        no_ask           DOUBLE,
+        last_price       DOUBLE,
+        volume           DOUBLE,
+        open_interest    DOUBLE,
+        fetched_at       TIMESTAMP,
+        PRIMARY KEY (market_ticker, fetched_at)
+    );
+
     """
 
     for stmt in sql.split(";"):

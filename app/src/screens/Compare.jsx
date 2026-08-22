@@ -46,8 +46,12 @@ export default function CompareScreen() {
     setAiLoading(true); setAiError(null); setAiVerdict(null);
     try {
       const fmt = p => `${p.name} (${p.pos}, ${p.team}): Proj ${p.proj}, Last ${p.last}, Avg ${p.avg}, ECR #${p.ecr}, ADP ${p.adp}, Opp ${p.opp} (#${p.oppRank} vs ${p.pos}), Owned ${p.owned}%, Tier ${p.tier}`;
-      const playerLines = selected.map((p, i) => `Player ${i + 1}: ${fmt(p)}`).join('\n');
-      const question = `Compare these ${selected.length} fantasy football players and tell me which one to start this week:\n\n${playerLines}\n\nGive a direct ranking (best to worst) with reasoning. Focus on this week's matchup, projected points, and floor/ceiling. Be concise.`;
+      // Pre-sort by projection descending so the model isn't the only thing doing the numeric comparison —
+      // it was previously handed players in selection order and would sometimes assert the wrong player had
+      // the higher Proj number.
+      const sorted = [...selected].sort((a, b) => (Number(b.proj) || 0) - (Number(a.proj) || 0));
+      const playerLines = sorted.map((p, i) => `#${i + 1} by projection: ${fmt(p)}`).join('\n');
+      const question = `Compare these ${selected.length} fantasy football players and tell me which one to start this week. They are listed below in descending order of projected points (Proj) — do not reorder by projection, that ranking is already correct; only adjust the ranking if floor/ceiling, matchup, or trend reasoning justifies moving a player, and say why.\n\n${playerLines}\n\nGive a direct ranking (best to worst) with reasoning. Focus on this week's matchup, projected points, and floor/ceiling. Be concise. Double-check each numeric comparison you state (e.g. "X has a higher Proj than Y") against the actual numbers above before writing it.`;
       const res = await fetch(`${API_BASE}/api/v1/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -3,7 +3,7 @@ import WatchlistScreen from './Watchlist.jsx';
 import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer, getPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge, SeasonStatBar, RadarChart, scoreToTier, SCORE_TIER_STYLE } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -282,23 +282,44 @@ function WeatherBadge({ team, opp, scheduleOppMap }) {
   );
 }
 
+// Numeric weather-impact score for a player's upcoming game, for sorting the
+// Weather column. Mirrors WeatherBadge's own home-team resolution so the sort
+// order matches what's actually displayed. Domes / no forecast data sort last.
+function getWeatherSeverity(r2Weather, team, opp, scheduleOppMap) {
+  if (!r2Weather?.teams) return -1;
+  const schedOpp = scheduleOppMap?.get(team) || opp || '';
+  const isAway = schedOpp.startsWith('@');
+  const oppClean = schedOpp.replace(/^@/, '').toUpperCase();
+  const homeTeam = isAway ? oppClean : (team || '').toUpperCase();
+  if (!homeTeam) return -1;
+  const entry = r2Weather.teams[homeTeam];
+  if (!entry || entry.is_dome) return -1;
+  const day = entry.forecast?.[0];
+  const hour = day?.hourly?.find(h => h.time === '1300') || day?.hourly?.[0];
+  if (!hour) return -1;
+  const wind   = Number(hour.wind_mph || 0);
+  const gust   = Number(hour.wind_gust_mph || hour.gust_mph || 0);
+  const precip = Number(hour.precip_in || 0);
+  return wind + gust * 0.5 + precip * 20;
+}
+
 // ── Column config ─────────────────────────────────────────────────────────────
 const DEFAULT_COLUMNS = [
   { id: 'proj',      label: 'Proj',     visible: true,  sortKey: 'proj',         group: 'std' },
   { id: 'last',      label: 'Last',     visible: true,  sortKey: 'last',         group: 'std' },
   { id: 'avg',       label: 'Avg',      visible: true,  sortKey: 'avg',          group: 'std' },
-  { id: 'trend',     label: 'Trend',    visible: true,  sortKey: null,           group: 'std' },
+  { id: 'trend',     label: 'Trend',    visible: true,  sortKey: 'trendAvg',     group: 'std' },
   { id: 'opp_score', label: 'Opp Sc',   visible: true,  sortKey: 'oppScore',     group: 'std' },
   { id: 'bye',       label: 'Bye',      visible: true,  sortKey: 'bye',          group: 'std' },
   { id: 'owned',     label: '%Own',     visible: true,  sortKey: 'owned',        group: 'std' },
   { id: 'adp',       label: 'ADP',      visible: true,  sortKey: 'adp',          group: 'std' },
   { id: 'ecr_rank',  label: 'Rank',     visible: true,  sortKey: 'rank',         group: 'std' },
-  { id: 'depth',     label: 'Depth',    visible: true,  sortKey: null,           group: 'std' },
-  { id: 'snaps',     label: 'Snaps/G',  visible: true,  sortKey: null,           group: 'std' },
+  { id: 'depth',     label: 'Depth',    visible: true,  sortKey: 'depthOrder',   group: 'std' },
+  { id: 'snaps',     label: 'Snaps/G',  visible: true,  sortKey: 'snapsG',       group: 'std' },
   { id: 'tgt',       label: 'Tgt%',     visible: false, sortKey: 'targetShare',  group: 'std' },
   { id: 'routes',    label: 'Routes',   visible: false, sortKey: 'routes',       group: 'std' },
   { id: 'yac',       label: 'YAC',      visible: false, sortKey: 'yac',          group: 'std' },
-  { id: 'weather',   label: 'Weather',  visible: true,  sortKey: null,           group: 'std' },
+  { id: 'weather',   label: 'Weather',  visible: true,  sortKey: 'weatherSeverity', group: 'std' },
   // Advanced stats (from Sleeper wks 14-17, 2025 season)
   { id: 'snap_pct',  label: 'Snap%',    visible: false, sortKey: 'snapPct',  group: 'adv' },
   { id: 'tgt_g',     label: 'Tgt/G',    visible: false, sortKey: 'tgtG',     group: 'adv' },
@@ -328,7 +349,8 @@ function loadColumns() {
   } catch { return DEFAULT_COLUMNS.map(c => ({ ...c })); }
 }
 
-export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new Set(), onAddPlayer, onDropPlayer, onClaimPlayer, onTradePlayer, user, watchlistIds = new Set(), onToggleWatch, waiverQueue = {}, playersTab = 'players', onPlayersTabChange }) {
+export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new Set(), onAddPlayer, onDropPlayer, onClaimPlayer, onTradePlayer, user, watchlistIds = new Set(), onToggleWatch, waiverQueue = {}, playersTab = 'players', onPlayersTabChange, showMobile = false }) {
+  const isMobile = showMobile;
   const _addFilter = (() => { try { const f = localStorage.getItem('fantasai_add_filter'); if (f) { localStorage.removeItem('fantasai_add_filter'); return f; } } catch {} return null; })();
   const [pos, setPos] = React.useState(_addFilter ?? 'ALL');
   const [search, setSearch] = React.useState('');
@@ -434,6 +456,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     sorted.forEach((row, i) => { ranks[row.team] = i + 1; });
     return ranks;
   }, [r2DefenseData]);
+
+  // Also needed at table level (not just inside WeatherBadge) so the Weather column can be sorted.
+  const { data: r2WeatherForSort } = useR2WeatherForecast();
 
   const { data: r2Breakouts } = useR2BreakoutCandidates();
   const breakoutSet = React.useMemo(() => {
@@ -790,6 +815,33 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
         const bs = breakoutSet.get(b.name.toLowerCase().trim())?.opportunity_score ?? -1;
         return bs - as;
       }
+      if (sort === 'trendAvg') {
+        const aAvg = a.trend?.length ? a.trend.reduce((s, v) => s + v, 0) / a.trend.length : -1;
+        const bAvg = b.trend?.length ? b.trend.reduce((s, v) => s + v, 0) / b.trend.length : -1;
+        return bAvg - aAvg;
+      }
+      if (sort === 'depthOrder') {
+        // Lower depth chart order = higher on the depth chart = "better". R2 order takes
+        // priority; fall back to parsing the trailing digit off the Sleeper depth label (e.g. "RB2" -> 2).
+        const parseFallback = key => {
+          const label = depthData[key];
+          const m = typeof label === 'string' ? label.match(/(\d+)$/) : null;
+          return m ? Number(m[1]) : null;
+        };
+        const aOrder = a.depthChartOrder ?? parseFallback(a.name.toLowerCase().trim());
+        const bOrder = b.depthChartOrder ?? parseFallback(b.name.toLowerCase().trim());
+        return (aOrder ?? 999) - (bOrder ?? 999);
+      }
+      if (sort === 'snapsG') {
+        const av = a.snaps ?? snapsData[a.name.toLowerCase().trim()] ?? -1;
+        const bv = b.snaps ?? snapsData[b.name.toLowerCase().trim()] ?? -1;
+        return bv - av;
+      }
+      if (sort === 'weatherSeverity') {
+        const av = getWeatherSeverity(r2WeatherForSort, a.team, a.opp, scheduleOppMap);
+        const bv = getWeatherSeverity(r2WeatherForSort, b.team, b.opp, scheduleOppMap);
+        return bv - av;
+      }
       if (sort === 'efficiencyScore') {
         const as = breakoutSet.get(a.name.toLowerCase().trim())?.efficiency_score ?? -1;
         const bs = breakoutSet.get(b.name.toLowerCase().trim())?.efficiency_score ?? -1;
@@ -899,7 +951,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
               {isLiveData() ? '2026 Players' : 'Static seed'}
             </div>
           </div>
-          {draftDone && (
+          {draftDone && !isMobile && (
             <div style={{ position: 'relative' }}>
               <div
                 onClick={() => setWaiverOrderOpen(o => !o)}
@@ -942,6 +994,9 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
       <div className="tabs" style={{ padding: '0 18px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
         <div className={`tab ${playersTab === 'players' ? 'active' : ''}`} onClick={() => onPlayersTabChange?.('players')}>Players</div>
         <div className={`tab ${playersTab === 'watchlist' ? 'active' : ''}`} onClick={() => onPlayersTabChange?.('watchlist')}>★ Watchlist {resolvableWatchCount > 0 && <span style={{ marginLeft: 4, fontSize: 9, background: 'rgba(198,255,58,.2)', color: 'var(--accent)', borderRadius: 3, padding: '1px 5px', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{resolvableWatchCount}</span>}</div>
+        {isMobile && draftDone && (
+          <div className={`tab ${playersTab === 'waiverorder' ? 'active' : ''}`} onClick={() => onPlayersTabChange?.('waiverorder')}>Waiver Order</div>
+        )}
       </div>
 
       {/* ── Watchlist tab ── */}
@@ -951,8 +1006,34 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
         </div>
       )}
 
+      {/* ── Waiver Order tab (mobile only — desktop shows it as a header dropdown) ── */}
+      {isMobile && playersTab === 'waiverorder' && draftDone && (
+        <div style={{ flex: 1, overflow: 'auto', padding: '14px 16px' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 14 }}>
+            You're <strong style={{ color: 'var(--accent)' }}>#{myWaiverPriority}</strong> of {waiverOrder.length} in waiver priority.
+            {myWaiverPriority === 1 && <span style={{ marginLeft: 6, fontSize: 9, background: 'rgba(198,255,58,.2)', color: 'var(--accent)', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>FIRST PICK</span>}
+          </div>
+          {waiverOrder.map((tid, i) => {
+            const t = findTeam(tid);
+            const isMe = tid === (user?.teamId ?? null);
+            return (
+              <div key={tid} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8, background: isMe ? 'rgba(198,255,58,.12)' : 'var(--panel)', border: '1px solid var(--border)', marginBottom: 6 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-faint)', width: 20, flexShrink: 0 }}>{i + 1}.</span>
+                <span style={{ fontSize: 14, fontWeight: isMe ? 700 : 500, color: isMe ? 'var(--accent)' : 'var(--text)' }}>{t?.logo || t?.name || `Team ${tid}`}</span>
+                {isMe && <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--accent)', fontWeight: 700 }}>YOU</span>}
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', padding: '10px 2px 0', borderTop: '1px solid var(--border)', marginTop: 8 }}>
+            Next run: {fmtWaiverDate(nextWaiverDate(processDay))}
+          </div>
+        </div>
+      )}
+
       {/* ── Players tab content ── */}
-      {playersTab === 'players' && <>
+      {/* Falls back here if playersTab is stuck on 'waiverorder' after switching
+          from mobile back to desktop, where that tab doesn't exist. */}
+      {(playersTab === 'players' || (playersTab === 'waiverorder' && !isMobile)) && <>
 
 
       {/* ── Success toast (pre-draft pickups) ── */}
@@ -2480,6 +2561,21 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     return null;
   }, [allWriteups, player.name]);
 
+  // Job 5 (Qwen3:30b) deep reasoning — only covers a weekly top-slice of
+  // high-priority players, not everyone, so this is a bonus card, not a
+  // replacement for the Job 3 writeup above.
+  const { data: deepReasoningData } = useR2DeepReasoning();
+  const deepReasoning = React.useMemo(() => {
+    if (!deepReasoningData || typeof deepReasoningData !== 'object') return null;
+    const dict = deepReasoningData.players || deepReasoningData;
+    const key = player.name?.toLowerCase().trim();
+    if (!key) return null;
+    for (const [name, entry] of Object.entries(dict)) {
+      if (name.toLowerCase().trim() === key) return entry;
+    }
+    return null;
+  }, [deepReasoningData, player.name]);
+
   // Pre-baked 2025 Sleeper stats (from R2) — used as fallback when live API unavailable
   const { data: r2Stats2025Data } = useR2PlayerStats2025();
   const r2Stats2025 = React.useMemo(() => {
@@ -3073,6 +3169,54 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   </div>
                 )}
               </div>
+
+              {/* Job 5 deep reasoning (Qwen3:30b) — only present for the weekly top-slice of high-priority players */}
+              {deepReasoning && (() => {
+                const rec = (deepReasoning.recommendation || '').toUpperCase();
+                const recColor = rec === 'BUY' ? '#1affa0' : rec === 'AVOID' ? '#ff4f4f' : '#ffb547';
+                return (
+                  <div className="muted-card" style={{ marginBottom: 16, borderLeft: `3px solid ${recColor}` }}>
+                    <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 8 }}>
+                      <div className="ai-orb" style={{ width: 20, height: 20 }}></div>
+                      <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: recColor }}>
+                        Deep Reasoning
+                      </span>
+                      <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 900, color: recColor, background: `${recColor}1a`, border: `1px solid ${recColor}40`, borderRadius: 4, padding: '1px 7px' }}>
+                        {rec || '—'}
+                      </span>
+                      {deepReasoning._elapsed_sec != null && (
+                        <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--font-mono)', color: recColor, opacity: .7 }}>
+                          Qwen3:30b
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Breakout Score</div>
+                        <div style={{ fontSize: 18, fontWeight: 900, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{deepReasoning.breakout_score ?? '—'}<span style={{ fontSize: 11, color: 'var(--text-faint)' }}>/100</span></div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Confidence</div>
+                        <div style={{ fontSize: 18, fontWeight: 900, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{deepReasoning.confidence ?? '—'}<span style={{ fontSize: 11, color: 'var(--text-faint)' }}>/100</span></div>
+                      </div>
+                      {deepReasoning.risk_flag && (
+                        <div>
+                          <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Risk</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: deepReasoning.risk_flag === 'none' ? 'var(--text-dim)' : '#ffb547', textTransform: 'capitalize' }}>{deepReasoning.risk_flag}</div>
+                        </div>
+                      )}
+                    </div>
+                    {deepReasoning.primary_reason && (
+                      <div style={{ fontSize: 13, lineHeight: 1.55 }}>{deepReasoning.primary_reason}</div>
+                    )}
+                    {deepReasoning._consistency_warning && (
+                      <div style={{ marginTop: 8, fontSize: 10, color: '#ffb547', fontFamily: 'var(--font-mono)' }}>
+                        ⚠ {deepReasoning._consistency_warning}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
             </React.Fragment>
           )}

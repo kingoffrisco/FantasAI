@@ -193,10 +193,14 @@ function getScoringRules() {
     const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
     if (s?.scoring) return s.scoring;
   } catch {}
-  return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2 };
+  return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2, kFg50: 5, kFgUnder50: 3, kFgMiss: -1 };
 }
 
 function calcFantasyPts(stats, rules) {
+  const fgMade = stats.fgMade ?? 0;
+  const fgMade50 = stats.fgMade50 ?? 0;
+  const fgMadeUnder50 = stats.fgMadeUnder50 ?? Math.max(0, fgMade - fgMade50);
+  const fgMissed = stats.fgMissed ?? Math.max(0, (stats.fgAtt ?? 0) - fgMade);
   return Math.max(0,
     (stats.passYards ?? 0) * (rules.passYd ?? 0.04) +
     (stats.passTDs   ?? 0) * (rules.passTD  ?? 4)   +
@@ -206,11 +210,24 @@ function calcFantasyPts(stats, rules) {
     (stats.recYards  ?? 0) * (rules.recYd    ?? 0.1) +
     (stats.recTDs    ?? 0) * (rules.recTD    ?? 6)   +
     (stats.receptions?? 0) * (rules.rec      ?? 0.5) +
-    (stats.fumbleLost?? 0) * (rules.fumbleLost ?? -2)
+    (stats.fumbleLost?? 0) * (rules.fumbleLost ?? -2) +
+    fgMade50 * (rules.kFg50 ?? 5) +
+    fgMadeUnder50 * (rules.kFgUnder50 ?? 3) +
+    fgMissed * (rules.kFgMiss ?? -1)
   );
 }
 
 function parseEspnBoxScore(boxscorePlayers, rules) {
+  const parseCompAttempts = (raw) => {
+    if (raw == null) return { made: 0, att: 0 };
+    const txt = String(raw);
+    const m = txt.match(/(\d+)\s*\/\s*(\d+)/);
+    if (m) return { made: Number(m[1]) || 0, att: Number(m[2]) || 0 };
+    const n = Number(txt);
+    if (Number.isFinite(n)) return { made: n, att: n };
+    return { made: 0, att: 0 };
+  };
+
   const byPlayer = {};
   for (const teamData of (boxscorePlayers ?? [])) {
     for (const group of (teamData.statistics ?? [])) {
@@ -228,6 +245,23 @@ function parseEspnBoxScore(boxscorePlayers, rules) {
         if (cat === 'rushing')   { s.rushYards = get('rushingYards', 'yards') ?? s.rushYards ?? 0; s.rushTDs = get('rushingTouchdowns', 'touchdowns') ?? s.rushTDs ?? 0; }
         if (cat === 'receiving') { s.recYards = get('receivingYards', 'yards') ?? s.recYards ?? 0; s.recTDs = get('receivingTouchdowns', 'touchdowns') ?? s.recTDs ?? 0; s.receptions = get('receptions') ?? s.receptions ?? 0; }
         if (cat === 'fumbles')   { s.fumbleLost = get('fumblesLost', 'lost') ?? s.fumbleLost ?? 0; }
+        if (cat === 'kicking') {
+          const pairIdx = idx('fieldGoalsMadeFieldGoalsAttempted');
+          if (pairIdx >= 0) {
+            const parsed = parseCompAttempts(st[pairIdx]);
+            s.fgMade = (s.fgMade ?? 0) + parsed.made;
+            s.fgAtt = (s.fgAtt ?? 0) + parsed.att;
+          } else {
+            const made = get('fieldGoalsMade', 'fgm');
+            const att = get('fieldGoalsAttempted', 'fga');
+            if (made != null) s.fgMade = (s.fgMade ?? 0) + made;
+            if (att != null) s.fgAtt = (s.fgAtt ?? 0) + att;
+          }
+          const fg50 = get('fieldGoalsMadeFrom50Plus', 'fieldGoals50PlusMade', 'fg50');
+          if (fg50 != null) s.fgMade50 = (s.fgMade50 ?? 0) + fg50;
+          const misses = get('fieldGoalsMissed', 'fgMissed');
+          if (misses != null) s.fgMissed = (s.fgMissed ?? 0) + misses;
+        }
       }
     }
   }
@@ -378,6 +412,30 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const isMobile = showMobile;
   const [dashTab, setDashTab] = React.useState('standings');
   const [mobileScoringOpen, setMobileScoringOpen] = React.useState(false);
+
+  // Mobile tab strip has more tabs than fit in a 414px frame. Touch users can
+  // swipe it fine, but there's no way to tell that from looking at it (no
+  // scrollbar), and mouse users (e.g. previewing "Mobile" on desktop) have no
+  // swipe gesture at all — so surface explicit scroll arrows, shown only when
+  // there's actually more content in that direction.
+  const dashTabStripRef = React.useRef(null);
+  const [dashTabCanScrollLeft, setDashTabCanScrollLeft]   = React.useState(false);
+  const [dashTabCanScrollRight, setDashTabCanScrollRight] = React.useState(false);
+  const updateDashTabScrollState = React.useCallback(() => {
+    const el = dashTabStripRef.current;
+    if (!el) return;
+    setDashTabCanScrollLeft(el.scrollLeft > 2);
+    setDashTabCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+  React.useEffect(() => {
+    if (!isMobile) return;
+    updateDashTabScrollState();
+    window.addEventListener('resize', updateDashTabScrollState);
+    return () => window.removeEventListener('resize', updateDashTabScrollState);
+  }, [isMobile, updateDashTabScrollState]);
+  function scrollDashTabs(dir) {
+    dashTabStripRef.current?.scrollBy({ left: dir * 120, behavior: 'smooth' });
+  }
 
   const { data: cbsTeams } = useApi(() => api.teams(), []);
   const { data: r2Alerts, fetchedAt: r2AlertsFetchedAt } = useR2CriticalAlerts();
@@ -1035,8 +1093,19 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
       {/* ── League Standings + Commish + Transactions + Champions Corner ── */}
       {isMobile && (
-        <div style={{ flexShrink: 0, background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
-          <div style={{ display: 'flex', overflowX: 'auto', scrollbarWidth: 'none' }}>
+        <div style={{ flexShrink: 0, background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'stretch' }}>
+          {dashTabCanScrollLeft && (
+            <button onClick={() => scrollDashTabs(-1)} aria-label="Scroll tabs left" style={{
+              flex: '0 0 auto', width: 28, border: 'none', borderRight: '1px solid var(--border)',
+              background: 'var(--bg-2)', color: 'var(--text-dim)', cursor: 'pointer', fontSize: 14,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>‹</button>
+          )}
+          <div
+            ref={dashTabStripRef}
+            onScroll={updateDashTabScrollState}
+            style={{ display: 'flex', overflowX: 'auto', scrollbarWidth: 'thin', flex: 1, minWidth: 0 }}
+          >
             {[
               { id: 'standings',    label: 'Standings', icon: '🏆' },
               { id: 'commish',      label: 'Commish',   icon: '📢' },
@@ -1061,6 +1130,13 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               </button>
             ))}
           </div>
+          {dashTabCanScrollRight && (
+            <button onClick={() => scrollDashTabs(1)} aria-label="Scroll tabs right" style={{
+              flex: '0 0 auto', width: 28, border: 'none', borderLeft: '1px solid var(--border)',
+              background: 'var(--bg-2)', color: 'var(--accent)', cursor: 'pointer', fontSize: 14,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>›</button>
+          )}
         </div>
       )}
       <div style={{ padding: isMobile ? '0 14px 24px' : '0 24px 24px', display: isMobile ? 'block' : 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: isMobile ? undefined : '1fr', gap: 16, alignItems: 'stretch', flex: isMobile ? undefined : 1, minHeight: isMobile ? undefined : 0 }}>
@@ -1802,7 +1878,6 @@ function MobileScoringPopup({ onClose, myTeamId, week, espnGameMap, espnPlayerAc
   );
 }
 
-const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const TYPE_COLOR = { game: 'var(--accent-2)', waiver: 'var(--warn)', lock: 'var(--danger)', other: 'var(--text-faint)' };
 const TYPE_LABEL = { game: 'GAME', waiver: 'WAIVER', lock: 'LOCK', other: 'EVENT' };
 
@@ -2154,8 +2229,8 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
     return map;
   }, [nflGames]);
 
-  // Today's day of week for highlighting
-  const todayDay = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+  // Today's exact date (YYYY-MM-DD) for highlighting across a 2-week span
+  const todayDateKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
 
   // ── Happy Hour ───────────────────────────────────────────────────────────────
   const [happyHours, setHappyHours] = React.useState(() => {
@@ -2174,17 +2249,13 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
     } catch { return { date: null, address: '' }; }
   }, []);
 
-  function getWeekDay(dateStr) {
-    try { return new Date(dateStr.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' }); } catch { return null; }
-  }
-
   function fmt12(t) {
     try { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; }
     catch { return t; }
   }
 
   function openHHModal() {
-    setHhDraft({ id: Date.now().toString(), title: 'Happy Hour', date: new Date().toISOString().slice(0, 10), time: '17:00', address: '', teamIds: LEAGUE_TEAMS.map(t => t.id) });
+    setHhDraft({ id: Date.now().toString(), title: '', date: new Date().toISOString().slice(0, 10), time: '17:00', address: '', teamIds: LEAGUE_TEAMS.map(t => t.id) });
     setShowHHModal(true);
   }
 
@@ -2300,6 +2371,10 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
     localStorage.setItem('fantasai_draft_rsvp', JSON.stringify(updated));
   }
 
+  // Recurring weekly slots (TNF, waivers, etc.) key by weekday name — they repeat
+  // every week shown. One-off dated items (happy hours, draft) key by their actual
+  // calendar date (YYYY-MM-DD) so they land on the correct day and don't collide
+  // with a different week's occurrence of the same weekday.
   const grouped = React.useMemo(() => {
     const g = {};
     for (const evt of events) {
@@ -2307,36 +2382,42 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
       g[evt.day].push(evt);
     }
     for (const hh of happyHours) {
-      const day = getWeekDay(hh.date);
-      if (!day) continue;
-      if (!g[day]) g[day] = [];
-      g[day].push({ ...hh, _isHH: true });
+      const dateKey = (hh.date || '').slice(0, 10);
+      if (!dateKey) continue;
+      if (!g[dateKey]) g[dateKey] = [];
+      g[dateKey].push({ ...hh, _isHH: true });
     }
     if (draftSettings.date) {
-      const day = getWeekDay(draftSettings.date);
-      if (day) {
-        if (!g[day]) g[day] = [];
+      const dateKey = draftSettings.date.slice(0, 10);
+      if (dateKey) {
+        if (!g[dateKey]) g[dateKey] = [];
         const draftTime = draftSettings.date.includes('T') ? draftSettings.date.split('T')[1].slice(0, 5) : '';
-        g[day].push({ id: '__draft__', _isDraft: true, date: draftSettings.date, time: draftTime, address: draftSettings.address });
+        g[dateKey].push({ id: '__draft__', _isDraft: true, date: draftSettings.date, time: draftTime, address: draftSettings.address });
       }
     }
     return g;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, happyHours, draftSettings.date, draftSettings.address]);
 
-  const activeDays = DAY_ORDER.filter(d => grouped[d]?.length > 0);
-
-  // Compute Sun–Sat dates for this NFL week (calendar display)
+  // Compute Sun–Sat dates for this week AND next week (14 days), each with its own
+  // real date key — this is what lets the calendar tell "this Friday" apart from
+  // "next Friday" instead of merging them into one weekday bucket.
   const calWeekDates = React.useMemo(() => {
     const now = new Date();
     const sun = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
     const NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
     const ABBRS = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
-    return NAMES.map((name, i) => ({
-      name,
-      abbr: ABBRS[i],
-      num: new Date(sun.getFullYear(), sun.getMonth(), sun.getDate() + i).getDate(),
-    }));
+    return Array.from({ length: 14 }, (_, i) => {
+      const d = new Date(sun.getFullYear(), sun.getMonth(), sun.getDate() + i);
+      const dow = i % 7;
+      return {
+        name: NAMES[dow],
+        abbr: ABBRS[dow],
+        num: d.getDate(),
+        dateKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+        weekIdx: i < 7 ? 0 : 1,
+      };
+    });
   }, []);
 
   return (
@@ -2345,7 +2426,7 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
       <div className="card-head" style={{ flexShrink: 0 }}>
         <div className="card-title">Weekly Events</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button className="btn primary sm" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.02em' }} onClick={openHHModal}>🍺 Create Happy Hour</button>
+          <button className="btn primary sm" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.02em' }} onClick={openHHModal}>📅 Create Event</button>
           <span className="mono faint" style={{ fontSize: 10 }}>{weekLabel}</span>
         </div>
       </div>
@@ -2371,13 +2452,18 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
       </div>
       {/* ── Week Calendar + Events ── */}
       <div style={{ padding: '12px 12px 8px', flex: 1, overflow: 'auto', minHeight: 0 }}>
-        {/* ── 7-column calendar grid ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
-          {calWeekDates.map(({ name, abbr, num }, colIdx) => {
-            const isToday = name === todayDay;
-            const dayEvts = [...(grouped[name] || [])].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+        {/* ── 7-column calendar grid, two weeks stacked ── */}
+        {[0, 1].map(weekIdx => (
+        <div key={weekIdx} style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: 4 }}>
+            {weekIdx === 0 ? 'This Week' : 'Next Week'}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+          {calWeekDates.filter(c => c.weekIdx === weekIdx).map(({ name, abbr, num, dateKey }, colIdx) => {
+            const isToday = dateKey === todayDateKey;
+            const dayEvts = [...(grouped[name] || []), ...(grouped[dateKey] || [])].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
             return (
-              <div key={name} style={{
+              <div key={dateKey} style={{
                 display: 'flex', flexDirection: 'column',
                 borderRight: colIdx < 6 ? '1px solid var(--border)' : 'none',
                 background: isToday ? 'rgba(198,255,58,.04)' : 'transparent',
@@ -2436,18 +2522,21 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
               </div>
             );
           })}
+          </div>
         </div>
+        ))}
 
         {/* ── Rich event detail cards (HH, Draft, primetime games) ── */}
-        {DAY_ORDER.flatMap(day => {
-          const isToday = day === todayDay;
-          const dayEvts = [...(grouped[day] || [])].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+        {calWeekDates.flatMap(({ name: day, dateKey, weekIdx }) => {
+          const isToday = dateKey === todayDateKey;
+          const dayEvts = [...(grouped[day] || []), ...(grouped[dateKey] || [])].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
           const richEvts = dayEvts.filter(evt => evt._isHH || evt._isDraft || !!slotGame[evt.id]);
           if (richEvts.length === 0) return [];
           return [(
-            <div key={day} style={{ borderTop: '1px solid var(--border)' }}>
+            <div key={dateKey} style={{ borderTop: '1px solid var(--border)' }}>
               <div style={{ padding: '5px 14px 3px', fontSize: 12, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: isToday ? 'var(--accent)' : 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {day}
+                {weekIdx === 1 && <span style={{ fontSize: 9, opacity: 0.6, textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>(Next Week)</span>}
                 {isToday && <span style={{ fontSize: 8, background: 'var(--accent)', color: '#0a1300', borderRadius: 3, padding: '1px 5px', fontWeight: 800 }}>TODAY</span>}
               </div>
               {richEvts.map(evt => {
@@ -2612,11 +2701,16 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
                       {/* Map — below details, constrained width */}
                       {evt.address && (
                         <div style={{ padding: '0 10px 10px' }}>
-                          <iframe
-                            title={`Map: ${evt.address}`}
-                            src={`https://maps.google.com/maps?q=${encodeURIComponent(evt.address)}&output=embed`}
-                            style={{ width: '100%', maxWidth: 400, height: 160, border: 'none', borderRadius: 6, display: 'block', opacity: 0.9 }}
-                          />
+                          <div style={{ maxWidth: 400, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+                            <div style={{ padding: '8px 10px', fontSize: 15, fontWeight: 800, color: '#2f6fff', background: 'var(--panel)', textAlign: 'center' }}>
+                              {evt.title || 'Event'}
+                            </div>
+                            <iframe
+                              title={`Map: ${evt.address}`}
+                              src={`https://maps.google.com/maps?q=${encodeURIComponent(evt.address)}&output=embed`}
+                              style={{ width: '100%', height: 160, border: 'none', display: 'block', opacity: 0.9 }}
+                            />
+                          </div>
                         </div>
                       )}
                       </>}
@@ -2830,14 +2924,14 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
         onClick={e => { if (e.target === e.currentTarget) { setShowHHModal(false); setHhDraft(null); } }}>
         <div style={{ background: 'var(--panel)', border: '1px solid var(--border-strong)', borderRadius: 14, padding: 24, width: 420, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-            <div style={{ fontSize: 15, fontWeight: 800 }}>{happyHours.some(h => h.id === hhDraft?.id) ? '🍺 Edit Happy Hour' : '🍺 Schedule Happy Hour'}</div>
+            <div style={{ fontSize: 15, fontWeight: 800 }}>{happyHours.some(h => h.id === hhDraft?.id) ? '📅 Edit Event' : '📅 Create Event'}</div>
             <button style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 18, cursor: 'pointer', lineHeight: 1 }} onClick={() => { setShowHHModal(false); setHhDraft(null); }}>✕</button>
           </div>
 
           {/* Event name */}
           <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 11, color: 'var(--text-faint)', display: 'block', marginBottom: 4 }}>Event Name</label>
-            <input className="input" value={hhDraft.title} onChange={e => setHhDraft(d => ({ ...d, title: e.target.value }))} placeholder="Happy Hour" style={{ width: '100%', boxSizing: 'border-box' }} />
+            <input className="input" value={hhDraft.title} onChange={e => setHhDraft(d => ({ ...d, title: e.target.value }))} placeholder="e.g. Happy Hour, Draft Venue" style={{ width: '100%', boxSizing: 'border-box' }} />
           </div>
 
           {/* Date + Time */}

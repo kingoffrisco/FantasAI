@@ -1,38 +1,39 @@
 {
-  "generated_at": "2026-08-17T11:48:37.555390+00:00",
+  "generated_at": "2026-08-21T01:23:20.133637+00:00",
   "model": "qwen3:30b",
-  "player_count": 1,
+  "player_count": 2,
   "focus": "30B deep reasoning on high-priority fantasy players",
   "players": {
-    "49ers": {
-      "player_name": "49ers",
-      "position": "",
-      "team": "",
+    "Bijan Robinson": {
+      "player_name": "Bijan Robinson",
+      "position": "RB",
+      "team": "ATL",
       "priority": 10.0,
-      "input_hash": "e4cd615f7d4d",
+      "input_hash": "860e802dcad5",
       "breakout_score": 95,
       "confidence": 90,
-      "primary_reason": "Top offensive threat, high matchup score",
+      "primary_reason": "Historic contract extension as highest-paid RB",
       "risk_flag": "none",
       "recommendation": "BUY",
+      "_consistency_warning": "",
       "packet": {
-        "player_name": "49ers",
-        "position": "",
-        "team": "",
+        "player_name": "Bijan Robinson",
+        "position": "RB",
+        "team": "ATL",
         "injury_status": "none",
         "injury_flag": false,
         "latest_sentiment": "positive",
-        "latest_summary": "Highlighted as a top offensive threat, strongly recommended to start.",
+        "latest_summary": "Robinson is a top-tier running back with no injury risks and consistent high-level production.",
         "job2_scores": {
-          "waiver_score": 9.5,
-          "trade_buy": 9.0,
-          "trade_sell": 5.0,
-          "start_score": 10.0,
-          "sit_score": 1.0,
-          "injury_risk": 0.0,
-          "dynasty_score": 8.5,
-          "matchup_score": 9.5,
-          "rookie_score": 3.0
+          "waiver_score": 0,
+          "trade_buy": 10,
+          "trade_sell": 10,
+          "start_score": 10,
+          "sit_score": 0,
+          "injury_risk": 0,
+          "dynasty_score": 10,
+          "matchup_score": 8,
+          "rookie_score": 0
         },
         "breakout_signal": {
           "opportunity_score": 0,
@@ -40,9 +41,88 @@
           "avg_snap_share": null,
           "week": null
         },
-        "recent_headlines": []
+        "recent_headlines": [
+          {
+            "headline": "Falcons RB Bijan Robinson Continues To Get High Honors Across NFL",
+            "summary": "Bijan Robinson's continued high honors suggest strong performance, making him a top fantasy asset.",
+            "relevance": 10.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Sources: Falcons, RB Robinson reach 3-year deal worth up to $75M",
+            "summary": "Fantasy managers should expect Bijan Robinson to have a larger role with the Falcons due to his new contract status as the highest-paid running back in NFL history.",
+            "relevance": 10,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Falcons sign Bijan Robinson to historic three-year extension, making him NFL's highest-paid running ",
+            "summary": "Bijan Robinson's historic contract extension makes him a top priority in drafts and waivers, focusing on his rushing potential and role in the Falcons' offense.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          }
+        ]
       },
-      "_elapsed_sec": 2.08
+      "_elapsed_sec": 2.83
+    },
+    "Colston Loveland": {
+      "player_name": "Colston Loveland",
+      "position": "TE",
+      "team": "CHI",
+      "priority": 10.0,
+      "input_hash": "d911b25d4532",
+      "breakout_score": 85,
+      "confidence": 90,
+      "primary_reason": "Top-5 TE status with consistent production",
+      "risk_flag": "low",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Colston Loveland",
+        "position": "TE",
+        "team": "CHI",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "A must-start option due to his top-5 tight end status and consistent production.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 9.0,
+          "trade_sell": 8.0,
+          "start_score": 10.0,
+          "sit_score": 0.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 8.0,
+          "matchup_score": 5.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 3.11,
+          "snap_share_delta": -0.1925,
+          "avg_snap_share": 0.79,
+          "week": 18
+        },
+        "recent_headlines": [
+          {
+            "headline": "Bears rising star Colston Loveland dubbed top-5 tight end already",
+            "summary": "Colston Loveland's top-5 tight end status elevates his fantasy value, making him a must-start option if available.",
+            "relevance": 10.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Bears TE Colston Loveland Expected to Play for a Different NFL Team",
+            "summary": "Fantasy managers should monitor Colston Loveland's trade status as he's expected to play for a new NFL team, impacting lineup decisions.",
+            "relevance": 9.5,
+            "sentiment": "neutral"
+          },
+          {
+            "headline": "Bears: Colston Loveland\u2019s status as one of the best TEs in NFL, confirmed",
+            "summary": "Colston Loveland is confirmed as one of the top TEs in the NFL, making him a high-priority target for fantasy managers.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 1.28
     }
   }
 }

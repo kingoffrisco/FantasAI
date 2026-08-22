@@ -117,7 +117,7 @@ def r2_put(key: str, payload) -> bool:
     )
     ok = resp.status_code in (200, 201)
     status = "OK" if ok else f"FAIL {resp.status_code}"
-    print(f"  {status} → {key}")
+    print(f"  {status} -> {key}")
     return ok
 
 
@@ -459,9 +459,12 @@ def main():
                 % len(existing_scores)
             )
 
-    inj_players = injuries.get("players", injuries) if injuries else {}
-    if isinstance(inj_players, dict) and "players" in inj_players:
-        inj_players = inj_players["players"]
+    if isinstance(injuries, dict) and isinstance(injuries.get("data"), list):
+        inj_players = injuries["data"]
+    else:
+        inj_players = injuries.get("players", injuries) if injuries else {}
+        if isinstance(inj_players, dict) and "players" in inj_players:
+            inj_players = inj_players["players"]
 
     players_raw = list(player_notes["players"].values())
 
@@ -582,8 +585,8 @@ def main():
         out.write_text(json.dumps(master, indent=2))
         sl_out = Path(__file__).parent / "job2_sleepers_dry_run.json"
         sl_out.write_text(json.dumps(sleeper_file, indent=2))
-        print(f"[Job 2] Dry run saved → {out}")
-        print(f"[Job 2] Sleepers dry run → {sl_out} ({len(sleeper_file.get('players', []))} players)")
+        print(f"[Job 2] Dry run saved -> {out}")
+        print(f"[Job 2] Sleepers dry run -> {sl_out} ({len(sleeper_file.get('players', []))} players)")
         return
 
     print("[Job 2] Uploading to R2...")

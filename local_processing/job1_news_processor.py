@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -59,7 +60,7 @@ _ACTIVE_MODEL = MODEL
 CLASSIFY_PROMPT = """Analyze this NFL news snippet for fantasy football.
 Return ONLY valid JSON (no markdown, no explanation):
 {{
-  "players": ["player name(s) mentioned"],
+  "players": ["full name(s) of individual NFL players mentioned"],
   "relevance": <float 0-10>,
   "sentiment": "positive|negative|neutral",
   "injury_related": <true|false>,
@@ -71,6 +72,13 @@ Return ONLY valid JSON (no markdown, no explanation):
   "rookie_relevance": <float 0-10>,
   "summary": "<one actionable sentence for fantasy managers>"
 }}
+
+Rules for "players":
+- Only individual human players by first+last name (e.g. "Joe Burrow").
+- Never a team, city, or nickname alone (e.g. NOT "49ers", "Bengals", "Cowboys WR").
+- Never a vague group reference (e.g. NOT "other Bengals players", "Vikings WR",
+  "Colts' Receiver", "Rams' skill players").
+- If the article is about a team/defense in general with no named player, return [].
 
 Article: {text}"""
 
@@ -90,6 +98,46 @@ Return ONLY valid JSON (no markdown):
 
 
 # -- Helpers ----------------------------------------------------------------
+
+def _normalize_name(name: str) -> str:
+    name = (name or "").strip().lower()
+    name = re.sub(r"[.']", "", name)
+    name = re.sub(r"\s+(jr|sr|ii|iii|iv)$", "", name)
+    name = re.sub(r"\s+", " ", name)
+    return name
+
+
+def load_roster_names() -> dict:
+    """normalized name -> canonical full_name, from the 2026 draft roster export.
+
+    Used to reject player names the news-classifier LLM hallucinates or
+    over-extracts from article text (team names, generic group references
+    like "Vikings WR") — anything that isn't an exact/near-exact match to a
+    real roster entry never makes it into player_notes.json.
+    """
+    for path in (
+        "fantasai/players/players_2026_draft.json",
+        "fantasai/players/export_players_2026_draft.json",
+    ):
+        raw = r2_get(path)
+        if not raw:
+            continue
+        arr = raw if isinstance(raw, list) else (
+            raw.get("data") or raw.get("players") or []
+        )
+        lookup = {}
+        for p in arr:
+            if not isinstance(p, dict):
+                continue
+            full_name = p.get("full_name") or p.get("player_name") or ""
+            if not full_name:
+                continue
+            lookup[_normalize_name(full_name)] = full_name
+        print("[Job 1] Roster loaded: %d players from %s" % (len(lookup), path))
+        return lookup
+    print("[Job 1] Roster export not found — skipping player-name validation")
+    return {}
+
 
 def _fingerprint(article: dict) -> str:
     """Stable ID for an article — real ID preferred, headline hash as fallback."""
@@ -246,14 +294,21 @@ def extract_draft_signal(text: str) -> dict:
 
 # -- Aggregation helpers ----------------------------------------------------
 
-def build_player_notes(classified: list) -> dict:
+def build_player_notes(classified: list, roster_lookup: dict = None) -> dict:
     players: dict = {}
+    dropped_non_roster = 0
 
     for item in classified:
         for player in item.get("players", []):
             if not player or len(player) < 3:
                 continue
             name = player.strip()
+            if roster_lookup:
+                canonical = roster_lookup.get(_normalize_name(name))
+                if not canonical:
+                    dropped_non_roster += 1
+                    continue
+                name = canonical
             if name not in players:
                 players[name] = {
                     "player_name": name,
@@ -311,6 +366,12 @@ def build_player_notes(classified: list) -> dict:
         p["articles"] = sorted(
             p["articles"], key=lambda a: a["relevance"], reverse=True
         )[:5]
+
+    if roster_lookup and dropped_non_roster:
+        print(
+            "[Job 1] Dropped %d non-roster name mentions (team names, "
+            "vague group references, etc.)" % dropped_non_roster
+        )
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -434,6 +495,7 @@ def main():
         "[Job 1] Loaded %d labels (%d name aliases learned), %d feedback scores"
         % (len(labels), len(alias_map), len(feedback_scores))
     )
+    roster_lookup = load_roster_names()
 
     # Load classified cache so we can skip already-processed articles
     cached_articles: list = []
@@ -473,7 +535,7 @@ def main():
     if not articles and cached_articles:
         print("[Job 1] No new articles — rebuilding outputs from cache.")
         recorrected = _recorrect_cached_articles(cached_articles, alias_map, label_overrides)
-        player_notes = build_player_notes(recorrected)
+        player_notes = build_player_notes(recorrected, roster_lookup)
         ai_summaries = build_ai_summaries(recorrected, feedback_scores)
         beat_signals = build_beat_writer_signals(recorrected)
         if not args.dry_run:
@@ -614,7 +676,7 @@ def main():
             deduped.append(a)
     deduped.reverse()
 
-    player_notes = build_player_notes(deduped)
+    player_notes = build_player_notes(deduped, roster_lookup)
     ai_summaries = build_ai_summaries(deduped, feedback_scores)
     beat_signals = build_beat_writer_signals(deduped)
 

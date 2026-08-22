@@ -98,7 +98,7 @@ function fmtNg(val, statId) {
   return String(val);
 }
 
-export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftComplete, onDraftStatusChange, onOpenPlayer }) {
+export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftComplete, onDraftStatusChange, onOpenPlayer, showMobile = false }) {
   const REAL_currentPickNum = 40;
   const isCommissioner = user?.isAdmin || user?.isCommissioner;
 
@@ -139,6 +139,10 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   const [joinSlot, setJoinSlot]           = React.useState(null);
 
   function startMockDraft() {
+    if (mockDraftLocked) {
+      setDraftLimitToast('Mock drafts are disabled once the live draft window opens.');
+      return;
+    }
     setMockPicks([]);
     setMockPickNum(1);
     setQueue([]);
@@ -148,6 +152,11 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     setMockTeamsOrder([...TEAMS_ORDER]);
     setMockSetup(true);
     setMockActive(true);
+    // A new mock draft starts with a clean Chat & Activity feed — no carryover
+    // from a previous mock or the real draft.
+    setChatMessages([]);
+    try { localStorage.removeItem('fantasai_draft_chat_messages'); } catch {}
+    setCommishLog([]);
   }
   function beginMockDraft(slotIndex) {
     const myTeamId = user?.teamId || 1;
@@ -253,34 +262,13 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   const mockPicksRef = React.useRef(mockPicks);
   React.useEffect(() => { mockPicksRef.current = mockPicks; }, [mockPicks]);
 
-  // AI auto-picks non-user slots during mock draft
-  React.useEffect(() => {
-    if (!mockActive || mockSetup || paused || mockPickNum > TOTAL_PICKS || !mockUserTeamId) return;
-    const round = Math.ceil(mockPickNum / 12);
-    const s     = (mockPickNum - 1) % 12;
-    // Use current mockTeamsOrder (now in deps — no stale closure)
-    const onClockId = round % 2 === 1 ? mockTeamsOrder[s] : mockTeamsOrder[11 - s];
-    if (onClockId === mockUserTeamId) return; // user's turn — wait
-    const t = setTimeout(() => {
-      // Read from ref so we never use a stale draftedSet even after a quick pick
-      const currentPicks = mockPicksRef.current;
-      const draftedSet = new Set(currentPicks.map(p => p.playerId));
-      const pickedId = pickForTeamAuto(onClockId, mockPickNum, currentPicks, draftedSet);
-      if (pickedId) {
-        setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId: onClockId, playerId: pickedId, round, slot: s + 1 }]);
-        setQueue(q => q.filter(id => id !== pickedId));
-      }
-      setMockPickNum(n => n + 1);
-    }, 450);
-    return () => clearTimeout(t);
-  }, [mockActive, mockSetup, paused, mockPickNum, mockUserTeamId, mockTeamsOrder]);
-
   // Read draft date from league settings (stateful so saves are reflected immediately)
   const [draftSettings, setDraftSettings] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null')?.draft || {}; } catch { return {}; }
   });
   const draftDate = draftSettings.date ? new Date(draftSettings.date) : null;
   const isLive = !draftDate || draftDate <= new Date();
+  const mockDraftLocked = isLive;
   const DRAFT_TEAM_COUNT  = draftSettings.teams  || LEAGUE_TEAMS.length;
   const DRAFT_ROUND_COUNT = draftSettings.rounds || DRAFT_ROUNDS; // 14 = 8 starters + 6 bench
   const TOTAL_PICKS       = DRAFT_TEAM_COUNT * DRAFT_ROUND_COUNT;
@@ -292,6 +280,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     mq.addEventListener('change', h);
     return () => mq.removeEventListener('change', h);
   }, []);
+  const isMobileView = isMobile || showMobile;
   const [mobileDraftTab, setMobileDraftTab] = React.useState('board'); // 'board' | panel tab ids
 
   const [boardPos, setBoardPos] = React.useState('ALL');
@@ -327,6 +316,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   });
   const [chatInput, setChatInput] = React.useState('');
   const [rosterPanelView, setRosterPanelView] = React.useState('roster'); // 'roster' | 'grid' | 'chat'
+  const activePanelView = isMobileView ? mobileDraftTab : rosterPanelView;
   const draftGridRef = React.useRef(null);
   const dragRef = React.useRef({ mode: null });
 
@@ -355,7 +345,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   }
 
   function startResize(mode, e) {
-    if (isMobile) return;
+    if (isMobileView) return;
     if (e?.preventDefault) e.preventDefault();
     dragRef.current = { mode };
     document.body.style.userSelect = 'none';
@@ -923,20 +913,20 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     return () => clearInterval(t);
   }, [paused, mockActive, isLive]);
 
-  // When a non-user team's clock expires in a live draft, auto-draft a pick for them and switch
+  // When a non-user team's clock expires, auto-draft a pick for them and switch
   // them to Autodraft for the rest of the draft so the room doesn't keep stalling on them.
-  // (Mock-draft bot teams don't rely on this — they're already auto-picked the instant it becomes
-  // their turn, well before the clock could expire.) The user's own timer-expiry auto-pick is
+  // The user's own timer-expiry auto-pick is
   // handled by a separate effect further down (after isMyTurn is defined) so the pick doesn't get
   // double-submitted by both effects firing at once.
   React.useEffect(() => {
     if (seconds === 0 && !paused) {
       const r = setTimeout(() => {
-        if (!mockActive && !isMyTurn && !draftComplete) {
+        if (!isMyTurn && !draftComplete) {
           const draftedSet = new Set(allPicks.filter(p => p.playerId).map(p => p.playerId));
           const pickId = pickForTeamAuto(onClockTeamId, currentPickNum, allPicks, draftedSet);
           if (pickId) {
-            commishPick(pickId, onClockTeamId);
+            if (mockActive) commishMockPick(pickId, onClockTeamId);
+            else commishPick(pickId, onClockTeamId);
             if (getTeamMode(onClockTeamId) === 'manual') {
               const team = LEAGUE_TEAMS.find(x => x.id === onClockTeamId) || findTeam(onClockTeamId);
               setTeamModes(prev => ({ ...prev, [onClockTeamId]: 'auto' }));
@@ -1051,6 +1041,14 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     setCommishPickSearch('');
     setCommishPickTeamId(null);
     setCommishLog([{ type: 'reset', message: msg, ts, id: Date.now() }]);
+    // A reset draft (mock or real) starts with a clean Chat & Activity feed —
+    // no carryover from whatever was said/logged before the reset. The real
+    // draft's chat is synced to a shared R2 store (chat_log.json), so it must
+    // be cleared there too — otherwise the next poll just merges the old
+    // messages straight back into local state.
+    setChatMessages([]);
+    try { localStorage.removeItem('fantasai_draft_chat_messages'); } catch {}
+    if (!mockActive) api.draftChat.save([]);
     setResetDraftConfirm(false);
     setResetDraftConfirm2(false);
   }
@@ -1074,32 +1072,6 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   const slot = ((currentPickNum - 1) % 12);
   const onClockTeamId = currentRound % 2 === 1 ? teamsOrder[slot] : teamsOrder[11 - slot];
   const onClockTeam = LEAGUE_TEAMS.find(t => t.id === onClockTeamId);
-
-  // Auto-draft for live mode when a team's mode is 'auto' or 'ai'
-  React.useEffect(() => {
-    if (mockActive || !isLive || paused || livePickNum > TOTAL_PICKS) return;
-    const mode = teamModes[onClockTeamId];
-    if (!mode || mode === 'manual') return;
-    const draftedSet = new Set(livePicks.filter(p => p.playerId).map(p => p.playerId));
-    const t = setTimeout(() => {
-      let pickId = null;
-      if (mode === 'ai') {
-        pickId = pickForTeamAuto(onClockTeamId, livePickNum, livePicks, draftedSet);
-      } else {
-        const queueId = queue.find(id => !draftedSet.has(id));
-        pickId = queueId ?? pickForTeamAuto(onClockTeamId, livePickNum, livePicks, draftedSet);
-      }
-      if (pickId) {
-        const pickNum = livePickNum;
-        setLivePicks(prev => prev.map(p => p.pickNum === pickNum ? { ...p, playerId: pickId, teamId: onClockTeamId, pickedAt: new Date().toISOString() } : p));
-        setLivePickNum(n => n + 1);
-        setSeconds(clockSeconds);
-        setQueue(q => q.filter(id => id !== pickId));
-      }
-    }, 1800);
-    return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mockActive, isLive, paused, livePickNum, teamModes, onClockTeamId]);
 
   const upcoming = [];
   for (let i = 1; i <= 12; i++) {
@@ -1274,7 +1246,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   // non-user team is always AI-controlled anyway (not an "elected" autodraft state).
   function getTeamMode(teamId) {
     if (teamId === myDraftTeamId) return userDraftMode;
-    return mockActive ? 'manual' : (teamModes[teamId] || 'manual');
+    return teamModes[teamId] || 'manual';
   }
   // Unified setter — announces, toasts, and chimes consistently whether the owner set it themselves
   // or the commissioner assigned it on their behalf.
@@ -1336,6 +1308,37 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   const isMyTurn = onClockTeamId === myDraftTeamId;
 
   const draftComplete = currentPickNum > TOTAL_PICKS;
+
+  // Auto-draft when a team is in 'auto' or 'ai' mode (live + mock).
+  // In mock: teams start manual and only switch to auto after timing out.
+  React.useEffect(() => {
+    if (paused || draftComplete || !onClockTeamId || isMyTurn) return;
+    const mode = getTeamMode(onClockTeamId);
+    if (!mode || mode === 'manual') return;
+    const draftedSet = new Set(allPicks.filter(p => p.playerId).map(p => p.playerId));
+    const t = setTimeout(() => {
+      let pickId = null;
+      if (mode === 'ai') {
+        pickId = pickForTeamAuto(onClockTeamId, currentPickNum, allPicks, draftedSet);
+      } else {
+        const queueId = queue.find(id => !draftedSet.has(id));
+        pickId = queueId ?? pickForTeamAuto(onClockTeamId, currentPickNum, allPicks, draftedSet);
+      }
+      if (pickId) {
+        if (mockActive) {
+          commishMockPick(pickId, onClockTeamId);
+        } else {
+          const pickNum = livePickNum;
+          setLivePicks(prev => prev.map(p => p.pickNum === pickNum ? { ...p, playerId: pickId, teamId: onClockTeamId, pickedAt: new Date().toISOString() } : p));
+          setLivePickNum(n => n + 1);
+          setSeconds(clockSeconds);
+          setQueue(q => q.filter(id => id !== pickId));
+        }
+      }
+    }, mockActive ? 1200 : 1800);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mockActive, isLive, paused, livePickNum, teamModes, onClockTeamId, currentPickNum, isMyTurn, draftComplete]);
 
   // Count picks until the user's next turn (0 when it's their turn)
   const picksAway = React.useMemo(() => {
@@ -1475,6 +1478,14 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftComplete]);
 
+  // If live draft opens while someone is in a mock, force-end the mock.
+  React.useEffect(() => {
+    if (!mockActive || !mockDraftLocked) return;
+    exitMockDraft();
+    setDraftLimitToast('Live draft is now open. Mock draft has been ended.');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mockActive, mockDraftLocked]);
+
   // Notify parent when live draft is active (no mock running)
   React.useEffect(() => {
     if (isLive && !mockActive && !draftComplete) {
@@ -1602,10 +1613,17 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     <div
       ref={draftGridRef}
       className="draft-grid"
-      style={isMobile ? undefined : {
-        gridTemplateColumns: `minmax(560px, 1fr) ${layoutSizes.rightCol}px`,
-        gridTemplateRows: `84px minmax(240px, 1fr)`,
-      }}
+      style={isMobileView
+        ? {
+            gridTemplateColumns: '1fr',
+            gridTemplateRows: '84px auto minmax(0, 1fr)',
+            gridTemplateAreas: '"clock" "tabs" "content"',
+            minHeight: 0,
+          }
+        : {
+            gridTemplateColumns: `minmax(560px, 1fr) ${layoutSizes.rightCol}px`,
+            gridTemplateRows: `84px minmax(240px, 1fr)`,
+          }}
     >
       {draftLimitToast && (
         <div style={{ position: 'fixed', top: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: '#ff4f4f', color: '#fff', padding: '10px 24px', borderRadius: 8, fontWeight: 700, fontSize: 14, boxShadow: '0 4px 20px rgba(0,0,0,.5)' }}>
@@ -1755,7 +1773,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                 {syncActive ? 'Syncing...' : 'Resync Now'}
               </button>
             )}
-            {!mockActive && (
+            {!mockActive && !mockDraftLocked && (
               <button
                 className="btn sm"
                 style={{ background: '#ffb547', color: '#000', borderColor: '#ffb547', fontWeight: 800 }}
@@ -1786,35 +1804,45 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
       </div>
 
       {/* Mobile tab bar — only visible on small screens */}
-      {isMobile && (
-        <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)', gridColumn: '1 / -1', overflowX: 'auto', whiteSpace: 'nowrap' }}>
-          {[
-            { id: 'board', label: 'Board', icon: '📋' },
-            { id: 'roster', label: 'My Roster', icon: '🏈' },
-            { id: 'grid', label: 'All Teams', icon: '▦' },
-            { id: 'queue', label: 'My Queue', icon: '🎯' },
-            { id: 'chatactivity', label: 'Chat & Activity', icon: '💬' },
-            { id: 'ghosts', label: 'Ghost Picks', icon: '👻' },
-            ...(isCommissioner ? [{ id: 'commish', label: 'Commish', icon: '👑' }] : []),
-          ].map(t => (
-            <button key={t.id} onClick={() => {
-              setMobileDraftTab(t.id);
-              if (t.id !== 'board') setRosterPanelView(t.id);
-            }} style={{
-              flex: '0 0 auto', minWidth: 88, padding: '10px 8px', fontSize: 11, fontWeight: mobileDraftTab === t.id ? 700 : 500,
-              border: 'none', borderBottom: mobileDraftTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
-              background: 'transparent', color: mobileDraftTab === t.id ? 'var(--accent)' : 'var(--text-dim)',
-              cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-            }}>
-              <span style={{ fontSize: 14 }}>{t.icon}</span>
-              <span>{t.label}</span>
-            </button>
-          ))}
+      {isMobileView && (
+        <div style={{ gridArea: 'tabs', flexShrink: 0, background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 10 }}>
+          <div style={{ display: 'flex', overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {[
+              { id: 'board', label: 'Board', icon: '📋' },
+              { id: 'roster', label: 'Roster', icon: '🏈' },
+              { id: 'grid', label: 'Teams', icon: '▦' },
+              { id: 'queue', label: 'Queue', icon: '🎯' },
+              { id: 'chatactivity', label: 'Chat', icon: '💬' },
+              { id: 'ghosts', label: 'Ghost', icon: '👻' },
+              ...(isCommissioner ? [{ id: 'commish', label: 'Commish', icon: '👑' }] : []),
+            ].map(t => (
+              <button key={t.id} onClick={() => {
+                setMobileDraftTab(t.id);
+                if (t.id !== 'board') setRosterPanelView(t.id);
+              }} style={{
+                flex: '0 0 auto',
+                padding: '10px 16px 8px',
+                fontSize: 12, fontWeight: mobileDraftTab === t.id ? 700 : 500,
+                border: 'none',
+                borderBottom: `2px solid ${mobileDraftTab === t.id ? 'var(--accent)' : 'transparent'}`,
+                background: 'transparent',
+                color: mobileDraftTab === t.id ? 'var(--accent)' : 'var(--text-dim)',
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+              }}>
+                <span style={{ fontSize: 16 }}>{t.icon}</span>
+                <span>{t.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
       {/* BIG BOARD */}
-      <div className="draft-board" style={isMobile && mobileDraftTab !== 'board' ? { display: 'none' } : {}}>
+      {(!isMobileView || mobileDraftTab === 'board') && (
+      <div className="draft-board" style={isMobileView
+        ? { gridArea: 'content', minHeight: 0, borderRight: 'none', width: '100%', maxWidth: '100%' }
+        : {}}>
         <div className="toolbar" style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', borderTop: 0 }}>
           <div className="card-title" style={{ flex: 1 }}>
             Big Board · {bestAvail.length} available
@@ -2213,8 +2241,9 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
           </table>
         </div>
       </div>
+      )}
 
-      {!isMobile && (
+      {!isMobileView && (
         <div
           className="draft-resize-handle col"
           onMouseDown={e => startResize('col', e)}
@@ -2223,9 +2252,22 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
       )}
 
       {/* RIGHT: Roster / All Teams / Chat panel */}
-      <div className="draft-roster" style={isMobile && mobileDraftTab === 'board' ? { display: 'none' } : { display: 'flex', flexDirection: 'column' }}>
+      {(!isMobileView || mobileDraftTab !== 'board') && (
+      <div className="draft-roster" style={isMobileView
+        ? {
+            display: 'flex',
+            flexDirection: 'column',
+            gridArea: 'content',
+            minHeight: 0,
+            minWidth: 0,
+            width: '100%',
+            maxWidth: '100%',
+            overflowX: 'auto',
+            overflowY: 'auto',
+          }
+        : { display: 'flex', flexDirection: 'column' }}>
         {/* Tab strip */}
-        <div style={isMobile ? { display: 'none' } : { display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={isMobileView ? { display: 'none' } : { display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           {[
             { id: 'roster', label: '🏈 My Roster' },
             { id: 'grid',   label: '▦ All Teams' },
@@ -2248,7 +2290,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
         </div>
 
         {/* MY ROSTER view */}
-        {rosterPanelView === 'roster' && (() => {
+        {activePanelView === 'roster' && (() => {
           const POS_ORDER = ['QB', 'RB', 'WR', 'TE', 'K', 'DST'].filter(pos => posLimits[pos] !== 0);
           const grouped = POS_ORDER.map(pos => ({
             pos,
@@ -2282,7 +2324,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
         })()}
 
         {/* ALL TEAMS grid view */}
-        {rosterPanelView === 'grid' && (
+        {activePanelView === 'grid' && (
           <div style={{ flex: 1, overflow: 'auto', padding: '6px 8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
               <div style={{ fontSize: 9, color: 'var(--text-faint)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
@@ -2441,7 +2483,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
         )}
 
         {/* QUEUE view */}
-        {rosterPanelView === 'queue' && (
+        {activePanelView === 'queue' && (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
               <div className="card-title" style={{ flex: 1 }}>My Queue · {queue.length}</div>
@@ -2490,7 +2532,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
         )}
 
         {/* GHOST PICKS view */}
-        {rosterPanelView === 'ghosts' && (
+        {activePanelView === 'ghosts' && (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
             <div className="ghost-label" style={{ padding: '8px 12px 4px' }}>
               <div className="ai-orb" style={{ width: 14, height: 14 }}></div>
@@ -2528,7 +2570,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
         )}
 
         {/* COMMISH CONCIERGE view */}
-        {rosterPanelView === 'commish' && isCommissioner && (
+        {activePanelView === 'commish' && isCommissioner && (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'auto', padding: '10px 12px', gap: 10, background: 'linear-gradient(180deg, rgba(255,180,0,.06) 0%, rgba(255,180,0,.02) 100%)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 16 }}>👑</span>
@@ -2606,7 +2648,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
         )}
 
         {/* CHAT & ACTIVITY view */}
-        {rosterPanelView === 'chatactivity' && (
+        {activePanelView === 'chatactivity' && (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
             <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
               <div style={{ padding: '6px 12px 8px', borderBottom: '1px solid var(--border)', marginBottom: 8 }}>
@@ -2777,6 +2819,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
           </div>
         )}
       </div>
+      )}
 
       {showRecap && <DraftRecap round={currentRound - 1} picks={allPicks} teamCount={DRAFT_TEAM_COUNT} onClose={() => setShowRecap(false)} />}
 

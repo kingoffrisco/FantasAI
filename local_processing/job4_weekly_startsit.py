@@ -140,10 +140,22 @@ def r2_put(key: str, payload) -> bool:
 # ── Sleeper helpers ───────────────────────────────────────────────────────────
 
 def get_current_nfl_week() -> int:
+    """
+    Fantasy-relevant week — NOT the same as "whatever week is live right now".
+    Sleeper's state.week tracks preseason weeks too (e.g. returns 2 during
+    preseason week 2), and start/sit advice for preseason games is meaningless
+    for a real fantasy lineup. Until Sleeper reports season_type == 'regular',
+    always target regular-season Week 1 — matches the date-based Week 1 cutover
+    already used by the frontend (Dashboard.jsx NFL_SCHEDULE, CurrentRoster.jsx
+    H2H_SEASON_START = 2026-09-09). Once the regular season starts, this
+    naturally advances week-by-week via Sleeper's own counter.
+    """
     try:
         resp = requests.get("https://api.sleeper.app/v1/state/nfl", timeout=10, verify=VERIFY_SSL)
         if resp.ok:
             data = resp.json()
+            if data.get("season_type") != "regular":
+                return 1
             return int(data.get("display_week") or data.get("week") or 1)
     except Exception as e:
         print(f"[Sleeper] Week detection failed: {e}")
@@ -376,7 +388,27 @@ def load_player_list() -> list:
 
 
 def load_rostered_names(top_n: int = 200) -> set:
-    """Top N players by ECR/ADP as the analysis pool."""
+    """Top N players by real 2025 production, falling back to ECR/ADP, as
+    the analysis pool.
+
+    Bug fixed 2026-08-22 (two layers deep):
+    1. export_players_2026_draft.json's actual ADP field is `adp_rank` — this
+       was checking `adp`/`adp_ppr`/`adp_rank_ppr` (none of which exist in
+       the current schema), so ADP was never being read at all.
+    2. Even after fixing #1, ADP coverage in this export is nearly empty —
+       only 32/1057 players have any adp_rank, and ZERO of the 131 QBs do.
+       With #1 alone, every QB (Joe Burrow included) still tied at rank=9999
+       and the "top N" sort degraded to ~alphabetical-by-name — confirmed
+       live: Burrow (elite starter) and Makai Lemon (rookie WR) were both
+       excluded from the 199-player pool this way, alphabetical order the
+       only differentiator between them.
+    Fix: rank primarily by season_avg_points_2025 (populated for 613/1057
+    players — real production is the strongest signal there is, and it's
+    what's actually available), falling back to ADP/ECR only for players
+    with no 2025 games (rookies, injured all season). This is the same
+    "prefer real data over an estimate" priority the app already documents
+    elsewhere (see the Current Roster legend's proj-column priority chain).
+    """
     raw = load_player_list()
     ranked = []
     for p in raw:
@@ -384,10 +416,15 @@ def load_rostered_names(top_n: int = 200) -> set:
         pos = (p.get("position") or p.get("pos") or "").upper()
         if not name or pos not in SKILL_POS:
             continue
+        avg_pts = p.get("season_avg_points_2025")
         ecr = float(p.get("positionRank") or p.get("position_rank")
                      or p.get("ecr") or 9999)
-        adp = float(p.get("adp") or p.get("adp_ppr") or p.get("adp_rank_ppr") or 9999)
-        rank = min(ecr, adp)
+        adp = float(p.get("adp") or p.get("adp_ppr") or p.get("adp_rank_ppr")
+                     or p.get("adp_rank") or 9999)
+        if avg_pts is not None and avg_pts > 0:
+            rank = (0, -float(avg_pts))       # tier 0: real production, best points first
+        else:
+            rank = (1, min(ecr, adp))         # tier 1: no 2025 data, fall back to ADP/ECR
         ranked.append((rank, name.lower()))
     ranked.sort()
     names = set(n for _, n in ranked[:top_n])
@@ -1219,7 +1256,7 @@ def main():
         dc_mult, dc_label = depth_chart_multiplier(pos, depth_order, starter_status_dc)
         start_score = round(start_score * dc_mult, 1)
 
-        inj_tag = f" | ⚠ {status}" if (is_questionable or is_doubtful or is_out) else ""
+        inj_tag = f" | [!] {status}" if (is_questionable or is_doubtful or is_out) else ""
         print(f"  Score: {start_score}/100 | {dc_label} | Matchup: {mi} | Proj: {proj:.1f} ({proj_source}){inj_tag}")
 
         # Auto-assign clear-cut cases — no model call needed.

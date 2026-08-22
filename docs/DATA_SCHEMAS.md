@@ -1,7 +1,101 @@
 # FantasAI Data Schemas
 
-**Last Updated:** June 7, 2026  
-**Schema Version:** 1.0.0
+**Last Updated:** August 22, 2026
+**Schema Version:** 2.0.0
+
+> **August 22, 2026 update:** Added schemas for the endpoints/exports that shipped since June (Job 2 player scores, Job 5 deep reasoning, live scoreboard/player-stats, O-Line Index/Stability, Offensive Ecosystem, rookie scores). The `source: "databricks"` field described below in the original schemas is now misleading for most endpoints — see [API_ENDPOINTS.md](API_ENDPOINTS.md) for which endpoints are still Databricks-backed (a shrinking minority) vs. R2/local-pipeline-backed (everything else). Base URL for all R2-backed schemas below is `https://api.fantasai.net/api/v1/r2/{key}`, not `r2.yourdomain.com` as the original version of this doc stated.
+
+---
+
+## New Since June 2026
+
+### Player Scores Schema (Job 2)
+
+**Endpoint:** `fantasai/analysis/player_scores.json`
+
+| Field | Type | Description |
+|---|---|---|
+| `player_name` | string | Player's full name |
+| `position` | string | Player position |
+| `team` | string | Team abbreviation |
+| `week` | number | NFL week scored for |
+| `waiver_score` | number | 0-10 |
+| `trade_buy_score` | number | 0-10 |
+| `trade_sell_score` | number | 0-10 |
+| `start_score` | number | 0-10 |
+| `sit_score` | number | 0-10 |
+| `injury_risk` | number | 0-10 |
+| `dynasty_score` | number | 0-10 |
+| `matchup_score` | number | 0-10 |
+| `rookie_score` | number | 0-10 |
+
+Four derived files are written alongside the master file, each a filtered/re-sorted view: `fantasai/analysis/waiver_wire_recommendations.json`, `trade_values.json`, `lineup_recommendations.json`, `drop_candidates.json`.
+
+### Deep Reasoning Schema (Job 5, new)
+
+**Endpoint:** `fantasai/analysis/deep_reasoning.json`
+**Schema file:** `app/schemas/deep_reasoning_schema.json`
+
+Generated weekly (Wed 1:30 AM) by Qwen3 30B for the top ~20 highest-signal candidates only (ranked by Job 2 scores + breakout opportunity score) — this is NOT a full-roster export.
+
+| Field | Type | Description |
+|---|---|---|
+| `player_name` | string | Player's full name |
+| `position` | string | Player position |
+| `team` | string | Team abbreviation |
+| `breakout_score` | number | 0-100 |
+| `confidence` | number | 0-100 |
+| `primary_reason` | string | LLM-generated rationale |
+| `risk_flag` | string | Key risk factor |
+| `recommendation` | string | `"BUY"`, `"HOLD"`, or `"AVOID"` |
+| `_consistency_warning` | string \| null | Flags internal contradictions, e.g. a BUY recommendation paired with a low breakout_score |
+| `_elapsed_sec` | number | Generation time for this player (typically 1-3s) |
+
+Sample data available in `local_processing/job5_deep_reasoner_dry_run.json`.
+
+### Live Scoreboard Schema (new — replaces direct ESPN calls)
+
+**Endpoint:** `fantasai/live/scoreboard_{season}_{type}_{week}.json`
+
+Written by `local_processing/job_live_scores.py` (hourly auto-poll, tightens cadence during live windows). Read via `GET /api/v1/nfl/scoreboard?week=&season=&type=`. Shape is a normalized port of ESPN's scoreboard response — game status, home/away teams, scores, clock/period. See `local_processing/job_live_scores_dry_run.json` for a real sample (2026 preseason, e.g. CIN 16-14 DET).
+
+### Live Player Stats Schema (new)
+
+**Endpoint:** `fantasai/live/player_stats_{season}_{type}_{week}.json`
+
+Written by the same job. Per-player live box-score stats used for real-time fantasy scoring in the Head-to-Head screen. Sample fields per player: `rec`, `recYds`, `rushAtt`, `rushYds`, `pts`, etc. — the exact fantasy-point calculation (`calcFantasyPts`) is duplicated in three places that must stay in sync: `job_live_scores.py`, `worker-api/src/index.js`'s `handleNflPlayerStats`, and `app/src/lib/liveScoring.js`.
+
+**Note:** both live keys are per-(season, type, week) and permanent — historical weeks remain queryable, never overwritten. A discovery index is also written at `fantasai/live/index.json`.
+
+### O-Line Index Schema (new)
+
+**Endpoints:** `fantasai/analysis/oline_index.json` (team-level), `fantasai/analysis/player_team_history.json`
+
+Proprietary pass/run block quality score computed from nflverse play-by-play data (no PFF dependency), percentile-ranked per team/season. `player_team_history.json` tracks which team a player played for each season, for trade-aware context.
+
+### O-Line Stability Schema (new)
+
+**Endpoints:** `fantasai/analysis/oline_stability.json` (team-level OLSI), `fantasai/analysis/player_oline_stability.json` (per-lineman)
+
+O-Line Stability Index — a continuity/chemistry/health/experience/penalties composite. Depends on real per-week O-line lineup history (`depth_chart_history`, 2021-2025) and the O-Line Index above.
+
+### Offensive Ecosystem Schema (new)
+
+**Endpoints:** `fantasai/analysis/player_weapon_scores.json` (WR/TE/RB), `fantasai/analysis/team_support_scores.json` (QB)
+
+Percentile-composite "Player Weapon Score" for pass-catchers and a QB "Support Score" / ESCV (Environment-Supported Composite Value) combining O-Line quality, weapon quality, pace, and red-zone opportunity.
+
+### Rookie Scores Schema (new)
+
+**Endpoint:** `fantasai/analysis/rookie_scores.json`
+
+0-100 rookie score per position, weighting draft capital + athleticism (combine) + landing-spot opportunity, with fantasy point projections via historical cohort curves. Computed internally (`ingest_rookie_scores.py`), no new external fetch — reads combine, draft, and depth-chart data already in DuckDB. Complements college production data from `ingest_cfbd.py` (College Football Data API).
+
+### Weekly Start/Sit Schema (Job 4, new)
+
+**Endpoint:** `fantasai/analysis/weekly_startsit.json`
+
+Hybrid deterministic-score + LLM-narrative recommendation. Weighting: 30% projection vs. baseline, 20% matchup, 20% opportunity, 15% team environment, 10% recent trend, 5% weather/injury.
 
 ---
 
@@ -35,7 +129,7 @@
 |-------|------|-------------|
 | `total_articles` | number | Total number of articles in response |
 | `exported_at` | string (ISO 8601) | When export was generated |
-| `source` | string | Always `"databricks"` |
+| `source` | string | Historically always `"databricks"`; this endpoint (`fantasai/analysis/player_news.json`) is now written by the local pipeline (`export_to_r2.py`), so the field name is stale — don't rely on its value to mean "queried live from Databricks" |
 | `description` | string | Endpoint description |
 
 ---
@@ -335,6 +429,12 @@ YYYY-MM-DDTHH:MM:SSZ
 
 ---
 
-**Generated:** 2026-06-07  
-**Schema Version:** 1.0.0  
+**Generated:** 2026-06-07 (original schemas below this point), updated 2026-08-22 (see "New Since June 2026" section above)
+**Schema Version:** 2.0.0
 **Maintained by:** FantasAI Data Team
+
+---
+
+## Known-Stale / Unconfirmed Schemas
+
+The following schemas from the original June 7 version were **not re-verified** in the August 22 audit — the underlying endpoints (`predictions/defense_predictions.json`, `analysis/sleeper_picks.json`'s `ownership_pct` field) were not confirmed present in the current `export_to_r2.py` output or worker-api routes. Treat them as historical reference, not a guarantee, until spot-checked against a live R2 fetch.

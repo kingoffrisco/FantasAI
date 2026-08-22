@@ -9,6 +9,14 @@ const STORAGE_KEY = 'fantasai_league_settings';
 const MEDIA_KEY   = 'fantasai_commish_media';
 const API_BASE    = 'https://api.fantasai.net';
 
+function formatFieldGoalRuleValue({ kFg50 = 5, kFgUnder50 = 3, kFgMiss = -1 } = {}) {
+  return [
+    `FG Made (50+ yds): ${kFg50} points`,
+    `FG Made (< 50 yds): ${kFgUnder50} points`,
+    `FG Missed: ${kFgMiss} points`,
+  ].join('\n');
+}
+
 const DEFAULTS = {
   // General
   fantasaiKey:  '',
@@ -62,7 +70,7 @@ const DEFAULTS = {
 
   // Scoring — offensive
   offensiveScoring: [
-    { code: 'FG',     name: 'Field Goals',                                                   value: '3 points' },
+    { code: 'FG',     name: 'Field Goals',                                                   value: formatFieldGoalRuleValue({ kFg50: 5, kFgUnder50: 3, kFgMiss: -1 }) },
     { code: 'FL',     name: 'Fumble Lost, Including ST plays',                               value: '-1 point' },
     { code: 'Fum2PK', name: 'Fumble Recovery Two-point Conversion, Kicking formation',      value: '2 points' },
     { code: 'Fum2PT', name: 'Fumble Recovery Two-point Conversion, Two-point formation',    value: '2 points' },
@@ -98,6 +106,22 @@ const DEFAULTS = {
   // Scoring format — drives ADP rankings and projection scoring
   // 'ppr' | 'half-ppr' | 'standard'
   scoringFormat: 'half-ppr',
+
+  // Scoring values used by live matchup scoring widgets.
+  scoring: {
+    passYd: 0.04,
+    passTD: 4,
+    passInt: -2,
+    rushYd: 0.1,
+    rushTD: 6,
+    recYd: 0.1,
+    recTD: 6,
+    rec: 0.5,
+    fumbleLost: -2,
+    kFg50: 5,
+    kFgUnder50: 3,
+    kFgMiss: -1,
+  },
 
   // Scoring policies
   scoringPolicies: {
@@ -180,10 +204,21 @@ function load() {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
     if (saved) {
       const merged = { ...DEFAULTS, ...saved };
+      merged.scoring = {
+        ...DEFAULTS.scoring,
+        ...(saved.scoring || {}),
+      };
       if (saved.positions) {
         const savedKeys = new Set(saved.positions.map(p => p.key));
         const missing = DEFAULTS.positions.filter(p => !savedKeys.has(p.key));
         if (missing.length) merged.positions = [...saved.positions, ...missing];
+      }
+      if (Array.isArray(merged.offensiveScoring)) {
+        merged.offensiveScoring = merged.offensiveScoring.map(rule =>
+          rule.code === 'FG'
+            ? { ...rule, value: formatFieldGoalRuleValue(merged.scoring) }
+            : rule
+        );
       }
       return merged;
     }
@@ -267,6 +302,11 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
   const [editingRule, setEditingRule] = React.useState(null);
   const [editingScore, setEditingScore] = React.useState(null);
   const [editingRoster, setEditingRoster] = React.useState(null);
+  const [fgScoringDraft, setFgScoringDraft] = React.useState(() => ({
+    kFg50: 5,
+    kFgUnder50: 3,
+    kFgMiss: -1,
+  }));
   const [saved, setSaved]     = React.useState(false);
   const [weekData, setWeekData] = React.useState({ week: 1, season: new Date().getFullYear(), type: 'regular' });
   const [editingWeek, setEditingWeek] = React.useState(false);
@@ -277,6 +317,14 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
   });
   const [commishUrlDraft, setCommishUrlDraft] = React.useState('');
   const mediaInputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    setFgScoringDraft({
+      kFg50: data.scoring?.kFg50 ?? 5,
+      kFgUnder50: data.scoring?.kFgUnder50 ?? 3,
+      kFgMiss: data.scoring?.kFgMiss ?? -1,
+    });
+  }, [data.scoring?.kFg50, data.scoring?.kFgUnder50, data.scoring?.kFgMiss]);
 
   // League Fees state
   const [editingFees, setEditingFees]     = React.useState(false);
@@ -750,6 +798,28 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     flash();
   }
 
+  function saveFieldGoalScoring() {
+    const kFg50 = Number(fgScoringDraft.kFg50);
+    const kFgUnder50 = Number(fgScoringDraft.kFgUnder50);
+    const kFgMiss = Number(fgScoringDraft.kFgMiss);
+    const nextScoring = {
+      ...(data.scoring || {}),
+      kFg50: Number.isFinite(kFg50) ? kFg50 : 5,
+      kFgUnder50: Number.isFinite(kFgUnder50) ? kFgUnder50 : 3,
+      kFgMiss: Number.isFinite(kFgMiss) ? kFgMiss : -1,
+    };
+    const nextOffense = (data.offensiveScoring || []).map(rule =>
+      rule.code === 'FG'
+        ? { ...rule, value: formatFieldGoalRuleValue(nextScoring) }
+        : rule
+    );
+    const next = { ...data, scoring: nextScoring, offensiveScoring: nextOffense };
+    persist(next);
+    setData(next);
+    flash();
+    logChange('scoring', `Updated FG scoring: 50+ = ${nextScoring.kFg50}, under 50 = ${nextScoring.kFgUnder50}, missed = ${nextScoring.kFgMiss}`);
+  }
+
   function getBracketRoundLabel(round, totalRounds) {
     if (round === totalRounds) return 'Championship';
     if (round === totalRounds - 1) return 'Semifinals';
@@ -923,6 +993,119 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
             </div>
           </Card>
 
+          <Card title="Draft Settings">
+            {editingDraft ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>Draft Format</label>
+                    <select
+                      className="input"
+                      style={{ fontSize: 13, minWidth: 180 }}
+                      value={draftSettingsDraft.format}
+                      onChange={e => setDraftSettingsDraft(d => ({ ...d, format: e.target.value }))}
+                    >
+                      {['Snake', 'Auction', '3rd Round Reversal', 'Linear', 'Salary Cap'].map(f => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>Draft Date &amp; Time</label>
+                    <input
+                      type="datetime-local"
+                      className="input"
+                      style={{ fontSize: 13 }}
+                      value={draftSettingsDraft.date}
+                      onChange={e => setDraftSettingsDraft(d => ({ ...d, date: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                {/* Draft Order */}
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <label style={{ fontSize: 12, color: 'var(--accent-2)', fontWeight: 800 }}>Draft Order</label>
+                    <button type="button" className="btn ghost sm" onClick={() => {
+                      const cur = draftSettingsDraft.order?.length === LEAGUE_TEAMS.length ? [...draftSettingsDraft.order] : LEAGUE_TEAMS.map(t => t.id);
+                      for (let i = cur.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cur[i], cur[j]] = [cur[j], cur[i]]; }
+                      setDraftSettingsDraft(d => ({ ...d, order: cur }));
+                    }}>⚄ Randomize</button>
+                    <button type="button" className="btn ghost sm" onClick={() => setDraftSettingsDraft(d => ({ ...d, order: LEAGUE_TEAMS.map(t => t.id) }))}>⟲ Reset</button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5 }}>
+                    {(draftSettingsDraft.order?.length === LEAGUE_TEAMS.length ? draftSettingsDraft.order : LEAGUE_TEAMS.map(t => t.id)).map((teamId, idx) => {
+                      const team = LEAGUE_TEAMS.find(t => t.id === teamId);
+                      return (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px', borderRadius: 6, background: 'rgba(255,255,255,.03)', border: '1px solid var(--border)' }}>
+                          <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', width: 14, flexShrink: 0 }}>{idx + 1}</span>
+                          <select
+                            value={teamId}
+                            onChange={e => {
+                              const newId = parseInt(e.target.value);
+                              const next = draftSettingsDraft.order?.length === LEAGUE_TEAMS.length ? [...draftSettingsDraft.order] : LEAGUE_TEAMS.map(t => t.id);
+                              const fromIdx = next.indexOf(newId);
+                              [next[fromIdx], next[idx]] = [next[idx], next[fromIdx]];
+                              setDraftSettingsDraft(d => ({ ...d, order: next }));
+                            }}
+                            style={{ flex: 1, fontSize: 10, background: 'transparent', border: 'none', color: 'var(--text)', padding: 0, cursor: 'pointer', minWidth: 0, outline: 'none' }}
+                          >
+                            {LEAGUE_TEAMS.map(t => <option key={t.id} value={t.id}>{t.logo} {t.name}</option>)}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn primary sm" onClick={() => {
+                    const next = { ...data, draft: { ...data.draft, ...draftSettingsDraft } };
+                    persist(next); setData(next); setEditingDraft(false); flash();
+                    logChange('draft', `Draft settings updated — format: ${draftSettingsDraft.format}${draftSettingsDraft.date ? `, date: ${new Date(draftSettingsDraft.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` : ''}`);
+                  }}>Save Draft Settings</button>
+                  <button className="btn ghost sm" onClick={() => setEditingDraft(false)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 24 }}>
+                    <span style={{ fontSize: 13 }}>
+                      <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Format</span>
+                      <strong>{data.draft?.format || 'Not set'}</strong>
+                    </span>
+                    <span style={{ fontSize: 13 }}>
+                      <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Date</span>
+                      <strong>{data.draft?.date ? new Date(data.draft.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not scheduled'}</strong>
+                    </span>
+                  </div>
+                  {data.draft?.order?.length === LEAGUE_TEAMS.length && (
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--accent-2)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 6 }}>Draft Order</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {data.draft.order.map((teamId, idx) => {
+                          const team = LEAGUE_TEAMS.find(t => t.id === teamId);
+                          return (
+                            <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                              <span style={{ fontSize: 15 }}>{team?.logo}</span>
+                              <span style={{ fontSize: 8, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{idx + 1}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {canEdit && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
+                    <button className="btn ghost sm" onClick={() => { setDraftSettingsDraft({ format: data.draft?.format || 'Snake', date: data.draft?.date || '', order: data.draft?.order?.length === LEAGUE_TEAMS.length ? [...data.draft.order] : LEAGUE_TEAMS.map(t => t.id) }); setEditingDraft(true); }}>Edit</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+
           {canEdit && (
             <Card title="CBS Sports FantasAI Key">
               <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1045,119 +1228,6 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
               </div>
             </Card>
           )}
-
-          <Card title="Draft Settings">
-            {editingDraft ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>Draft Format</label>
-                    <select
-                      className="input"
-                      style={{ fontSize: 13, minWidth: 180 }}
-                      value={draftSettingsDraft.format}
-                      onChange={e => setDraftSettingsDraft(d => ({ ...d, format: e.target.value }))}
-                    >
-                      {['Snake', 'Auction', '3rd Round Reversal', 'Linear', 'Salary Cap'].map(f => (
-                        <option key={f} value={f}>{f}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>Draft Date &amp; Time</label>
-                    <input
-                      type="datetime-local"
-                      className="input"
-                      style={{ fontSize: 13 }}
-                      value={draftSettingsDraft.date}
-                      onChange={e => setDraftSettingsDraft(d => ({ ...d, date: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                {/* Draft Order */}
-                <div style={{ marginTop: 4 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                    <label style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 600 }}>Draft Order</label>
-                    <button type="button" className="btn ghost sm" onClick={() => {
-                      const cur = draftSettingsDraft.order?.length === LEAGUE_TEAMS.length ? [...draftSettingsDraft.order] : LEAGUE_TEAMS.map(t => t.id);
-                      for (let i = cur.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cur[i], cur[j]] = [cur[j], cur[i]]; }
-                      setDraftSettingsDraft(d => ({ ...d, order: cur }));
-                    }}>⚄ Randomize</button>
-                    <button type="button" className="btn ghost sm" onClick={() => setDraftSettingsDraft(d => ({ ...d, order: LEAGUE_TEAMS.map(t => t.id) }))}>⟲ Reset</button>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 5 }}>
-                    {(draftSettingsDraft.order?.length === LEAGUE_TEAMS.length ? draftSettingsDraft.order : LEAGUE_TEAMS.map(t => t.id)).map((teamId, idx) => {
-                      const team = LEAGUE_TEAMS.find(t => t.id === teamId);
-                      return (
-                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px', borderRadius: 6, background: 'rgba(255,255,255,.03)', border: '1px solid var(--border)' }}>
-                          <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', width: 14, flexShrink: 0 }}>{idx + 1}</span>
-                          <select
-                            value={teamId}
-                            onChange={e => {
-                              const newId = parseInt(e.target.value);
-                              const next = draftSettingsDraft.order?.length === LEAGUE_TEAMS.length ? [...draftSettingsDraft.order] : LEAGUE_TEAMS.map(t => t.id);
-                              const fromIdx = next.indexOf(newId);
-                              [next[fromIdx], next[idx]] = [next[idx], next[fromIdx]];
-                              setDraftSettingsDraft(d => ({ ...d, order: next }));
-                            }}
-                            style={{ flex: 1, fontSize: 10, background: 'transparent', border: 'none', color: 'var(--text)', padding: 0, cursor: 'pointer', minWidth: 0, outline: 'none' }}
-                          >
-                            {LEAGUE_TEAMS.map(t => <option key={t.id} value={t.id}>{t.logo} {t.name}</option>)}
-                          </select>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn primary sm" onClick={() => {
-                    const next = { ...data, draft: { ...data.draft, ...draftSettingsDraft } };
-                    persist(next); setData(next); setEditingDraft(false); flash();
-                    logChange('draft', `Draft settings updated — format: ${draftSettingsDraft.format}${draftSettingsDraft.date ? `, date: ${new Date(draftSettingsDraft.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` : ''}`);
-                  }}>Save Draft Settings</button>
-                  <button className="btn ghost sm" onClick={() => setEditingDraft(false)}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ display: 'flex', gap: 24 }}>
-                    <span style={{ fontSize: 13 }}>
-                      <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Format</span>
-                      <strong>{data.draft?.format || 'Not set'}</strong>
-                    </span>
-                    <span style={{ fontSize: 13 }}>
-                      <span style={{ color: 'var(--text-dim)', marginRight: 6 }}>Date</span>
-                      <strong>{data.draft?.date ? new Date(data.draft.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Not scheduled'}</strong>
-                    </span>
-                  </div>
-                  {data.draft?.order?.length === LEAGUE_TEAMS.length && (
-                    <div>
-                      <div style={{ fontSize: 10, color: 'var(--text-faint)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 6 }}>Draft Order</div>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {data.draft.order.map((teamId, idx) => {
-                          const team = LEAGUE_TEAMS.find(t => t.id === teamId);
-                          return (
-                            <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                              <span style={{ fontSize: 15 }}>{team?.logo}</span>
-                              <span style={{ fontSize: 8, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{idx + 1}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {canEdit && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
-                    <button className="btn ghost sm" onClick={() => { setDraftSettingsDraft({ format: data.draft?.format || 'Snake', date: data.draft?.date || '', order: data.draft?.order?.length === LEAGUE_TEAMS.length ? [...data.draft.order] : LEAGUE_TEAMS.map(t => t.id) }); setEditingDraft(true); }}>Edit</button>
-                  </div>
-                )}
-              </div>
-            )}
-          </Card>
 
           {/* ── League Fees ── */}
           <Card title="League Fees">
@@ -1649,6 +1719,56 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
             <Row label="Scoring System"     value={data.scoringPolicies.system} />
             <Row label="Scoring per Period" value={data.scoringPolicies.perPeriod} />
             <Row label="Matchup Tiebreaker" value={data.scoringPolicies.matchupTiebreaker} />
+          </Card>
+
+          <Card title="Field Goal Scoring">
+            <div style={{ padding: '12px 16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>FG Made (50+ yards)</span>
+                  <input
+                    className="input"
+                    type="number"
+                    step="1"
+                    value={fgScoringDraft.kFg50}
+                    disabled={!canEdit}
+                    onChange={e => setFgScoringDraft(prev => ({ ...prev, kFg50: e.target.value }))}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>FG Made (&lt; 50 yards)</span>
+                  <input
+                    className="input"
+                    type="number"
+                    step="1"
+                    value={fgScoringDraft.kFgUnder50}
+                    disabled={!canEdit}
+                    onChange={e => setFgScoringDraft(prev => ({ ...prev, kFgUnder50: e.target.value }))}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>FG Missed</span>
+                  <input
+                    className="input"
+                    type="number"
+                    step="1"
+                    value={fgScoringDraft.kFgMiss}
+                    disabled={!canEdit}
+                    onChange={e => setFgScoringDraft(prev => ({ ...prev, kFgMiss: e.target.value }))}
+                  />
+                </label>
+              </div>
+              {canEdit ? (
+                <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
+                  <button className="btn primary sm" onClick={saveFieldGoalScoring}>Save FG Scoring</button>
+                </div>
+              ) : (
+                <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 10 }}>
+                  Only Commissioners and Admins can change field-goal scoring.
+                </div>
+              )}
+            </div>
           </Card>
 
           <ScoringSection

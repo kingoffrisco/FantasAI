@@ -1,657 +1,171 @@
 # FantasAI Backend-to-Frontend Integration Guide
 
-**Last Updated:** June 5, 2026  
-**Version:** 1.0  
-**Target:** Frontend developers integrating with FantasAI Databricks backend
+**Last Updated:** August 22, 2026
+**Target:** Frontend developers working on the FantasAI React app
+
+> This replaces the June 5, 2026 version, which described a Databricks-only backend and a much smaller app. Rewritten from a full read of `app/src/api.js`, `App.jsx`, `app/src/components/layout.jsx`, `app/src/lib/liveScoring.js`, and the full `app/src/screens/` directory (26 files).
 
 ---
 
 ## 🎯 Overview
 
-This document describes all data available from the FantasAI backend, how to access it, and how to integrate it into your frontend application.
+**Backends:**
+- **`https://api.fantasai.net`** — primary Cloudflare Worker. Almost everything goes here.
+- **`https://fantasai-cbs.fantasai.workers.dev`** (overridable via `VITE_WORKER_URL`) — legacy, used only for CBS Sports Fantasy proxy calls (`/api/cbs/*`).
 
-### Data Delivery Method
+**Auth header:** `X-FantasAI-Key` (env `VITE_FANTASAI_KEY`, defaults to the literal `'fantasai2026'` baked into the client bundle) — required by most `api.fantasai.net` reads/writes. CBS calls additionally send `X-CBS-Cookie` from localStorage when the user has connected a CBS account.
 
-**Primary:** Cloudflare R2 Object Storage (S3-compatible)  
-**Format:** Gzipped JSON  
-**Refresh:** Daily at 08:00 UTC  
-**Base URL:** `https://api.fantasai.net/api/v1/r2/fantasai/`
+**⚠️ Known issue:** `https://api.fantasai.net` is hardcoded as a local `API_BASE` constant independently in at least 10 files (`App.jsx`, `AdminOwners.jsx`, `ChangePassword.jsx`, `Login.jsx`, `Compare.jsx`, `CurrentRoster.jsx`, `Sources.jsx`, `LeagueSettings.jsx`, and others) instead of being imported from `app/src/api.js`. If the API domain ever changes, all of these need to be updated individually. New code should import from `api.js` instead of redeclaring the constant.
 
----
-
-## 📦 Available Data Exports
-
-### 1. 2026 Draft Players (`export_players_2026_draft`)
-
-**Purpose:** All active 2026 fantasy draft candidates with tiers, rankings, and recent performance.
-
-**Refresh Schedule:** Daily 08:00 UTC  
-**Records:** 997 players (all `isDraftable: true` — retired players removed June 12, 2026)  
-**Worker Endpoint:** `GET https://api.fantasai.net/api/v1/db/players`  
-**Source Table:** `main.fantasai.export_players_2026_draft`
-
-**Live R2 Schema (camelCase):**
-```json
-{
-  "playerId": "string",
-  "name": "string",
-  "position": "string (QB, RB, WR, TE, K, DEF, FB)",
-  "team": "string (3-letter code e.g. 'KC', 'PHI')",
-  "proj": "float | null (projected fantasy points)",
-  "avg": "string (season average e.g. '22.5')",
-  "last": "string (last game score)",
-  "trend": "string (JSON array of 6 recent scores)",
-  "positionRank": "integer | null",
-  "percentile": "float | null (0-100)",
-  "tier": "string (Elite | High | Mid | Low | Unproven)",
-  "isDraftable": "string ('true' for all 997)",
-  "status": "string (Active | Injured | Questionable)",
-  "lastSeasonPlayed": "string (e.g. '2025')",
-  "experience": "string (years in NFL e.g. '3')",
-  "isRookie": "string ('true' | 'false')"
-}
-```
-
-> **Note:** ADP is not yet in this export. It is a planned ETL addition.
-
-**Position breakdown:** QB(124) · RB(198) · WR(391) · TE(204) · K(43) · FB(5) · DEF(32)
-
-**Frontend Usage:**
-- Draft board player lists
-- Player comparison tools
-- Athletic profile cards
-- Mock draft interfaces
+**Data delivery:** Mostly Cloudflare R2 JSON, read through the Worker's `/api/v1/r2/{key}` passthrough. A shrinking minority of routes (`/api/v1/db/players`, `/api/v1/news/latest`, etc.) still query Databricks directly and are of unconfirmed live status — see [docs/API_ENDPOINTS.md](../docs/API_ENDPOINTS.md).
 
 ---
 
-### 2. ML Predictions (`ml_predictions.json`)
+## 📦 `app/src/api.js` — Function-to-Endpoint Map
 
-**Purpose:** Weekly fantasy point predictions from position-specific XGBoost models
+This is the central API client; prefer it over ad-hoc `fetch()` calls in screens.
 
-**Refresh Schedule:** Weekly (Monday 06:00 UTC after games)  
-**Records:** ~500 active players  
-**Source Table:** `main.fantasai.export_ml_predictions`
+### CBS Worker proxy (`BASE`)
+| Function | Endpoint |
+|---|---|
+| `api.league()` | `GET /api/cbs/league` |
+| `api.teams()` | `GET /api/cbs/teams` |
+| `api.rankings(pos)` | `GET /api/cbs/rankings?pos=` |
+| `api.draft(year)` | `GET /api/cbs/draft?year=` |
+| `api.rosters()` | `GET /api/cbs/rosters` |
+| `api.sleeperPlayers()` | `GET /api/cbs/sleeper-players` |
 
-**Schema:**
-```json
-{
-  "player_id": "string",
-  "player_name": "string",
-  "position": "string",
-  "team": "string",
-  "week": "integer (1-18)",
-  "season": "integer (2026)",
-  "predicted_fantasy_pts": "float",
-  "prediction_confidence": "float (0-1, model confidence score)",
-  "prediction_range": {
-    "low": "float (pessimistic scenario)",
-    "high": "float (optimistic scenario)"
-  },
-  "actual_fantasy_pts": "float (null for future weeks)",
-  "prediction_error": "float (null for future weeks)",
-  "model_version": "string (e.g., qb_fantasy_predictor_v2)"
-}
-```
+### Player pool (`API_BASE`)
+| Function | Endpoint | Notes |
+|---|---|---|
+| `api.dbPlayers()` | `GET /api/v1/db/players` | ⚠️ Databricks-backed, unconfirmed live |
+| `api.allPlayers(limit)` | `GET /api/v1/players?limit=` | Sleeper-backed fallback |
 
-**Frontend Usage:**
-- Start/sit recommendations
-- Weekly lineup optimizer
-- Projected points displays
-- Model performance tracking
+### R2 data (`api.r2.*`, all `GET /api/v1/r2/{key}`)
 
----
+~37 distinct keys. Notable ones (see [docs/DATA_SCHEMAS.md](../docs/DATA_SCHEMAS.md) for shapes):
 
-### 3. Player Trends (`player_trends.json`)
+`players2026`, `lineup`, `injuries`, `trends`, `playerScores`, `trade`, `waivers`, `drops`, `playerNotes`, `playerNewsLinks`, `criticalAlerts`, `enrichedNews`, `aiSummaries`, `breakoutCandidates` (falls back to `/api/v1/opportunity/rankings` — ⚠️ Databricks-backed), `sleeperPicks`, `weatherForecast`, `defenseAdp`, `defensePerformance`, `defensePredictions`, `defenseVsPos`, `rookieScores`, `collegeStats`, `weeklyStats` (583K records — on-demand only, don't fetch eagerly), `adpPPR`, `adpStandard`, `ecrPPR`, `ecrStandard`, `playerWriteups`, `nflSchedule`, `opponentLookup`, `playerOwnership`, `combineData`, `playerStats2025`, `olineIndex`, `playerTeamHistory`, `weaponScores`, `teamSupportScores`, `olineStability`, `playerOlineStability`, `weeklyStartSit`, `deepReasoning` *(new, 2026-08-22 — Job 5 output, only covers the weekly top-slice ~300 players, not the full pool)*, `dkSlates`, `dkSalaries`, `kalshiNflMarkets`
 
-**Purpose:** Statistical trends and momentum indicators for waiver wire and trade analysis
+The Player detail popup (`Players.jsx`) now shows a "Deep Reasoning" card (breakout score, confidence, risk flag, recommendation) below the existing Job 3 writeup card whenever `deepReasoning` has an entry for that player — it's additive, not a replacement, since Job 5 doesn't cover the full player pool.
 
-**Refresh Schedule:** Daily 08:00 UTC  
-**Records:** ~800 players with recent activity  
-**Source Table:** `main.fantasai.export_player_trends`
+`api.r2.list(prefix)` → `GET /api/v1/r2/list?prefix=`
 
-**Schema:**
-```json
-{
-  "player_id": "string",
-  "player_name": "string",
-  "position": "string",
-  "team": "string",
-  "trend_window": "string (Last_3_Weeks, Last_5_Weeks)",
-  "trending_direction": "string (UP, DOWN, STABLE)",
-  "fantasy_pts_trend": "float (% change over window)",
-  "snap_share_trend": "float (% change in offensive snaps)",
-  "target_share_trend": "float (% change in targets, WR/TE only)",
-  "touch_share_trend": "float (% change in carries+targets, RB only)",
-  "opportunity_score": "float (0-100, composite opportunity metric)",
-  "momentum_indicator": "string (HOT, WARM, COLD)",
-  "trend_start_date": "timestamp",
-  "trend_end_date": "timestamp"
-}
-```
+### Transactions
+`api.transactions.get/log` → `GET/POST /api/v1/transactions`
 
-**Frontend Usage:**
-- Waiver wire prioritization
-- Trade value assessment
-- Player cards with trend arrows
-- "Hot hand" player lists
+### Draft state
+| Function | Endpoint |
+|---|---|
+| `api.draftPicks.get/save` | `GET/POST /api/v1/draft/picks` |
+| `api.draftChat.get/save` | `GET/PUT /api/v1/r2/fantasai/draft/chat_log.json` |
+| `api.draftQueue.get/save` | `GET/PUT /api/v1/r2/fantasai/draft/queue_by_team.json` |
+| `api.draftState.get/save` | `GET/PUT /api/v1/r2/fantasai/draft/state.json` |
+
+### Auth/admin
+| Function | Endpoint |
+|---|---|
+| `api.loginLog.record/list` | `POST`(keepalive)`/GET /api/v1/login-log` |
+| `api.leagues.list()` | R2 list + fetch each `fantasai/leagues/*/league-config.json` |
+| `api.leagues.delete(leagueId)` | `DELETE /api/v1/r2/fantasai/leagues/{leagueId}/{league-config.json,owners-config.json}` |
+
+### Called directly with `fetch()`, outside `api.js`
+`/api/v1/owners/config` (GET/POST — `App.jsx`, `AdminOwners.jsx`, `ChangePassword.jsx`, `Login.jsx`), `/api/v1/rosters/load`, `/api/v1/rosters/save`, `/api/v1/rosters/reset`, `/api/v1/league-settings`, `/api/v1/league` (cookie health check), plus the live-scoring endpoints (see below).
 
 ---
 
-### 4. Positional Rankings (`positional_rankings.json`)
+## 🖥️ Screen Inventory (`app/src/screens/*.jsx`)
 
-**Purpose:** Expert consensus rankings aggregated from Fantasy Pros, ESPN, Yahoo
+26 files, 23 routed from `App.jsx`, 2 embedded-only, **3 orphaned**.
 
-**Refresh Schedule:** Daily 08:00 UTC  
-**Records:** ~600 ranked players per week  
-**Source Table:** `main.fantasai.export_positional_rankings`
+| Screen | Purpose | Status |
+|---|---|---|
+| `Dashboard.jsx` | Home — standings, lineup summary, alerts, live scores | routed (`dashboard`) |
+| `Players.jsx` | Main player pool/rankings, hosts Watchlist tab, heaviest R2 consumer | routed (`players`) |
+| `News.jsx` | Player news feed | routed (`news`) |
+| `CurrentRoster.jsx` | Roster/slots, AI lineup panel, trade responses, embeds `LineupDecisions.jsx` | routed (`roster`) |
+| `HeadToHead.jsx` | Weekly matchup + **live in-game scoring** | routed (`h2h`) |
+| `Compare.jsx` | Player comparison + "Ask FantasAI" verdict | routed (`compare`) |
+| `Trade.jsx` | Trade builder/grader | routed (`trade`) |
+| `DraftRoom.jsx` | Mock + live draft, Ghost Picks, Big Board, chat (~3,400 lines) | routed (`draft`) |
+| `DraftRecap.jsx` | Post-draft grading vs. ADP | routed (`draft` → recap) |
+| `OwnerIntel.jsx` | Owner profiles, draft-tendency insight | routed (`owners`) |
+| `Sources.jsx` | Data source config + fallback-chain diagnostic | routed (`sources`) |
+| `LeagueSettings.jsx` | Scoring rules, roster limits, push notifications | routed (`settings`) |
+| `AccountEdit.jsx` | Theme, AI scoring weights, team prefs | routed (`account`) |
+| `Transactions.jsx` | League transaction log | routed (`transactions`) |
+| `PowerRankings.jsx` | Rankings/points/schedule, sparklines | routed (`power`) |
+| `AdminOwners.jsx` | Admin: owner management | routed (`admin-owners`, admin only) |
+| `ScoringTest.jsx` | Admin: scoring math test harness | routed (`admin-scoring`, admin only) |
+| `LoginLog.jsx` | Admin: login activity log | routed (`admin-loginlog`, admin only) |
+| `AdminLeagues.jsx` | Admin: created/imported leagues management | routed (`admin-leagues`, admin only) |
+| `Login.jsx` | Login + league create/import + password reset entry | routed (pre-auth gate) |
+| `ChangePassword.jsx` | Forced password change + reset flow | routed (conditional gate) |
+| `LineupDecisions.jsx` | Start/sit optimizer (`computeOptimal`) | embedded in `CurrentRoster.jsx` |
+| `Watchlist.jsx` | Watchlist table | embedded in `Players.jsx` |
+| `Waivers.jsx` | Standalone waiver-order/claims screen | **⚠️ orphaned — not imported anywhere** |
+| `WarRoom.jsx` | Draft-prep mock-draft-batch analyzer | **⚠️ orphaned — not imported anywhere** |
+| `SeasonPerformance.jsx` | Full-season score simulation | **⚠️ orphaned — not imported anywhere** |
 
-**Schema:**
-```json
-{
-  "player_id": "string",
-  "player_name": "string",
-  "position": "string",
-  "team": "string",
-  "week": "integer",
-  "overall_rank": "integer (1-600)",
-  "position_rank": "integer (rank within position)",
-  "consensus_tier": "string (Tier 1, Tier 2, etc.)",
-  "expert_ranks": {
-    "fantasy_pros": "integer",
-    "espn": "integer",
-    "yahoo": "integer"
-  },
-  "rank_variance": "float (standard deviation across sources)",
-  "confidence_level": "string (High, Medium, Low)"
-}
-```
-
-**Frontend Usage:**
-- Draft rankings display
-- Trade value charts
-- Start/sit tiers
-- Expert consensus comparisons
-
----
-
-### 5. Breakout Candidates (`breakout_candidates.json`)
-
-**Purpose:** ML-identified players likely to exceed expectations (waiver wire targets)
-
-**Refresh Schedule:** Weekly (Tuesday 10:00 AM ET)  
-**Records:** ~50 candidates per week  
-**Source Table:** `main.fantasai.export_breakout_candidates`
-
-**Schema:**
-```json
-{
-  "player_id": "string",
-  "player_name": "string",
-  "position": "string",
-  "team": "string",
-  "week": "integer",
-  "opportunity_score": "float (0-100, ML-generated breakout probability)",
-  "snap_share_delta": "float (% change in snap share)",
-  "avg_snap_share": "float (% snaps over last 3 weeks)",
-  "target_share_delta": "float (WR/TE/RB only)",
-  "depth_chart_change": "boolean (true if moved up)",
-  "breakout_reasoning": "string (e.g., 'Increased snap share + weak matchup')",
-  "confidence_level": "string (High, Medium, Low)"
-}
-```
-
-**Frontend Usage:**
-- Waiver wire recommendations
-- Weekly "Pick Up These Players" articles
-- Breakout alert notifications
-- Fantasy tips feed
+The 3 orphaned screens exist on disk with no route wiring anywhere in `App.jsx` or any other component (confirmed via grep). Decide whether to wire them in, delete them, or leave as intentional reference — they currently just add dead weight to the bundle.
 
 ---
 
-### 6. Sleeper Picks (`sleeper_picks.json`)
+## 🧭 Routing (`App.jsx`)
 
-**Purpose:** Undervalued players with low ownership but high upside
+No router library — a single `useState('dashboard')` string (`active`) drives a big conditional render. Auth gate sequence: `?reset=` token → `ResetPasswordScreen`; no `user` → `Login`; `needsPasswordChange` → `ChangePassword`; otherwise the main shell.
 
-**Refresh Schedule:** Weekly (Tuesday 10:00 AM ET)  
-**Records:** ~30 sleeper picks per week  
-**Source Table:** `main.fantasai.export_sleeper_picks`
+Admin routes (`admin-owners`, `admin-scoring`, `admin-loginlog`, `admin-leagues`) are gated only by nav-item visibility in `Sidebar`/`MobileNav` (`user.isAdmin`) — `App.jsx` does not re-check `isAdmin` before rendering if `active` is somehow set to one of those values directly. This is nav-visibility gating, not a hard route guard.
 
-**Schema:**
-```json
-{
-  "player_id": "string",
-  "player_name": "string",
-  "position": "string",
-  "team": "string",
-  "ownership_pct": "float (% rostered on Sleeper platform)",
-  "projected_pts": "float (weekly projection)",
-  "value_score": "float (0-100, upside/ownership ratio)",
-  "reason": "string (explanation for the sleeper pick)",
-  "matchup_grade": "string (A+, A, B+, etc.)",
-  "weeks_to_breakout": "integer (estimated weeks until value realized)"
-}
-```
+`DraftRoom` is always mounted (kept alive with `display:none` when inactive) so pick timers and AI auto-picks continue while the user browses elsewhere; a floating "Return to Draft" banner appears app-wide during an active draft.
 
-**⚠️ Known Issue:** `ownership_pct` currently returns 0 for all records. Fix pending in the Gold → Export pipeline (ownership join not yet wired).
-
-**Frontend Usage:**
-- Deep sleeper recommendations
-- Championship week stashes
-- Dynasty league targets
-- Low-ownership DFS plays
+Admin identity: `admin@fantasai.net` is treated as always-admin independent of server state; other users' `isAdmin`/`isCommissioner` flags are re-validated against R2 owner config on each cold load.
 
 ---
 
-### 7. Player News (`player_news.json`) ✨ NEW
+## 🧭 Navigation Structure (`app/src/components/layout.jsx`)
 
-**Purpose:** Recent NFL player news headlines with article URLs for frontend scraping
-
-**Refresh Schedule:** Daily 08:00 UTC  
-**Records:** 1,075 articles (top 5 per player, 271 players)  
-**Source Table:** `main.fantasai.export_player_news`  
-**Data Retention:** 60 days
-
-**Schema:**
-```json
-{
-  "metadata": {
-    "generated_at": "timestamp (ISO 8601)",
-    "total_players": "integer (271)",
-    "total_articles": "integer (1075)",
-    "max_articles_per_player": "integer (5)",
-    "data_retention_days": "integer (60)"
-  },
-  "data": [
-    {
-      "player_id": "string",
-      "player_name": "string",
-      "position": "string",
-      "team": "string",
-      "headline": "string (article title)",
-      "article_url": "string (full URL to original article)",
-      "publisher": "string (e.g., ESPN, The New York Times, Sports Illustrated)",
-      "published_at": "timestamp (ISO 8601)",
-      "article_rank": "integer (1-5, 1 = most recent)"
-    }
-  ]
-}
-```
-
-**Frontend Integration Pattern:**
-
-**Display (No Description):**
-```jsx
-// Fetch news for player
-const response = await fetch('https://api.fantasai.net/api/v1/r2/fantasai/analysis/player_news.json');
-const { data: allNews } = await response.json();
-const playerNews = allNews.filter(n => n.player_id === playerId).slice(0, 3);
-
-// Render headlines only
-{playerNews.map(article => (
-  <div className="news-item">
-    <h4>{article.headline}</h4>
-    <div className="news-meta">
-      {article.publisher} • {formatDate(article.published_at)}
-    </div>
-    <button onClick={() => scrapeAndShowArticle(article.article_url)}>
-      Read Full Article
-    </button>
-  </div>
-))}
-```
-
-**On-Demand Scraping (User Clicks "Read More"):**
-```jsx
-async function scrapeAndShowArticle(url) {
-  // Check cache first
-  const cached = localStorage.getItem(`article_${btoa(url)}`);
-  if (cached) {
-    return showArticleModal(JSON.parse(cached));
-  }
-  
-  // Scrape on-demand (your frontend scraper)
-  const content = await yourScraper.fetch(url);
-  
-  // Cache for 24 hours
-  localStorage.setItem(`article_${btoa(url)}`, JSON.stringify({
-    content,
-    cachedAt: Date.now()
-  }));
-  
-  // Display in modal/sidebar
-  showArticleModal(content);
-}
-```
-
-**Why No Descriptions?**
-- Google News RSS feeds don't provide article summaries (only title + URL)
-- Backend provides headline + link only
-- Frontend scrapes full content on-demand when user clicks "Read More"
-- This avoids 15-minute backend scraping delays and respects rate limits
-
-**Frontend Responsibilities:**
-1. Display headlines, publisher, publish date, and clickable URL
-2. Implement article scraper (your choice: Puppeteer, Cheerio, etc.)
-3. Cache scraped content per URL to avoid re-scraping
-4. Handle paywalls, 404s, and scraping failures gracefully
+- **League:** Dashboard, Current Roster, Head to Head, Power Rankings, Players, News & Updates, Transactions
+- **Tools:** My Account/Team, Compare, Trade Analyzer
+- **Draft:** Draft Room, Owner Intel, Player Draft Rankings
+- **Setup:** Sources, Rules & Settings
+- **Admin** (if `user.isAdmin`): Owners, Scoring Test, Login Log, Leagues
 
 ---
 
-## 🔗 API Endpoints
+## 🏈 Live In-Game Scoring (`app/src/lib/liveScoring.js`)
 
-### Primary Exports (R2 Storage)
+Consumed only by `HeadToHead.jsx` — not used in `DraftRoom.jsx`.
 
-All exports available at: `https://api.fantasai.net/api/v1/r2/fantasai/analysis/`
+- `getScoringRules()` — reads league scoring config from `localStorage`.
+- `calcFantasyPts(stats, rules)` — raw box-score stats → fantasy points. **This calculation is duplicated in 3 places** (here, `worker-api`'s `handleNflPlayerStats`, and `local_processing/job_live_scores.py`) — must be kept in sync manually if scoring rules change.
+- `getGameProgress()` / `blendProjectedFinal()` — blends live points-so-far with a pace-adjusted remaining-game projection.
+- `fetchEspnScoreboardDirect()` / `fetchEspnPlayerStatsDirect()` — **browser-direct ESPN fallback**, used only when the Worker/R2 cache has no data yet for the requested week. Display-only, never written back to R2.
 
- File | URL | Refresh |
-------|-----|---------|
- Draft Roster | `draft_ready_roster_2026.json` | Daily 08:00 UTC |
- ML Predictions | `ml_predictions.json` | Weekly Mon 06:00 UTC |
- Player Trends | `player_trends.json` | Daily 08:00 UTC |
- Rankings | `positional_rankings.json` | Daily 08:00 UTC |
- Breakout Candidates | `breakout_candidates.json` | Weekly Tue 10:00 AM ET |
- Sleeper Picks | `sleeper_picks.json` | Weekly Tue 10:00 AM ET |
- Player News | `player_news.json` | Daily 08:00 UTC |
-
-### Response Format
-
-All endpoints return:
-```json
-{
-  "metadata": {
-    "generated_at": "2026-06-05T08:00:00Z",
-    "record_count": 1234,
-    "source_table": "main.fantasai.{table_name}"
-  },
-  "data": [ /* array of records */ ]
-}
-```
+**Integration:** `HeadToHead.jsx` polls `GET {workerUrl}/api/v1/nfl/scoreboard?week=&season=&type=` and `.../player-stats` every 60s, but only while at least one game is in progress (stops once the week is final). Falls back to the direct-ESPN functions above if the Worker returns zero games (i.e., `job_live_scores.py` hasn't populated R2 for that week yet). Scores are matched to rostered players by lowercased/trimmed name.
 
 ---
 
-## 📁 Schema Files
+## 🎨 Draft Room (`DraftRoom.jsx`, ~3,400 lines)
 
-All table schemas are documented in: `/Repos/kingoffrisco@yahoo.com/FantasAI/app/schemas/`
-
-**Available Schema Files:**
-- `export_player_news_schema.json` ✅
-- `draft_ready_roster_2026_schema.json` (pending)
-- `export_ml_predictions_schema.json` (pending)
-- `export_player_trends_schema.json` (pending)
-
-**Schema File Format:**
-```json
-{
-  "table_name": "string",
-  "description": "string",
-  "refresh_schedule": "string",
-  "retention": "string",
-  "records": "string",
-  "use_case": "string",
-  "columns": [
-    {
-      "name": "string",
-      "type": "string",
-      "description": "string"
-    }
-  ],
-  "relationships": {
-    "related_table": "join relationship description"
-  },
-  "frontend_usage": {
-    "display": "string",
-    "scraping": "string",
-    "caching": "string"
-  },
-  "sample_data": []
-}
-```
+Large, self-contained draft experience:
+- **Mock draft mode** — full setup flow, slot selection, scheduled mocks, session persisted to `localStorage` so it survives navigation/refresh.
+- **Live draft mode** — synced via `api.draftPicks`/`draftState`/`draftQueue`/`draftChat` so all owners see the same board in real time; commissioner-only per-team "team mode" controls.
+- **Ghost Picks** tab — AI-predicted picks for teams still on the clock (see [ARCHITECTURE.md → AI Architecture → Ghost Picks](../ARCHITECTURE.md#ai-architecture)).
+- **Big Board** — full pool with NextGen Stats columns, inline player detail.
+- **Turn chimes**, **per-team draft queues**, **chat & activity feed** (all R2-persisted).
+- Cross-references CFBD college stats and live Sleeper stats for rookie/prospect context.
+- Reports status to `App.jsx` (drives sidebar badge, "Return to Draft" banner, topbar LIVE/PAUSED/COMPLETE indicator).
 
 ---
 
-## 🔄 Refresh Schedules
+## ⚠️ Known Frontend Issues
 
-### Daily (08:00 UTC)
-- Draft roster
-- Player trends
-- Positional rankings
-- Player news
-
-### Weekly (Monday 06:00 UTC)
-- ML predictions (after games complete)
-
-### Weekly (Tuesday 10:00 AM ET)
-- Breakout candidates
-- Sleeper picks
-
-### Manual Triggers
-All exports can be manually triggered via Databricks Jobs API (contact backend team)
+1. **3 orphaned screens** — `Waivers.jsx`, `WarRoom.jsx`, `SeasonPerformance.jsx`. Not routed anywhere.
+2. **Duplicated `API_BASE` constant** — see Overview above.
+3. **`breakoutCandidates` fallback hits a Databricks-backed route** (`/api/v1/opportunity/rankings`) if the R2 read fails — silent degradation if Databricks is down, worth a health check.
+4. **`weeklyStats` R2 key is ~50-100MB** — confirmed still true; fetch on-demand only, never eagerly on page load.
 
 ---
 
-## 🎨 Frontend Integration Patterns
-
-### 1. Fetching Data
-
-**Recommended Approach:**
-```javascript
-class FantasAIClient {
-  constructor() {
-    this.baseURL = 'https://api.fantasai.net/api/v1/r2/fantasai/analysis';
-    this.cache = new Map();
-    this.cacheExpiry = 60 * 60 * 1000; // 1 hour
-  }
-
-  async fetch(endpoint) {
-    const cacheKey = endpoint;
-    const cached = this.cache.get(cacheKey);
-    
-    if (cached && Date.now() - cached.timestamp < this.cacheExpiry) {
-      return cached.data;
-    }
-
-    const response = await fetch(`${this.baseURL}/${endpoint}`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    
-    const data = await response.json();
-    this.cache.set(cacheKey, { data, timestamp: Date.now() });
-    
-    return data;
-  }
-
-  async getDraftRoster() {
-    return this.fetch('draft_ready_roster_2026.json');
-  }
-
-  async getPredictions() {
-    return this.fetch('ml_predictions.json');
-  }
-
-  async getPlayerNews() {
-    return this.fetch('player_news.json');
-  }
-}
-
-// Usage
-const client = new FantasAIClient();
-const roster = await client.getDraftRoster();
-```
-
-### 2. Caching Strategy
-
-**Client-Side Cache:**
-- Cache API responses for 1 hour (data refreshes daily/weekly)
-- Use localStorage for scraped article content (24-hour expiry)
-- Invalidate cache on user-triggered refresh
-
-**Service Worker Cache:**
-```javascript
-// cache-first for static data exports
-self.addEventListener('fetch', (event) => {
-  if (event.request.url.includes('fantasai.net/api/v1/r2')) {
-    event.respondWith(
-      caches.match(event.request).then((response) => {
-        return response || fetch(event.request);
-      })
-    );
-  }
-});
-```
-
-### 3. Error Handling
-
-```javascript
-async function fetchWithRetry(url, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return await response.json();
-      
-      // Exponential backoff
-      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i)));
-    } catch (err) {
-      if (i === retries - 1) throw err;
-    }
-  }
-}
-```
-
-### 4. Real-Time Updates
-
-**Polling Strategy:**
-- Draft roster: Poll every 6 hours (updates daily)
-- Predictions: Poll every 30 minutes on game days
-- Player news: Poll every 15 minutes during peak hours
-
-**WebSocket (Future Enhancement):**
-- Backend doesn't currently support WebSockets
-- Consider using Server-Sent Events (SSE) for live score updates
-
----
-
-## ⚠️ Known Issues & Limitations
-
-### Current Issues
-
-1. **Sleeper Picks Ownership Data:**
-   - `ownership_pct` returns 0 for all records
-   - Fix pending: Requires JOIN to `bronze_sleeper_ownership` table
-   - Expected fix: June 7, 2026
-
-2. **NFL Combine Data Not in ML Models:**
-   - Combine metrics available in draft roster
-   - NOT yet integrated into ML prediction models
-   - Retrain required (scheduled June 10, 2026)
-
-3. **Player News No Descriptions:**
-   - Google News RSS limitation (design decision, not a bug)
-   - Frontend must scrape article content on-demand
-   - See "Player News" section for integration pattern
-
-### Rate Limits
-
-**R2 Storage:**
-- No rate limits on GET requests
-- Cached at CDN edge (Cloudflare)
-- Safe for high-traffic applications
-
-**Sleeper API (Backend):**
-- 1,000 calls/day limit (backend manages this)
-- Frontend has no direct Sleeper API access
-
-**ESPN API (Backend):**
-- No documented limits
-- Backend manages all API calls
-
----
-
-## 🧪 Testing & Validation
-
-### Data Quality Checks
-
-**Before consuming data, validate:**
-
-```javascript
-// Check for suspicious zero values
-function validateData(data) {
-  const zeroChecks = {
-    sleeper_picks: ['ownership_pct'],
-    breakout_candidates: ['opportunity_score'],
-    ml_predictions: ['predicted_fantasy_pts']
-  };
-
-  for (const [table, fields] of Object.entries(zeroChecks)) {
-    fields.forEach(field => {
-      const zeros = data.filter(r => r[field] === 0).length;
-      const total = data.length;
-      const pct = (zeros / total) * 100;
-      
-      if (pct > 50) {
-        console.warn(`⚠️ ${table}.${field}: ${pct.toFixed(1)}% zeros`);
-      }
-    });
-  }
-}
-```
-
-### Sample Data
-
-Test endpoints always return valid JSON:
-```bash
-curl https://api.fantasai.net/api/v1/r2/fantasai/analysis/player_news.json | jq '.data[0]'
-```
-
----
-
-## 📞 Support & Escalation
-
-### Backend Team Contact
-- Slack: `#fantasai-backend`
-- Email: backend@fantasai.net
-
-### Request New Data Exports
-1. Document required fields and use case
-2. Submit request in `#fantasai-backend` channel
-3. Expected turnaround: 2-3 business days
-
-### Report Data Issues
-- Include: table name, timestamp, sample problematic records
-- Tag: `@backend-team` in Slack
-
----
-
-## 📝 Change Log
-
-### June 5, 2026
-- ✅ Added `player_news.json` export (1,075 articles, 271 players)
-- ✅ Created comprehensive frontend integration guide
-- ✅ Documented on-demand article scraping pattern
-- ✅ Added schema documentation in `/app/schemas/`
-
-### June 2, 2026
-- ✅ Added NFL Combine metrics to draft roster
-- ✅ Fixed player deduplication in gold layer
-- ⚠️ Identified zero-value issue in sleeper picks (pending fix)
-
-### May 28, 2026
-- ✅ Launched R2 export pipeline
-- ✅ Fixed secret scope configuration
-
----
-
-## 🚀 Quick Start Checklist
-
-**For new frontend developers:**
-
-- [ ] Clone FantasAI repo: `/Repos/kingoffrisco@yahoo.com/FantasAI/`
-- [ ] Review schema files in `/app/schemas/`
-- [ ] Test API endpoint: `https://api.fantasai.net/api/v1/r2/fantasai/analysis/player_news.json`
-- [ ] Implement FantasAIClient class (see "Frontend Integration Patterns")
-- [ ] Add caching layer (localStorage + service worker)
-- [ ] Build article scraper for player news (your choice of library)
-- [ ] Set up error handling and retry logic
-- [ ] Subscribe to `#fantasai-backend` Slack channel for updates
-
----
-
-**Questions? Reach out to the backend team!** 🏈
+**Generated:** 2026-08-22 from a full read of `app/src/api.js`, `App.jsx`, `layout.jsx`, `liveScoring.js`, and all 26 files in `app/src/screens/`.

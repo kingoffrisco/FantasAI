@@ -1,0 +1,43 @@
+{
+  "generated_at": "2026-08-20T23:34:34.575702+00:00",
+  "model": "qwen3:14b",
+  "player_count": 1,
+  "players": {
+    "Joe Burrow": {
+      "player_name": "Joe Burrow",
+      "position": "QB",
+      "team": "CIN",
+      "injury_flag": true,
+      "injury_status": "questionable",
+      "latest_sentiment": "positive",
+      "max_relevance": 10.0,
+      "articles": [
+        {
+          "headline": "PFN\u2019s Top 100 NFL Players Entering 2026: Joe Burrow, Puka Nacua, and Matthew Stafford Continue to Cl",
+          "relevance": 10.0
+        },
+        {
+          "headline": "FOX Sports Host disagrees with ranking Joe Burrow over Patrick Mahomes",
+          "relevance": 9.5
+        },
+        {
+          "headline": "Cincinnati Bengals\u2019 Joe Burrow Drops in NFL Rankings Over Serious Concern",
+          "relevance": 9.5
+        }
+      ],
+      "waiver_score": 8.5,
+      "trade_buy": 7.5,
+      "trade_sell": 5.0,
+      "start_score": 7.0,
+      "sit_score": 5.5,
+      "injury_risk": 7.0,
+      "dynasty_score": 8.0,
+      "matchup_score": 5.0,
+      "rookie_score": 0.0,
+      "waiver_reason": "High upside QB with consensus QB1 potential despite injury concerns.",
+      "trade_reason": "Elite fantasy value with strong 2026 season projections makes him a top trade target.",
+      "start_reason": "Consensus QB1 by season's end despite current injury risk",
+      "_elapsed_sec": 10.7
+    }
+  }
+}

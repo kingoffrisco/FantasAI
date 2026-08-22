@@ -3742,12 +3742,26 @@ function WaiverRecommendations({ myRosterIds, starters, fullRoster, onOpenPlayer
     for (const p of rosterPlayers) m[p.pos] = (m[p.pos] || 0) + 1;
     return m;
   }, [rosterPlayers]);
+  // Position roster-total maxes from League Settings (e.g. K → 0 means the
+  // league doesn't use kickers at all, so it can never be a "need").
+  const posMaxMap = React.useMemo(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
+      const positions = saved?.positions ?? [];
+      const map = {};
+      for (const p of positions) {
+        map[p.key] = p.rosterTotal === 'No Limit' ? Infinity : parseInt(p.rosterTotal, 10);
+      }
+      return map;
+    } catch { return {}; }
+  }, []);
   const weakPositions = React.useMemo(() => {
     const ideal = { QB: 2, RB: 4, WR: 4, TE: 2, K: 1, DST: 1 };
     return Object.entries(ideal)
+      .filter(([pos]) => posMaxMap[pos] !== 0)
       .filter(([pos, min]) => (posCounts[pos] || 0) < min)
       .map(([pos]) => pos);
-  }, [posCounts]);
+  }, [posCounts, posMaxMap]);
 
   const freeAgents = React.useMemo(() => {
     const rostered = new Set([...myRosterIds]);
@@ -4104,7 +4118,7 @@ function RosterLegend() {
         <span style={{ fontSize: 14, color: 'var(--text-faint)' }}>{open ? '▾' : '▸'}</span>
       </button>
       {open && (
-        <div style={{ padding: '14px 18px 18px', background: 'var(--panel-1)', display: 'flex', flexDirection: 'column', gap: 16, fontSize: 11, lineHeight: 1.6, color: 'var(--text-dim)' }}>
+        <div style={{ padding: '14px 18px 18px', background: 'var(--panel-1)', display: 'flex', flexDirection: 'column', gap: 16, fontSize: 11, lineHeight: 1.6, color: 'var(--text-dim)', maxHeight: '60vh', overflowY: 'auto' }}>
 
           <div>
             <div style={{ fontWeight: 800, fontSize: 10, letterSpacing: '.08em', color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: 6 }}>Roster Slots</div>

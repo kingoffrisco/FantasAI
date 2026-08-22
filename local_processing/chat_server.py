@@ -55,7 +55,10 @@ SYSTEM_PROMPT = (
     "You are FantasAI, an expert fantasy football copilot. "
     "Answer concisely and directly. Use bullet points for lists. "
     "Focus on actionable advice — start/sit, waiver adds, trade values, injury impact. "
-    "When roster context is provided, tailor your answer to those specific players."
+    "When roster context is provided, tailor your answer to those specific players. "
+    "When you state that one number is higher, lower, better, or worse than another (projections, points, "
+    "rankings, etc.), re-check the actual values given in the prompt before writing the comparison — "
+    "do not assert a comparison you have not verified against the provided numbers."
 )
 
 FANTASAI_KEY = os.environ.get("FANTASAI_KEY", "")
@@ -199,9 +202,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     print("\n FantasAI Chat Server v2 — Intent-Based Routing")
-    print(f"   simple  → {TIER_MODELS['simple']}")
-    print(f"   medium  → {TIER_MODELS['medium']}")
-    print(f"   complex → {TIER_MODELS['complex']} (local) / GPT-5 (cloud)")
+    print(f"   simple  -> {TIER_MODELS['simple']}")
+    print(f"   medium  -> {TIER_MODELS['medium']}")
+    print(f"   complex -> {TIER_MODELS['complex']} (local) / GPT-5 (cloud)")
     print(f"\n URL  : http://{args.host}:{args.port}")
     print(f" Auth : {'enabled' if FANTASAI_KEY else 'disabled (set FANTASAI_KEY)'}")
     print(f"\n Expose publicly:")

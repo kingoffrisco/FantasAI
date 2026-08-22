@@ -213,8 +213,8 @@ export default {
       if (url.pathname === '/api/v1/league-settings')     return handleLeagueSettingsLoad(url, env);
       if (url.pathname === '/api/v1/community')           return handleCommunityLoad(env);
       if (url.pathname === '/api/v1/proxy')               return handleProxy(url);
-      if (url.pathname === '/api/v1/nfl/scoreboard')      return handleNflScoreboard(url);
-      if (url.pathname === '/api/v1/nfl/player-stats')   return handleNflPlayerStats(url);
+      if (url.pathname === '/api/v1/nfl/scoreboard')      return await handleNflScoreboard(url, env);
+      if (url.pathname === '/api/v1/nfl/player-stats')   return await handleNflPlayerStats(url, env);
       if (url.pathname === '/api/v1/nfl/schedule')        return handleNflSchedule(url);
       if (url.pathname === '/api/v1/nfl/news')            return handleNflNews(url);
       if (url.pathname === '/api/v1/players')             return handlePlayers(url);
@@ -730,28 +730,42 @@ function normalizeGame(event) {
   };
 }
 
-async function handleNflScoreboard(url) {
+// ESPN's site API started returning 403 to this Worker's outbound requests
+// on 2026-08-20 (still 200 from a plain machine) — looks like Cloudflare
+// Workers' shared egress IPs getting blocked, not an ESPN outage. Live
+// scoring now sources from R2, populated by a local job
+// (local_processing/job_live_scores.py) that polls ESPN directly from the
+// user's own machine instead. If ESPN access from Workers is ever
+// restored, this can go back to calling espnFetch directly.
+// Per (season, type, week) — matches local_processing/job_live_scores.py's
+// scoreboard_key()/player_stats_key() exactly. Every week's data lives at
+// its own key permanently; the job never overwrites an earlier week's data
+// when it moves on to a new one, so historical weeks stay fetchable here.
+const liveScoreboardKey   = (season, type, week) => `fantasai/live/scoreboard_${season}_${type}_${week}.json`;
+const livePlayerStatsKey  = (season, type, week) => `fantasai/live/player_stats_${season}_${type}_${week}.json`;
+
+async function handleNflScoreboard(url, env) {
   const { week, season, type } = resolveWeekParams(url);
-  const seasonType = espnSeasonType(type);
-  const data = await espnFetch(`/scoreboard?seasontype=${seasonType}&week=${week}&season=${season}`);
-  // NFL season runs Aug–Jan; filter to only games that belong to the requested season year
-  // so ESPN can't silently return prior-season data when the new season hasn't dropped yet.
-  const seasonFloor = new Date(`${season}-07-01`);
-  const seasonCeil  = new Date(`${season + 1}-03-01`);
-  const allGames    = (data.events || []).map(normalizeGame);
-  const games       = allGames.filter(g => {
-    const d = new Date(g.date);
-    return d >= seasonFloor && d < seasonCeil;
-  });
+  const res = await s3Fetch(env, 'GET', liveScoreboardKey(season, type, week), null);
+  const cached = res.ok ? await res.json() : null;
+
+  if (!cached) {
+    return json({
+      source: 'local-pipeline', fetchedAt: new Date().toISOString(),
+      season, week, type, gameCount: 0, games: [], seasonAvailable: false,
+      note: 'No cached live data for this week/season/type — run job_live_scores.py locally to populate it.',
+    }, 200);
+  }
+
   return json({
-    source:          'espn',
-    fetchedAt:       new Date().toISOString(),
+    source:          'local-pipeline',
+    fetchedAt:       cached.fetchedAt,
     season,
     week,
     type,
-    gameCount:       games.length,
-    games,
-    seasonAvailable: games.length > 0,
+    gameCount:       cached.games.length,
+    games:           cached.games,
+    seasonAvailable: cached.games.length > 0,
   }, 200);
 }
 
@@ -807,148 +821,27 @@ async function handleNflNews(url) {
   return json({ source: 'espn', fetchedAt: new Date().toISOString(), count: articles.length, articles }, 200);
 }
 
-// ── NFL Player Stats (ESPN box scores) ──────────────────────────────────────
-async function handleNflPlayerStats(url) {
+// ── NFL Player Stats — sourced from R2 (see handleNflScoreboard's comment
+//    on why this no longer calls ESPN directly from the Worker) ────────────
+async function handleNflPlayerStats(url, env) {
   const { week, season, type } = resolveWeekParams(url);
-  const seasonType = espnSeasonType(type);
+  const res = await s3Fetch(env, 'GET', livePlayerStatsKey(season, type, week), null);
+  const cached = res.ok ? await res.json() : null;
 
-  // Step 1: get the scoreboard to find game IDs
-  const board = await espnFetch(`/scoreboard?seasontype=${seasonType}&week=${week}&season=${season}`);
-  const events = (board.events || []).filter(e => {
-    const d = new Date(e.date);
-    return d >= new Date(`${season}-07-01`) && d < new Date(`${season + 1}-03-01`);
-  });
-
-  if (events.length === 0) {
-    return json({ source: 'espn', week, season, gameCount: 0, players: [], fetchedAt: new Date().toISOString() }, 200);
+  if (!cached) {
+    return json({
+      source: 'local-pipeline', fetchedAt: new Date().toISOString(),
+      week, season, type, gameCount: 0, players: [],
+      note: 'No cached live data for this week/season/type — run job_live_scores.py locally to populate it.',
+    }, 200);
   }
-
-  // Step 2: fetch box scores for each game in parallel (cap at 16 games)
-  const gameIds = events.slice(0, 16).map(e => e.id);
-  const summaries = await Promise.allSettled(
-    gameIds.map(id => espnFetch(`/summary?event=${id}`))
-  );
-
-  // Step 3: parse player stats from each game
-  const playerMap = {};
-
-  for (let i = 0; i < summaries.length; i++) {
-    const result = summaries[i];
-    if (result.status !== 'fulfilled') continue;
-    const data = result.value;
-    const boxscore = data.boxscore || {};
-
-    // Determine team scores for DST pts-allowed calculation
-    const teamScores = {};
-    for (const comp of (events[i]?.competitions?.[0]?.competitors || [])) {
-      const abbr = comp.team?.abbreviation || '';
-      teamScores[abbr] = parseInt(comp.score || '0', 10);
-    }
-
-    // Parse individual player stats
-    for (const teamData of (boxscore.players || [])) {
-      const teamAbbr = teamData.team?.abbreviation || '';
-      const opponentAbbr = Object.keys(teamScores).find(k => k !== teamAbbr) || '';
-      const ptsAllowed = teamScores[opponentAbbr] ?? null;
-
-      for (const statGroup of (teamData.statistics || [])) {
-        const { name, keys = [], athletes = [] } = statGroup;
-        for (const athleteEntry of athletes) {
-          const athlete = athleteEntry.athlete || {};
-          const statsArr = athleteEntry.stats || [];
-          const pid = athlete.id;
-          if (!pid) continue;
-
-          if (!playerMap[pid]) {
-            playerMap[pid] = {
-              id: pid,
-              name: athlete.displayName || '',
-              pos: athlete.position?.abbreviation || '',
-              team: teamAbbr,
-              stats: {},
-            };
-          }
-          const p = playerMap[pid];
-
-          function sv(key) {
-            const idx = keys.indexOf(key);
-            if (idx < 0) return 0;
-            const v = statsArr[idx];
-            return v && v !== '--' ? parseFloat(v) || 0 : 0;
-          }
-          function splitSlash(key) {
-            const idx = keys.indexOf(key);
-            const v = idx >= 0 ? (statsArr[idx] || '') : '';
-            const parts = v.split('/');
-            return { a: parseFloat(parts[0]) || 0, b: parseFloat(parts[1]) || 0 };
-          }
-          function splitDash(key) {
-            const idx = keys.indexOf(key);
-            const v = idx >= 0 ? (statsArr[idx] || '') : '';
-            const parts = v.split('-');
-            return parseFloat(parts[0]) || 0;
-          }
-
-          if (name === 'passing') {
-            const ca = splitSlash('completionsAttempts');
-            p.stats.passComp = (p.stats.passComp || 0) + ca.a;
-            p.stats.passAtt  = (p.stats.passAtt  || 0) + ca.b;
-            p.stats.passYds  = (p.stats.passYds  || 0) + sv('passingYards');
-            p.stats.passTds  = (p.stats.passTds  || 0) + sv('passingTouchdowns');
-            p.stats.passInt  = (p.stats.passInt  || 0) + sv('interceptions');
-          } else if (name === 'rushing') {
-            p.stats.rushAtt = (p.stats.rushAtt || 0) + sv('rushingAttempts');
-            p.stats.rushYds = (p.stats.rushYds || 0) + sv('rushingYards');
-            p.stats.rushTds = (p.stats.rushTds || 0) + sv('rushingTouchdowns');
-          } else if (name === 'receiving') {
-            p.stats.rec     = (p.stats.rec     || 0) + sv('receptions');
-            p.stats.recYds  = (p.stats.recYds  || 0) + sv('receivingYards');
-            p.stats.recTds  = (p.stats.recTds  || 0) + sv('receivingTouchdowns');
-            p.stats.targets = (p.stats.targets || 0) + sv('receivingTargets');
-          } else if (name === 'kicking') {
-            const fg = splitSlash('fieldGoalsMadeFieldGoalsAttempted');
-            const xp = splitSlash('extraPointsMadeExtraPointsAttempted');
-            p.stats.fgMade  = (p.stats.fgMade  || 0) + fg.a;
-            p.stats.fgAtt   = (p.stats.fgAtt   || 0) + fg.b;
-            p.stats.xpMade  = (p.stats.xpMade  || 0) + xp.a;
-            if (!p.pos || p.pos === '') p.pos = 'K';
-          } else if (name === 'defensive') {
-            p.stats.sacks   = (p.stats.sacks   || 0) + sv('sacks');
-            p.stats.ints    = (p.stats.ints    || 0) + sv('interceptions');
-            p.stats.fumRec  = (p.stats.fumRec  || 0) + sv('fumbleRecoveries');
-            p.stats.tds     = (p.stats.tds     || 0) + sv('defensiveTouchdowns');
-            p.stats.safeties= (p.stats.safeties|| 0) + sv('safeties');
-          }
-
-          // Tag DST players with ptsAllowed for their team's defense
-          if (ptsAllowed !== null) p.stats.ptsAllowed = ptsAllowed;
-        }
-      }
-    }
-  }
-
-  // Normalize ESPN position abbreviations to fantasy slot names
-  const POS_NORM = { HB: 'RB', FB: 'RB', WB: 'RB', FL: 'WR', SE: 'WR', SWR: 'WR', 'D/ST': 'DST', DEF: 'DST', PK: 'K' };
-  for (const p of Object.values(playerMap)) {
-    const t = (p.pos || '').trim();
-    p.pos = POS_NORM[t] || t;
-  }
-
-  // Filter to players with at least some recorded stats.
-  // Kickers are included if they appeared in the kicking stat group (fgAtt > 0) even if they missed all FGs.
-  const players = Object.values(playerMap).filter(p => {
-    const s = p.stats;
-    return (s.passYds || s.rushYds || s.recYds || s.rec || s.fgMade || s.fgAtt || s.sacks || s.ints || s.tds) > 0
-      || (s.xpMade || 0) > 0;
-  });
 
   return json({
-    source: 'espn',
-    fetchedAt: new Date().toISOString(),
+    source: 'local-pipeline',
+    fetchedAt: cached.fetchedAt,
     week,
     season,
-    gameCount: gameIds.length,
-    players,
+    players: cached.players,
   }, 200);
 }
 
@@ -1431,7 +1324,9 @@ const CHAT_SYSTEM_PROMPT =
   'You are FantasAI, an expert fantasy football copilot. ' +
   'Answer concisely and directly. Use bullet points for lists. ' +
   'Focus on actionable advice — start/sit decisions, waiver adds, trade values, injury impact. ' +
-  'When roster context is provided, tailor your answer to those specific players.';
+  'When roster context is provided, tailor your answer to those specific players. ' +
+  'When you state that one number is higher, lower, better, or worse than another (projections, points, rankings, etc.), ' +
+  're-check the actual values given in the prompt before writing the comparison — do not assert a comparison you have not verified against the provided numbers.';
 
 // ── Intent classification ────────────────────────────────────────────────────
 

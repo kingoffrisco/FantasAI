@@ -27,6 +27,7 @@ import LoginLog from './screens/LoginLog.jsx';
 import AdminLeagues from './screens/AdminLeagues.jsx';
 import ScoringTestScreen from './screens/ScoringTest.jsx';
 import LeagueSettings from './screens/LeagueSettings.jsx';
+import DfsOptimizerScreen from './screens/DfsOptimizer.jsx';
 import CurrentRosterScreen from './screens/CurrentRoster.jsx';
 import HeadToHeadScreen from './screens/HeadToHead.jsx';
 import AccountEditScreen, { THEME_VARS } from './screens/AccountEdit.jsx';
@@ -475,6 +476,12 @@ export default function App() {
   }, []);
   // Merge: either the manual desktop-preview toggle or an actual mobile device.
   const showMobile = tweaks.showMobile || isMobileDevice;
+  const [leftNavCollapsed, setLeftNavCollapsed] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_left_nav_collapsed') || 'false'); } catch { return false; }
+  });
+  React.useEffect(() => {
+    localStorage.setItem('fantasai_left_nav_collapsed', JSON.stringify(leftNavCollapsed));
+  }, [leftNavCollapsed]);
 
   const [active, setActive] = React.useState('dashboard');
   const [appFontSize, setAppFontSize] = React.useState(() => Number(localStorage.getItem('fantasai_font_size') ?? 12));
@@ -485,7 +492,7 @@ export default function App() {
   // 'mock' | 'live' | null — set by DraftRoom via onDraftStatusChange callback
   // Also seed from localStorage so a page refresh still shows the banner
   const [draftTab, setDraftTab] = React.useState('room'); // 'room' | 'recap'
-  const [playersTab, setPlayersTab] = React.useState('players'); // 'players' | 'watchlist'
+  const [playersTab, setPlayersTab] = React.useState('players'); // 'players' | 'watchlist' | 'waiverorder' (mobile only)
 
   // Redirect legacy 'watchlist' nav to Players › Watchlist tab
   React.useEffect(() => {
@@ -1270,6 +1277,11 @@ export default function App() {
 
   const aiMode = tweaks.aiMode;
   const showAI = tweaks.showChat;
+  const desktopSidebarWidth = leftNavCollapsed ? 78 : 240;
+  const shellLayoutStyle = {
+    ...(!showMobile ? { gridTemplateColumns: showAI ? `${desktopSidebarWidth}px 1fr 340px` : `${desktopSidebarWidth}px 1fr` } : {}),
+    ...(tweaks.showMobile && !isMobileDevice ? { maxWidth: 414, margin: '0 auto', boxShadow: '0 0 60px rgba(0,0,0,.6)' } : {}),
+  };
   const _draftPausedOnOtherPage = draftInProgress && active !== 'draft' && draftMeta?.draftPaused && !draftMeta?.draftComplete;
   const shellClass = `shell ${showAI ? 'has-ai' : ''} ${showMobile ? 'mobile-mode' : ''} ${_draftPausedOnOtherPage ? 'draft-paused' : ''}`;
   const playerObj = openPlayer ? findPlayer(openPlayer) : null;
@@ -1286,10 +1298,14 @@ export default function App() {
   return (
     <React.Fragment>
       <LiveScoreTicker myTeamId={user?.teamId} onNav={setActive} />
-      <div className={shellClass} style={tweaks.showMobile && !isMobileDevice ? { maxWidth: 414, margin: '0 auto', boxShadow: '0 0 60px rgba(0,0,0,.6)' } : {}}>
+      <div className={shellClass} style={shellLayoutStyle}>
         <div className="logo-area">
           <span className="logo-dot"></span>
-          <span className="logo">FANTAS<span className="ai-mark">AI</span></span>
+          {!showMobile && leftNavCollapsed ? (
+            <span className="logo" title="Expand navigation" style={{ fontSize: 13, letterSpacing: '.04em' }}>AI</span>
+          ) : (
+            <span className="logo">FANTAS<span className="ai-mark">AI</span></span>
+          )}
         </div>
         <TopBar
           crumbs={CRUMBS[active] || ['FantasAI']}
@@ -1304,14 +1320,14 @@ export default function App() {
           fontSize={appFontSize}
           onFontSizeChange={handleAppFontSize}
         />
-        <Sidebar active={active} onNav={id => setActive(id)} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} cookieAlert={cookieAlert} />
+        <Sidebar active={active} onNav={id => setActive(id)} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} cookieAlert={cookieAlert} collapsed={!showMobile && leftNavCollapsed} onToggleCollapse={() => setLeftNavCollapsed(v => !v)} />
 
         <div className="main" style={{ zoom: appFontSize / 12 }}>
           {active === 'dashboard' && <Dashboard onNav={setActive} onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} watchlistIds={watchlistIds} tradeOffers={tradeOffers} showMobile={showMobile} />}
-          {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onClaimPlayer={handleClaimPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} playersTab={playersTab} onPlayersTabChange={setPlayersTab} />}
+          {active === 'players'   && <PlayersScreen onOpenPlayer={setOpenPlayer} aiMode={aiMode} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onClaimPlayer={handleClaimPlayer} onTradePlayer={handleTradePlayer} user={user} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} waiverQueue={waiverQueue} playersTab={playersTab} onPlayersTabChange={setPlayersTab} showMobile={showMobile} />}
           {active === 'news'      && <NewsScreen onOpenPlayer={setOpenPlayer} sourcesState={sourcesState} user={user} />}
           {active === 'roster'    && <CurrentRosterScreen onNav={setActive} user={user} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onDropPlayer={handleDropPlayer} onClaimPlayer={handleClaimPlayer} onOpenPlayer={setOpenPlayer} watchlistIds={watchlistIds} onToggleWatch={handleToggleWatch} sourcesState={sourcesState} slotOverrides={rosterSlotOverrides} onSlotOverridesChange={handleSlotOverridesChange} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} rosterSyncBadge={rosterSyncBadge} rosterLoading={rosterLoading} showMobile={showMobile} />}
-          {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
+          {active === 'h2h'       && <HeadToHeadScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} showMobile={showMobile} />}
           {active === 'compare'   && <CompareScreen />}
           {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} onSendTradeOffer={handleSendTradeOffer} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} onDeleteTradeOffer={handleDeleteTradeOffer} />}
           {/* Draft — always mounted so timer and AI auto-picks continue when user navigates to another screen */}
@@ -1327,7 +1343,7 @@ export default function App() {
                 <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
                   {/* DraftRoom kept mounted at all times — display:none hides it without unmounting */}
                   <div style={{ display: tab === 'room' ? 'flex' : 'none', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                    <DraftRoom aiMode={aiMode} user={user} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onOpenPlayer={setOpenPlayer} onDraftPick={id => {
+                    <DraftRoom aiMode={aiMode} user={user} showMobile={showMobile} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onOpenPlayer={setOpenPlayer} onDraftPick={id => {
                       let nextIds = null;
                       setMyRosterIds(prev => {
                         const next = new Set([...prev, id]);
@@ -1361,6 +1377,7 @@ export default function App() {
           {active === 'power'         && <PowerRankingsScreen user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
           {active === 'account'       && <AccountEditScreen user={user} />}
           {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} initialTab={settingsInitialTab} />}
+          {active === 'dfs-optimizer' && <DfsOptimizerScreen />}
         </div>
 
         {showAI && <AICopilot active={active} aiMode={aiMode} user={user} myRosterIds={myRosterIds} />}

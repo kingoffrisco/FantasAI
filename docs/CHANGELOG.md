@@ -4,6 +4,21 @@ All notable changes to the FantasAI ML pipeline project.
 
 ---
 
+## [Docs] - 2026-08-22
+
+### Documentation Rewrite
+Full deep-dive audit of the codebase (local pipeline, worker-api, frontend) and rewrite of `ARCHITECTURE.md`, `docs/README.md`, `docs/API_ENDPOINTS.md`, `docs/DATA_SCHEMAS.md`, and `app/BACKEND_TO_FRONTEND.md`, which had drifted since the June 16 architecture snapshot. Key corrections:
+
+- DuckDB schema grew from ~24 to ~33 tables — new O-Line Index, O-Line Stability, and Offensive Ecosystem subsystems, plus rookie scoring and team RSS ingestion
+- New Job 5 (`job5_deep_reasoner.py`, Qwen3 30B) — weekly deep breakout/buy-sell reasoning on the top ~20 candidates, separate from the daily 8B/14B chain
+- New live-scoring pipeline (`job_live_scores.py`) — worker-api's `/api/v1/nfl/scoreboard` and `/player-stats` moved off direct ESPN calls (which started 403-ing Cloudflare Workers on 2026-08-20) to reading R2 keys this job writes
+- Chat routing corrected: local Ollama (via `chat_server.py`) is primary for simple/medium queries, OpenAI is primary for complex queries with local/Anthropic fallback — Cloudflare Workers AI is not used at all (contrary to the old 3-tier doc)
+- Identified 9 worker-api routes still querying Databricks directly despite the "full migration" narrative — status unconfirmed
+- Identified `pipeline_watcher.py` as likely vestigial (polls a Databricks ETL marker that's no longer written) and 3 frontend screens (`Waivers.jsx`, `WarRoom.jsx`, `SeasonPerformance.jsx`) as orphaned/unrouted
+- 14 Windows Task Scheduler tasks confirmed live under `\FantasAI\`, up from the 2 documented in June
+
+---
+
 ## [2.2.0] - 2026-06-19
 
 ### Summary

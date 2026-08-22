@@ -1,0 +1,5464 @@
+{
+  "season": 2026,
+  "fetchedAt": "2026-08-21T03:33:45.548803+00:00",
+  "gameCount": 321,
+  "games": [
+    {
+      "id": "401873271",
+      "date": "2026-08-07T00:00Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "CAR",
+      "homeScore": "30",
+      "awayScore": "33",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 1
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 1
+    },
+    {
+      "id": "401873272",
+      "date": "2026-08-13T23:00Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "DET",
+      "homeScore": "16",
+      "awayScore": "14",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873275",
+      "date": "2026-08-13T23:00Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "GB",
+      "homeScore": "28",
+      "awayScore": "9",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873273",
+      "date": "2026-08-13T23:30Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "IND",
+      "homeScore": "13",
+      "awayScore": "13",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873640",
+      "date": "2026-08-14T00:00Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "ARI",
+      "homeScore": "14",
+      "awayScore": "27",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873274",
+      "date": "2026-08-14T00:00Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "LAC",
+      "homeScore": "7",
+      "awayScore": "27",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401874392",
+      "date": "2026-08-14T01:00Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "TEN",
+      "homeScore": "13",
+      "awayScore": "19",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873278",
+      "date": "2026-08-14T23:00Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "DEN",
+      "homeScore": "7",
+      "awayScore": "27",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873276",
+      "date": "2026-08-14T23:00Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "TB",
+      "homeScore": "16",
+      "awayScore": "24",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873277",
+      "date": "2026-08-14T23:00Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "MIA",
+      "homeScore": "20",
+      "awayScore": "7",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873282",
+      "date": "2026-08-15T17:00Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "CAR",
+      "homeScore": "29",
+      "awayScore": "14",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401874393",
+      "date": "2026-08-15T17:00Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "CLE",
+      "homeScore": "34",
+      "awayScore": "10",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873280",
+      "date": "2026-08-15T17:00Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "MIN",
+      "homeScore": "10",
+      "awayScore": "13",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873283",
+      "date": "2026-08-15T20:00Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "LAR",
+      "homeScore": "12",
+      "awayScore": "20",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873281",
+      "date": "2026-08-15T20:00Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "JAX",
+      "homeScore": "20",
+      "awayScore": "24",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873284",
+      "date": "2026-08-15T23:00Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "PHI",
+      "homeScore": "24",
+      "awayScore": "7",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873279",
+      "date": "2026-08-16T00:00Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "DAL",
+      "homeScore": "7",
+      "awayScore": "17",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 2
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 2
+    },
+    {
+      "id": "401873286",
+      "date": "2026-08-21T00:00Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "LV",
+      "homeScore": "20",
+      "awayScore": "22",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873285",
+      "date": "2026-08-21T02:00Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "SF",
+      "homeScore": "3",
+      "awayScore": "17",
+      "state": "in",
+      "completed": false,
+      "description": "In Progress",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873288",
+      "date": "2026-08-21T23:00Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873287",
+      "date": "2026-08-21T23:30Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "CAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873613",
+      "date": "2026-08-22T01:00Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "GB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873601",
+      "date": "2026-08-22T16:00Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873294",
+      "date": "2026-08-22T17:00Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873295",
+      "date": "2026-08-22T17:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873291",
+      "date": "2026-08-22T17:00Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873290",
+      "date": "2026-08-22T20:00Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873292",
+      "date": "2026-08-22T20:00Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873289",
+      "date": "2026-08-22T23:00Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873293",
+      "date": "2026-08-22T23:00Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "PHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873296",
+      "date": "2026-08-22T23:30Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401874101",
+      "date": "2026-08-23T02:00Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "DAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873297",
+      "date": "2026-08-24T00:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 3
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 3
+    },
+    {
+      "id": "401873298",
+      "date": "2026-08-27T23:00Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873299",
+      "date": "2026-08-28T00:00Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873641",
+      "date": "2026-08-28T00:00Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "SF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873300",
+      "date": "2026-08-28T02:00Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "LAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873302",
+      "date": "2026-08-28T22:00Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873304",
+      "date": "2026-08-28T23:00Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873307",
+      "date": "2026-08-28T23:00Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873303",
+      "date": "2026-08-28T23:30Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873306",
+      "date": "2026-08-28T23:30Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "TB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401874048",
+      "date": "2026-08-29T00:00Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401874102",
+      "date": "2026-08-29T00:00Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "ARI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873305",
+      "date": "2026-08-29T00:00Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873301",
+      "date": "2026-08-29T00:00Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873614",
+      "date": "2026-08-29T01:00Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "MIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401873308",
+      "date": "2026-08-29T17:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "DET",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401874394",
+      "date": "2026-08-29T22:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "pre",
+        "week": 4
+      },
+      "espnSeasonType": 1,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872656",
+      "date": "2026-09-10T00:20Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872657",
+      "date": "2026-09-11T00:35Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "SF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872925",
+      "date": "2026-09-13T17:00Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "TB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872923",
+      "date": "2026-09-13T17:00Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872924",
+      "date": "2026-09-13T17:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872659",
+      "date": "2026-09-13T17:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872658",
+      "date": "2026-09-13T17:00Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872661",
+      "date": "2026-09-13T17:00Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872922",
+      "date": "2026-09-13T17:00Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "CLE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872660",
+      "date": "2026-09-13T17:00Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872928",
+      "date": "2026-09-13T20:25Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "MIA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872927",
+      "date": "2026-09-13T20:25Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "GB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872929",
+      "date": "2026-09-13T20:25Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872926",
+      "date": "2026-09-13T20:25Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "ARI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872930",
+      "date": "2026-09-14T00:20Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "DAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872931",
+      "date": "2026-09-15T00:15Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "DEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 1
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 1
+    },
+    {
+      "id": "401872932",
+      "date": "2026-09-18T00:15Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "DET",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872933",
+      "date": "2026-09-20T17:00Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "CAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872937",
+      "date": "2026-09-20T17:00Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "MIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872939",
+      "date": "2026-09-20T17:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "PHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872946",
+      "date": "2026-09-20T17:00Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872936",
+      "date": "2026-09-20T17:00Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "GB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872935",
+      "date": "2026-09-20T17:00Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "CLE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872938",
+      "date": "2026-09-20T17:00Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872934",
+      "date": "2026-09-20T17:00Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872940",
+      "date": "2026-09-20T20:05Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "JAX",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872941",
+      "date": "2026-09-20T20:05Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "LV",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872944",
+      "date": "2026-09-20T20:25Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872943",
+      "date": "2026-09-20T20:25Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872942",
+      "date": "2026-09-20T20:25Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "MIA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872945",
+      "date": "2026-09-21T00:20Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "IND",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872947",
+      "date": "2026-09-22T00:15Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 2
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 2
+    },
+    {
+      "id": "401872948",
+      "date": "2026-09-25T00:15Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872953",
+      "date": "2026-09-27T17:00Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "LAC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872949",
+      "date": "2026-09-27T17:00Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "CAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872954",
+      "date": "2026-09-27T17:00Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872951",
+      "date": "2026-09-27T17:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872952",
+      "date": "2026-09-27T17:00Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872956",
+      "date": "2026-09-27T17:00Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "TEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872950",
+      "date": "2026-09-27T17:00Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872955",
+      "date": "2026-09-27T17:00Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872957",
+      "date": "2026-09-27T17:00Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872958",
+      "date": "2026-09-27T20:05Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "ARI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872959",
+      "date": "2026-09-27T20:05Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "MIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872960",
+      "date": "2026-09-27T20:25Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872961",
+      "date": "2026-09-27T20:25Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "LV",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872962",
+      "date": "2026-09-28T00:20Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "LAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872963",
+      "date": "2026-09-29T00:15Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "PHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 3
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 3
+    },
+    {
+      "id": "401872964",
+      "date": "2026-10-02T00:15Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872965",
+      "date": "2026-10-04T13:30Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "IND",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872971",
+      "date": "2026-10-04T17:00Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872972",
+      "date": "2026-10-04T17:00Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872969",
+      "date": "2026-10-04T17:00Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "JAX",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872966",
+      "date": "2026-10-04T17:00Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "ARI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872970",
+      "date": "2026-10-04T17:00Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "LAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872968",
+      "date": "2026-10-04T17:00Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "GB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872973",
+      "date": "2026-10-04T17:00Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "TEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872967",
+      "date": "2026-10-04T17:00Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "DAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872974",
+      "date": "2026-10-04T20:05Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "MIA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872976",
+      "date": "2026-10-04T20:25Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872975",
+      "date": "2026-10-04T20:25Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "DEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872977",
+      "date": "2026-10-04T20:25Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "LAC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872978",
+      "date": "2026-10-05T00:20Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "DET",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872979",
+      "date": "2026-10-06T00:15Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 4
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 4
+    },
+    {
+      "id": "401872980",
+      "date": "2026-10-09T00:15Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "TB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872981",
+      "date": "2026-10-11T13:30Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "PHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872984",
+      "date": "2026-10-11T17:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872982",
+      "date": "2026-10-11T17:00Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872986",
+      "date": "2026-10-11T17:00Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "LV",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872987",
+      "date": "2026-10-11T17:00Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "MIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872983",
+      "date": "2026-10-11T17:00Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "CLE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872985",
+      "date": "2026-10-11T17:00Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "IND",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872988",
+      "date": "2026-10-11T17:00Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872989",
+      "date": "2026-10-11T20:05Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "DEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872990",
+      "date": "2026-10-11T20:25Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872991",
+      "date": "2026-10-11T20:25Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "DET",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872992",
+      "date": "2026-10-11T20:25Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "SF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872993",
+      "date": "2026-10-12T00:20Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872994",
+      "date": "2026-10-13T00:15Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 5
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 5
+    },
+    {
+      "id": "401872995",
+      "date": "2026-10-16T00:15Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401872996",
+      "date": "2026-10-18T13:30Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401872999",
+      "date": "2026-10-18T17:00Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401872997",
+      "date": "2026-10-18T17:00Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873003",
+      "date": "2026-10-18T17:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "TEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873001",
+      "date": "2026-10-18T17:00Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873000",
+      "date": "2026-10-18T17:00Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401872998",
+      "date": "2026-10-18T17:00Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "CAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873002",
+      "date": "2026-10-18T17:00Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873004",
+      "date": "2026-10-18T20:05Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "ARI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873006",
+      "date": "2026-10-18T20:25Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "LAC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873005",
+      "date": "2026-10-18T20:25Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873007",
+      "date": "2026-10-19T00:20Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "DAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873008",
+      "date": "2026-10-20T00:15Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 6
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 6
+    },
+    {
+      "id": "401873010",
+      "date": "2026-10-23T00:15Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873011",
+      "date": "2026-10-25T13:30Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873017",
+      "date": "2026-10-25T17:00Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "SF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873013",
+      "date": "2026-10-25T17:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "CLE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873014",
+      "date": "2026-10-25T17:00Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "IND",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873015",
+      "date": "2026-10-25T17:00Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "MIA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873018",
+      "date": "2026-10-25T17:00Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "TB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873012",
+      "date": "2026-10-25T17:00Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873016",
+      "date": "2026-10-25T17:00Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873019",
+      "date": "2026-10-25T20:05Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "DEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873020",
+      "date": "2026-10-25T20:25Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "GB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873021",
+      "date": "2026-10-25T20:25Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "LAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873022",
+      "date": "2026-10-26T00:20Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873009",
+      "date": "2026-10-27T00:15Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "DAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 7
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 7
+    },
+    {
+      "id": "401873023",
+      "date": "2026-10-30T00:15Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "CAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873026",
+      "date": "2026-11-01T18:00Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873031",
+      "date": "2026-11-01T18:00Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "TEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873024",
+      "date": "2026-11-01T18:00Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "ARI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873030",
+      "date": "2026-11-01T18:00Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "MIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873029",
+      "date": "2026-11-01T18:00Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "LV",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873027",
+      "date": "2026-11-01T18:00Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "CLE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873025",
+      "date": "2026-11-01T18:00Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873028",
+      "date": "2026-11-01T18:00Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "IND",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873032",
+      "date": "2026-11-01T21:05Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "LAC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873033",
+      "date": "2026-11-01T21:25Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873034",
+      "date": "2026-11-01T21:25Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873035",
+      "date": "2026-11-02T01:20Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "PHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873036",
+      "date": "2026-11-03T01:15Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 8
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 8
+    },
+    {
+      "id": "401873037",
+      "date": "2026-11-06T01:15Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "JAX",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873038",
+      "date": "2026-11-08T14:30Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873040",
+      "date": "2026-11-08T18:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "DAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873045",
+      "date": "2026-11-08T18:00Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873042",
+      "date": "2026-11-08T18:00Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "DET",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873039",
+      "date": "2026-11-08T18:00Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "CLE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873044",
+      "date": "2026-11-08T18:00Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873043",
+      "date": "2026-11-08T18:00Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "LAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873041",
+      "date": "2026-11-08T18:00Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "DEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873046",
+      "date": "2026-11-08T21:05Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873047",
+      "date": "2026-11-08T21:05Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "LV",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873049",
+      "date": "2026-11-08T21:25Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "GB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873048",
+      "date": "2026-11-08T21:25Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "ARI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873050",
+      "date": "2026-11-09T01:20Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "TB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873051",
+      "date": "2026-11-10T01:15Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 9
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 9
+    },
+    {
+      "id": "401873052",
+      "date": "2026-11-13T01:15Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873053",
+      "date": "2026-11-15T14:30Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873058",
+      "date": "2026-11-15T18:00Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873056",
+      "date": "2026-11-15T18:00Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873060",
+      "date": "2026-11-15T18:00Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "MIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873057",
+      "date": "2026-11-15T18:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "JAX",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873059",
+      "date": "2026-11-15T18:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "MIA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873055",
+      "date": "2026-11-15T18:00Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "CAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873054",
+      "date": "2026-11-15T18:00Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873062",
+      "date": "2026-11-15T21:05Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873061",
+      "date": "2026-11-15T21:05Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "LAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873063",
+      "date": "2026-11-15T21:25Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "SF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873064",
+      "date": "2026-11-16T01:20Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873065",
+      "date": "2026-11-17T01:15Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "LAC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 10
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 10
+    },
+    {
+      "id": "401873066",
+      "date": "2026-11-20T01:15Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "IND",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873070",
+      "date": "2026-11-22T18:00Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "MIA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873071",
+      "date": "2026-11-22T18:00Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873073",
+      "date": "2026-11-22T18:00Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "TEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873072",
+      "date": "2026-11-22T18:00Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "TB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873067",
+      "date": "2026-11-22T18:00Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "ARI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873069",
+      "date": "2026-11-22T18:00Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "JAX",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873068",
+      "date": "2026-11-22T18:00Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873074",
+      "date": "2026-11-22T21:05Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873075",
+      "date": "2026-11-22T21:25Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "LV",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873076",
+      "date": "2026-11-22T21:25Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873077",
+      "date": "2026-11-23T01:20Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "MIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873078",
+      "date": "2026-11-24T01:15Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 11
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 11
+    },
+    {
+      "id": "401873079",
+      "date": "2026-11-26T01:00Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "GB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873081",
+      "date": "2026-11-26T18:00Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873080",
+      "date": "2026-11-26T21:30Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "PHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873082",
+      "date": "2026-11-27T01:20Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873083",
+      "date": "2026-11-27T20:00Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "DEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873087",
+      "date": "2026-11-29T18:00Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873086",
+      "date": "2026-11-29T18:00Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "LV",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873088",
+      "date": "2026-11-29T18:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873089",
+      "date": "2026-11-29T18:00Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873084",
+      "date": "2026-11-29T18:00Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873085",
+      "date": "2026-11-29T18:00Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873090",
+      "date": "2026-11-29T21:05Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "TEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873092",
+      "date": "2026-11-29T21:25Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873091",
+      "date": "2026-11-29T21:25Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873093",
+      "date": "2026-11-30T01:20Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873094",
+      "date": "2026-12-01T01:15Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "CAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 12
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 12
+    },
+    {
+      "id": "401873096",
+      "date": "2026-12-04T01:15Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873098",
+      "date": "2026-12-06T18:00Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "DET",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873100",
+      "date": "2026-12-06T18:00Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "JAX",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873097",
+      "date": "2026-12-06T18:00Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873102",
+      "date": "2026-12-06T18:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873099",
+      "date": "2026-12-06T18:00Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "GB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873095",
+      "date": "2026-12-06T18:00Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "SF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873101",
+      "date": "2026-12-06T18:00Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "LAC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873103",
+      "date": "2026-12-06T21:05Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "MIA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873104",
+      "date": "2026-12-06T21:05Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "PHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873106",
+      "date": "2026-12-06T21:25Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "CAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873105",
+      "date": "2026-12-06T21:25Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873107",
+      "date": "2026-12-07T01:20Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873108",
+      "date": "2026-12-08T01:15Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "DAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 13
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 13
+    },
+    {
+      "id": "401873109",
+      "date": "2026-12-11T01:15Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "MIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873110",
+      "date": "2026-12-13T18:00Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873117",
+      "date": "2026-12-13T18:00Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "TEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873111",
+      "date": "2026-12-13T18:00Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873112",
+      "date": "2026-12-13T18:00Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "DEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873114",
+      "date": "2026-12-13T18:00Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "IND",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873113",
+      "date": "2026-12-13T18:00Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873115",
+      "date": "2026-12-13T18:00Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873116",
+      "date": "2026-12-13T18:00Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "TB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873118",
+      "date": "2026-12-13T21:05Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "LAC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873119",
+      "date": "2026-12-13T21:25Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873120",
+      "date": "2026-12-13T21:25Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "LAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873121",
+      "date": "2026-12-13T21:25Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873122",
+      "date": "2026-12-14T01:20Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873123",
+      "date": "2026-12-15T01:15Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 14
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 14
+    },
+    {
+      "id": "401873124",
+      "date": "2026-12-18T01:15Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "SF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873125",
+      "date": "2026-12-19T22:00Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873126",
+      "date": "2026-12-20T01:20Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873133",
+      "date": "2026-12-20T18:00Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "MIA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873131",
+      "date": "2026-12-20T18:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "IND",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873130",
+      "date": "2026-12-20T18:00Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "CLE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873128",
+      "date": "2026-12-20T18:00Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873134",
+      "date": "2026-12-20T18:00Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873127",
+      "date": "2026-12-20T18:00Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873129",
+      "date": "2026-12-20T18:00Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873132",
+      "date": "2026-12-20T18:00Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "JAX",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873135",
+      "date": "2026-12-20T21:05Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873137",
+      "date": "2026-12-20T21:25Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "DEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873136",
+      "date": "2026-12-20T21:25Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "DAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873138",
+      "date": "2026-12-21T01:20Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "DET",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873139",
+      "date": "2026-12-22T01:15Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 15
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 15
+    },
+    {
+      "id": "401873140",
+      "date": "2026-12-25T01:15Z",
+      "homeAbbr": "PHI",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873141",
+      "date": "2026-12-25T18:00Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "GB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873142",
+      "date": "2026-12-25T21:30Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873143",
+      "date": "2026-12-26T01:15Z",
+      "homeAbbr": "SEA",
+      "awayAbbr": "LAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873146",
+      "date": "2026-12-27T05:00Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "TB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873145",
+      "date": "2026-12-27T05:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "CIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873147",
+      "date": "2026-12-27T05:00Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873144",
+      "date": "2026-12-27T05:00Z",
+      "homeAbbr": "PIT",
+      "awayAbbr": "CAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873150",
+      "date": "2026-12-27T18:00Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "LAC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873148",
+      "date": "2026-12-27T18:00Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "ARI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873151",
+      "date": "2026-12-27T18:00Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "NE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873149",
+      "date": "2026-12-27T18:00Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "CLE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873152",
+      "date": "2026-12-27T21:05Z",
+      "homeAbbr": "LV",
+      "awayAbbr": "TEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873153",
+      "date": "2026-12-27T21:25Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "SF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873154",
+      "date": "2026-12-28T01:20Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "JAX",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873155",
+      "date": "2026-12-29T01:15Z",
+      "homeAbbr": "DET",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 16
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 16
+    },
+    {
+      "id": "401873156",
+      "date": "2027-01-01T01:15Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "BAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873157",
+      "date": "2027-01-03T05:00Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "DEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873158",
+      "date": "2027-01-03T05:00Z",
+      "homeAbbr": "LAC",
+      "awayAbbr": "KC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873159",
+      "date": "2027-01-03T05:00Z",
+      "homeAbbr": "TB",
+      "awayAbbr": "LAR",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873160",
+      "date": "2027-01-03T05:00Z",
+      "homeAbbr": "JAX",
+      "awayAbbr": "WSH",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873164",
+      "date": "2027-01-03T18:00Z",
+      "homeAbbr": "ATL",
+      "awayAbbr": "NO",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873162",
+      "date": "2027-01-03T18:00Z",
+      "homeAbbr": "CLE",
+      "awayAbbr": "IND",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873165",
+      "date": "2027-01-03T18:00Z",
+      "homeAbbr": "DAL",
+      "awayAbbr": "NYG",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873166",
+      "date": "2027-01-03T18:00Z",
+      "homeAbbr": "TEN",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873161",
+      "date": "2027-01-03T18:00Z",
+      "homeAbbr": "MIA",
+      "awayAbbr": "BUF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873163",
+      "date": "2027-01-03T18:00Z",
+      "homeAbbr": "NYJ",
+      "awayAbbr": "MIN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873167",
+      "date": "2027-01-03T18:00Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873168",
+      "date": "2027-01-03T21:05Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "LV",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873169",
+      "date": "2027-01-03T21:25Z",
+      "homeAbbr": "CHI",
+      "awayAbbr": "DET",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873170",
+      "date": "2027-01-04T01:20Z",
+      "homeAbbr": "SF",
+      "awayAbbr": "PHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873171",
+      "date": "2027-01-05T01:15Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "HOU",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 17
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 17
+    },
+    {
+      "id": "401873181",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "BUF",
+      "awayAbbr": "NYJ",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873174",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "CIN",
+      "awayAbbr": "CLE",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873179",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "DEN",
+      "awayAbbr": "LAC",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873176",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "GB",
+      "awayAbbr": "DET",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873177",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "IND",
+      "awayAbbr": "JAX",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873178",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "KC",
+      "awayAbbr": "LV",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873185",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "LAR",
+      "awayAbbr": "SEA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873173",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "MIN",
+      "awayAbbr": "CHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873180",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "NE",
+      "awayAbbr": "MIA",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873186",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "NO",
+      "awayAbbr": "TB",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873182",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "NYG",
+      "awayAbbr": "PHI",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873184",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "ARI",
+      "awayAbbr": "SF",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873175",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "WSH",
+      "awayAbbr": "DAL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873172",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "CAR",
+      "awayAbbr": "ATL",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873183",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "BAL",
+      "awayAbbr": "PIT",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    },
+    {
+      "id": "401873187",
+      "date": "2027-01-10T05:00Z",
+      "homeAbbr": "HOU",
+      "awayAbbr": "TEN",
+      "homeScore": "0",
+      "awayScore": "0",
+      "state": "pre",
+      "completed": false,
+      "description": "Scheduled",
+      "queriedAs": {
+        "type": "regular",
+        "week": 18
+      },
+      "espnSeasonType": 2,
+      "espnWeek": 18
+    }
+  ]
+}

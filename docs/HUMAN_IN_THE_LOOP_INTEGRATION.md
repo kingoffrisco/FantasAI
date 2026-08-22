@@ -1,7 +1,9 @@
 # Human-in-the-Loop & User Settings Integration Guide
 
-**Last Updated:** June 8, 2026  
+**Last Updated:** June 8, 2026
 **Status:** ✅ Ready for Implementation
+
+> **⚠️ Not re-verified August 22, 2026.** This doc's data flow ends in Databricks Bronze/Gold tables (`bronze_article_labels`, `gold_player_mapping_corrections`) and ML retraining. Per [ARCHITECTURE.md](../ARCHITECTURE.md)'s June 15, 2026 migration, most Databricks dependencies were removed — but the worker-api route `POST /api/v1/feedback/vote` still carries a code comment claiming "Databricks ingests these nightly," which was not confirmed live in the August audit. The R2-facing steps below (frontend → Worker API → `fantasai/labeling/article_labels.json`) are still accurate; treat everything downstream of R2 in this doc (Databricks bronze/gold ingestion, retraining) as unconfirmed until checked directly.
 
 ---
 
