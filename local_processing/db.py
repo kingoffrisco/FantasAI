@@ -828,6 +828,25 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         PRIMARY KEY (market_ticker, fetched_at)
     );
 
+    -- =========================================================
+    -- FLOOR / CEILING (empirical percentiles from real game logs, not a
+    -- simulation). See ingest/ingest_floor_ceiling.py.
+    -- =========================================================
+    CREATE TABLE IF NOT EXISTS player_floor_ceiling (
+        master_player_id  VARCHAR PRIMARY KEY,
+        player_name        VARCHAR,
+        position            VARCHAR,
+        team                VARCHAR,
+        games_sample        INTEGER,
+        floor_pts           DOUBLE,   -- 25th percentile, most recent games window
+        median_pts          DOUBLE,   -- 50th percentile
+        ceiling_pts         DOUBLE,   -- 90th percentile
+        mean_pts            DOUBLE,
+        boom_rate            DOUBLE,   -- % of games >= 1.5x median
+        bust_rate            DOUBLE,   -- % of games < 0.5x median
+        computed_at          TIMESTAMP
+    );
+
     """
 
     for stmt in sql.split(";"):

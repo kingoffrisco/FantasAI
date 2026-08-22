@@ -28,6 +28,7 @@ import AdminLeagues from './screens/AdminLeagues.jsx';
 import ScoringTestScreen from './screens/ScoringTest.jsx';
 import LeagueSettings from './screens/LeagueSettings.jsx';
 import DfsOptimizerScreen from './screens/DfsOptimizer.jsx';
+import KalshiScreen from './screens/Kalshi.jsx';
 import CurrentRosterScreen from './screens/CurrentRoster.jsx';
 import HeadToHeadScreen from './screens/HeadToHead.jsx';
 import AccountEditScreen, { THEME_VARS } from './screens/AccountEdit.jsx';
@@ -1378,6 +1379,7 @@ export default function App() {
           {active === 'account'       && <AccountEditScreen user={user} />}
           {active === 'settings'      && <LeagueSettings user={user} onRosterReset={handleRosterReset} rosterResetState={rosterResetState} initialTab={settingsInitialTab} />}
           {active === 'dfs-optimizer' && <DfsOptimizerScreen />}
+          {active === 'kalshi'        && <KalshiScreen />}
         </div>
 
         {showAI && <AICopilot active={active} aiMode={aiMode} user={user} myRosterIds={myRosterIds} />}

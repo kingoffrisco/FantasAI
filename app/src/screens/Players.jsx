@@ -3,7 +3,7 @@ import WatchlistScreen from './Watchlist.jsx';
 import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer, getPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge, SeasonStatBar, RadarChart, scoreToTier, SCORE_TIER_STYLE } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning, useR2FloorCeiling } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -2576,6 +2576,18 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     return null;
   }, [deepReasoningData, player.name]);
 
+  // Floor/Ceiling — empirical 25th/90th percentile from the player's actual
+  // game log (most recent ~24 games), not a simulation. Only covers players
+  // with a big-enough real sample (min 6 games).
+  const { data: floorCeilingData } = useR2FloorCeiling();
+  const floorCeiling = React.useMemo(() => {
+    const list = floorCeilingData?.players;
+    if (!Array.isArray(list)) return null;
+    const key = player.name?.toLowerCase().trim();
+    if (!key) return null;
+    return list.find(p => (p.player_name || '').toLowerCase().trim() === key) || null;
+  }, [floorCeilingData, player.name]);
+
   // Pre-baked 2025 Sleeper stats (from R2) — used as fallback when live API unavailable
   const { data: r2Stats2025Data } = useR2PlayerStats2025();
   const r2Stats2025 = React.useMemo(() => {
@@ -3197,6 +3209,40 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                       Not on {player.team}'s confirmed {player.pos} depth chart — no meaningful projection can be generated until he has a real slot.
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Floor/Ceiling — empirical percentiles from real game log, not a simulation */}
+              {floorCeiling && (
+                <div className="muted-card" style={{ marginBottom: 16, borderLeft: '3px solid #a78bfa' }}>
+                  <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: '#a78bfa' }}>
+                      Floor / Ceiling
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
+                      {floorCeiling.games_sample} game sample
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Floor (25th %ile)</div>
+                      <div style={{ fontSize: 18, fontWeight: 900, fontFamily: 'var(--font-mono)', color: '#ff8080' }}>{floorCeiling.floor_pts.toFixed(1)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Median</div>
+                      <div style={{ fontSize: 18, fontWeight: 900, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{floorCeiling.median_pts.toFixed(1)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Ceiling (90th %ile)</div>
+                      <div style={{ fontSize: 18, fontWeight: 900, fontFamily: 'var(--font-mono)', color: '#4caf82' }}>{floorCeiling.ceiling_pts.toFixed(1)}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                    Booms (≥1.5× median) <strong style={{ color: '#4caf82' }}>{floorCeiling.boom_rate}%</strong> of games · Busts (&lt;0.5× median) <strong style={{ color: '#ff8080' }}>{floorCeiling.bust_rate}%</strong> of games
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-faint)' }}>
+                    From this player's actual fantasy points over their last {floorCeiling.games_sample} games — real history, not a projection model.
+                  </div>
                 </div>
               )}
 

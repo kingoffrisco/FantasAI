@@ -226,6 +226,8 @@ This matches the original design intent exactly — no correction needed here, j
 
 **Betting/DFS** *(new, 2026-08-22, not yet scheduled — see `docs/BETTING_DATA_SOURCES.md`)*: bronze_dk_slates, bronze_dk_salaries (`ingest_draftkings.py`, unofficial DraftKings DFS endpoints — salaries/slates only, no Sportsbook odds yet); bronze_kalshi_nfl_markets (`ingest_kalshi.py`, official Kalshi public REST API, append-only for line-movement history)
 
+**Floor/Ceiling** *(new, 2026-08-22, not yet scheduled)*: player_floor_ceiling (`ingest_floor_ceiling.py`) — empirical 25th/90th percentile from each player's own real game log in `gold_weekly_stats` (most recent ~24 games, min 6 required), not a simulation. 1,038 players covered as of first run. Feeds both the Player popup and the DFS AI Lineup Analysis.
+
 **Total: ~36 tables**, up from 24 at the June 16 snapshot (`docs/LOCAL_MIGRATION_CHECKLIST.md`).
 
 ---

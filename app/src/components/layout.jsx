@@ -273,6 +273,7 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     { id: 'cbs',        label: 'Player Draft Rankings',     icon: '▦' },
     { group: 'Betting' },
     { id: 'dfs-optimizer', label: 'DFS Optimizer',  icon: '💰' },
+    { id: 'kalshi',         label: 'Kalshi Markets',  icon: '📈' },
     { group: 'Setup' },
     { id: 'sources',  label: 'Sources',          icon: '⌁', ...(cookieAlert ? { badge: '!', alert: true } : {}) },
     { id: 'settings', label: 'Rules & Settings',  icon: '📋' },
@@ -427,6 +428,7 @@ const BASE_SECTIONS = [
     group: 'Betting',
     items: [
       { id: 'dfs-optimizer', label: 'DFS Optimizer', icon: '💰' },
+      { id: 'kalshi',         label: 'Kalshi Markets', icon: '📈' },
     ],
   },
   {

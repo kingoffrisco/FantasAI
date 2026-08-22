@@ -250,6 +250,99 @@ function LogoPreview({ logo, logoImg, color, textColor = '#000000', size = 64 })
   );
 }
 
+const LEGEND_ENTRY_STYLE = { display: 'grid', gridTemplateColumns: '150px 1fr', gap: '2px 12px', padding: '2px 0' };
+const LEGEND_LABEL_STYLE = { fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 11 };
+
+function LegendGroup({ title, children }) {
+  return (
+    <div>
+      <div style={{ fontWeight: 800, fontSize: 10, letterSpacing: '.08em', color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: 6 }}>{title}</div>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>{children}</div>
+    </div>
+  );
+}
+
+function LegendRow({ label, children }) {
+  return (
+    <div style={LEGEND_ENTRY_STYLE}>
+      <span style={LEGEND_LABEL_STYLE}>{label}</span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+function WeightsLegend() {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div style={{ margin: '24px 0 8px', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', background: 'var(--panel)', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: 12, fontWeight: 700 }}
+      >
+        <span>Weight Legend & Glossary</span>
+        <span style={{ fontSize: 14, color: 'var(--text-faint)' }}>{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div style={{ padding: '14px 18px 18px', background: 'var(--panel-1)', display: 'flex', flexDirection: 'column', gap: 16, fontSize: 11, lineHeight: 1.55, color: 'var(--text-dim)', maxHeight: '60vh', overflowY: 'auto' }}>
+
+          <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+            Weights determine how much each feature counts toward a player's composite rank on the Players page. Higher weight = that feature moves a player up or down the ranking more. Every position shares the same underlying feature set below — not every feature appears for every position (e.g. Kickers don't have Target Share).
+          </div>
+
+          <LegendGroup title="Production & Baseline">
+            <LegendRow label="Projected Points">This week's projected fantasy points — the single strongest default signal for most positions.</LegendRow>
+            <LegendRow label="Season Avg Pts">Average fantasy points per game so far this season.</LegendRow>
+            <LegendRow label="Last Week Pts">Most recent game's fantasy points — a simple recency/hot-hand signal.</LegendRow>
+            <LegendRow label="Rushing/Receiving Yards, TDs">Raw season box-score production in that category.</LegendRow>
+            <LegendRow label="Targets / Target Share %">Raw target count, and targets as a % of the team's total pass attempts — target share is usually the more predictive of the two since it's volume-independent.</LegendRow>
+            <LegendRow label="Air Yards">Total downfield distance of a player's targets (thrown yardage, not yards after catch) — a proxy for how big a role a receiver has in the passing game regardless of whether the ball is actually completed.</LegendRow>
+            <LegendRow label="FG Percentage / FG Attempts / Long FG Made / Extra Points">Kicker box-score stats — accuracy, volume, leg strength, and PAT opportunity.</LegendRow>
+            <LegendRow label="Points Allowed / Sacks / Interceptions / Fumble Recoveries / Defensive TDs">Standard DST box-score categories.</LegendRow>
+          </LegendGroup>
+
+          <LegendGroup title="Market & Consensus">
+            <LegendRow label="ECR Rank">Expert Consensus Rank — averaged rankings from FantasyPros' expert panel. Lower is better; the app treats this as "How good do industry experts think this player is right now."</LegendRow>
+            <LegendRow label="ADP">Average Draft Position — where this player is actually being drafted across real leagues. Diverges from ECR when the market is over/under-drafting someone relative to expert opinion — a gap between the two is itself a signal.</LegendRow>
+            <LegendRow label="Matchup Rank">This week's opponent's rank against this position (1 = toughest defense to score against, 32 = easiest).</LegendRow>
+            <LegendRow label="Ownership %">% of leagues (Sleeper sample) that have this player rostered — a rough popularity/scarcity signal, not a quality signal by itself.</LegendRow>
+            <LegendRow label="Tier">Positional tier grouping (e.g. QB1 vs QB2) computed from ECR — players in the same tier are treated as roughly interchangeable.</LegendRow>
+          </LegendGroup>
+
+          <LegendGroup title="AI / Model-Derived Scores — the logic behind each">
+            <LegendRow label="Opportunity Score">
+              A snap-share/usage breakout model (<code>analysis/breakout_candidates.json</code>, built by Job 2). It's built from <strong>snap-share delta</strong> (how much a player's snap count has risen recently) combined with their <strong>average snap share</strong> — the idea is that rising usage tends to predict rising production before the box score fully catches up. Only players currently flagged as breakout candidates have a nonzero score here; everyone else scores 0 on this feature specifically, not because they're bad, but because they're not currently showing a usage spike.
+            </LegendRow>
+            <LegendRow label="News/Sleeper Signal (AI)">
+              Job 2's local LLM (Qwen3 14B) reads recent news/injury reports for this player and outputs a 0-10 waiver-relevance score, blended with a value signal (projection relative to how widely-owned the player is) into a single "sleeper score" (<code>analysis/sleeper_picks.json</code>). This is the one feature that's reading actual text, not just stats — it's what lets the app react to something like a beat-writer report about a role change before that shows up in any box score.
+            </LegendRow>
+            <LegendRow label="Success Rate (EPA-based)">
+              % of a player's plays that were "successful" by the standard down-and-distance EPA (Expected Points Added) threshold — roughly, did this play meaningfully help the offense stay on schedule, not just "did it gain positive yards." Derived from nflverse play-by-play data. A better efficiency signal than raw yards, since it doesn't get inflated by one huge play.
+            </LegendRow>
+            <LegendRow label="Explosive Run/Reception Rate">
+              % of a player's rushes or catches that go for an explosive gain (a standard big-play threshold, e.g. 15+ yards receiving / 10+ yards rushing). Captures big-play/ceiling upside that a per-play average can hide.
+            </LegendRow>
+            <LegendRow label="Elusiveness Score (Rushing)">
+              A composite rushing-efficiency score built from yards-after-contact-style metrics — how much of a runner's production comes from breaking tackles and creating extra yardage themselves, versus what the blocking gave them.
+            </LegendRow>
+          </LegendGroup>
+
+          <LegendGroup title="NextGen Stats (nflverse Next Gen Stats)">
+            <LegendRow label="Completion % Over Expected (CPOE)">How much more/less often a QB completes passes than expected given the difficulty (depth, coverage, pressure) of each throw — a purer accuracy signal than raw completion %, since it accounts for what the QB was actually asked to do.</LegendRow>
+            <LegendRow label="Avg Time to Throw">How long a QB holds the ball before releasing — context for pressure/sack risk and offensive scheme.</LegendRow>
+            <LegendRow label="Aggressiveness %">% of a QB's throws into tight coverage (a defender within a yard of the receiver) — a risk/reward throwing-style signal.</LegendRow>
+            <LegendRow label="Avg Separation">Average distance (yards) a receiver has from the nearest defender at the moment of catch/incompletion — bigger separation generally means an easier target and a more open route-runner.</LegendRow>
+            <LegendRow label="Avg Cushion at Snap">How much room a corner is giving a receiver at the snap — a proxy for how much respect/attention a receiver draws from the defense.</LegendRow>
+            <LegendRow label="Yards After Catch / Contact">Receiving: yardage gained after the catch. Rushing: yardage gained after first contact. Both isolate what the player did themselves versus what the play design/blocking provided.</LegendRow>
+            <LegendRow label="Catch % Above Average">A receiver's catch rate compared to the expected catch rate for the difficulty of their targets — separates "reliable hands" from "just gets easy targets."</LegendRow>
+            <LegendRow label="QB Pressure Rate / Coverage Grade">DST-side NextGen signals — how often this defense pressures the opposing QB, and a composite coverage-quality grade.</LegendRow>
+          </LegendGroup>
+
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TABS = [
   { id: 'team',       label: 'Team Name',   icon: '🏆' },
   { id: 'sleeper',    label: 'Sleeper',      icon: '😴' },
@@ -749,6 +842,8 @@ export default function AccountEditScreen({ user }) {
                   Weights saved — Players page will use these rankings.
                 </div>
               )}
+
+              <WeightsLegend />
             </div>
           </div>
         )}
