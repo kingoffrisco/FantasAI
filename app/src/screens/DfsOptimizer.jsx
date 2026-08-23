@@ -30,8 +30,8 @@ const LINEUP_STRATEGY_SEQUENCE = ['projection', 'leverageScore', 'ceiling'];
 const DFS_LAYOUT_PREF_KEY = 'dfsOptimizerLayout';
 const DEFAULT_DFS_LAYOUT = [
   { id: 'contest',         span: 1, height: null },
+  { id: 'selectPlayers',   span: 1, height: null },
   { id: 'weightedLineups', span: 2, height: null },
-  { id: 'selectPlayers',   span: 2, height: null },
   { id: 'aiAnalysis',      span: 2, height: null },
 ];
 const MIN_BOX_HEIGHT = 160;
@@ -615,7 +615,7 @@ export default function DfsOptimizerScreen() {
   const weightsActive = !isDefaultWeights(dfsWeights);
 
   return (
-    <div style={{ padding: '20px 24px', maxWidth: 1600, display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ padding: '20px 24px', width: '100%', display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="page-head" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
           <div>
