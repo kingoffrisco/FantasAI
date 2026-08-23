@@ -231,7 +231,7 @@ export function CBSConnectModal({ onClose, onConnected, mode }) {
   );
 }
 
-export function CBSRankingsScreen({ onOpenPlayer }) {
+export function CBSRankingsScreen({ onOpenPlayer, draftPriorityIds, onToggleDraftPriority }) {
   const [pos, setPos] = React.useState('ALL');
   const [search, setSearch] = React.useState('');
   const [format, setFormat] = React.useState('PPR');
@@ -852,7 +852,7 @@ export function PlayerDraftRankingsScreen({ onOpenPlayer, draftPriorityIds, onTo
 
       {tab === 'cbs' ? (
         <div style={{ flex: 1, overflow: 'auto' }}>
-          <CBSRankingsScreen onOpenPlayer={onOpenPlayer} />
+          <CBSRankingsScreen onOpenPlayer={onOpenPlayer} draftPriorityIds={draftPriorityIds} onToggleDraftPriority={onToggleDraftPriority} />
         </div>
       ) : tab !== 'personal' ? (
         (() => {
