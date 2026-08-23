@@ -3,7 +3,7 @@ import WatchlistScreen from './Watchlist.jsx';
 import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer, getPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge, SeasonStatBar, RadarChart, scoreToTier, SCORE_TIER_STYLE } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning, useR2FloorCeiling } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning, useR2FloorCeiling, useR2PlayerCoverageSplits, useR2TeamCoverageTendency } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -285,6 +285,16 @@ function WeatherBadge({ team, opp, scheduleOppMap }) {
 // Numeric weather-impact score for a player's upcoming game, for sorting the
 // Weather column. Mirrors WeatherBadge's own home-team resolution so the sort
 // order matches what's actually displayed. Domes / no forecast data sort last.
+const COVERAGE_SCHEME_LABELS = {
+  MAN_COVERAGE: 'Man', ZONE_COVERAGE: 'Zone',
+  COVER_0: 'Cover 0', COVER_1: 'Cover 1', COVER_2: 'Cover 2', COVER_3: 'Cover 3',
+  COVER_4: 'Cover 4', COVER_6: 'Cover 6', COVER_9: 'Cover 9',
+  '2_MAN': '2-Man', COMBO: 'Combo', BLOWN: 'Blown Coverage',
+};
+function formatCoverageScheme(value) {
+  return COVERAGE_SCHEME_LABELS[value] || value;
+}
+
 function getWeatherSeverity(r2Weather, team, opp, scheduleOppMap) {
   if (!r2Weather?.teams) return -1;
   const schedOpp = scheduleOppMap?.get(team) || opp || '';
@@ -2588,6 +2598,37 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     return list.find(p => (p.player_name || '').toLowerCase().trim() === key) || null;
   }, [floorCeilingData, player.name]);
 
+  // Coverage matchup — real man/zone and per-scheme (Cover 0-9) target
+  // splits from nflverse play-by-play charting, plus the upcoming
+  // opponent's own coverage tendency. No CB assignment or route alignment
+  // in this data (nflverse doesn't chart that) — man/zone and scheme only.
+  const { data: coverageSplitsData } = useR2PlayerCoverageSplits();
+  const { data: teamTendencyData } = useR2TeamCoverageTendency();
+  const coverageSplits = React.useMemo(() => {
+    const rows = coverageSplitsData?.players;
+    if (!Array.isArray(rows)) return null;
+    const key = player.name?.toLowerCase().trim();
+    if (!key) return null;
+    const mine = rows.filter(r => (r.receiver_name || '').toLowerCase().trim() === key);
+    if (!mine.length) return null;
+    return {
+      manZone: mine.filter(r => r.split_type === 'man_zone').sort((a, b) => b.targets - a.targets),
+      byScheme: mine.filter(r => r.split_type === 'coverage_type').sort((a, b) => b.targets - a.targets),
+      seasonsIncluded: mine[0]?.seasons_included,
+    };
+  }, [coverageSplitsData, player.name]);
+  const opponentTendency = React.useMemo(() => {
+    const rows = teamTendencyData?.teams;
+    const opp = (player.opp || '').replace(/^@/, '').toUpperCase();
+    if (!Array.isArray(rows) || !opp) return null;
+    const mine = rows.filter(r => (r.team || '').toUpperCase() === opp);
+    if (!mine.length) return null;
+    return {
+      manZone: mine.filter(r => r.split_type === 'man_zone').sort((a, b) => b.pct_of_pass_plays - a.pct_of_pass_plays),
+      byScheme: mine.filter(r => r.split_type === 'coverage_type').sort((a, b) => b.pct_of_pass_plays - a.pct_of_pass_plays),
+    };
+  }, [teamTendencyData, player.opp]);
+
   // Pre-baked 2025 Sleeper stats (from R2) — used as fallback when live API unavailable
   const { data: r2Stats2025Data } = useR2PlayerStats2025();
   const r2Stats2025 = React.useMemo(() => {
@@ -3242,6 +3283,86 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   </div>
                   <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-faint)' }}>
                     From this player's actual fantasy points over their last {floorCeiling.games_sample} games — real history, not a projection model.
+                  </div>
+                </div>
+              )}
+
+              {/* Coverage Matchup — real man/zone + per-scheme splits from nflverse PBP charting */}
+              {coverageSplits && (
+                <div className="muted-card" style={{ marginBottom: 16, borderLeft: '3px solid #4ea8ff' }}>
+                  <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 10 }}>
+                    <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: '#4ea8ff' }}>
+                      Coverage Matchup
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
+                      {coverageSplits.seasonsIncluded} seasons
+                    </span>
+                  </div>
+
+                  {coverageSplits.manZone.length > 0 && (
+                    <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+                      {coverageSplits.manZone.map(mz => (
+                        <div key={mz.split_value} style={{ flex: 1 }}>
+                          <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                            {mz.split_value === 'MAN_COVERAGE' ? 'vs Man' : 'vs Zone'} ({mz.targets} tgt)
+                          </div>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+                            <span style={{ fontSize: 16, fontWeight: 900, fontFamily: 'var(--font-mono)', color: mz.avg_epa > 0 ? '#4caf82' : '#ff8080' }}>{mz.yds_per_target.toFixed(1)}</span>
+                            <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>Y/T</span>
+                            <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{mz.catch_rate_pct.toFixed(0)}% catch</span>
+                          </div>
+                          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: mz.avg_epa > 0 ? '#4caf82' : '#ff8080' }}>
+                            {mz.avg_epa != null ? `${mz.avg_epa > 0 ? '+' : ''}${mz.avg_epa.toFixed(2)} EPA/tgt` : ''}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {coverageSplits.byScheme.length > 0 && (
+                    <div style={{ overflowX: 'auto', marginBottom: 10 }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                            {['Scheme', 'Tgt', 'Catch%', 'Y/T', 'EPA/tgt'].map(h => (
+                              <th key={h} style={{ textAlign: h === 'Scheme' ? 'left' : 'right', padding: '3px 8px', fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {coverageSplits.byScheme.map(s => {
+                            const oppPct = opponentTendency?.byScheme.find(o => o.split_value === s.split_value)?.pct_of_pass_plays;
+                            return (
+                              <tr key={s.split_value} style={{ borderBottom: '1px solid var(--border)' }}>
+                                <td style={{ padding: '3px 8px', fontWeight: 600 }}>
+                                  {formatCoverageScheme(s.split_value)}
+                                  {oppPct != null && (
+                                    <span style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-mono)', color: '#4ea8ff' }} title={`${player.opp?.replace('@', '') || 'Opponent'} runs this ${oppPct.toFixed(0)}% of the time`}>
+                                      opp {oppPct.toFixed(0)}%
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{s.targets}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{s.catch_rate_pct.toFixed(0)}%</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{s.yds_per_target.toFixed(1)}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: s.avg_epa > 0 ? '#4caf82' : s.avg_epa < 0 ? '#ff8080' : 'var(--text-dim)' }}>
+                                  {s.avg_epa != null ? `${s.avg_epa > 0 ? '+' : ''}${s.avg_epa.toFixed(2)}` : '—'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {opponentTendency?.byScheme.length > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>
+                      {player.opp?.replace('@', '') || 'Opponent'}'s most-used coverage: <strong>{formatCoverageScheme(opponentTendency.byScheme[0].split_value)}</strong> ({opponentTendency.byScheme[0].pct_of_pass_plays.toFixed(0)}% of pass plays) — "opp %" column above shows how often each scheme comes up against this specific opponent.
+                    </div>
+                  )}
+                  <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-faint)' }}>
+                    From real nflverse play-by-play coverage charting — targets/catch rate/yards per target/EPA against each scheme this player has actually faced. No CB-specific or route-alignment data exists publicly, so this is scheme-level only, not "vs this specific cornerback." Small target counts are noisier — weight accordingly.
                   </div>
                 </div>
               )}

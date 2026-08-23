@@ -821,6 +821,44 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
     );
 
     -- =========================================================
+    -- COVERAGE MATCHUPS (nflverse play-by-play — defense_coverage_type /
+    -- defense_man_zone_type / route fields, free, no auth, updated
+    -- through the current season). Verified live 2026-08-23: 100% of
+    -- CeeDee Lamb's 117 targets in the 2025 pbp had real coverage data.
+    -- No CB assignment or L/R/slot alignment in this data — that layer
+    -- would need PFF (paid) or the NFL's internal Coverage Responsibility
+    -- model (not public). See ingest/ingest_coverage_matchups.py.
+    -- =========================================================
+    CREATE TABLE IF NOT EXISTS player_coverage_splits (
+        receiver_gsis_id   VARCHAR,
+        receiver_name       VARCHAR,
+        team                 VARCHAR,
+        split_type            VARCHAR,  -- 'man_zone' or 'coverage_type'
+        split_value            VARCHAR,  -- 'MAN_COVERAGE'/'ZONE_COVERAGE', or 'COVER_0'..'COVER_9'/'2_MAN'/'COMBO'
+        targets                 INTEGER,
+        receptions              INTEGER,
+        yards                   INTEGER,
+        tds                     INTEGER,
+        avg_epa                  DOUBLE,
+        catch_rate_pct            DOUBLE,
+        yds_per_target             DOUBLE,
+        seasons_included            VARCHAR,
+        computed_at                  TIMESTAMP,
+        PRIMARY KEY (receiver_gsis_id, split_type, split_value)
+    );
+
+    CREATE TABLE IF NOT EXISTS team_coverage_tendency (
+        team                VARCHAR,
+        split_type            VARCHAR,
+        split_value            VARCHAR,
+        plays                   INTEGER,
+        pct_of_pass_plays        DOUBLE,
+        seasons_included           VARCHAR,
+        computed_at                 TIMESTAMP,
+        PRIMARY KEY (team, split_type, split_value)
+    );
+
+    -- =========================================================
     -- KALSHI NFL MARKETS (official, documented public REST API — no auth
     -- required for market data). Append-only: never overwrite prior rows,
     -- so price history over time becomes a usable "line movement" signal.
