@@ -282,6 +282,15 @@ def export_to_r2(conn, dry_run: bool):
         print("   No ownership data — skipping R2 export")
         return
 
+    # SQL NULL (e.g. team is null for free-agent/practice-squad players in
+    # Sleeper's own metadata) -> pandas NaN in an object/float column, and
+    # Python's json.dumps happily writes a literal NaN token for that —
+    # valid Python, NOT valid JSON, breaking strict JSON.parse() downstream
+    # (this silently broke the frontend's Ownership Leverage DFS weight and
+    # the DFS Optimizer's Non-Chalk lineup — both fell back to unadjusted
+    # projections with no visible error). Same fix as ingest_draftkings.py.
+    rows = rows.astype(object).where(rows.notnull(), None)
+
     meta = conn.execute(
         "SELECT MAX(updated_at), MAX(leagues_sampled) FROM bronze_player_ownership"
     ).fetchone()
@@ -296,7 +305,9 @@ def export_to_r2(conn, dry_run: bool):
     }
 
     key = "fantasai/analysis/player_ownership.json"
-    body = json.dumps(payload, default=str)
+    # allow_nan=False: fail loudly here instead of shipping a NaN/Infinity
+    # token that breaks every strict JSON.parse() downstream.
+    body = json.dumps(payload, default=str, allow_nan=False)
     size_kb = len(body.encode()) / 1024
     print(f"   {key}  ({len(rows)} players, {size_kb:.1f} KB)")
     if dry_run:

@@ -173,7 +173,18 @@ def build_packet(
     }
 
 
-def candidate_priority(player: dict, packet: dict) -> float:
+def candidate_priority(player: dict, packet: dict) -> tuple[float, float]:
+    """
+    Returns (primary, secondary) — primary is the max of the individual
+    signal scores (an elite player only needs to be maxed out on ONE
+    dimension, e.g. start_score, to warrant reasoning time); secondary is
+    the sum, used only to break ties between candidates that hit the same
+    max. Several max-priority players (e.g. two locked-in must-starts) can
+    easily tie at primary=10 — without a real secondary signal, the caller's
+    sort previously broke ties alphabetically, which meant a player whose
+    name sorted later (e.g. "Puka Nacua" after "Patrick Mahomes") could get
+    arbitrarily excluded by a tight --limit despite being equally elite.
+    """
     breakout = packet.get("breakout_signal", {})
     values = [
         float(player.get("waiver_score") or 0),
@@ -184,7 +195,7 @@ def candidate_priority(player: dict, packet: dict) -> float:
         float(player.get("matchup_score") or 0),
         float(breakout.get("opportunity_score") or 0),
     ]
-    return max(values)
+    return max(values), sum(values)
 
 
 PROMPT_TEMPLATE = """Return exactly one valid JSON object and nothing else.
@@ -288,7 +299,7 @@ def main():
     skipped_unidentified = 0
     for name, player in player_scores.items():
         packet = build_packet(name, player, breakout_lookup, notes_lookup)
-        priority = candidate_priority(player, packet)
+        priority, priority_tiebreak = candidate_priority(player, packet)
         if priority <= 0:
             continue
         # No position/team means upstream couldn't confirm this is a real
@@ -298,7 +309,7 @@ def main():
         if not packet.get("position") and not packet.get("team"):
             skipped_unidentified += 1
             continue
-        ranked.append((priority, name, packet))
+        ranked.append((priority, priority_tiebreak, name, packet))
 
     if skipped_unidentified:
         print(
@@ -306,14 +317,20 @@ def main():
             f"position/team (likely non-roster names from upstream)"
         )
 
-    ranked.sort(key=lambda item: (-item[0], item[1]))
+    # Primary: max signal score (an elite player only needs to be maxed on
+    # ONE dimension). Secondary: sum of all signal scores, to break ties
+    # between candidates that hit the same max on real signal strength
+    # rather than alphabetically (which previously let a tight --limit
+    # arbitrarily exclude equally-elite players whose name just sorted
+    # later — see candidate_priority's docstring).
+    ranked.sort(key=lambda item: (-item[0], -item[1], item[2]))
     selected = ranked[: max(args.limit, 0)]
 
     print(f"[Job 5] Reasoning about {len(selected)} players with {MODEL}...")
     results: dict = {}
     errors = 0
 
-    for idx, (priority, name, packet) in enumerate(selected, start=1):
+    for idx, (priority, priority_tiebreak, name, packet) in enumerate(selected, start=1):
         input_hash = _packet_hash(packet)
         cached = {}
         if isinstance(existing_players, dict):

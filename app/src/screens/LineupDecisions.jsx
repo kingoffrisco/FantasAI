@@ -1,6 +1,6 @@
 import React from 'react';
 import { buildRosterFrame, assignRoster } from '../lib/data.js';
-import { findPlayer, findPlayerByName } from '../lib/playerStore.js';
+import { findPlayer, findPlayerByName, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { useR2Lineup, useR2Injuries } from '../hooks.js';
 
@@ -223,6 +223,16 @@ export default function LineupDecisions({
   const [injuryLoading, setInjuryLoading] = React.useState(true);
   const [applied, setApplied]           = React.useState(false);
 
+  // Subscribes to the player store so this screen recomputes once
+  // projections/status/ADP/ECR finish patching in asynchronously after
+  // initial load (see App.jsx's sleeperProj/ecr/adp patch effects) —
+  // findPlayer() itself always reads live data, but without this the
+  // memos below only recompute when myRosterIds/slotOverrides change, so
+  // they'd silently keep comparing whatever proj numbers existed at first
+  // mount even after more current ones land (e.g. recommending a
+  // lower-projected player over a higher-projected one using stale data).
+  const livePlayers = usePlayers();
+
   const settings = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; }
     catch { return null; }
@@ -232,12 +242,12 @@ export default function LineupDecisions({
 
   const rosterEntries = React.useMemo(
     () => assignRoster(frame, [...myRosterIds], slotOverrides, findPlayer),
-    [frame, myRosterIds, slotOverrides],
+    [frame, myRosterIds, slotOverrides, livePlayers],
   );
 
   const allRosterPlayers = React.useMemo(
     () => [...myRosterIds].map(id => findPlayer(id)).filter(Boolean),
-    [myRosterIds],
+    [myRosterIds, livePlayers],
   );
 
   // Fetch Sleeper bulk player list for live injury status
@@ -310,7 +320,7 @@ export default function LineupDecisions({
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startingSlots, optimalMap, injuryMap]);
+  }, [startingSlots, optimalMap, injuryMap, livePlayers]);
 
   const currentTotal  = startingSlots.reduce((s, e) => s + getProj(findPlayer(e.playerId)), 0);
   const optimalTotal  = optimalSlots.reduce((s, e) => s + getProj(findPlayer(e.playerId)), 0);

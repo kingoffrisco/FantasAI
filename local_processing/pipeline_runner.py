@@ -24,7 +24,7 @@ Usage:
   python pipeline_runner.py --job 4       # job 4 only — weekly start/sit
     python pipeline_runner.py --job 5       # job 5 only — 30B deep reasoning
   python pipeline_runner.py --limit 50    # cap articles (fast test)
-    python pipeline_runner.py --reasoning-limit 15  # cap Job 5
+    python pipeline_runner.py --reasoning-limit 15  # override Job 5's default (300) for a fast test run
   python pipeline_runner.py --dry-run     # run models but don't upload to R2
   python pipeline_runner.py --task waiver # job 2 single task only
   python pipeline_runner.py --pos QB,RB   # job 3/4 position filter
@@ -59,8 +59,11 @@ def main():
     parser = argparse.ArgumentParser(description="FantasAI GPU processing pipeline")
     parser.add_argument("--job",     choices=["1", "2", "3", "4", "5", "all"], default="all")
     parser.add_argument("--limit",   type=int, default=None, help="Cap articles for Job 1")
-    parser.add_argument("--reasoning-limit", type=int, default=None,
-                        help="Cap candidates for Job 5 deep reasoning")
+    parser.add_argument("--reasoning-limit", type=int, default=300,
+                        help="Cap candidates for Job 5 deep reasoning (default: 300, matching "
+                             "orchestrator_weekly_reasoning.py — was silently falling back to "
+                             "job5_deep_reasoner.py's own --limit default of 20 whenever this "
+                             "script ran without an explicit --reasoning-limit)")
     parser.add_argument("--dry-run", action="store_true", help="Don't upload to R2")
     parser.add_argument("--full",    action="store_true",
                         help="Reprocess all articles/players (ignore cache)")

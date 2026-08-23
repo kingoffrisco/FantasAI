@@ -1,9 +1,909 @@
 {
-  "generated_at": "2026-08-21T01:23:20.133637+00:00",
+  "generated_at": "2026-08-23T16:54:06.329864+00:00",
   "model": "qwen3:30b",
-  "player_count": 2,
+  "player_count": 25,
   "focus": "30B deep reasoning on high-priority fantasy players",
   "players": {
+    "Ja'Marr Chase": {
+      "player_name": "Ja'Marr Chase",
+      "position": "WR",
+      "team": "CIN",
+      "priority": 10.0,
+      "input_hash": "6ba4c822d0b9",
+      "breakout_score": 95,
+      "confidence": 90,
+      "primary_reason": "Elite WR duo with high snap share and positive sentime sentiment",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Ja'Marr Chase",
+        "position": "WR",
+        "team": "CIN",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Start Ja'Marr Chase as he is part of the best WR duo in the NFL and has elite fantasy potential.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 10.0,
+          "trade_sell": 10.0,
+          "start_score": 10.0,
+          "sit_score": 0.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 10.0,
+          "matchup_score": 8.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 4.66,
+          "snap_share_delta": 0.09750000000000003,
+          "avg_snap_share": 0.88,
+          "week": 18
+        },
+        "recent_headlines": [
+          {
+            "headline": "Bengals Star Ja'Marr Chase Named NFL's Best Wide Receiver in Latest 2026 Ranking",
+            "summary": "Ja'Marr Chase is named the NFL's best wide receiver, making him a top fantasy target in all leagues.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Cincinnati Bengals\u2019 Ja\u2019Marr Chase Wins Decisive NFL Receiver Vote",
+            "summary": "Ja'Marr Chase's decisive victory in the NFL receiver vote suggests he'll have significant fantasy impact in upcoming weeks.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Ja\u2019Marr Chase Fantasy Outlook 2026: Bengals Superstar Is Still The Best Wide Receiver In Fantasy",
+            "summary": "Target Ja'Marr Chase in drafts as the top wide receiver prospect with high fantasy potential in 2026.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 123.44
+    },
+    "Puka Nacua": {
+      "player_name": "Puka Nacua",
+      "position": "WR",
+      "team": "LAR",
+      "priority": 10.0,
+      "input_hash": "5ab461c1977f",
+      "breakout_score": 95,
+      "confidence": 92,
+      "primary_reason": "Top-2 WR ranking with high snap share and positive sen sentiment",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Puka Nacua",
+        "position": "WR",
+        "team": "LAR",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "As the NFL's 2nd-best wide receiver, Nacua is a must-start fantasy option in all formats.",
+        "job2_scores": {
+          "waiver_score": 9.5,
+          "trade_buy": 9.5,
+          "trade_sell": 9.0,
+          "start_score": 10.0,
+          "sit_score": 8.5,
+          "injury_risk": 0.0,
+          "dynasty_score": 10.0,
+          "matchup_score": 5.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 4.72,
+          "snap_share_delta": 0.01000000000000012,
+          "avg_snap_share": 0.8266666666666667,
+          "week": 18
+        },
+        "recent_headlines": [
+          {
+            "headline": "PFN\u2019s Top 100 NFL Players Entering 2026: Joe Burrow, Puka Nacua, and Matthew Stafford Continue to Cl",
+            "summary": "Fantasy managers should prioritize Joe Burrow, Puka Nacua, and Matthew Stafford as their rankings continue to rise in the 2026 NFL season.",
+            "relevance": 10.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Puka Nacua ranked as NFL's 2nd-best wide receiver entering 2026",
+            "summary": "Puka Nacua is projected as a top wide receiver in 2026, making him a key fantasy target for upcoming drafts.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Puka Nacua ranked as NFL's 2nd-best wide receiver entering 2026",
+            "summary": "Puka Nacua's top-2 WR ranking for 2026 makes him a high-priority waiver and draft target for fantasy managers.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.65
+    },
+    "Derrick Henry": {
+      "player_name": "Derrick Henry",
+      "position": "RB",
+      "team": "BAL",
+      "priority": 10.0,
+      "input_hash": "9d7f8f083802",
+      "breakout_score": 95,
+      "confidence": 90,
+      "primary_reason": "Record pursuit and positive headlines",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Derrick Henry",
+        "position": "RB",
+        "team": "BAL",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Positive headlines and record pursuit confirm him as a must-start fantasy option.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 10.0,
+          "trade_sell": 10.0,
+          "start_score": 10.0,
+          "sit_score": 0.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 10.0,
+          "matchup_score": 5.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Derrick Henry looks to pass Barry Sanders to claim another NFL record",
+            "summary": "Start Derrick Henry in your lineups as he aims to set an NFL record.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Big NFL news DIRECTLY IMPACTS Zay Flowers, Baltimore Ravens, Derrick Henry SQUASHES retirement talk",
+            "summary": "Derrick Henry's retirement talk is squashed, positively impacting his fantasy outlook, while Zay Flowers' status remains relevant for Baltimore Ravens' offensive plans.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Big NFL news DIRECTLY IMPACTS Zay Flowers, Baltimore Ravens, Derrick Henry SQUASHES retirement talk",
+            "summary": "Zay Flowers and Derrick Henry are expected to play, boosting their fantasy relevance.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 1.85
+    },
+    "CeeDee Lamb": {
+      "player_name": "CeeDee Lamb",
+      "position": "WR",
+      "team": "DAL",
+      "priority": 10.0,
+      "input_hash": "9585f8fe3be5",
+      "breakout_score": 95,
+      "confidence": 90,
+      "primary_reason": "Elevated target share with elite offense",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "CeeDee Lamb",
+        "position": "WR",
+        "team": "DAL",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Lamb's elevated target share and elite offensive environment warrant starting him in all formats.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 9.5,
+          "trade_sell": 8.5,
+          "start_score": 9.5,
+          "sit_score": 5.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 9.0,
+          "matchup_score": 8.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Cowboys' CeeDee Lamb Poised To Take Dak Prescott Connection To New Heights",
+            "summary": "Fantasy managers should prioritize starting CeeDee Lamb if he's on the bench, as he's poised to see an increased target share from Dak Prescott.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "NFC East power rankings: Is CeeDee Lamb the best wide receiver?",
+            "summary": "CeeDee Lamb's potential as the top wide receiver in the NFC East makes him a key fantasy asset to monitor for weekly lineups.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Cowboys' CeeDee Lamb Poised To Take Dak Prescott Connection To New Heights",
+            "summary": "CeeDee Lamb is likely to see an increased target share with Dak Prescott, impacting fantasy output for managers.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 3.21
+    },
+    "DeVonta Smith": {
+      "player_name": "DeVonta Smith",
+      "position": "WR",
+      "team": "PHI",
+      "priority": 10.0,
+      "input_hash": "c5cd635a9435",
+      "breakout_score": 95,
+      "confidence": 90,
+      "primary_reason": "Elite fantasy upside and top-8 rankings",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "DeVonta Smith",
+        "position": "WR",
+        "team": "PHI",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Elite fantasy upside and top-8 rankings warrant starting him in all formats.",
+        "job2_scores": {
+          "waiver_score": 9.5,
+          "trade_buy": 9.5,
+          "trade_sell": 7.5,
+          "start_score": 10.0,
+          "sit_score": 2.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 9.5,
+          "matchup_score": 8.5,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "'Top-8 Upside' \u2013 Fantasy Football Analyst Ranks DeVonta Smith Ahead of Tee Higgins and Zay Flowers",
+            "summary": "Prioritize DeVonta Smith over Tee Higgins and Zay Flowers in your fantasy lineup based on analyst rankings of top-8 upside.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "NFL legend backs the Eagles' biggest offseason decision with revealing DeVonta Smith endorsement",
+            "summary": "DeVonta Smith's endorsement suggests increased target volume, boosting his fantasy value.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "DeVonta Smith Fantasy Outlook 2026: Handed the Keys To The Eagles WR Room",
+            "summary": "DeVonta Smith is expected to be the primary target for the Eagles' WR room in 2026, making him a top fantasy WR option.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 1.89
+    },
+    "Tee Higgins": {
+      "player_name": "Tee Higgins",
+      "position": "WR",
+      "team": "CIN",
+      "priority": 10.0,
+      "input_hash": "cd70a64161c1",
+      "breakout_score": 85,
+      "confidence": 90,
+      "primary_reason": "Elite matchup potential as part of Bengals' WR duo",
+      "risk_flag": "low",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Tee Higgins",
+        "position": "WR",
+        "team": "CIN",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Top-8 WR with elite matchup potential as part of the Bengals' premier WR duo.",
+        "job2_scores": {
+          "waiver_score": 9.5,
+          "trade_buy": 9.0,
+          "trade_sell": 8.5,
+          "start_score": 10.0,
+          "sit_score": 5.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 9.0,
+          "matchup_score": 8.5,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "'Top-8 Upside' \u2013 Fantasy Football Analyst Ranks DeVonta Smith Ahead of Tee Higgins and Zay Flowers",
+            "summary": "Prioritize DeVonta Smith over Tee Higgins and Zay Flowers in your fantasy lineup based on analyst rankings of top-8 upside.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Bengals' Tee Higgins Deal Gains Value After Latest Star Wide Receiver Contract Extension",
+            "summary": "Tee Higgins' value has increased due to the contract extension of another star wide receiver, making him a better target in drafts.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Ja\u2019Marr Chase already sees shades of Tee Higgins in Noah Thomas",
+            "summary": "Fantasy managers should monitor Ja'Marr Chase's performance as he shows promise similar to Tee Higgins, potentially impacting starting decisions.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.17
+    },
+    "Jahmyr Gibbs": {
+      "player_name": "Jahmyr Gibbs",
+      "position": "RB",
+      "team": "DET",
+      "priority": 10.0,
+      "input_hash": "e08e110fbe4e",
+      "breakout_score": 95,
+      "confidence": 90,
+      "primary_reason": "Elite snap share and high opportunity score",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Jahmyr Gibbs",
+        "position": "RB",
+        "team": "DET",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "He is a top-tier RB with elite potential and should be started every week.",
+        "job2_scores": {
+          "waiver_score": 9.5,
+          "trade_buy": 9.5,
+          "trade_sell": 5,
+          "start_score": 10,
+          "sit_score": 2,
+          "injury_risk": 0,
+          "dynasty_score": 9.5,
+          "matchup_score": 5,
+          "rookie_score": 10
+        },
+        "breakout_signal": {
+          "opportunity_score": 4.76,
+          "snap_share_delta": -0.05249999999999999,
+          "avg_snap_share": 0.7533333333333333,
+          "week": 20
+        },
+        "recent_headlines": [
+          {
+            "headline": "Jahmyr Gibbs Fantasy Outlook 2026: Lions RB Poised For a Truly Legendary Fantasy Season",
+            "summary": "Fantasy managers should strongly consider adding Jahmyr Gibbs in waivers for 2026 as the Lions' rookie RB shows potential for a historic fantasy season.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Who has more receiving yards in 2026, Isaac TeSlaa or Jahmyr Gibbs?",
+            "summary": "Fantasy managers should monitor rookie receiver projections for Isaac TeSlaa and Jahmyr Gibbs as they compete for target volume in 2026.",
+            "relevance": 9.0,
+            "sentiment": "neutral"
+          },
+          {
+            "headline": "Heath Cummings' Fantasy football running back tiers: Jahmyr Gibbs edges Bijan Robinson",
+            "summary": "Fantasy managers should prioritize Jahmyr Gibbs over Bijan Robinson in running back tiers due to Gibbs' projected edge in production.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.35
+    },
+    "Colston Loveland": {
+      "player_name": "Colston Loveland",
+      "position": "TE",
+      "team": "CHI",
+      "priority": 10.0,
+      "input_hash": "d911b25d4532",
+      "breakout_score": 85,
+      "confidence": 92,
+      "primary_reason": "Top-5 TE status with consistent production",
+      "risk_flag": "None",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Colston Loveland",
+        "position": "TE",
+        "team": "CHI",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "A must-start option due to his top-5 tight end status and consistent production.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 9.0,
+          "trade_sell": 8.0,
+          "start_score": 10.0,
+          "sit_score": 0.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 8.0,
+          "matchup_score": 5.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 3.11,
+          "snap_share_delta": -0.1925,
+          "avg_snap_share": 0.79,
+          "week": 18
+        },
+        "recent_headlines": [
+          {
+            "headline": "Bears rising star Colston Loveland dubbed top-5 tight end already",
+            "summary": "Colston Loveland's top-5 tight end status elevates his fantasy value, making him a must-start option if available.",
+            "relevance": 10.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Bears TE Colston Loveland Expected to Play for a Different NFL Team",
+            "summary": "Fantasy managers should monitor Colston Loveland's trade status as he's expected to play for a new NFL team, impacting lineup decisions.",
+            "relevance": 9.5,
+            "sentiment": "neutral"
+          },
+          {
+            "headline": "Bears: Colston Loveland\u2019s status as one of the best TEs in NFL, confirmed",
+            "summary": "Colston Loveland is confirmed as one of the top TEs in the NFL, making him a high-priority target for fantasy managers.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 30.39
+    },
+    "Emeka Egbuka": {
+      "player_name": "Emeka Egbuka",
+      "position": "WR",
+      "team": "TB",
+      "priority": 10.0,
+      "input_hash": "92aa11d41366",
+      "breakout_score": 90,
+      "confidence": 95,
+      "primary_reason": "Breakout season expectations in Zac Robinson's offense offense",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Emeka Egbuka",
+        "position": "WR",
+        "team": "TB",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Fantasy managers should prioritize starting Egbuka due to his breakout season expectations.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 9.0,
+          "trade_sell": 6.0,
+          "start_score": 10.0,
+          "sit_score": 1.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 9.0,
+          "matchup_score": 9.0,
+          "rookie_score": 9.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Buccaneers' Emeka Egbuka is poised for a breakout in Zac Robinson's offense",
+            "summary": "Fantasy managers should prioritize starting Emeka Egbuka in upcoming matchups as he's positioned for a breakout season in Zac Robinson's offense.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Emeka Egbuka Trade Worth",
+            "summary": "The Emeka Egbuka trade could impact fantasy lineups depending on his new team's usage and availability on waivers.",
+            "relevance": 8.5,
+            "sentiment": "neutral"
+          },
+          {
+            "headline": "Emeka Egbuka, Garrett Wilson, Tee Higgins, or Tetairoa McMillan: Who Should I Draft for Fantasy Foot",
+            "summary": "Fantasy managers should evaluate Emeka Egbuka, Garrett Wilson, Tee Higgins, and Tetairoa McMillan based on their 2026 potential and draft position in the upcoming rookie drafts.",
+            "relevance": 8.5,
+            "sentiment": "neutral"
+          }
+        ]
+      },
+      "_elapsed_sec": 1.91
+    },
+    "Terry McLaurin": {
+      "player_name": "Terry McLaurin",
+      "position": "WR",
+      "team": "WAS",
+      "priority": 10.0,
+      "input_hash": "90a2185e09d4",
+      "breakout_score": 90,
+      "confidence": 95,
+      "primary_reason": "Top target status and high matchup score",
+      "risk_flag": "low",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Terry McLaurin",
+        "position": "WR",
+        "team": "WAS",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "McLaurin is a top target and must-start in all matchups.",
+        "job2_scores": {
+          "waiver_score": 9.0,
+          "trade_buy": 8.5,
+          "trade_sell": 8.0,
+          "start_score": 10.0,
+          "sit_score": 0.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 8.5,
+          "matchup_score": 9.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Terry McLaurin Names Commanders\u2019 New \u2018Matchup Nightmare\u2019",
+            "summary": "Terry McLaurin is a top target for opposing defenses, making him a key fantasy asset in upcoming matchups.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Trade for \u2018Legit Vertical Threat\u2019 Would Free Commanders\u2019 Terry McLaurin",
+            "summary": "The potential trade for Terry McLaurin could increase his target volume with the Commanders, making him a valuable waiver wire addition for fantasy managers.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Fantasy football rankings 2026: Busts per model that called Terry McLaurin's down season",
+            "summary": "Avoid Terry McLaurin in drafts and waivers due to his predicted down season impacting fantasy rankings.",
+            "relevance": 8.5,
+            "sentiment": "negative"
+          }
+        ]
+      },
+      "_elapsed_sec": 1.96
+    },
+    "Jaylen Waddle": {
+      "player_name": "Jaylen Waddle",
+      "position": "WR",
+      "team": "DEN",
+      "priority": 10.0,
+      "input_hash": "6ed3721ed5cc",
+      "breakout_score": 85,
+      "confidence": 90,
+      "primary_reason": "Elite playmaker potential with high matchup scores",
+      "risk_flag": "low",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Jaylen Waddle",
+        "position": "WR",
+        "team": "DEN",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "As an elite playmaker, Waddle is a must-start for fantasy managers.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 10.0,
+          "trade_sell": 8.0,
+          "start_score": 10.0,
+          "sit_score": 5.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 8.0,
+          "matchup_score": 5.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Jaylen Waddle gives the Broncos the elite playmaker that they have been lacking",
+            "summary": "Jaylen Waddle's addition as an elite playmaker could significantly boost the Broncos' offensive output, making him a top waiver-wire target for fantasy managers.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Can Courtland Sutton, Jaylen Waddle achieve rare 1,000-yard double? Broncos mailbag",
+            "summary": "Fantasy managers should monitor Courtland Sutton and Jaylen Waddle's production as they aim for a rare 1,000-yard dual performance this season.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Davis Webb's perfect 2-word stance on Broncos landing Jaylen Waddle",
+            "summary": "Fantasy managers should consider adding Jaylen Waddle if not already owned, as the Broncos have acquired him in a trade.",
+            "relevance": 8.5,
+            "sentiment": "neutral"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.07
+    },
+    "Tony Pollard": {
+      "player_name": "Tony Pollard",
+      "position": "RB",
+      "team": "TEN",
+      "priority": 10.0,
+      "input_hash": "3405ea5b8c7a",
+      "breakout_score": 90,
+      "confidence": 85,
+      "primary_reason": "Projected strong performance in 2025 warrants must-sta must-start status",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Tony Pollard",
+        "position": "RB",
+        "team": "TEN",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Projected strong performance in 2025 warrants a must-start status.",
+        "job2_scores": {
+          "waiver_score": 9.0,
+          "trade_buy": 9.0,
+          "trade_sell": 7.0,
+          "start_score": 10.0,
+          "sit_score": 2.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 9.0,
+          "matchup_score": 7.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Titans' Tony Pollard had one of the NFL's best runs in 2025",
+            "summary": "Tony Pollard's projected strong performance in 2025 makes him a top target for waivers and dynasty leagues.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "RELOADED: Titans\u2019 New Era Begins\u2014Will Cam Ward, Carnell Tate, Tony Pollard DRIVE a Playoff Push?",
+            "summary": "Cam Ward, Carnell Tate, and Tony Pollard could play pivotal roles in the Titans' playoff push, making them key fantasy targets.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "RELOADED: Titans\u2019 New Era Begins\u2014Will Cam Ward, Carnell Tate, Tony Pollard DRIVE a Playoff Push?",
+            "summary": "Fantasy managers should monitor Cam Ward, Carnell Tate, and Tony Pollard's contributions as they play key roles in the Titans' playoff push potential.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.27
+    },
+    "Christian Watson": {
+      "player_name": "Christian Watson",
+      "position": "WR",
+      "team": "GB",
+      "priority": 10.0,
+      "input_hash": "d686194ba0a5",
+      "breakout_score": 90,
+      "confidence": 95,
+      "primary_reason": "high fantasy relevance and positive sentiment",
+      "risk_flag": "low",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Christian Watson",
+        "position": "WR",
+        "team": "GB",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "He is ranked as the 5th most important Packers player and should be started in all lineups.",
+        "job2_scores": {
+          "waiver_score": 9.5,
+          "trade_buy": 9.0,
+          "trade_sell": 8.0,
+          "start_score": 10.0,
+          "sit_score": 2.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 9.0,
+          "matchup_score": 5.0,
+          "rookie_score": 9.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "The Most Important Packers: No. 5 \u2014 WR Christian Watson",
+            "summary": "Start Christian Watson in all lineups as he's ranked as the 5th most important Packers player with high fantasy relevance.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Five Guillotine Leagues\u2122 2026 Draft Targets: Jaxson Dart, Christian Watson & More",
+            "summary": "Fantasy managers should prioritize targeting Jaxson Dart and Christian Watson in upcoming drafts due to their highlighted potential in the 2026 Guillotine Leagues.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "These Could Be Christian Watson\u2019s Absurd Stats If Packers WR Stays Healthy",
+            "summary": "Christian Watson could see a significant stat boost if the Packers' WR remains healthy, making him a top target in waivers.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 1.87
+    },
+    "Josh Allen": {
+      "player_name": "Josh Allen",
+      "position": "QB",
+      "team": "BUF",
+      "priority": 10.0,
+      "input_hash": "6d5e3abd0f76",
+      "breakout_score": 95,
+      "confidence": 95,
+      "primary_reason": "Elite QB ranking and injury risk",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Josh Allen",
+        "position": "QB",
+        "team": "BUF",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Allen's elite status and lack of injury risk warrant starting him in all formats.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 10.0,
+          "trade_sell": 3.0,
+          "start_score": 10.0,
+          "sit_score": 0.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 9.5,
+          "matchup_score": 8.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "PFF: Bills' QB Josh Allen considered top QB in NFL again in rankings",
+            "summary": "Josh Allen's top QB ranking in PFF analysis suggests he remains a high-value fantasy asset despite recent performance fluctuations.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Bills' Josh Allen is 'Most Singularly Unstoppable' QB, Says NFL GM in New Top 10 Rankings",
+            "summary": "Josh Allen's top 10 ranking and positive expert evaluation suggest he remains a high-value fantasy asset with strong projection for upcoming matchups.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "\u201cReally Hasn\u2019t Been the Same\u201d: NFL Analyst Explains Why Josh Allen Edged Patrick Mahomes for No. 1 R",
+            "summary": "Fantasy managers should prioritize Josh Allen over Patrick Mahomes in their lineups due to his higher current ranking and performance analysis.",
+            "relevance": 9.5,
+            "sentiment": "neutral"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.24
+    },
+    "Trevor Lawrence": {
+      "player_name": "Trevor Lawrence",
+      "position": "QB",
+      "team": "JAX",
+      "priority": 10.0,
+      "input_hash": "5237ba7d71e9",
+      "breakout_score": 100,
+      "confidence": 100,
+      "primary_reason": "Elite perform performance",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Trevor Lawrence",
+        "position": "QB",
+        "team": "JAX",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Trevor Lawrence's continued elite performance makes him a must-start in all leagues.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 10.0,
+          "trade_sell": 3.0,
+          "start_score": 10.0,
+          "sit_score": 0.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 10.0,
+          "matchup_score": 7.5,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Trevor Lawrence Continues Ascension Among Elite QBs",
+            "summary": "Trevor Lawrence's continued elite performance makes him a must-start quarterback in all leagues.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Tweets of the week: Trevor Lawrence highlights, Travis Hunter insight, and more",
+            "summary": "Start Trevor Lawrence and Travis Hunter if they're available in your league due to their highlighted performance.",
+            "relevance": 9.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Will Trevor Lawrence, Jaguars starters play in preseason v. Saints today?",
+            "summary": "Monitor Trevor Lawrence's participation in the preseason game as his availability could impact fantasy lineups.",
+            "relevance": 8.5,
+            "sentiment": "neutral"
+          }
+        ]
+      },
+      "_elapsed_sec": 1.84
+    },
     "Bijan Robinson": {
       "player_name": "Bijan Robinson",
       "position": "RB",
@@ -11,8 +911,8 @@
       "priority": 10.0,
       "input_hash": "860e802dcad5",
       "breakout_score": 95,
-      "confidence": 90,
-      "primary_reason": "Historic contract extension as highest-paid RB",
+      "confidence": 95,
+      "primary_reason": "Historic contract extension and top-tier production",
       "risk_flag": "none",
       "recommendation": "BUY",
       "_consistency_warning": "",
@@ -62,67 +962,535 @@
           }
         ]
       },
-      "_elapsed_sec": 2.83
+      "_elapsed_sec": 28.23
     },
-    "Colston Loveland": {
-      "player_name": "Colston Loveland",
-      "position": "TE",
-      "team": "CHI",
+    "Justin Herbert": {
+      "player_name": "Justin Herbert",
+      "position": "QB",
+      "team": "LAC",
       "priority": 10.0,
-      "input_hash": "d911b25d4532",
-      "breakout_score": 85,
+      "input_hash": "00a34fad664a",
+      "breakout_score": 95,
       "confidence": 90,
-      "primary_reason": "Top-5 TE status with consistent production",
+      "primary_reason": "Elite QB with high matchup score and consistent produc production",
       "risk_flag": "low",
       "recommendation": "BUY",
       "_consistency_warning": "",
       "packet": {
-        "player_name": "Colston Loveland",
-        "position": "TE",
-        "team": "CHI",
+        "player_name": "Justin Herbert",
+        "position": "QB",
+        "team": "LAC",
         "injury_status": "none",
         "injury_flag": false,
         "latest_sentiment": "positive",
-        "latest_summary": "A must-start option due to his top-5 tight end status and consistent production.",
+        "latest_summary": "Elite quarterback with consistent production and playoff success potential, making him a must-start weekly.",
         "job2_scores": {
-          "waiver_score": 10.0,
+          "waiver_score": 9.5,
           "trade_buy": 9.0,
-          "trade_sell": 8.0,
+          "trade_sell": 5.0,
           "start_score": 10.0,
-          "sit_score": 0.0,
+          "sit_score": 5.0,
           "injury_risk": 0.0,
-          "dynasty_score": 8.0,
+          "dynasty_score": 9.5,
           "matchup_score": 5.0,
           "rookie_score": 0.0
         },
         "breakout_signal": {
-          "opportunity_score": 3.11,
-          "snap_share_delta": -0.1925,
-          "avg_snap_share": 0.79,
-          "week": 18
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
         },
         "recent_headlines": [
           {
-            "headline": "Bears rising star Colston Loveland dubbed top-5 tight end already",
-            "summary": "Colston Loveland's top-5 tight end status elevates his fantasy value, making him a must-start option if available.",
+            "headline": "Blockbuster Broncos Trade Called NFL\u2019s \u2018Most Impactful\u2019 Offseason Move",
+            "summary": "Fantasy managers should prioritize targeting Justin Herbert if he becomes available on waivers following the Broncos' blockbuster trade.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Former Charger Says Justin Herbert Could Retire if Team Doesn\u2019t Change",
+            "summary": "Fantasy managers should consider potential trade/drop decisions for Justin Herbert if the Chargers fail to address his concerns.",
+            "relevance": 9.0,
+            "sentiment": "negative"
+          },
+          {
+            "headline": "Will Justin Herbert Increase His Rushing Attempts?",
+            "summary": "Fantasy managers should monitor Justin Herbert's potential increase in rushing attempts, which could impact his fantasy output.",
+            "relevance": 8.5,
+            "sentiment": "neutral"
+          }
+        ]
+      },
+      "_elapsed_sec": 1.86
+    },
+    "Drake Maye": {
+      "player_name": "Drake Maye",
+      "position": "QB",
+      "team": "NE",
+      "priority": 10.0,
+      "input_hash": "1213fb2049b5",
+      "breakout_score": 85,
+      "confidence": 90,
+      "primary_reason": "Top-5 QB projection with strong recent headlines",
+      "risk_flag": "low",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Drake Maye",
+        "position": "QB",
+        "team": "NE",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "As a top-5 QB, Maye should be started in all formats weekly.",
+        "job2_scores": {
+          "waiver_score": 9.5,
+          "trade_buy": 9.0,
+          "trade_sell": 4.0,
+          "start_score": 10.0,
+          "sit_score": 2.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 8.0,
+          "matchup_score": 7.0,
+          "rookie_score": 5.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Drake Maye Will Deliver A Top-5 QB Fantasy Football Season Again",
+            "summary": "Drake Maye is projected to have a top-5 QB fantasy season, making him a strong addition for waivers.",
             "relevance": 10.0,
             "sentiment": "positive"
           },
           {
-            "headline": "Bears TE Colston Loveland Expected to Play for a Different NFL Team",
-            "summary": "Fantasy managers should monitor Colston Loveland's trade status as he's expected to play for a new NFL team, impacting lineup decisions.",
+            "headline": "Drake Maye not worried about making Patriots receivers happy: \u2018My job is to score points\u2019",
+            "summary": "Drake Maye's focus on scoring points rather than worrying about receivers could boost his fantasy production as a rookie quarterback.",
             "relevance": 9.5,
-            "sentiment": "neutral"
+            "sentiment": "positive"
           },
           {
-            "headline": "Bears: Colston Loveland\u2019s status as one of the best TEs in NFL, confirmed",
-            "summary": "Colston Loveland is confirmed as one of the top TEs in the NFL, making him a high-priority target for fantasy managers.",
-            "relevance": 9.0,
+            "headline": "Patriots legend confirms AFC East's worst fears with latest Drake Maye take",
+            "summary": "Drake Maye's uncertain status as a rookie quarterback could impact fantasy managers' waiver wire decisions and starting lineups.",
+            "relevance": 8.5,
+            "sentiment": "negative"
+          }
+        ]
+      },
+      "_elapsed_sec": 34.85
+    },
+    "De'Von Achane": {
+      "player_name": "De'Von Achane",
+      "position": "RB",
+      "team": "MIA",
+      "priority": 10.0,
+      "input_hash": "4c648be86795",
+      "breakout_score": 90,
+      "confidence": 85,
+      "primary_reason": "Heavy workload and breakout projections",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "De'Von Achane",
+        "position": "RB",
+        "team": "MIA",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Heavy workload and breakout projections make him a must-start.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 9.0,
+          "trade_sell": 4.0,
+          "start_score": 10.0,
+          "sit_score": 5.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 9.0,
+          "matchup_score": 5.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Fantasy football rankings 2026: Sleepers from model that nailed De'Von Achane's massive year",
+            "summary": "Add De'Von Achane as a high-priority sleeper in your fantasy league based on his projected breakout season.",
+            "relevance": 10.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Fantasy football rankings 2026: Sleepers from computer that nailed De'Von Achane's huge year",
+            "summary": "Target De'Von Achane as a high-priority sleeper in upcoming drafts due to his projected breakout season.",
+            "relevance": 10.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "De'Von Achane, Justin Jefferson Carrying Heavy Fantasy Football Workloads",
+            "summary": "Fantasy managers should monitor De'Von Achane and Justin Jefferson's workloads as they carry heavy fantasy football responsibilities impacting their usage and production.",
+            "relevance": 9.5,
+            "sentiment": "neutral"
+          }
+        ]
+      },
+      "_elapsed_sec": 27.15
+    },
+    "Kaleb Johnson": {
+      "player_name": "Kaleb Johnson",
+      "position": "RB",
+      "team": "PIT",
+      "priority": 10.0,
+      "input_hash": "fabc81cfeaf7",
+      "breakout_score": 85,
+      "confidence": 90,
+      "primary_reason": "Expected to start over competition",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Kaleb Johnson",
+        "position": "RB",
+        "team": "PIT",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Expected to start over competition, making him a high-impact fantasy option.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 8.5,
+          "trade_sell": 6.0,
+          "start_score": 9.5,
+          "sit_score": 2.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 7.5,
+          "matchup_score": 5.0,
+          "rookie_score": 8.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "'Absolutely Not': No Chance Kaleb Johnson Should Lose Roster Spot Over Eli Heidenreich, Kaboly Says",
+            "summary": "Kaleb Johnson is expected to retain his roster spot over Eli Heidenreich, making him a priority for fantasy managers to keep or target on waivers.",
+            "relevance": 8.5,
             "sentiment": "positive"
           }
         ]
       },
-      "_elapsed_sec": 1.28
+      "_elapsed_sec": 1.78
+    },
+    "Zay Flowers": {
+      "player_name": "Zay Flowers",
+      "position": "WR",
+      "team": "BAL",
+      "priority": 10.0,
+      "input_hash": "83e5d335ff21",
+      "breakout_score": 85,
+      "confidence": 85,
+      "primary_reason": "Elite WR with no injuries and strong offensive support",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Zay Flowers",
+        "position": "WR",
+        "team": "BAL",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Elite WR with no injuries and strong offensive support.",
+        "job2_scores": {
+          "waiver_score": 0.0,
+          "trade_buy": 8.0,
+          "trade_sell": 7.0,
+          "start_score": 10.0,
+          "sit_score": 5.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 10.0,
+          "matchup_score": 5.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 4.82,
+          "snap_share_delta": 0.16249999999999987,
+          "avg_snap_share": 0.85,
+          "week": 18
+        },
+        "recent_headlines": [
+          {
+            "headline": "Big NFL news DIRECTLY IMPACTS Zay Flowers, Baltimore Ravens, Derrick Henry SQUASHES retirement talk",
+            "summary": "Derrick Henry's retirement talk is squashed, positively impacting his fantasy outlook, while Zay Flowers' status remains relevant for Baltimore Ravens' offensive plans.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Big NFL news DIRECTLY IMPACTS Zay Flowers, Baltimore Ravens, Derrick Henry SQUASHES retirement talk",
+            "summary": "Zay Flowers and Derrick Henry are expected to play, boosting their fantasy relevance.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "'Top-8 Upside' \u2013 Fantasy Football Analyst Ranks DeVonta Smith Ahead of Tee Higgins and Zay Flowers",
+            "summary": "Prioritize DeVonta Smith over Tee Higgins and Zay Flowers in your fantasy lineup based on analyst rankings of top-8 upside.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.4
+    },
+    "Ty Simpson": {
+      "player_name": "Ty Simpson",
+      "position": "QB",
+      "team": "LAR",
+      "priority": 10.0,
+      "input_hash": "6fe2d4149bfb",
+      "breakout_score": 90,
+      "confidence": 95,
+      "primary_reason": "Rams' clear Week 1 starter with no injury concerns",
+      "risk_flag": "none",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Ty Simpson",
+        "position": "QB",
+        "team": "LAR",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "As the Rams' clear Week 1 starter with no injury concerns, Simpson is a must-start fantasy asset.",
+        "job2_scores": {
+          "waiver_score": 9.0,
+          "trade_buy": 8.5,
+          "trade_sell": 3.0,
+          "start_score": 10.0,
+          "sit_score": 0.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 9.0,
+          "matchup_score": 5.0,
+          "rookie_score": 10.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Ty Simpson will show why Rams sought him as their next franchise QB",
+            "summary": "Fantasy managers should consider adding Ty Simpson if available, as the Rams' focus on him as their next franchise QB suggests potential high-level impact in 2024.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "NFL Rookie QB Grades: Ty Simpson earns A after stellar Rams preseason debut",
+            "summary": "Ty Simpson's stellar preseason performance as a rookie QB makes him a top waiver-wire target for fantasy managers looking to add elite rookie talent.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "How every rookie QB performed in Week 1, from Ty Simpson to Fernando Mendoza",
+            "summary": "Monitor rookie QBs' Week 1 performance for fantasy relevance and potential waiver pickups.",
+            "relevance": 8.5,
+            "sentiment": "neutral"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.2
+    },
+    "Alvin Kamara": {
+      "player_name": "Alvin Kamara",
+      "position": "RB",
+      "team": "NO",
+      "priority": 10.0,
+      "input_hash": "3c03a9d92e48",
+      "breakout_score": 85,
+      "confidence": 90,
+      "primary_reason": "Central role in unpredictable offense",
+      "risk_flag": "low",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Alvin Kamara",
+        "position": "RB",
+        "team": "NO",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Kamara is a must-start RB due to his central role in the Saints' unpredictable offense.",
+        "job2_scores": {
+          "waiver_score": 0,
+          "trade_buy": 10,
+          "trade_sell": 8,
+          "start_score": 10,
+          "sit_score": 0,
+          "injury_risk": 0,
+          "dynasty_score": 10,
+          "matchup_score": 5,
+          "rookie_score": 0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Why Moving Foward With Alvin Kamara in the Saints RB Room Is a Good Thing",
+            "summary": "Fantasy managers should prioritize holding onto Alvin Kamara in the Saints' RB room as the team's strategy supports his role.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "SETTLED: Alvin Kamara Makes New Orleans Saints A Better Football Team, Keeps Offense Unpredictable",
+            "summary": "Start Alvin Kamara in lineups as his unpredictable offensive production boosts New Orleans' fantasy value.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "How Does Alvin Kamara\u2019s Official Spot on the Roster Change the Rushing Attack Moving Forward",
+            "summary": "Monitor Alvin Kamara's role changes as his official roster spot may impact his rushing stats and fantasy value.",
+            "relevance": 9.5,
+            "sentiment": "neutral"
+          }
+        ]
+      },
+      "_elapsed_sec": 124.29
+    },
+    "Quentin Johnston": {
+      "player_name": "Quentin Johnston",
+      "position": "WR",
+      "team": "LAC",
+      "priority": 10.0,
+      "input_hash": "923af406ca48",
+      "breakout_score": 85,
+      "confidence": 80,
+      "primary_reason": "Projected breakout in 2026 with high waiver wire poten potential",
+      "risk_flag": "low",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Quentin Johnston",
+        "position": "WR",
+        "team": "LAC",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Expected to be a key contributor, warranting a starting spot.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 9.0,
+          "trade_sell": 4.0,
+          "start_score": 8.0,
+          "sit_score": 5.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 7.0,
+          "matchup_score": 5.0,
+          "rookie_score": 0.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Quentin Johnston Fantasy Football Outlook For 2026: A Fourth-Year Breakout On Tap",
+            "summary": "Quentin Johnston is projected for a breakout season in 2026, making him a top waiver wire target for fantasy managers.",
+            "relevance": 10.0,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Fantasy Football League Winners in 2026: Jeremiyah Love, Quentin Johnston, and Kyle Pitts Have High ",
+            "summary": "Add Jeremiyah Love, Quentin Johnston, and Kyle Pitts to your waiver wire as they show high potential for fantasy success in 2026.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Fantasy Football League Winners in 2026: Jeremiyah Love, Quentin Johnston, and Kyle Pitts Have High ",
+            "summary": "Add Jeremiyah Love, Quentin Johnston, and Kyle Pitts to your waiver wire targeting high-upside rookie talent for 2026 fantasy drafts.",
+            "relevance": 9.5,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.12
+    },
+    "Tank Bigsby": {
+      "player_name": "Tank Bigsby",
+      "position": "RB",
+      "team": "PHI",
+      "priority": 10.0,
+      "input_hash": "8b17e6ea3bff",
+      "breakout_score": 80,
+      "confidence": 85,
+      "primary_reason": "Top NFC North RB bargain with high-impact backup upsid upside",
+      "risk_flag": "low",
+      "recommendation": "BUY",
+      "_consistency_warning": "",
+      "packet": {
+        "player_name": "Tank Bigsby",
+        "position": "RB",
+        "team": "PHI",
+        "injury_status": "none",
+        "injury_flag": false,
+        "latest_sentiment": "positive",
+        "latest_summary": "Tank Bigsby is among the top potential league-winning backup RBs, making him a viable start in favorable matchups.",
+        "job2_scores": {
+          "waiver_score": 10.0,
+          "trade_buy": 7.0,
+          "trade_sell": 6.0,
+          "start_score": 7.0,
+          "sit_score": 5.0,
+          "injury_risk": 0.0,
+          "dynasty_score": 8.0,
+          "matchup_score": 5.0,
+          "rookie_score": 8.0
+        },
+        "breakout_signal": {
+          "opportunity_score": 0,
+          "snap_share_delta": null,
+          "avg_snap_share": null,
+          "week": null
+        },
+        "recent_headlines": [
+          {
+            "headline": "Tank Bigsby among 3 biggest NFC North RB fantasy bargains",
+            "summary": "Tank Bigsby is a top NFC North RB fantasy bargain, making him a high-priority waiver pickup.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Blake Corum, Tank Bigsby among top potential league-winning backup RBs",
+            "summary": "Target Blake Corum and Tank Bigsby in waivers/trades as potential high-impact backup RBs with league-winning upside.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          },
+          {
+            "headline": "Eagles\u2019 First Practice Delivers Exciting Tank Bigsby News",
+            "summary": "Fantasy managers should target Tank Bigsby in drafts and waivers due to his promising performance in the Eagles' first practice.",
+            "relevance": 8.5,
+            "sentiment": "positive"
+          }
+        ]
+      },
+      "_elapsed_sec": 2.11
     }
   }
 }
