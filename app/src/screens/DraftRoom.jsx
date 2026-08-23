@@ -98,7 +98,7 @@ function fmtNg(val, statId) {
   return String(val);
 }
 
-export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftComplete, onDraftStatusChange, onOpenPlayer, showMobile = false }) {
+export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftComplete, onDraftStatusChange, onOpenPlayer, showMobile = false, draftPriorityIds }) {
   const REAL_currentPickNum = 40;
   const isCommissioner = user?.isAdmin || user?.isCommissioner;
 
@@ -2124,6 +2124,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                 const isJustFreed = justFreedIds.has(p.id);
                 const isAiPick    = aiSuggestions.some(s => s.id === p.id);
                 const aiPickRank  = isAiPick ? aiSuggestions.findIndex(s => s.id === p.id) : -1;
+                const isPriority  = draftPriorityIds?.has(p.id);
                 const rank        = getRank(p);
                 const displayRank = rankSource === 'owner'
                   ? (ownerRanks[p.id] != null ? ownerRanks[p.id] : '—')
@@ -2166,6 +2167,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                 return (
                   <tr key={p.id} style={
                     isJustFreed ? { background: 'rgba(76,175,130,.1)', outline: '1px solid rgba(76,175,130,.3)' }
+                    : isPriority ? { background: 'rgba(78,168,255,.1)', outline: '1px solid rgba(78,168,255,.4)' }
                     : isAiPick  ? { background: 'rgba(78,168,255,.08)', outline: `1px solid rgba(78,168,255,${aiPickRank === 0 ? '.45' : '.22'})` }
                     : {}
                   }>
@@ -2175,6 +2177,17 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                         <PlayerAvatar player={p} />
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            {isPriority && (
+                              <span
+                                title="Draft Priority — you flagged this player on Player Draft Rankings"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+                                  background: 'var(--accent-2)', boxShadow: '0 0 8px 1px #4ea8ffaa',
+                                  fontSize: 8, fontWeight: 900, color: 'var(--accent-2-ink)',
+                                }}
+                              >★</span>
+                            )}
                             <div className="player-name" style={{ fontSize: 14 }}>{p.name}</div>
                             {isAiPick && (
                               <span style={{ fontSize: 8, fontWeight: 900, letterSpacing: '.05em', background: 'var(--accent-2)', color: 'var(--accent-2-ink)', borderRadius: 3, padding: '1px 4px', lineHeight: 1.4, flexShrink: 0 }}>

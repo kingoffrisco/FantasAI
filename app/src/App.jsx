@@ -616,6 +616,8 @@ export default function App() {
           setRosterSlotOverrides(prefs.slotOverrides);
         if (Array.isArray(prefs.watchlist))
           setWatchlistIds(new Set(prefs.watchlist));
+        if (Array.isArray(prefs.draftPriority))
+          setDraftPriorityIds(new Set(prefs.draftPriority));
         if (prefs.sources?.freeApis && prefs.sources?.feeds) {
           const mergedApis = { ...prefs.sources.freeApis };
           FREE_DATA_SOURCES.forEach(s => { if (s.enabled && mergedApis[s.id] === false) mergedApis[s.id] = true; });
@@ -951,6 +953,7 @@ export default function App() {
     setRosterLoading(false);
     setRosterSlotOverrides({});
     setWatchlistIds(new Set());
+    setDraftPriorityIds(new Set());
     setTradeOffers([]);
     setWaiverQueue({});
     setSourcesState({
@@ -1228,6 +1231,19 @@ export default function App() {
     });
   }, []);
 
+  // Draft Priority — flagged on the Player Draft Rankings page, shown as a
+  // blue medallion badge in DraftRoom's live board so a flagged player
+  // stands out as they come up. Same Set/patchPrefs pattern as watchlist.
+  const [draftPriorityIds, setDraftPriorityIds] = React.useState(new Set());
+  const handleToggleDraftPriority = React.useCallback(id => {
+    setDraftPriorityIds(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      patchPrefs({ draftPriority: [...n] });
+      return n;
+    });
+  }, []);
+
   const [sourcesState, setSourcesState] = React.useState(() => ({
     freeApis: Object.fromEntries(FREE_DATA_SOURCES.map(s => [s.id, s.enabled])),
     feeds:    Object.fromEntries(RANKING_SOURCES.map(s => [s.id, { enabled: s.enabled, weight: s.weight }])),
@@ -1351,7 +1367,7 @@ export default function App() {
                 <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
                   {/* DraftRoom kept mounted at all times — display:none hides it without unmounting */}
                   <div style={{ display: tab === 'room' ? 'flex' : 'none', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                    <DraftRoom aiMode={aiMode} user={user} showMobile={showMobile} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onOpenPlayer={setOpenPlayer} onDraftPick={id => {
+                    <DraftRoom aiMode={aiMode} user={user} showMobile={showMobile} draftPriorityIds={draftPriorityIds} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onOpenPlayer={setOpenPlayer} onDraftPick={id => {
                       let nextIds = null;
                       setMyRosterIds(prev => {
                         const next = new Set([...prev, id]);
@@ -1375,7 +1391,7 @@ export default function App() {
             );
           })()}
           {active === 'owners'    && <OwnerIntelScreen onOpenPlayer={setOpenPlayer} user={user} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} />}
-          {active === 'cbs'       && <PlayerDraftRankingsScreen onOpenPlayer={setOpenPlayer} />}
+          {active === 'cbs'       && <PlayerDraftRankingsScreen onOpenPlayer={setOpenPlayer} draftPriorityIds={draftPriorityIds} onToggleDraftPriority={handleToggleDraftPriority} />}
           {active === 'sources'       && <SourcesScreen onNav={setActive} sourcesState={sourcesState} onSourcesChange={handleSourcesChange} user={user} myRosterIds={myRosterIds} cookieAlert={cookieAlert} onCookieAlertDismiss={() => setCookieAlert(false)} />}
           {active === 'admin-owners'  && <AdminOwners />}
           {active === 'admin-scoring'  && <ScoringTestScreen user={user} />}

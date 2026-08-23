@@ -1,6 +1,6 @@
 import React from 'react';
 import { CBS_RANKINGS } from '../lib/data.js';
-import { getPlayers, findPlayer } from '../lib/playerStore.js';
+import { getPlayers, findPlayer, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, PlayerCell, TeamLogoBadge } from './ui.jsx';
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 import { api } from '../api.js';
@@ -256,7 +256,10 @@ export function CBSRankingsScreen({ onOpenPlayer }) {
     }).catch(() => {}).finally(() => setFpLoading(false));
   }, [format]);
 
-  const allPlayers = getPlayers();
+  // usePlayers() (not raw getPlayers()) — this screen must re-render once
+  // ECR loads and playerStore recomputes tiers async after initial mount,
+  // or it keeps showing the pre-ECR (arbitrary) tiers forever.
+  const allPlayers = usePlayers();
   const fpMap = fpRanks[format];
 
   const ranked = React.useMemo(() => {
@@ -353,6 +356,7 @@ export function CBSRankingsScreen({ onOpenPlayer }) {
         <table className="data-table">
           <thead>
             <tr>
+              <th className="num" style={{ width: 36 }} title="Draft Priority — flag a player to get a blue medallion badge on the live Draft Room board">★</th>
               <th className="num" style={thStyle('rank')} onClick={() => handleSort('rank')}>Rank{arrow('rank')}</th>
               <th style={thStyle('name')} onClick={() => handleSort('name')}>Player{arrow('name')}</th>
               <th style={thStyle('tier')} onClick={() => handleSort('tier')}>Tier{arrow('tier')}</th>
@@ -367,8 +371,22 @@ export function CBSRankingsScreen({ onOpenPlayer }) {
               const p = findPlayer(r.playerId);
               if (!p) return null;
               const tierColor = `hsl(${200 + (r.tier || 1) * 18}, 60%, 60%)`;
+              const isPriority = draftPriorityIds?.has(p.id);
               return (
                 <tr key={r.playerId} onClick={() => onOpenPlayer && onOpenPlayer(p.id)} style={{ cursor: 'pointer' }}>
+                  <td className="num" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => onToggleDraftPriority && onToggleDraftPriority(p.id)}
+                      title={isPriority ? 'Remove Draft Priority' : 'Flag as Draft Priority'}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer', padding: 2, lineHeight: 1,
+                        fontSize: 16, color: isPriority ? '#4ea8ff' : 'var(--text-faint)',
+                        textShadow: isPriority ? '0 0 6px #4ea8ff99' : 'none',
+                      }}
+                    >
+                      {isPriority ? '●' : '○'}
+                    </button>
+                  </td>
                   <td className="num">
                     <strong style={{ fontSize: 14, fontFamily: 'var(--font-display)', fontStretch: '75%' }}>{r.rank}</strong>
                   </td>
@@ -737,7 +755,7 @@ function ImportRankingsModal({ onClose, onImport, initialTab = 'file' }) {
   );
 }
 
-export function PlayerDraftRankingsScreen({ onOpenPlayer }) {
+export function PlayerDraftRankingsScreen({ onOpenPlayer, draftPriorityIds, onToggleDraftPriority }) {
   const [tab, setTab] = React.useState('cbs');
   const [savedRankings, setSavedRankings] = React.useState(() => getPrefs().savedRankings || []);
   const [personalRanks, setPersonalRanks] = React.useState(() => getPrefs().personalRankings || []);

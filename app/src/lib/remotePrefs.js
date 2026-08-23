@@ -31,6 +31,7 @@ function apiHeaders() {
 
 export const PREFS_DEFAULTS = {
   watchlist:         [],      // player IDs on watchlist
+  draftPriority:     [],      // player IDs flagged as a draft priority (blue medallion in DraftRoom)
   slotOverrides:     {},      // roster slot overrides { slotKey: playerId }
   customRankings:    [],      // user's custom player ranking overrides
   scoringWeights:    null,    // custom scoring weight config
