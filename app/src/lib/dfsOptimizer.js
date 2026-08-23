@@ -38,7 +38,7 @@ function eligiblePool(players, excludeIds) {
  * linear constraints — e.g. "share at most N players with a prior lineup" —
  * without duplicating the whole model-building logic.
  */
-function solveOnce(pool, { lockIds = new Set(), extraConstraints = {}, extraVariableTags = {} } = {}) {
+function solveOnce(pool, { lockIds = new Set(), extraConstraints = {}, extraVariableTags = {}, objectiveKey = 'projection' } = {}) {
   const counts = { QB: 0, RB: 0, WR: 0, TE: 0, DST: 0 };
   for (const p of pool) counts[p.position] += 1;
   const missing = Object.entries(CORE_MIN).filter(([pos, min]) => counts[pos] < min);
@@ -66,7 +66,7 @@ function solveOnce(pool, { lockIds = new Set(), extraConstraints = {}, extraVari
   const binaries = {};
   for (const p of pool) {
     variables[p.id] = {
-      points:  Number(p.projection) || 0,
+      points:  Number(p[objectiveKey]) || 0,
       salary:  Number(p.salary),
       qb:  p.position === 'QB'  ? 1 : 0,
       rb:  p.position === 'RB'  ? 1 : 0,
@@ -116,11 +116,23 @@ function solveOnce(pool, { lockIds = new Set(), extraConstraints = {}, extraVari
   }
 
   const lineup = pool.filter(p => Math.round(result[p.id] || 0) === 1);
+  const round2 = n => Math.round(n * 100) / 100;
+  // totalProjection always reflects real DK/weighted projection, regardless
+  // of what the solve actually optimized for (points/leverageScore/ceiling)
+  // — so every generated lineup can be compared on the same basis. ceiling/
+  // ownership totals are informational only when that data exists on the
+  // pool; a player missing it just doesn't contribute (not assumed 0).
+  const withCeiling = lineup.filter(p => p.ceiling != null);
+  const withOwnership = lineup.filter(p => p.ownership != null);
   return {
     feasible: true,
     lineup: assignSlots(lineup),
     totalSalary: lineup.reduce((s, p) => s + Number(p.salary), 0),
-    totalProjection: Math.round(lineup.reduce((s, p) => s + (Number(p.projection) || 0), 0) * 100) / 100,
+    totalProjection: round2(lineup.reduce((s, p) => s + (Number(p.projection) || 0), 0)),
+    totalCeiling: withCeiling.length ? round2(withCeiling.reduce((s, p) => s + Number(p.ceiling), 0)) : null,
+    ceilingCoverage: withCeiling.length,
+    avgOwnership: withOwnership.length ? round2(withOwnership.reduce((s, p) => s + Number(p.ownership), 0) / withOwnership.length) : null,
+    ownershipCoverage: withOwnership.length,
     salaryCap: DK_SALARY_CAP,
     remainingSalary: DK_SALARY_CAP - lineup.reduce((s, p) => s + Number(p.salary), 0),
   };
@@ -136,6 +148,14 @@ export function optimizeLineup(players, opts = {}) {
   return solveOnce(pool, { lockIds });
 }
 
+// Default per-lineup objective sequence: pure points, then leverage
+// (points discounted by ownership — rewards low-owned production), then
+// ceiling (90th-percentile real game-log outcome). A player missing
+// leverageScore/ceiling data falls back to plain projection for that
+// solve (neutral, not fabricated high/low) — see DfsOptimizer.jsx where
+// these fields get attached to the pool before calling this.
+const DEFAULT_STRATEGIES = ['projection', 'leverageScore', 'ceiling'];
+
 /**
  * Generates up to `count` distinct lineups from the same (already
  * weight-adjusted) pool, each required to differ from every earlier one by
@@ -146,14 +166,21 @@ export function optimizeLineup(players, opts = {}) {
  * Stops early (returns fewer than `count`) if no sufficiently different
  * lineup exists under the cap/locks — a small slate may only support 1-2.
  *
+ * `config.strategies` picks what each successive lineup optimizes for —
+ * e.g. ['projection', 'leverageScore', 'ceiling'] for Optimal / Non-Chalk /
+ * Best Ceiling. Diversity is still enforced against every prior lineup
+ * regardless of strategy, so lineup 2 isn't just "best ceiling" in a
+ * vacuum, it's "best ceiling that's also meaningfully different from the
+ * optimal lineup."
+ *
  * @param {Array} players
  * @param {{excludeIds?: Set, lockIds?: Set}} [opts]
- * @param {{count?: number, minDiff?: number}} [config]
+ * @param {{count?: number, minDiff?: number, strategies?: string[]}} [config]
  * @returns {Array<ReturnType<typeof optimizeLineup>>}
  */
 export function optimizeDiverseLineups(players, opts = {}, config = {}) {
   const { excludeIds = new Set(), lockIds = new Set() } = opts;
-  const { count = 3, minDiff = 2 } = config;
+  const { count = 3, minDiff = 2, strategies = DEFAULT_STRATEGIES } = config;
   const pool = eligiblePool(players, excludeIds);
 
   const results = [];
@@ -168,7 +195,8 @@ export function optimizeDiverseLineups(players, opts = {}, config = {}) {
         extraVariableTags[id] = { ...(extraVariableTags[id] || {}), [key]: 1 };
       }
     });
-    const result = solveOnce(pool, { lockIds, extraConstraints, extraVariableTags });
+    const objectiveKey = strategies[i] || 'projection';
+    const result = solveOnce(pool, { lockIds, extraConstraints, extraVariableTags, objectiveKey });
     results.push(result);
     if (!result.feasible) break; // no more sufficiently-different lineups available
     priorLineups.push(result.lineup.map(l => l.player.id));

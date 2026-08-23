@@ -17,6 +17,9 @@ function money(n) {
 
 const WEATHER_COLOR = { Low: 'var(--text-dim)', Medium: '#ffb547', High: 'var(--danger)', Dome: 'var(--text-faint)' };
 
+// Optimal Lineup / Non-Chalk / Best Ceiling — see optimizeDiverseLineups' strategies config.
+const LINEUP_STRATEGY_SEQUENCE = ['projection', 'leverageScore', 'ceiling'];
+
 function formatPoolColumnValue(colId, row) {
   if (!row) return '—';
   switch (colId) {
@@ -315,16 +318,41 @@ export default function DfsOptimizerScreen() {
     return optimizeLineup(poolForSlate, { excludeIds, lockIds });
   }, [poolForSlate, excludeIds, lockIds]);
 
-  // Generates up to 3 distinct lineups from poolForSlate — which already has
-  // the current DFS Weights baked in (see poolForSlate memo above; it's a
-  // no-op pass-through when weights are still default) — each required to
-  // differ from the others by at least 2 players. Runs async via setTimeout
-  // so the "Generating…" state actually paints before the (synchronous,
-  // blocking) ILP solve runs 3x.
+  // Ceiling lookup (real 90th-percentile game-log data, same source as the
+  // AI Analysis floor/ceiling card) — used by the "Best Ceiling" lineup.
+  const ceilingByName = React.useMemo(() => {
+    const map = new Map();
+    for (const fc of (floorCeilingData?.players || [])) {
+      if (fc.player_name) map.set(fc.player_name.toLowerCase().trim(), Number(fc.ceiling_pts));
+    }
+    return map;
+  }, [floorCeilingData]);
+
+  // Pool enriched with ceiling/ownership/leverageScore for the strategy
+  // lineups below. A player missing real data gets `ceiling: null` (so
+  // result.totalCeiling coverage stays honest) but contributes 0 — not a
+  // guessed value — to the ceiling-maximizing solve specifically; missing
+  // ownership falls back to plain projection (neutral, no leverage
+  // adjustment applied) rather than assuming a specific ownership number.
+  const strategizedPool = React.useMemo(() => {
+    return poolForSlate.map(p => {
+      const ceiling = ceilingByName.get(p.name?.toLowerCase().trim());
+      const ownership = ownershipMap.get(p.name?.toLowerCase().trim());
+      const leverageScore = ownership != null ? (p.projection || 0) * (1 - ownership / 100) : (p.projection || 0);
+      return { ...p, ceiling: Number.isFinite(ceiling) ? ceiling : null, ownership: ownership ?? null, leverageScore };
+    });
+  }, [poolForSlate, ceilingByName, ownershipMap]);
+
+  // Generates the 3 strategy lineups — Optimal (pure projection), Non-Chalk
+  // (projection discounted by ownership, rewarding low-owned production),
+  // Best Ceiling (real 90th-percentile outcome) — from the same
+  // weight-adjusted pool, each required to differ from the others by at
+  // least 2 players. Runs async via setTimeout so the "Generating…" state
+  // actually paints before the (synchronous, blocking) ILP solve runs 3x.
   function generateWeightedLineups() {
     setGeneratingLineups(true);
     setTimeout(() => {
-      const results = optimizeDiverseLineups(poolForSlate, { excludeIds, lockIds }, { count: 3, minDiff: 2 });
+      const results = optimizeDiverseLineups(strategizedPool, { excludeIds, lockIds }, { count: 3, minDiff: 2, strategies: LINEUP_STRATEGY_SEQUENCE });
       setWeightedLineups(results);
       setGeneratingLineups(false);
     }, 20);
@@ -546,56 +574,6 @@ export default function DfsOptimizerScreen() {
                 </div>
               )}
 
-              {optimized?.feasible && (
-                <div className="card">
-                  <div className="card-head">
-                    <span className="card-title">Optimal Lineup</span>
-                    {selectedSlate?.earliest_start && (
-                      <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
-                        Earliest kickoff: {new Date(selectedSlate.earliest_start).toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                  <div className="card-body" style={{ padding: 0 }}>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                        <thead>
-                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                            {['Slot', 'Player', 'Team', 'Opp', 'Salary', 'Proj'].map(h => (
-                              <th key={h} style={{ textAlign: h === 'Player' ? 'left' : 'right', padding: '8px 12px', fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase' }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {optimized.lineup.map(({ slot, player }) => (
-                            <tr key={`${slot}-${player.id}`} style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td style={{ padding: '8px 12px', fontWeight: 800, color: POS_COLORS[player.position] || 'var(--text)' }}>{slot}</td>
-                              <td style={{ padding: '8px 12px', fontWeight: 700 }}>{player.name}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{player.team}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{player.opponent ? `vs ${player.opponent}` : ''}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{money(player.salary)}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: '#4caf82' }}>{player.projection?.toFixed(1) ?? '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr style={{ borderTop: '2px solid var(--border)' }}>
-                            <td colSpan={4} style={{ padding: '8px 12px', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-faint)' }}>Total</td>
-                            <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800 }}>{money(optimized.totalSalary)}</td>
-                            <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#4caf82' }}>{optimized.totalProjection.toFixed(1)}</td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {optimized && !optimized.feasible && (
-                <div className="card">
-                  <div className="card-head"><span className="card-title">Optimal Lineup</span></div>
-                  <div className="card-body" style={{ padding: 16, fontSize: 13, color: 'var(--danger)' }}>{optimized.reason}</div>
-                </div>
-              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
@@ -611,7 +589,7 @@ export default function DfsOptimizerScreen() {
                 <div className="card-body">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
                     <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6, flex: 1, minWidth: 260 }}>
-                      Generates up to 3 lineups from the current player pool, weighted by your DFS Weights settings. Each differs from the others by at least 2 players.
+                      Generates 3 lineups from the current player pool: <b>Optimal Lineup</b> (pure projected points), <b>Non-Chalk</b> (points discounted by season-long roster ownership — a popularity proxy, not a DK-specific ownership projection, which DraftKings doesn't publish), and <b>Best Ceiling</b> (real 90th-percentile game-log outcome). Each differs from the others by at least 2 players.
                     </div>
                     <button className="btn primary" onClick={generateWeightedLineups} disabled={generatingLineups || poolForSlate.length === 0}>
                       {generatingLineups ? '⟳ Generating…' : 'Generate 3 Lineups'}
@@ -619,16 +597,16 @@ export default function DfsOptimizerScreen() {
                   </div>
                   {!weightsActive && (
                     <div style={{ fontSize: 10, color: 'var(--text-faint)', marginBottom: 12 }}>
-                      Tip: tune the DFS Weights tab first so these 3 lineups actually differ in strategy, not just in which near-tied player got picked.
+                      Tip: tune the DFS Weights tab first so these lineups reflect your own signals too, not just DK's raw projection.
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                     {weightedLineups === null && !generatingLineups && (
                       <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>No lineups generated yet.</div>
                     )}
-                    {weightedLineups?.filter(r => r.feasible).map((result, i) => (
+                    {weightedLineups?.map((result, i) => result.feasible && (
                       <div key={i} style={{ flex: '1 1 260px', minWidth: 260 }}>
-                        <WeightedLineupCard index={i} result={result} />
+                        <WeightedLineupCard strategy={LINEUP_STRATEGY_SEQUENCE[i]} result={result} />
                       </div>
                     ))}
                     {weightedLineups && weightedLineups.filter(r => r.feasible).length === 0 && (
@@ -1009,10 +987,12 @@ function PageLogicLegend() {
             Objective: maximize total projected points, using either DK's own consensus (AVG) or your FantasAI-weighted projection if DFS Weights are active.
           </LegendSection>
 
-          <LegendSection title="FantasAI Weighted Lineups for DK (the 3-lineup generator)">
-            Solves the same ILP model up to 3 times against the same weight-adjusted pool. After each solve, it adds one new constraint per prior lineup: the next lineup may share at most 7 of its 9 players with that lineup — i.e., it must differ by at least 2 players. So lineup 2 is the <i>best</i> lineup available that's meaningfully different from lineup 1, not a random shuffle, and lineup 3 must differ from both 1 and 2.
+          <LegendSection title="FantasAI Weighted Lineups for DK (Optimal / Non-Chalk / Best Ceiling)">
+            Solves the same ILP model 3 times against the same weight-adjusted pool, each with a different objective: <b>Optimal Lineup</b> maximizes real projected points (identical to what the old standalone "Optimal Lineup" card showed — it's been folded into this generator, not removed). <b>Non-Chalk</b> maximizes points discounted by season-long fantasy roster ownership — a real popularity/consensus signal, not an actual DK single-slate ownership projection (DraftKings doesn't publish those, so this is the closest real proxy available). <b>Best Ceiling</b> maximizes real 90th-percentile game-log outcomes instead of average projection.
             <br /><br />
-            If the pool can't support that much diversity under the current cap/locks/exclusions (common on a small slate), generation stops early and shows however many distinct lineups it actually found.
+            After each solve, it adds one new constraint per prior lineup: the next lineup may share at most 7 of its 9 players with that lineup — i.e., it must differ by at least 2 players — so Non-Chalk and Best Ceiling aren't just "the best lineup for that objective," they're the best lineup for that objective that's also meaningfully different from what came before.
+            <br /><br />
+            If the pool can't support that much diversity under the current cap/locks/exclusions (common on a small slate), generation stops early and shows however many distinct lineups it actually found. A player missing real ceiling or ownership data contributes 0 to that specific objective (not a guessed value) — it can still appear in the Optimal Lineup, just won't be favored by Non-Chalk/Best Ceiling without real data behind it.
           </LegendSection>
 
           <LegendSection title="Floor / Ceiling">
@@ -1050,12 +1030,31 @@ function LegendSection({ title, children }) {
 }
 
 // ─── DFS-Weighted Lineup mini card ───────────────────────────────────────
-function WeightedLineupCard({ index, result }) {
+const LINEUP_STRATEGY_META = {
+  projection:   { label: 'Optimal Lineup', color: '#4caf82', hint: 'Maximizes projected points — no ownership or ceiling adjustment.' },
+  leverageScore: { label: 'Non-Chalk', color: '#c084fc', hint: "Maximizes points discounted by season-long fantasy roster ownership — a real popularity/consensus signal, but not an actual DK single-slate ownership projection (DraftKings doesn't publish those)." },
+  ceiling:      { label: 'Best Ceiling', color: '#a78bfa', hint: "Maximizes each player's real 90th-percentile game-log outcome, not average projection." },
+};
+
+function WeightedLineupCard({ strategy, result }) {
+  const meta = LINEUP_STRATEGY_META[strategy] || LINEUP_STRATEGY_META.projection;
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-      <div style={{ padding: '6px 10px', background: 'var(--panel-2)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.05em' }}>Lineup {index + 1}</span>
-        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#4caf82' }}>{result.totalProjection.toFixed(1)} pts</span>
+      <div style={{ padding: '6px 10px', background: 'var(--panel-2)', borderBottom: '1px solid var(--border)' }} title={meta.hint}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.05em', color: meta.color }}>{meta.label}</span>
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#4caf82' }}>{result.totalProjection.toFixed(1)} pts</span>
+        </div>
+        {strategy === 'ceiling' && (
+          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', marginTop: 2 }}>
+            {result.totalCeiling != null ? `Ceiling ${result.totalCeiling.toFixed(1)} (${result.ceilingCoverage}/9 covered)` : 'Ceiling: no real game-log data for this lineup'}
+          </div>
+        )}
+        {strategy === 'leverageScore' && (
+          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', marginTop: 2 }}>
+            {result.avgOwnership != null ? `Avg roster% ${result.avgOwnership.toFixed(1)}% (${result.ownershipCoverage}/9 covered)` : 'Roster%: no data for this lineup'}
+          </div>
+        )}
       </div>
       <div>
         {result.lineup.map(({ slot, player }) => (
