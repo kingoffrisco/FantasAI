@@ -8,6 +8,7 @@ import { fetchDkLobbyContestsLive, fetchDkDraftGroupPlayersLive } from '../lib/d
 import { useR2BreakoutCandidates, useR2SleeperPicks, useR2DefenseVsPos, useR2PlayerOwnership, useR2WeatherForecast, useR2KalshiNflMarkets, useR2FloorCeiling, useR2DkContests, useR2PlayerNotes, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability } from '../hooks.js';
 import { findPlayerByName } from '../lib/playerStore.js';
 import { buildPlayerContextLines, PLAYER_CONTEXT_SOURCES, DFS_POOL_COLUMNS, loadDfsPoolColumns, saveDfsPoolColumns, getPlayerTableRow, buildOwnershipMap } from '../lib/dfsPlayerContext.js';
+import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 
 const POS_COLORS = { QB: '#ef4444', RB: '#22c55e', WR: '#3b82f6', TE: '#f59e0b', DST: '#64748b' };
 
@@ -19,6 +20,39 @@ const WEATHER_COLOR = { Low: 'var(--text-dim)', Medium: '#ffb547', High: 'var(--
 
 // Optimal Lineup / Non-Chalk / Best Ceiling — see optimizeDiverseLineups' strategies config.
 const LINEUP_STRATEGY_SEQUENCE = ['projection', 'leverageScore', 'ceiling'];
+
+// ─── Movable / resizable page layout ──────────────────────────────────────
+// Lets the user drag each box to reorder it and drag its corner to resize
+// it. Order is applied via CSS `order` (grid items respect it, same as
+// flexbox) rather than physically moving JSX, so every box stays exactly
+// where it's defined in the source — only its position in the visual flow
+// and its size change.
+const DFS_LAYOUT_PREF_KEY = 'dfsOptimizerLayout';
+const DEFAULT_DFS_LAYOUT = [
+  { id: 'contest',         span: 1, height: null },
+  { id: 'weightedLineups', span: 2, height: null },
+  { id: 'selectPlayers',   span: 2, height: null },
+  { id: 'aiAnalysis',      span: 2, height: null },
+];
+const MIN_BOX_HEIGHT = 160;
+
+function loadDfsLayout() {
+  try {
+    const saved = getPrefs().dfsOptimizerLayout;
+    if (!Array.isArray(saved)) return DEFAULT_DFS_LAYOUT.map(b => ({ ...b }));
+    const byId = new Map(saved.filter(b => b?.id).map(b => [b.id, b]));
+    const knownIds = new Set(DEFAULT_DFS_LAYOUT.map(b => b.id));
+    const ordered = saved.filter(b => knownIds.has(b?.id)).map(b => DEFAULT_DFS_LAYOUT.find(d => d.id === b.id));
+    const missing = DEFAULT_DFS_LAYOUT.filter(d => !byId.has(d.id));
+    return [...ordered, ...missing].map(d => {
+      const s = byId.get(d.id);
+      return { id: d.id, span: s?.span === 2 ? 2 : s?.span === 1 ? 1 : d.span, height: Number.isFinite(s?.height) ? s.height : null };
+    });
+  } catch { return DEFAULT_DFS_LAYOUT.map(b => ({ ...b })); }
+}
+function saveDfsLayout(layout) {
+  patchPrefs({ [DFS_LAYOUT_PREF_KEY]: layout });
+}
 
 function formatPoolColumnValue(colId, row) {
   if (!row) return '—';
@@ -53,6 +87,59 @@ function formatPoolColumnValue(colId, row) {
     case 'bench':    return row.benchPress ?? '—';
     default:         return '—';
   }
+}
+
+// One draggable/resizable box in the page layout. `order` comes from this
+// box's index in the current dfsLayout array (CSS order, not DOM position),
+// so wrapping existing content in this component doesn't require moving
+// any of that content in the source. Drag the ⠿ handle to reorder, the ⤡
+// corner to resize (right = wider/full-width, down = taller).
+function LayoutBox({ id, order, span, height, dragging, dragOver, onDragStart, onDragOver, onDrop, onDragEnd, onResizeStart, children }) {
+  return (
+    <div
+      data-box-id={id}
+      onDragOver={e => { e.preventDefault(); onDragOver(id); }}
+      onDrop={e => { e.preventDefault(); onDrop(id); }}
+      style={{
+        order,
+        gridColumn: `span ${span}`,
+        position: 'relative',
+        height: height ? `${height}px` : 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        minWidth: 0,
+        opacity: dragging === id ? 0.4 : 1,
+        outline: dragOver === id && dragging && dragging !== id ? '2px dashed var(--accent-2)' : 'none',
+        outlineOffset: 2,
+        borderRadius: 10,
+        transition: 'opacity .15s',
+      }}
+    >
+      <span
+        draggable
+        onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart(id); }}
+        onDragEnd={onDragEnd}
+        title="Drag to reorder this box"
+        style={{
+          position: 'absolute', top: 6, right: 6, zIndex: 6, cursor: 'grab', fontSize: 13, lineHeight: 1,
+          color: 'var(--text-faint)', padding: '3px 6px', borderRadius: 5,
+          background: 'var(--panel-2)', border: '1px solid var(--border)', userSelect: 'none',
+        }}
+      >⠿</span>
+      <div style={{ flex: 1, minHeight: 0, overflowY: height ? 'auto' : 'visible' }}>
+        {children}
+      </div>
+      <span
+        onMouseDown={e => onResizeStart(e, id)}
+        title="Drag to resize — right for full width, down for taller"
+        style={{
+          position: 'absolute', bottom: 4, right: 4, zIndex: 6, cursor: 'nwse-resize', fontSize: 13, lineHeight: 1,
+          color: 'var(--text-faint)', padding: '3px 5px', borderRadius: 5,
+          background: 'var(--panel-2)', border: '1px solid var(--border)', userSelect: 'none',
+        }}
+      >⤡</span>
+    </div>
+  );
 }
 
 export default function DfsOptimizerScreen() {
@@ -259,6 +346,71 @@ export default function DfsOptimizerScreen() {
     }
     return games.size;
   }, [poolForSlate]);
+
+  // Draggable/resizable box layout — order + span + height per box,
+  // persisted the same way as everything else on this page.
+  const [dfsLayout, setDfsLayout] = React.useState(() => loadDfsLayout());
+  const dfsLayoutRef = React.useRef(dfsLayout);
+  React.useEffect(() => { dfsLayoutRef.current = dfsLayout; }, [dfsLayout]);
+  const [draggingBoxId, setDraggingBoxId] = React.useState(null);
+  const [dragOverBoxId, setDragOverBoxId] = React.useState(null);
+  const resizeStateRef = React.useRef(null);
+
+  const boxOrder = id => { const i = dfsLayout.findIndex(b => b.id === id); return i < 0 ? 0 : i; };
+  const boxSpan = id => dfsLayout.find(b => b.id === id)?.span ?? 1;
+  const boxHeight = id => dfsLayout.find(b => b.id === id)?.height ?? null;
+
+  function moveBoxTo(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    setDfsLayout(prev => {
+      const next = [...prev];
+      const fromIdx = next.findIndex(b => b.id === fromId);
+      const toIdx = next.findIndex(b => b.id === toId);
+      if (fromIdx < 0 || toIdx < 0) return prev;
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      saveDfsLayout(next);
+      return next;
+    });
+  }
+
+  function handleBoxResizeStart(e, id) {
+    e.preventDefault();
+    const box = dfsLayoutRef.current.find(b => b.id === id);
+    if (!box) return;
+    const wrapperEl = e.currentTarget.closest('[data-box-id]');
+    resizeStateRef.current = {
+      id,
+      startX: e.clientX,
+      startY: e.clientY,
+      startHeight: box.height || wrapperEl?.offsetHeight || 260,
+      startSpan: box.span,
+    };
+    window.addEventListener('mousemove', handleBoxResizeMove);
+    window.addEventListener('mouseup', handleBoxResizeEnd);
+  }
+  function handleBoxResizeMove(e) {
+    const r = resizeStateRef.current;
+    if (!r) return;
+    const dy = e.clientY - r.startY;
+    const dx = e.clientX - r.startX;
+    const newHeight = Math.max(MIN_BOX_HEIGHT, Math.round(r.startHeight + dy));
+    let newSpan = r.startSpan;
+    if (dx > 90) newSpan = 2;
+    else if (dx < -90) newSpan = 1;
+    setDfsLayout(prev => prev.map(b => b.id === r.id ? { ...b, height: newHeight, span: newSpan } : b));
+  }
+  function handleBoxResizeEnd() {
+    window.removeEventListener('mousemove', handleBoxResizeMove);
+    window.removeEventListener('mouseup', handleBoxResizeEnd);
+    resizeStateRef.current = null;
+    saveDfsLayout(dfsLayoutRef.current);
+  }
+  function resetDfsLayout() {
+    const next = DEFAULT_DFS_LAYOUT.map(b => ({ ...b }));
+    setDfsLayout(next);
+    saveDfsLayout(next);
+  }
 
   // Position + salary filters for the player-selection table — narrows the
   // display only; locks/excludes/the optimizer still see the full pool.
@@ -532,8 +684,19 @@ export default function DfsOptimizerScreen() {
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '400px minmax(0, 1fr)', gap: 20, alignItems: 'start' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: -8 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>Drag ⠿ to reorder a box · drag ⤡ to resize it</span>
+            <button className="btn ghost sm" onClick={resetDfsLayout} style={{ fontSize: 10 }}>Reset Layout</button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(380px, 1fr))', gap: 20, alignItems: 'start' }}>
+            <LayoutBox
+              id="contest" order={boxOrder('contest')} span={boxSpan('contest')} height={boxHeight('contest')}
+              dragging={draggingBoxId} dragOver={dragOverBoxId}
+              onDragStart={setDraggingBoxId} onDragOver={setDragOverBoxId} onDrop={moveBoxTo}
+              onDragEnd={() => { setDraggingBoxId(null); setDragOverBoxId(null); }}
+              onResizeStart={handleBoxResizeStart}
+            >
               {(contests.length > 0 || liveContests !== null) ? (
                 <>
                   <ContestPicker
@@ -573,12 +736,17 @@ export default function DfsOptimizerScreen() {
                   </select>
                 </div>
               )}
+            </LayoutBox>
 
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
             {optimized && (
               <>
+              <LayoutBox
+                id="weightedLineups" order={boxOrder('weightedLineups')} span={boxSpan('weightedLineups')} height={boxHeight('weightedLineups')}
+                dragging={draggingBoxId} dragOver={dragOverBoxId}
+                onDragStart={setDraggingBoxId} onDragOver={setDragOverBoxId} onDrop={moveBoxTo}
+                onDragEnd={() => { setDraggingBoxId(null); setDragOverBoxId(null); }}
+                onResizeStart={handleBoxResizeStart}
+              >
               <div className="card">
                 <div className="card-head">
                   <span className="card-title">FantasAI Weighted Lineups for DK</span>
@@ -620,7 +788,15 @@ export default function DfsOptimizerScreen() {
                   )}
                 </div>
               </div>
+              </LayoutBox>
 
+              <LayoutBox
+                id="selectPlayers" order={boxOrder('selectPlayers')} span={boxSpan('selectPlayers')} height={boxHeight('selectPlayers')}
+                dragging={draggingBoxId} dragOver={dragOverBoxId}
+                onDragStart={setDraggingBoxId} onDragOver={setDragOverBoxId} onDrop={moveBoxTo}
+                onDragEnd={() => { setDraggingBoxId(null); setDragOverBoxId(null); }}
+                onResizeStart={handleBoxResizeStart}
+              >
               <div className="card">
                 <div className="card-head" style={{ position: 'relative' }}>
                   <span className="card-title">Select Players for This Contest ({poolForSlate.length}{poolGameCount > 0 ? ` across ${poolGameCount} game${poolGameCount === 1 ? '' : 's'}` : ''})</span>
@@ -757,13 +933,15 @@ export default function DfsOptimizerScreen() {
                   </table>
                 </div>
               </div>
-              </>
-            )}
-            </div>
-          </div>
+              </LayoutBox>
 
-          {optimized && (
-            <>
+              <LayoutBox
+                id="aiAnalysis" order={boxOrder('aiAnalysis')} span={boxSpan('aiAnalysis')} height={boxHeight('aiAnalysis')}
+                dragging={draggingBoxId} dragOver={dragOverBoxId}
+                onDragStart={setDraggingBoxId} onDragOver={setDragOverBoxId} onDrop={moveBoxTo}
+                onDragEnd={() => { setDraggingBoxId(null); setDragOverBoxId(null); }}
+                onResizeStart={handleBoxResizeStart}
+              >
               <div className="card">
                 <div className="card-head">
                   <span className="card-title">AI Lineup Analysis</span>
@@ -932,8 +1110,10 @@ export default function DfsOptimizerScreen() {
                   )}
                 </div>
               </div>
+              </LayoutBox>
             </>
           )}
+          </div>
 
           {dataGeneratedAt && (
             <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>
