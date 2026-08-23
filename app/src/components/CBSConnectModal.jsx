@@ -272,11 +272,18 @@ export function CBSRankingsScreen({ onOpenPlayer }) {
     return list;
   }, [allPlayers, fpMap]);
 
+  // Tier comes from playerStore's own position-aware computation (grouped
+  // by position, cut by ECR rank within that position — see
+  // assignPositionTiers in playerStore.js). Never derive it from `i` here:
+  // that's this list's OVERALL cross-position rank order, and bucketing it
+  // by fixed-width chunks produced nonsensical tiers for players near a
+  // position boundary (e.g. a clear top-5 RB landing in "tier 5" just
+  // because enough non-RBs were ranked ahead of them overall).
   const rows = ranked.map((p, i) => ({
     playerId: p.id,
     rank: i + 1,
     fpEcr: p.fpEcr,
-    tier: p.tier || Math.ceil((i + 1) / 50),
+    tier: p.tier || 1,
   }));
 
   let filtered = rows.slice();

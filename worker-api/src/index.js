@@ -865,6 +865,8 @@ const PROXY_WHITELIST = [
   'api.mysportsfeeds.com',
   'www.fantasypros.com',
   'partners.fantasypros.com',
+  'api.draftkings.com',
+  'www.draftkings.com',
 ];
 
 async function handleProxy(url) {

@@ -17,6 +17,7 @@
 
 import { getPrefs, patchPrefs } from './remotePrefs.js';
 import { findImpliedGameTotal, findWinProbability } from './kalshi.js';
+import { PLAYER_CONTEXT_SOURCES } from './dfsPlayerContext.js';
 
 export const DFS_ANALYSIS_METRICS = [
   { key: 'salary',      label: 'Salary' },
@@ -38,7 +39,9 @@ export const DEFAULT_WEATHER_THRESHOLDS = { lowMaxMph: 10, medMaxMph: 20 }; // >
 function buildDefaultAnalysisSettings() {
   const enabled = {};
   for (const m of DFS_ANALYSIS_METRICS) enabled[m.key] = true;
-  return { enabled, weatherThresholds: { ...DEFAULT_WEATHER_THRESHOLDS } };
+  const playerContextEnabled = {};
+  for (const s of PLAYER_CONTEXT_SOURCES) playerContextEnabled[s.key] = true;
+  return { enabled, playerContextEnabled, weatherThresholds: { ...DEFAULT_WEATHER_THRESHOLDS }, contestType: 'gpp', userExpectations: '' };
 }
 
 export function loadAnalysisSettings() {
@@ -48,7 +51,10 @@ export function loadAnalysisSettings() {
     if (!saved) return defaults;
     return {
       enabled: { ...defaults.enabled, ...(saved.enabled || {}) },
+      playerContextEnabled: { ...defaults.playerContextEnabled, ...(saved.playerContextEnabled || {}) },
       weatherThresholds: { ...defaults.weatherThresholds, ...(saved.weatherThresholds || {}) },
+      contestType: saved.contestType === 'cash' ? 'cash' : 'gpp',
+      userExpectations: typeof saved.userExpectations === 'string' ? saved.userExpectations : '',
     };
   } catch { return buildDefaultAnalysisSettings(); }
 }
@@ -63,7 +69,7 @@ export function resetAnalysisSettings() {
   return d;
 }
 
-function weatherRiskForTeam(weatherForecast, homeTeam, thresholds) {
+export function weatherRiskForTeam(weatherForecast, homeTeam, thresholds) {
   const teams = weatherForecast?.teams;
   if (!teams || !homeTeam) return null;
   const entry = teams[homeTeam];
@@ -168,4 +174,40 @@ export function computeLineupMetrics(lineup, { kalshiMarkets, weatherForecast, w
     .map(m => `${m.label}: ${metrics[m.key]?.display ?? 'unknown'}`);
 
   return { metrics, promptLines };
+}
+
+// Builds the chat prompt sent to /api/v1/chat. Asks for a fixed
+// STRENGTHS/WEAKNESSES/VERDICT format so the UI can render a structured
+// checklist instead of a wall of prose — parseAnalysisResponse() below
+// pulls it back apart. If the model doesn't follow the format, the raw
+// text is shown as a fallback rather than dropped.
+export function buildAnalysisPrompt({ rosterLines, promptLines, contestType, userExpectations, playerContextLines }) {
+  const framing = contestType === 'cash'
+    ? 'a cash game (heads-up/50-50/double-up) — prioritize floor and consistency over ceiling; a single bust anywhere in the lineup is the main risk'
+    : 'a GPP tournament — prioritize ceiling and differentiation over floor; being safe and average everywhere is itself a weakness';
+  const expectations = userExpectations?.trim()
+    ? `\nThe user's specific priorities for this analysis:\n${userExpectations.trim()}\n`
+    : '';
+  const playerContext = playerContextLines?.length
+    ? `\nPLAYER CONTEXT (FantasAI's own model, usage, matchup, O-line, and news data for each rostered player):\n${playerContextLines.join('\n')}\n`
+    : '';
+  return `Critique this DraftKings Classic NFL lineup for ${framing}. Evaluate THIS lineup — do not suggest a completely different one.\n${expectations}\nROSTER:\n${rosterLines}\n\nLINEUP METRICS:\n${promptLines.join('\n')}\n${playerContext}\nRespond in exactly this format:\nSTRENGTHS:\n- <specific strength>\n- <specific strength>\n(2-4 bullets, most important first)\n\nWEAKNESSES:\n- <specific weakness>\n- <specific weakness>\n(2-4 bullets, most important first)\n\nVERDICT:\n<2-3 sentence overall take>`;
+}
+
+export function parseAnalysisResponse(text) {
+  if (!text) return null;
+  const strengthsMatch = text.match(/STRENGTHS:\s*([\s\S]*?)(?=\n\s*WEAKNESSES:|\n\s*VERDICT:|$)/i);
+  const weaknessesMatch = text.match(/WEAKNESSES:\s*([\s\S]*?)(?=\n\s*VERDICT:|$)/i);
+  const verdictMatch = text.match(/VERDICT:\s*([\s\S]*)$/i);
+  const toBullets = s => (s || '')
+    .split('\n')
+    .map(l => l.replace(/^[\s\-\*•]+/, '').trim())
+    .filter(Boolean);
+
+  const strengths = strengthsMatch ? toBullets(strengthsMatch[1]) : [];
+  const weaknesses = weaknessesMatch ? toBullets(weaknessesMatch[1]) : [];
+  const verdict = verdictMatch ? verdictMatch[1].trim() : '';
+
+  if (!strengths.length && !weaknesses.length && !verdict) return null;
+  return { strengths, weaknesses, verdict };
 }

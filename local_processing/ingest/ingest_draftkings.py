@@ -22,10 +22,15 @@ family and is intentionally out of scope here (see docs/BETTING_DATA_SOURCES.md)
 Outputs (DuckDB):
   bronze_dk_slates   — one row per draft group
   bronze_dk_salaries — one row per (draft_group_id, draftable_id)
+  bronze_dk_contests — one row per contest (entry fee, prize pool, entries) —
+                       every Classic NFL contest in the lobby, not collapsed
+                       to one per draft group, so the user can browse and
+                       pick a specific contest to build a lineup for.
 
 Outputs (R2):
   fantasai/betting/dk_slates.json
   fantasai/betting/dk_salaries.json
+  fantasai/betting/dk_contests.json
 
 Usage:
   python ingest_draftkings.py                  # Classic slates only, up to --max-slates
@@ -74,22 +79,65 @@ def _get(url: str, timeout: int = 15) -> dict | None:
     return None
 
 
-def discover_draft_groups(max_slates: int) -> list[dict]:
+def _parse_dk_date(s: str | None):
+    """DK dates come as ASP.NET-style '/Date(1789318800000)/' (epoch ms)."""
+    if not s:
+        return None
+    try:
+        ms = int(s.strip("/").replace("Date(", "").replace(")", ""))
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).replace(tzinfo=None)
+    except (ValueError, TypeError):
+        return None
+
+
+def _is_real_nfl_contest(c: dict) -> bool:
     """
-    Crawl the NFL contest lobby and return up to max_slates distinct
-    Classic-format draft groups, largest field first (as a proxy for
-    "main slate" relevance).
+    Excludes anything that isn't a genuine, real-game salary-cap NFL contest:
+      - non-Classic game types (Showdown, Snake, Pick6, etc.)
+      - Snake-draft contests (not salary-cap — our optimizer doesn't apply)
+
+    NOTE: Preseason contests ("... (Preseason)" in the name) ARE real —
+    real players, real scheduled preseason games, same $50,000 cap/roster
+    rules as any other Classic contest. DK's rules page for these labels
+    the ruleset "Simulated NFL Classic" and mentions video-game settings
+    (Arcade/All-Madden) — that reads like it's describing how DK verifies
+    box scores, not that the games themselves are simulated. Confirmed
+    live 2026-08-22: draft group 152127 ("$60K Preseason Special") pulled
+    real rosters (Caleb Williams, Dak Prescott, Patrick Mahomes, etc.)
+    across 4 real scheduled preseason games (CHI@CIN, DAL@ARI, KC@TB,
+    PHI@NE), just with a flat $5,500 salary per player (9 x $5,500 =
+    $49,500, just under the standard $50,000 cap) instead of DK's usual
+    varied salaries — presumably because DK doesn't have enough signal to
+    differentiate preseason player value. Not excluded here.
     """
+    if c.get("gameType") != "Classic":
+        return False
+    if c.get("isSnakeDraft"):
+        return False
+    return True
+
+
+def fetch_lobby() -> list[dict]:
     data = _get(LOBBY_URL)
     if not data:
         return []
     contests = data.get("Contests") or []
     print(f"   Lobby: {len(contests)} open NFL contests")
+    real = [c for c in contests if _is_real_nfl_contest(c)]
+    print(f"   {len(real)} salary-cap Classic contests after filtering out Snake-draft / non-Classic")
+    return real
 
+
+def discover_draft_groups(contests: list[dict], max_slates: int) -> list[dict]:
+    """
+    Collapse the contest list to distinct Classic-format draft groups,
+    largest field first (as a proxy for "main slate" relevance) — used to
+    pick which slates to pull full player pools for.
+    """
     by_dg: dict[int, dict] = {}
     for c in contests:
         dg = c.get("dg")
-        if not dg or c.get("gameType") != "Classic":
+        if not dg:
             continue
         entries = c.get("m") or 0  # max entries, proxy for slate popularity
         existing = by_dg.get(dg)
@@ -104,6 +152,35 @@ def discover_draft_groups(max_slates: int) -> list[dict]:
     groups = sorted(by_dg.values(), key=lambda g: -g["_entries"])[:max_slates]
     print(f"   Selected {len(groups)} Classic draft groups (largest field first)")
     return groups
+
+
+def parse_contests(contests: list[dict]) -> list[dict]:
+    """Every individual Classic NFL contest — lets the user browse and pick
+    one (entry fee, prize pool, entries) rather than just the biggest slate."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = []
+    for c in contests:
+        contest_id = c.get("id")
+        dg = c.get("dg")
+        if contest_id is None or not dg:
+            continue
+        pd = c.get("pd") or {}
+        rows.append({
+            "contest_id":            contest_id,
+            "draft_group_id":        dg,
+            "name":                  c.get("n", ""),
+            "game_type":             c.get("gameType", ""),
+            "entry_fee":             c.get("a"),
+            "total_prize":           c.get("po"),
+            "payout_summary":        next(iter(pd.values()), "") if pd else "",
+            "max_entries":           c.get("m"),
+            "entries_so_far":        c.get("nt"),
+            "max_entries_per_user":  c.get("mec"),
+            "is_guaranteed":         (c.get("attr") or {}).get("IsGuaranteed") in ("true", True),
+            "start_time":            _parse_dk_date(c.get("sd")),
+            "fetched_at":            now,
+        })
+    return rows
 
 
 def fetch_draftables(draft_group_id: int) -> dict | None:
@@ -193,9 +270,9 @@ def parse_slate(draft_group_id: int, meta: dict, draftables_resp: dict) -> tuple
     return slate_row, player_rows
 
 
-def write_bronze(conn, slate_rows: list[dict], player_rows: list[dict], dry_run: bool):
+def write_bronze(conn, slate_rows: list[dict], player_rows: list[dict], contest_rows: list[dict], dry_run: bool):
     if dry_run:
-        print(f"   DRY RUN — would write {len(slate_rows)} slates, {len(player_rows)} salary rows")
+        print(f"   DRY RUN — would write {len(slate_rows)} slates, {len(player_rows)} salary rows, {len(contest_rows)} contests")
         return
     import pandas as pd
 
@@ -216,6 +293,16 @@ def write_bronze(conn, slate_rows: list[dict], player_rows: list[dict], dry_run:
         conn.execute("INSERT INTO bronze_dk_salaries BY NAME SELECT * FROM _dk_salaries")
         print(f"   bronze_dk_salaries: {len(player_rows)} rows written")
 
+    if contest_rows:
+        df = pd.DataFrame(contest_rows)
+        conn.register("_dk_contests", df)
+        # Full replace, not merge-by-id: this is a snapshot of currently-open
+        # contests, not a history table — a contest that closed since the
+        # last run should disappear, not linger as stale bronze_dk_contests rows.
+        conn.execute("DELETE FROM bronze_dk_contests")
+        conn.execute("INSERT INTO bronze_dk_contests BY NAME SELECT * FROM _dk_contests")
+        print(f"   bronze_dk_contests: {len(contest_rows)} rows written")
+
 
 def export_to_r2(conn, dry_run: bool):
     slates = conn.execute("""
@@ -227,6 +314,12 @@ def export_to_r2(conn, dry_run: bool):
                opponent, is_home, salary, status, game_start_time, dk_avg_points, dk_position_rank
         FROM bronze_dk_salaries ORDER BY draft_group_id, salary DESC
     """).df()
+    contests = conn.execute("""
+        SELECT contest_id, draft_group_id, name, game_type, entry_fee, total_prize,
+               payout_summary, max_entries, entries_so_far, max_entries_per_user,
+               is_guaranteed, start_time
+        FROM bronze_dk_contests ORDER BY total_prize DESC
+    """).df()
 
     # SQL NULL -> pandas NaN in a float column, and Python's json.dumps happily writes
     # a literal `NaN` token for that — valid Python, NOT valid JSON, and it breaks any
@@ -234,6 +327,7 @@ def export_to_r2(conn, dry_run: bool):
     # (draftStatAttributes id 90), so this is a real, expected case, not an edge case.
     slates   = slates.astype(object).where(slates.notnull(), None)
     salaries = salaries.astype(object).where(salaries.notnull(), None)
+    contests = contests.astype(object).where(contests.notnull(), None)
 
     now_iso = datetime.now(timezone.utc).isoformat()
     payloads = {
@@ -248,6 +342,12 @@ def export_to_r2(conn, dry_run: bool):
             "source": "draftkings_unofficial",
             "player_count": len(salaries),
             "players": salaries.to_dict(orient="records"),
+        },
+        "fantasai/betting/dk_contests.json": {
+            "generated_at": now_iso,
+            "source": "draftkings_unofficial",
+            "contest_count": len(contests),
+            "contests": contests.to_dict(orient="records"),
         },
     }
 
@@ -287,10 +387,13 @@ def main():
     conn = get_conn()
     init_schema(conn)
 
+    contest_rows = []
     if args.draft_group_id:
         groups = [{"draft_group_id": args.draft_group_id, "slate_name": "", "game_type": ""}]
     else:
-        groups = discover_draft_groups(args.max_slates)
+        contests = fetch_lobby()
+        contest_rows = parse_contests(contests)
+        groups = discover_draft_groups(contests, args.max_slates)
 
     if not groups:
         print("\n   WARNING: no draft groups found — DK lobby may have changed shape or blocked this request")
@@ -311,8 +414,8 @@ def main():
         print(f"   {len(player_rows)} players")
         time.sleep(0.3)
 
-    print(f"\n── Writing {len(all_slate_rows)} slates, {len(all_player_rows)} salary rows ─────")
-    write_bronze(conn, all_slate_rows, all_player_rows, args.dry_run)
+    print(f"\n── Writing {len(all_slate_rows)} slates, {len(all_player_rows)} salary rows, {len(contest_rows)} contests ─────")
+    write_bronze(conn, all_slate_rows, all_player_rows, contest_rows, args.dry_run)
 
     print("\n── Exporting to R2 ───────────────────────────────────────────────────")
     export_to_r2(conn, args.dry_run)

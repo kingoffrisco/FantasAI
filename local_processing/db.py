@@ -800,6 +800,26 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         PRIMARY KEY (draft_group_id, draftable_id)
     );
 
+    -- Individual contests within the lobby (one row per contest, NOT
+    -- collapsed to one per draft group like bronze_dk_slates) — lets the
+    -- user browse and pick a specific contest to build a lineup for, the
+    -- same way CBS roster data lets them browse their real league.
+    CREATE TABLE IF NOT EXISTS bronze_dk_contests (
+        contest_id            BIGINT PRIMARY KEY,
+        draft_group_id         BIGINT,
+        name                    VARCHAR,
+        game_type               VARCHAR,
+        entry_fee                DOUBLE,
+        total_prize              DOUBLE,
+        payout_summary            VARCHAR,  -- DK's own "$3,500,000" style description
+        max_entries               INTEGER,  -- contest-wide entry cap
+        entries_so_far             INTEGER,
+        max_entries_per_user        INTEGER,
+        is_guaranteed                BOOLEAN,
+        start_time                    TIMESTAMP,
+        fetched_at                  TIMESTAMP
+    );
+
     -- =========================================================
     -- KALSHI NFL MARKETS (official, documented public REST API — no auth
     -- required for market data). Append-only: never overwrite prior rows,

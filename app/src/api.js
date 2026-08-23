@@ -166,6 +166,7 @@ export const api = {
     floorCeiling:    () => r2Get('fantasai/analysis/floor_ceiling.json'),
     dkSlates:        () => r2Get('fantasai/betting/dk_slates.json'),
     dkSalaries:      () => r2Get('fantasai/betting/dk_salaries.json'),
+    dkContests:      () => r2Get('fantasai/betting/dk_contests.json'),
     kalshiNflMarkets: () => r2Get('fantasai/betting/kalshi_nfl_markets.json'),
   },
 

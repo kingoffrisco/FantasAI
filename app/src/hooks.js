@@ -151,6 +151,7 @@ export const useR2WeeklyStartSit        = () => useR2Analysis(api.r2.weeklyStart
 export const useR2DeepReasoning         = () => useR2Analysis(api.r2.deepReasoning)
 export const useR2DkSlates              = () => useR2Analysis(api.r2.dkSlates)
 export const useR2DkSalaries            = () => useR2Analysis(api.r2.dkSalaries)
+export const useR2DkContests            = () => useR2Analysis(api.r2.dkContests)
 export const useR2KalshiNflMarkets      = () => useR2Analysis(api.r2.kalshiNflMarkets)
 export const useR2FloorCeiling          = () => useR2Analysis(api.r2.floorCeiling)
 export const useR2PlayerStats2025       = () => useR2Analysis(api.r2.playerStats2025)

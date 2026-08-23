@@ -1,6 +1,6 @@
 import React from 'react';
 import { findTeam, MY_ROSTER, TEAM_ROSTERS, LEAGUE_TEAMS, TEAMS_ORDER, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, refreshTeamRosters, clearAllRosters } from './lib/data.js';
-import { findPlayer, getPlayers, setPlayers, patchPlayers, normalizePlayerList, BYE_WEEKS_2026 } from './lib/playerStore.js';
+import { findPlayer, getPlayers, setPlayers, patchPlayers, normalizePlayerList, recomputePlayerTiers, BYE_WEEKS_2026 } from './lib/playerStore.js';
 import { api } from './api.js';
 import { getPlayerMap, fetchBulkProjections } from './lib/sleeper.js';
 import { registerServiceWorker, getSubscriptionState, requestNotificationPermission, showLocalNotification } from './lib/pushNotifications.js';
@@ -864,6 +864,11 @@ export default function App() {
         const ecr = byName.get(p.name?.toLowerCase().trim()) ?? byName.get(stripSuffix(p.name));
         return ecr != null ? { ...p, ecr } : p;
       });
+      // Tiers computed during initial normalization used the pre-ECR
+      // (everyone at the 999 sentinel) pass — recompute now that real ECR
+      // exists, or e.g. Jahmyr Gibbs/Bijan Robinson stay stuck with
+      // whatever arbitrary tier the ECR-less first pass produced.
+      recomputePlayerTiers();
     }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -892,6 +897,7 @@ export default function App() {
           const rank = rankByTeam[p.team?.toUpperCase()];
           return rank ? { ...p, ecr: rank, adp: rank } : p;
         });
+        recomputePlayerTiers();
         return;
       }
 
@@ -922,6 +928,7 @@ export default function App() {
         const rank = rankByTeam[p.team?.toUpperCase()];
         return rank ? { ...p, ecr: rank, adp: rank } : p;
       });
+      recomputePlayerTiers();
     }
     patchDstRanks();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

@@ -302,19 +302,40 @@ export function normalizePlayerList(rawArr) {
     });
   }
 
-  // Compute tiers from ECR when no tier data exists in the export.
-  // Group by position, sort by ECR, assign tiers based on positional rank.
-  const posTierCuts = { QB: [3,8,15,24], RB: [6,15,30,48], WR: [6,15,30,48], TE: [3,6,12,20], K: [3,8,16], DST: [3,8,16] };
+  // Tiers, computed from ECR — see assignPositionTiers below. At this point
+  // (initial normalization) ECR usually isn't loaded yet (it's patched in
+  // later by a separate effect in App.jsx once ecr_ppr.json/ecr_std.json
+  // fetch), so this first pass is provisional; assignPositionTiers gets
+  // called again with `force: true` once real ECR data arrives, to replace
+  // it — see recomputePlayerTiers below.
+  assignPositionTiers(result, { force: false });
+
+  return result;
+}
+
+const POS_TIER_CUTS = { QB: [3,8,15,24], RB: [6,15,30,48], WR: [6,15,30,48], TE: [3,6,12,20], K: [3,8,16], DST: [3,8,16] };
+
+/**
+ * Groups players by position, sorts by ECR, assigns a tier per position
+ * using positional cutoffs (e.g. RB tier 1 = top 6 RBs by ECR). Mutates the
+ * players in place. With force:false (the default), only fills in players
+ * whose tier isn't already set (>0) — used for the very first pass, before
+ * real ECR has loaded. With force:true, recomputes every player's tier
+ * unconditionally — used once real ECR data is available, since a tier
+ * computed against missing ECR (everyone tied at the 999 sentinel) is not
+ * trustworthy and needs to be replaced, not just filled in where blank.
+ */
+export function assignPositionTiers(players, { force = false } = {}) {
   const byPos = {};
-  for (const p of result) {
+  for (const p of players) {
     if (!byPos[p.pos]) byPos[p.pos] = [];
     byPos[p.pos].push(p);
   }
-  for (const [pos, players] of Object.entries(byPos)) {
-    const cuts = posTierCuts[pos] || [5, 12, 24, 40];
-    const sorted = [...players].sort((a, b) => (a.ecr || 999) - (b.ecr || 999));
+  for (const [pos, posPlayers] of Object.entries(byPos)) {
+    const cuts = POS_TIER_CUTS[pos] || [5, 12, 24, 40];
+    const sorted = [...posPlayers].sort((a, b) => (a.ecr || 999) - (b.ecr || 999));
     sorted.forEach((p, i) => {
-      if (p.tier > 0) return;
+      if (!force && p.tier > 0) return;
       const rank = i + 1;
       let tier = cuts.length + 1;
       for (let t = 0; t < cuts.length; t++) {
@@ -323,6 +344,25 @@ export function normalizePlayerList(rawArr) {
       p.tier = tier;
     });
   }
+  return players;
+}
 
-  return result;
+/**
+ * Recomputes every player's tier from their CURRENT ecr field and applies
+ * it via patchPlayers. Call this after ECR data has been patched in (see
+ * App.jsx's ecr_ppr.json/ecr_std.json effect) — the tier assigned during
+ * initial normalization was computed before real ECR existed (everyone
+ * tied at the 999 sentinel) and is not meaningful until this runs.
+ */
+export function recomputePlayerTiers() {
+  // Compute against shallow copies, not the live store objects — mutating
+  // getPlayers()'s own objects in place would bypass patchPlayers' listener
+  // notification and leave subscribed components unaware anything changed.
+  const copies = getPlayers().map(p => ({ ...p }));
+  assignPositionTiers(copies, { force: true });
+  const tierById = new Map(copies.map(p => [p.id, p.tier]));
+  patchPlayers(p => {
+    const tier = tierById.get(p.id);
+    return tier != null && tier !== p.tier ? { ...p, tier } : p;
+  });
 }
