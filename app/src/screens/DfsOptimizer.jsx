@@ -27,18 +27,19 @@ const LINEUP_STRATEGY_SEQUENCE = ['projection', 'leverageScore', 'ceiling'];
 // flexbox) rather than physically moving JSX, so every box stays exactly
 // where it's defined in the source — only its position in the visual flow
 // and its size change.
-const DFS_LAYOUT_PREF_KEY = 'dfsOptimizerLayout';
+const DFS_LAYOUT_PREF_KEY = 'dfsOptimizerLayoutV2';
 const DEFAULT_DFS_LAYOUT = [
-  { id: 'contest',         span: 1, height: null },
-  { id: 'selectPlayers',   span: 1, height: null },
-  { id: 'weightedLineups', span: 2, height: null },
-  { id: 'aiAnalysis',      span: 2, height: null },
+  { id: 'contest',         span: 1, height: null, collapsed: false },
+  { id: 'contestDetails',  span: 1, height: null, collapsed: false },
+  { id: 'weightedLineups', span: 1, height: null, collapsed: false },
+  { id: 'aiAnalysis',      span: 1, height: null, collapsed: false },
+  { id: 'selectPlayers',   span: 2, height: null, collapsed: false },
 ];
 const MIN_BOX_HEIGHT = 160;
 
 function loadDfsLayout() {
   try {
-    const saved = getPrefs().dfsOptimizerLayout;
+    const saved = getPrefs()[DFS_LAYOUT_PREF_KEY];
     if (!Array.isArray(saved)) return DEFAULT_DFS_LAYOUT.map(b => ({ ...b }));
     const byId = new Map(saved.filter(b => b?.id).map(b => [b.id, b]));
     const knownIds = new Set(DEFAULT_DFS_LAYOUT.map(b => b.id));
@@ -46,7 +47,12 @@ function loadDfsLayout() {
     const missing = DEFAULT_DFS_LAYOUT.filter(d => !byId.has(d.id));
     return [...ordered, ...missing].map(d => {
       const s = byId.get(d.id);
-      return { id: d.id, span: s?.span === 2 ? 2 : s?.span === 1 ? 1 : d.span, height: Number.isFinite(s?.height) ? s.height : null };
+      return {
+        id: d.id,
+        span: s?.span === 2 ? 2 : s?.span === 1 ? 1 : d.span,
+        height: Number.isFinite(s?.height) ? s.height : null,
+        collapsed: typeof s?.collapsed === 'boolean' ? s.collapsed : d.collapsed,
+      };
     });
   } catch { return DEFAULT_DFS_LAYOUT.map(b => ({ ...b })); }
 }
@@ -94,17 +100,17 @@ function formatPoolColumnValue(colId, row) {
 // so wrapping existing content in this component doesn't require moving
 // any of that content in the source. Drag the ⠿ handle to reorder, the ⤡
 // corner to resize (right = wider/full-width, down = taller).
-function LayoutBox({ id, order, span, height, dragging, dragOver, onDragStart, onDragOver, onDrop, onDragEnd, onResizeStart, children }) {
+function LayoutBox({ id, order, span, height, collapsed, dragging, dragOver, onDragStart, onDragOver, onDrop, onDragEnd, onResizeStart, onToggleCollapse, children }) {
   return (
     <div
       data-box-id={id}
-      onDragOver={e => { e.preventDefault(); onDragOver(id); }}
-      onDrop={e => { e.preventDefault(); onDrop(id); }}
+      onDragOver={e => { e.preventDefault(); e.stopPropagation(); onDragOver(id); }}
+      onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop(dragging, id); }}
       style={{
         order,
         gridColumn: `span ${span}`,
         position: 'relative',
-        height: height ? `${height}px` : 'auto',
+        height: collapsed ? 'auto' : (height ? `${height}px` : 'auto'),
         display: 'flex',
         flexDirection: 'column',
         minWidth: 0,
@@ -121,23 +127,38 @@ function LayoutBox({ id, order, span, height, dragging, dragOver, onDragStart, o
         onDragEnd={onDragEnd}
         title="Drag to reorder this box"
         style={{
-          position: 'absolute', top: 6, right: 6, zIndex: 6, cursor: 'grab', fontSize: 13, lineHeight: 1,
+          position: 'absolute', top: 6, right: 30, zIndex: 6, cursor: 'grab', fontSize: 13, lineHeight: 1,
           color: 'var(--text-faint)', padding: '3px 6px', borderRadius: 5,
           background: 'var(--panel-2)', border: '1px solid var(--border)', userSelect: 'none',
         }}
       >⠿</span>
-      <div style={{ flex: 1, minHeight: 0, overflowY: height ? 'auto' : 'visible' }}>
-        {children}
-      </div>
-      <span
-        onMouseDown={e => onResizeStart(e, id)}
-        title="Drag to resize — right for full width, down for taller"
-        style={{
-          position: 'absolute', bottom: 4, right: 4, zIndex: 6, cursor: 'nwse-resize', fontSize: 13, lineHeight: 1,
-          color: 'var(--text-faint)', padding: '3px 5px', borderRadius: 5,
-          background: 'var(--panel-2)', border: '1px solid var(--border)', userSelect: 'none',
-        }}
-      >⤡</span>
+      {onToggleCollapse && (
+        <button
+          onClick={() => onToggleCollapse(id)}
+          title={collapsed ? 'Expand this box' : 'Collapse this box'}
+          style={{
+            position: 'absolute', top: 6, right: 6, zIndex: 6, cursor: 'pointer', fontSize: 11, lineHeight: 1,
+            color: 'var(--text-faint)', padding: '3px 6px', borderRadius: 5,
+            background: 'var(--panel-2)', border: '1px solid var(--border)', userSelect: 'none',
+          }}
+        >{collapsed ? '▸' : '▾'}</button>
+      )}
+      {!collapsed && (
+        <>
+          <div style={{ flex: 1, minHeight: 0, overflowY: height ? 'auto' : 'visible' }}>
+            {children}
+          </div>
+          <span
+            onMouseDown={e => onResizeStart(e, id)}
+            title="Drag to resize — right for full width, down for taller"
+            style={{
+              position: 'absolute', bottom: 4, right: 4, zIndex: 6, cursor: 'nwse-resize', fontSize: 13, lineHeight: 1,
+              color: 'var(--text-faint)', padding: '3px 5px', borderRadius: 5,
+              background: 'var(--panel-2)', border: '1px solid var(--border)', userSelect: 'none',
+            }}
+          >⤡</span>
+        </>
+      )}
     </div>
   );
 }
@@ -359,6 +380,15 @@ export default function DfsOptimizerScreen() {
   const boxOrder = id => { const i = dfsLayout.findIndex(b => b.id === id); return i < 0 ? 0 : i; };
   const boxSpan = id => dfsLayout.find(b => b.id === id)?.span ?? 1;
   const boxHeight = id => dfsLayout.find(b => b.id === id)?.height ?? null;
+  const boxCollapsed = id => dfsLayout.find(b => b.id === id)?.collapsed ?? false;
+
+  function toggleBoxCollapsed(id) {
+    setDfsLayout(prev => {
+      const next = prev.map(b => b.id === id ? { ...b, collapsed: !b.collapsed } : b);
+      saveDfsLayout(next);
+      return next;
+    });
+  }
 
   function moveBoxTo(fromId, toId) {
     if (!fromId || !toId || fromId === toId) return;
@@ -692,34 +722,24 @@ export default function DfsOptimizerScreen() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(380px, 1fr))', gap: 20, alignItems: 'start' }}>
             <LayoutBox
               id="contest" order={boxOrder('contest')} span={boxSpan('contest')} height={boxHeight('contest')}
+              collapsed={boxCollapsed('contest')} onToggleCollapse={toggleBoxCollapsed}
               dragging={draggingBoxId} dragOver={dragOverBoxId}
               onDragStart={setDraggingBoxId} onDragOver={setDragOverBoxId} onDrop={moveBoxTo}
               onDragEnd={() => { setDraggingBoxId(null); setDragOverBoxId(null); }}
               onResizeStart={handleBoxResizeStart}
             >
               {(contests.length > 0 || liveContests !== null) ? (
-                <>
-                  <ContestPicker
-                    contests={contests}
-                    selectedContestId={selectedContestId}
-                    onSelect={selectContest}
-                    onRefresh={refreshContestsLive}
-                    refreshing={contestsRefreshing}
-                    refreshError={contestsRefreshError}
-                    onPullDetails={pullContestDetailsLive}
-                    pullingDetails={pullingDetails}
-                    pulledGames={pulledGames}
-                  />
-                  {selectedContestId != null && (
-                    <ContestDetailsPanel
-                      detail={contestDetail}
-                      loading={contestDetailLoading}
-                      error={contestDetailError}
-                      showScoringRules={showScoringRules}
-                      onToggleScoringRules={() => setShowScoringRules(s => !s)}
-                    />
-                  )}
-                </>
+                <ContestPicker
+                  contests={contests}
+                  selectedContestId={selectedContestId}
+                  onSelect={selectContest}
+                  onRefresh={refreshContestsLive}
+                  refreshing={contestsRefreshing}
+                  refreshError={contestsRefreshError}
+                  onPullDetails={pullContestDetailsLive}
+                  pullingDetails={pullingDetails}
+                  pulledGames={pulledGames}
+                />
               ) : slates.length > 1 && (
                 <div className="muted-card" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase' }}>Slate</span>
@@ -738,10 +758,30 @@ export default function DfsOptimizerScreen() {
               )}
             </LayoutBox>
 
+            {selectedContestId != null && (
+              <LayoutBox
+                id="contestDetails" order={boxOrder('contestDetails')} span={boxSpan('contestDetails')} height={boxHeight('contestDetails')}
+                collapsed={boxCollapsed('contestDetails')} onToggleCollapse={toggleBoxCollapsed}
+                dragging={draggingBoxId} dragOver={dragOverBoxId}
+                onDragStart={setDraggingBoxId} onDragOver={setDragOverBoxId} onDrop={moveBoxTo}
+                onDragEnd={() => { setDraggingBoxId(null); setDragOverBoxId(null); }}
+                onResizeStart={handleBoxResizeStart}
+              >
+                <ContestDetailsPanel
+                  detail={contestDetail}
+                  loading={contestDetailLoading}
+                  error={contestDetailError}
+                  showScoringRules={showScoringRules}
+                  onToggleScoringRules={() => setShowScoringRules(s => !s)}
+                />
+              </LayoutBox>
+            )}
+
             {optimized && (
               <>
               <LayoutBox
                 id="weightedLineups" order={boxOrder('weightedLineups')} span={boxSpan('weightedLineups')} height={boxHeight('weightedLineups')}
+                collapsed={boxCollapsed('weightedLineups')} onToggleCollapse={toggleBoxCollapsed}
                 dragging={draggingBoxId} dragOver={dragOverBoxId}
                 onDragStart={setDraggingBoxId} onDragOver={setDragOverBoxId} onDrop={moveBoxTo}
                 onDragEnd={() => { setDraggingBoxId(null); setDragOverBoxId(null); }}
@@ -792,6 +832,7 @@ export default function DfsOptimizerScreen() {
 
               <LayoutBox
                 id="selectPlayers" order={boxOrder('selectPlayers')} span={boxSpan('selectPlayers')} height={boxHeight('selectPlayers')}
+                collapsed={boxCollapsed('selectPlayers')} onToggleCollapse={toggleBoxCollapsed}
                 dragging={draggingBoxId} dragOver={dragOverBoxId}
                 onDragStart={setDraggingBoxId} onDragOver={setDragOverBoxId} onDrop={moveBoxTo}
                 onDragEnd={() => { setDraggingBoxId(null); setDragOverBoxId(null); }}
@@ -937,6 +978,7 @@ export default function DfsOptimizerScreen() {
 
               <LayoutBox
                 id="aiAnalysis" order={boxOrder('aiAnalysis')} span={boxSpan('aiAnalysis')} height={boxHeight('aiAnalysis')}
+                collapsed={boxCollapsed('aiAnalysis')} onToggleCollapse={toggleBoxCollapsed}
                 dragging={draggingBoxId} dragOver={dragOverBoxId}
                 onDragStart={setDraggingBoxId} onDragOver={setDragOverBoxId} onDrop={moveBoxTo}
                 onDragEnd={() => { setDraggingBoxId(null); setDragOverBoxId(null); }}
