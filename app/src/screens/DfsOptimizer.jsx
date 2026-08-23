@@ -504,7 +504,7 @@ export default function DfsOptimizerScreen() {
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '400px minmax(0, 1fr)', gap: 20, alignItems: 'start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
               {(contests.length > 0 || liveContests !== null) ? (
                 <>
@@ -543,6 +543,57 @@ export default function DfsOptimizerScreen() {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {optimized?.feasible && (
+                <div className="card">
+                  <div className="card-head">
+                    <span className="card-title">Optimal Lineup</span>
+                    {selectedSlate?.earliest_start && (
+                      <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+                        Earliest kickoff: {new Date(selectedSlate.earliest_start).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="card-body" style={{ padding: 0 }}>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                            {['Slot', 'Player', 'Team', 'Opp', 'Salary', 'Proj'].map(h => (
+                              <th key={h} style={{ textAlign: h === 'Player' ? 'left' : 'right', padding: '8px 12px', fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {optimized.lineup.map(({ slot, player }) => (
+                            <tr key={`${slot}-${player.id}`} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '8px 12px', fontWeight: 800, color: POS_COLORS[player.position] || 'var(--text)' }}>{slot}</td>
+                              <td style={{ padding: '8px 12px', fontWeight: 700 }}>{player.name}</td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{player.team}</td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{player.opponent ? `vs ${player.opponent}` : ''}</td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{money(player.salary)}</td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: '#4caf82' }}>{player.projection?.toFixed(1) ?? '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ borderTop: '2px solid var(--border)' }}>
+                            <td colSpan={4} style={{ padding: '8px 12px', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-faint)' }}>Total</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800 }}>{money(optimized.totalSalary)}</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#4caf82' }}>{optimized.totalProjection.toFixed(1)}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {optimized && !optimized.feasible && (
+                <div className="card">
+                  <div className="card-head"><span className="card-title">Optimal Lineup</span></div>
+                  <div className="card-body" style={{ padding: 16, fontSize: 13, color: 'var(--danger)' }}>{optimized.reason}</div>
                 </div>
               )}
             </div>
@@ -735,53 +786,6 @@ export default function DfsOptimizerScreen() {
 
           {optimized && (
             <>
-              <div className="card">
-                <div className="card-head">
-                  <span className="card-title">Optimal Lineup</span>
-                  {selectedSlate?.earliest_start && (
-                    <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
-                      Earliest kickoff: {new Date(selectedSlate.earliest_start).toLocaleString()}
-                    </span>
-                  )}
-                </div>
-                <div className="card-body" style={{ padding: 0 }}>
-                  {!optimized.feasible ? (
-                    <div style={{ padding: 16, fontSize: 13, color: 'var(--danger)' }}>{optimized.reason}</div>
-                  ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                        <thead>
-                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                            {['Slot', 'Player', 'Team', 'Opp', 'Salary', 'Proj'].map(h => (
-                              <th key={h} style={{ textAlign: h === 'Player' ? 'left' : 'right', padding: '8px 12px', fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase' }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {optimized.lineup.map(({ slot, player }) => (
-                            <tr key={`${slot}-${player.id}`} style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td style={{ padding: '8px 12px', fontWeight: 800, color: POS_COLORS[player.position] || 'var(--text)' }}>{slot}</td>
-                              <td style={{ padding: '8px 12px', fontWeight: 700 }}>{player.name}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{player.team}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{player.opponent ? `vs ${player.opponent}` : ''}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{money(player.salary)}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: '#4caf82' }}>{player.projection?.toFixed(1) ?? '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr style={{ borderTop: '2px solid var(--border)' }}>
-                            <td colSpan={4} style={{ padding: '8px 12px', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-faint)' }}>Total</td>
-                            <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800 }}>{money(optimized.totalSalary)}</td>
-                            <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#4caf82' }}>{optimized.totalProjection.toFixed(1)}</td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-
               <div className="card">
                 <div className="card-head">
                   <span className="card-title">AI Lineup Analysis</span>
