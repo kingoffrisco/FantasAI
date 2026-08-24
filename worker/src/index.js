@@ -381,15 +381,24 @@ function parsePlayers(html) {
   return players;
 }
 
+// CBS's real draft-results URL is /draft/results/{year}:Pre-season:Tau%20League%20Draft/
+// — NOT /draft/results?year={year}, which silently serves a static/empty template
+// (same 168 blank rows, same team order, every year) instead of a 404. Confirmed
+// live 2026-08-24 for 2021-2025 with the query-param form before finding this.
+const DRAFT_EVENT_NAME = "Pre-season:Tau League Draft";
+
 async function getDraft(req, env, url) {
   const year = url.searchParams.get("year") || new Date().getFullYear();
-  const html = await cbsFetch(env, `/draft/results?year=${year}`, req);
+  const path = `/draft/results/${year}:${encodeURIComponent(DRAFT_EVENT_NAME)}/`;
+  const html = await cbsFetch(env, path, req);
   const picks = await parseDraft(html);
+  const teams = parseDraftTeamIds(html);
   return {
     source: "cbs",
     fetchedAt: new Date().toISOString(),
     year: parseInt(year),
     picks,
+    teams, // { cbsTeamId: teamNameAtDraftTime } — use cbsTeamId to match across renames
   };
 }
 
@@ -883,29 +892,93 @@ async function parseRankings(html) {
 }
 
 // Parse the draft results page.
-// CBS HTML: <tr class="subtitle"><td>Round N</td></tr> as section headers,
-//   then <tr class="row1|row2|bgFan"> with <td>pick</td><td>team</td><td>player</td>
+// CBS HTML: <tr class="subtitle"><td>Round N</td></tr> as section headers, then
+// <tr class="row1|row2|bgFan" align="right" valign="top"> pick rows (that exact
+// attribute pair distinguishes real pick rows from the draft-chat-log rows, which
+// reuse the same row1/row2 classes with different attributes). The player cell is
+// <a class='playerLink' ...>Name</a> <span class="playerPositionAndTeam">POS • TEAM</span>
+// — sometimes followed by extra injury/news icon markup (its own nested <a class="playerLink">
+// links) before the </td>, which breaks a single end-to-end regex, so each row is captured
+// as a block first, then player/pos/team extracted from within it independently.
+// Numeric character references 128-159 are Windows-1252 holdovers, not real
+// Unicode code points at those values — the HTML5 spec (and every real browser)
+// remaps them. Confirmed live: CBS emits &#149; for the position/team separator,
+// which is Windows-1252 0x95 = the bullet "•" (U+2022), not literal U+0095.
+const WIN1252_C1_REMAP = {
+  128: 0x20AC, 130: 0x201A, 131: 0x0192, 132: 0x201E, 133: 0x2026, 134: 0x2020,
+  135: 0x2021, 136: 0x02C6, 137: 0x2030, 138: 0x0160, 139: 0x2039, 140: 0x0152,
+  142: 0x017D, 145: 0x2018, 146: 0x2019, 147: 0x201C, 148: 0x201D, 149: 0x2022,
+  150: 0x2013, 151: 0x2014, 152: 0x02DC, 153: 0x2122, 154: 0x0161, 155: 0x203A,
+  156: 0x0153, 158: 0x017E, 159: 0x0178,
+};
+function decodeHtmlEntities(s) {
+  return s
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(WIN1252_C1_REMAP[+n] || parseInt(n, 10)))
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
+
 async function parseDraft(html) {
   const picks = [];
+  const events = [];
+  const roundRe = /<tr class="subtitle"><td[^>]*>Round (\d+)<\/td><\/tr>/g;
+  const rowRe   = /<tr class="(?:row1|row2|bgFan)" align="right" valign="top">([\s\S]*?)<\/tr>/g;
+  let m;
+  while ((m = roundRe.exec(html)) !== null) events.push({ at: m.index, round: parseInt(m[1]) });
+  while ((m = rowRe.exec(html)) !== null) events.push({ at: m.index, row: m[1] });
+  events.sort((a, b) => a.at - b.at);
+
   let round = 0;
   let overallPick = 0;
-  const re = /<tr class="subtitle"><td[^>]*>Round (\d+)<\/td>|<tr class="(?:row1|row2|bgFan)"[^>]+>\s*<td[^>]*>(\d+)<\/td>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*>([^<]*)<\/td>/g;
-  let m;
-  while ((m = re.exec(html)) !== null) {
-    if (m[1]) {
-      round = parseInt(m[1]);
-    } else if (m[2] && round > 0) {
-      overallPick++;
-      picks.push({
-        pickNum: overallPick,
-        round,
-        pickInRound: parseInt(m[2]),
-        team: m[3].trim(),
-        player: m[4].trim() || null,
-      });
+  const teamPickRe   = /<td[^>]*>(\d+)<\/td>\s*<td[^>]*>([^<]*)<\/td>/;
+  const playerRe     = /<a class='playerLink'[^>]*>([^<]*)<\/a>/;
+  const posTeamRe    = /<span class="playerPositionAndTeam">([^<]*)<\/span>/;
+  for (const ev of events) {
+    if (ev.round != null) { round = ev.round; continue; }
+    const tm = teamPickRe.exec(ev.row);
+    if (!tm) continue;
+    overallPick++;
+    const pm = playerRe.exec(ev.row);
+    const pp = posTeamRe.exec(ev.row);
+    let pos = null, nflTeam = null;
+    if (pp) {
+      const parts = decodeHtmlEntities(pp[1]).trim().split(/\s*•\s*/);
+      if (parts.length === 2) [pos, nflTeam] = parts;
     }
+    picks.push({
+      pickNum: overallPick,
+      round,
+      pickInRound: parseInt(tm[1]),
+      team: decodeHtmlEntities(tm[2]).trim(),
+      player: pm ? decodeHtmlEntities(pm[1]).trim() : null,
+      pos,
+      nflTeam,
+    });
   }
   return picks;
+}
+
+// Extract the { cbsTeamId: teamName } map embedded in the page's own JSON data
+// island — the same page that lists picks also lists each team's stable CBS id
+// alongside its CURRENT display name, so this always matches the picks table's
+// team-name text from the exact same page load, regardless of any later rename.
+// Field order inside each "team": {...} block is NOT stable (confirmed live —
+// varies per team depending on which optional fields, like custom logo params,
+// that owner has set), so each block is isolated first and name/id pulled out
+// independently rather than matched via one fixed-order regex.
+function parseDraftTeamIds(html) {
+  const blockRe = /"team"\s*:\s*\{([^{}]*)\}/g;
+  const nameRe  = /"name"\s*:\s*"([^"]*)"/;
+  const idRe    = /"id"\s*:\s*"(\d+)"/;
+  const teams = {};
+  let m;
+  while ((m = blockRe.exec(html)) !== null) {
+    const block = m[1];
+    const nm = nameRe.exec(block);
+    const im = idRe.exec(block);
+    if (nm && im) teams[im[1]] = decodeHtmlEntities(nm[1]).trim();
+  }
+  return teams;
 }
 
 // Parse the transactions page.
