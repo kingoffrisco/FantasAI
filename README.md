@@ -148,7 +148,7 @@ Local Qwen pipeline reads enriched news from R2, scores players, writes results 
 | `GET /api/v1/players` | `handlePlayers` | Sleeper player pool (1h cache) |
 | `GET /api/v1/r2/get` | `handleR2Proxy` | Raw R2 access (auth required) |
 | `PUT /api/v1/r2/{key}` | — | R2 write (used by local pipeline) |
-| `GET /api/v1/news/latest` | `handleDbNews` | Latest news from R2 |
+| `GET /api/v1/news/articles` | `handleDbArticles` | Player news, R2-backed |
 
 **Auth:** `X-FantasAI-Key` header must match `env.FANTASAI_KEY` secret.
 

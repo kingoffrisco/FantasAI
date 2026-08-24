@@ -1,6 +1,6 @@
 // FantasAI API Worker — api.fantasai.net
 //
-// POST /api/v1/chat                         — proxy to Databricks FantasAI chat endpoint (public, rate-limited by CF)
+// POST /api/v1/chat                         — routes to local Qwen, then OpenAI/Anthropic cloud fallback (public, rate-limited by CF)
 // GET  /api/health
 // GET  /api/v1/storage/test              — live S3 connectivity check (read + write probe)
 // GET  /api/v1/owners/config              — read owner map from S3 (no auth)
@@ -224,11 +224,8 @@ export default {
       if (url.pathname === '/api/v1/draft/picks')       return await handleDraftPicksGet(env);
       if (url.pathname === '/api/v1/cbs/rankings')        return await handleCbsRankings(url, request, env);
       if (url.pathname === '/api/v1/twitter/beat')        return await handleBeatWriterNews();
-      if (url.pathname.startsWith('/api/v1/player/'))   return await handlePlayerProfile(url, env);
       if (url.pathname === '/api/v1/db/players')          return await handleDbPlayers(env);
       if (url.pathname === '/api/v1/db/tables')           return await handleDbTables(env);
-      if (url.pathname === '/api/v1/news/latest')        return await handleDbNews(env);
-      if (url.pathname === '/api/v1/news/critical')      return await handleDbCritical(env);
       if (url.pathname === '/api/v1/news/articles')      return await handleDbArticles(url, env);
       if (url.pathname === '/api/v1/news/ai-summaries') return await handleDbAiSummaries(env);
       if (url.pathname === '/api/v1/labels/article')     return await handleLabelsGet(env);
@@ -237,8 +234,6 @@ export default {
       if (url.pathname === '/api/v1/trade-offers')       return await handleTradeOffersGet(env);
       if (url.pathname === '/api/v1/waivers')            return await handleWaiversGet(env);
       if (url.pathname === '/api/v1/draft/ghost-board')  return await handleGhostBoard(url, env);
-      if (url.pathname === '/api/v1/leaderboard/live')   return await handleDbLeaderboard(env);
-      if (url.pathname === '/api/v1/games/active')       return await handleDbActiveGames(env);
       if (url.pathname === '/api/v1/opportunity/rankings') return await handleDbOpportunity(env);
       if (url.pathname === '/health' || url.pathname === '/') return json(handleHealth(env), 200);
 
@@ -1746,15 +1741,6 @@ async function queryDatabricks(sql, env) {
   });
 }
 
-async function handlePlayerProfile(url, env) {
-  const raw  = url.pathname.split('/').pop();
-  const name = decodeURIComponent(raw).replace(/'/g, "''"); // escape single quotes
-  const rows = await queryDatabricks(
-    `SELECT * FROM main.fantasai_news.api_player_profile WHERE player_name = '${name}' LIMIT 1`, env
-  );
-  return json({ status: 'success', data: rows[0] || null, metadata: { timestamp: new Date().toISOString() } }, 200);
-}
-
 // Preferred player tables in priority order — export/gold only, never silver/bronze
 const PLAYER_TABLE_CANDIDATES = [
   'export_players_2026_draft',
@@ -1793,11 +1779,6 @@ async function handleDbPlayers(env) {
 async function handleDbTables(env) {
   const rows = await queryDatabricks(`SHOW TABLES IN main.fantasai`, env);
   return json({ source: 'databricks', fetchedAt: new Date().toISOString(), tables: rows }, 200);
-}
-
-async function handleDbNews(env) {
-  const rows = await queryDatabricks(`SELECT * FROM main.fantasai_news.api_news_feed LIMIT 20`, env);
-  return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
 }
 
 // Normalize a Databricks row to the frontend article shape regardless of column naming conventions
@@ -1902,23 +1883,6 @@ async function handleDbAiSummaries(env) {
   }
 
   return json({ status: 'success', source, summaries, metadata: { timestamp: new Date().toISOString(), count: summaries.length } }, 200);
-}
-
-async function handleDbCritical(env) {
-  const rows = await queryDatabricks(`SELECT * FROM main.fantasai_news.api_critical_alerts LIMIT 20`, env);
-  return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
-}
-
-async function handleDbLeaderboard(env) {
-  const rows = await queryDatabricks(`SELECT * FROM main.fantasai_news.api_live_leaderboard LIMIT 50`, env);
-  return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
-}
-
-async function handleDbActiveGames(env) {
-  const rows = await queryDatabricks(
-    `SELECT DISTINCT game_id, game_status, quarter, time_remaining FROM main.fantasai_news.live_game_stats WHERE game_status IN ('in progress', 'halftime')`, env
-  );
-  return json({ status: 'success', data: rows, metadata: { timestamp: new Date().toISOString(), count: rows.length } }, 200);
 }
 
 async function handleDbOpportunity(env) {

@@ -44,21 +44,20 @@ Gated by `X-FantasAI-Key` if `FANTASAI_KEY` is configured.
 | Method | Path | Description | Backend |
 |---|---|---|---|
 | GET | `/api/v1/players?limit=&pos=` | Full player pool, ranked by Sleeper `search_rank`, public, 1h edge cache | Sleeper API (direct) |
-| GET | `/api/v1/db/players` | Player list, tries a priority table list until one has rows | **Databricks** ⚠️ unmigrated |
-| GET | `/api/v1/db/tables` | `SHOW TABLES IN main.fantasai` | **Databricks** ⚠️ unmigrated |
-| GET | `/api/v1/player/{name}` | Single player profile | **Databricks** ⚠️ unmigrated |
+| GET | `/api/v1/db/players` | Player list, tries a priority table list until one has rows | **Databricks** ⚠️ last-resort fallback only, behind R2 `players_2026_draft.json` |
+| GET | `/api/v1/db/tables` | `SHOW TABLES IN main.fantasai` | **Databricks** ⚠️ unmigrated (debug use only) |
 | GET | `/api/v1/r2/fantasai/players/export_players_2026_draft.json` | Draft board — recommended primary source now | R2 (local pipeline) |
 
-⚠️ = still queries the old Databricks SQL Warehouse via `queryDatabricks()`. Whether Databricks is still reachable is unconfirmed — treat these as possibly dead. Prefer the R2-backed equivalent where one exists.
+Removed 2026-08-23 (confirmed unused by any frontend caller, queried Databricks tables with no active producer): `/api/v1/player/{name}`, `/api/v1/news/latest`, `/api/v1/news/critical`, `/api/v1/leaderboard/live`, `/api/v1/games/active`.
+
+⚠️ = still queries the old Databricks SQL Warehouse via `queryDatabricks()`, only as a fallback behind an R2 primary. Prefer the R2-backed equivalent where one exists.
 
 ## 4. News
 
 | Method | Path | Description | Backend |
 |---|---|---|---|
 | GET | `/api/v1/news/articles?limit=` | Player news articles — **recommended, actively maintained**, explicit code comment confirms Databricks fallback was removed because it always returned empty | R2 `fantasai/analysis/player_news.json`, falls back to `fantasai/news/enriched_news.json` |
-| GET | `/api/v1/news/latest` | News feed | **Databricks** ⚠️ unmigrated |
-| GET | `/api/v1/news/critical` | Critical alerts | **Databricks** ⚠️ unmigrated |
-| GET | `/api/v1/news/ai-summaries` | AI summaries | **Databricks** ⚠️ unmigrated (falls back to `export_player_news` table, also Databricks) |
+| GET | `/api/v1/news/ai-summaries` | AI summaries | **Databricks** ⚠️ last-resort fallback only, behind R2 `ai_summaries.json` (falls back to `export_player_news` table, also Databricks) |
 | GET | `/api/v1/twitter/beat` | Beat writer tweets — scrapes 30 hardcoded reporter handles via Nitter RSS mirrors (14 instances tried), falls back to PFT/NFL.com RSS | Nitter / RSS (external, live) |
 
 ## 5. Analysis (R2, local-pipeline-backed)
@@ -90,9 +89,7 @@ All read via `/api/v1/r2/{key}` — see [DATA_SCHEMAS.md](DATA_SCHEMAS.md) for s
 
 | Method | Path | Description | Backend |
 |---|---|---|---|
-| GET | `/api/v1/opportunity/rankings` | Opportunity scores | **Databricks** ⚠️ unmigrated (frontend falls back to this if R2 `breakoutCandidates` read fails) |
-| GET | `/api/v1/leaderboard/live` | Live leaderboard | **Databricks** ⚠️ unmigrated |
-| GET | `/api/v1/games/active` | In-progress/halftime games | **Databricks** ⚠️ unmigrated — note this predates and duplicates the newer R2-backed live scoring below |
+| GET | `/api/v1/opportunity/rankings` | Opportunity scores | **Databricks** ⚠️ last-resort fallback only, behind both R2 `breakout_candidates.json` paths |
 | POST | `/api/v1/weather/refresh` | Fetch fresh WWO forecasts for 32 teams (30-min cooldown, dome teams skipped) | WWO API → R2 |
 
 ## 6. Live Scoring (migrated to local pipeline as of 2026-08-20)

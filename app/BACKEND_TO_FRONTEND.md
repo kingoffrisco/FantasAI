@@ -17,7 +17,7 @@
 
 **⚠️ Known issue:** `https://api.fantasai.net` is hardcoded as a local `API_BASE` constant independently in at least 10 files (`App.jsx`, `AdminOwners.jsx`, `ChangePassword.jsx`, `Login.jsx`, `Compare.jsx`, `CurrentRoster.jsx`, `Sources.jsx`, `LeagueSettings.jsx`, and others) instead of being imported from `app/src/api.js`. If the API domain ever changes, all of these need to be updated individually. New code should import from `api.js` instead of redeclaring the constant.
 
-**Data delivery:** Mostly Cloudflare R2 JSON, read through the Worker's `/api/v1/r2/{key}` passthrough. A shrinking minority of routes (`/api/v1/db/players`, `/api/v1/news/latest`, etc.) still query Databricks directly and are of unconfirmed live status — see [docs/API_ENDPOINTS.md](../docs/API_ENDPOINTS.md).
+**Data delivery:** Mostly Cloudflare R2 JSON, read through the Worker's `/api/v1/r2/{key}` passthrough. A few routes (`/api/v1/db/players`, `/api/v1/news/ai-summaries`, `/api/v1/opportunity/rankings`) still query Databricks directly, but only as a last-resort fallback behind an R2 primary — see [docs/API_ENDPOINTS.md](../docs/API_ENDPOINTS.md). Five other Databricks-backed routes with no frontend caller were removed 2026-08-23.
 
 ---
 

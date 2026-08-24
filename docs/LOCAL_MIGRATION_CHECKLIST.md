@@ -130,7 +130,7 @@ Frontend reads R2 via `api.r2.*` in `app/src/api.js`. Every key below was found 
 
 | R2 Key | Frontend Function | What Should Produce It | Priority |
 |--------|------------------|----------------------|----------|
-| `predictions/defense_predictions.json` | `api.r2.defensePredictions()` | ML pipeline (future — requires LightGBM training notebooks) | 🔵 Future |
+| `predictions/defense_predictions.json` | removed 2026-08-23 — `api.r2.defensePredictions()`/`useR2DefensePredictions()` had no caller anywhere in the app | ML pipeline (future — requires LightGBM training notebooks). Re-add the hook when this ships. | 🔵 Future |
 | `fantasai/analysis/waiver_claims.json` | `AICopilot.jsx` internal | User-written; AICopilot POST to `/api/v1/transactions` | 🟢 Low (user-specific) |
 
 ---

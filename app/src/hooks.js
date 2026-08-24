@@ -138,7 +138,6 @@ export const useR2DefenseAdp            = () => useR2Analysis(api.r2.defenseAdp)
 export const useR2DefensePerformance    = () => useR2Analysis(api.r2.defensePerformance)
 export const useR2DefenseVsPos          = () => useR2Analysis(api.r2.defenseVsPos)
 export const useR2RookieScores          = () => useR2Analysis(api.r2.rookieScores)
-export const useR2DefensePredictions    = () => useR2Analysis(api.r2.defensePredictions)
 // Note: loads 500K+ rows — call only on demand, never on page load
 export const useR2WeeklyStats           = () => useR2Analysis(api.r2.weeklyStats)
 export const useR2AdpPPR                = () => useR2Analysis(api.r2.adpPPR)

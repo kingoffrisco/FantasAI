@@ -136,13 +136,6 @@ export const api = {
       }
       return null;
     },
-    defensePredictions: async () => {
-      for (const p of ['predictions/defense_predictions.json', 'fantasai/predictions/defense_predictions.json']) {
-        const r2 = await r2Get(p);
-        if (r2) return r2;
-      }
-      return null;
-    },
     defenseVsPos:   () => r2Get('fantasai/analysis/defense_vs_pos.json'),
     rookieScores:   () => r2Get('fantasai/analysis/rookie_scores.json'),
     collegeStats:   () => r2Get('fantasai/analysis/college_stats.json'),
