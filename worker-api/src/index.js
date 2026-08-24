@@ -143,6 +143,7 @@ const PROTECTED_GET = {
   '/api/v1/league':      handleLeague,
   '/api/v1/rosters':     handleRosters,
   '/api/v1/draft':       handleDraft,
+  '/api/v1/draft/remote': handleRemoteDraft,
   '/api/v1/login-log':   handleLoginLogGet,
 };
 
@@ -503,6 +504,10 @@ async function handleRosters(url, env, req) { return cbsFetch(env, '/api/cbs/ros
 async function handleDraft(url, env, req) {
   const year = url.searchParams.get('year') || new Date().getFullYear();
   return cbsFetch(env, `/api/cbs/draft?year=${year}`, req?.headers?.get('X-CBS-Cookie'));
+}
+async function handleRemoteDraft(url, env, req) {
+  const target = url.searchParams.get('url') || '';
+  return cbsFetch(env, `/api/cbs/remote-draft?url=${encodeURIComponent(target)}`, req?.headers?.get('X-CBS-Cookie'));
 }
 
 async function handleCbsRankings(url, request, env) {

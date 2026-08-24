@@ -55,6 +55,7 @@ const routes = {
   "/api/cbs/rankings":        getRankings,
   "/api/cbs/players":         getPlayers,
   "/api/cbs/draft":           getDraft,
+  "/api/cbs/remote-draft":    getRemoteDraft,
   "/api/cbs/transactions":    getTransactions,
   "/api/cbs/scoring":         getScoring,
   "/api/cbs/sleeper-players": getSleeperPlayers,
@@ -399,6 +400,62 @@ async function getDraft(req, env, url) {
     year: parseInt(year),
     picks,
     teams, // { cbsTeamId: teamNameAtDraftTime } — use cbsTeamId to match across renames
+  };
+}
+
+// Fetch and parse an arbitrary cbssports.com draft page (e.g. a public mock
+// draft lobby, which lives on its own mockdraftN-XXXXXXX.football.cbssports.com
+// subdomain, not the league's own domain) using the same cookie-based auth and
+// parsing as the league's own draft-results page. Restricted to *.cbssports.com
+// hosts only — this is not a general-purpose URL proxy.
+async function getRemoteDraft(req, env, url) {
+  const target = url.searchParams.get("url") || "";
+  let parsed;
+  try { parsed = new URL(target); } catch { throw new Error("Invalid or missing url parameter"); }
+  if (!/(^|\.)cbssports\.com$/i.test(parsed.hostname)) {
+    throw new Error("Only cbssports.com URLs are supported");
+  }
+
+  const cookie = (req && req.headers.get("X-CBS-Cookie")) || env.CBS_COOKIE;
+  if (!cookie) {
+    throw new Error("No CBS session cookie provided (connect your CBS cookie first)");
+  }
+
+  const res = await fetch(parsed.toString(), {
+    headers: {
+      "Cookie": cookie,
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Cache-Control": "no-cache",
+    },
+    redirect: "follow",
+  });
+
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`CBS auth failed (${res.status}). Session cookie likely expired — refresh it.`);
+  }
+  if (!res.ok) {
+    throw new Error(`CBS returned ${res.status} for ${parsed.pathname}`);
+  }
+
+  const html = await res.text();
+  if (html.includes("/login") && html.includes("password") && html.length < 30000) {
+    throw new Error("CBS returned the login page — session cookie expired, or doesn't have access to this room.");
+  }
+
+  const picks = await parseDraft(html);
+  const teams = parseDraftTeamIds(html);
+  return {
+    source: "cbs",
+    url: parsed.toString(),
+    fetchedAt: new Date().toISOString(),
+    htmlLength: html.length,
+    picks,
+    teams,
+    note: picks.length === 0
+      ? "No picks parsed from this page — confirmed live 2026-08-24 that CBS's live mock draft rooms (mockdraftN-*.football.cbssports.com) render their board entirely client-side over a websocket, with no server-rendered pick data at all, so this can't see it. Completed league drafts (/api/v1/draft?year=N) don't have this problem — those pages are plain server-rendered HTML."
+      : undefined,
   };
 }
 
