@@ -81,8 +81,11 @@ export const api = {
     enrichedNews:        () => r2Get('fantasai/news/enriched_news.json'),
     aiSummaries:         () => r2Get('fantasai/news/ai_summaries.json'),
     breakoutCandidates:  async () => {
-      // Backend exports to analysis/ (no fantasai/ prefix) — try both paths.
-      for (const p of ['analysis/breakout_candidates.json', 'fantasai/analysis/breakout_candidates.json']) {
+      // fantasai/analysis/ is the current local pipeline's export (export_to_r2.py,
+      // refreshed regularly). analysis/ (no prefix) is a legacy Databricks-era path
+      // that can go stale indefinitely with no active producer — try the current
+      // one first so a frozen legacy file never silently wins.
+      for (const p of ['fantasai/analysis/breakout_candidates.json', 'analysis/breakout_candidates.json']) {
         const r2 = await r2Get(p);
         if (r2) {
           const arr = extractPlayerArray(r2);

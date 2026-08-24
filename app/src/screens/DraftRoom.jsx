@@ -82,7 +82,11 @@ function getNgVal(p, statId, breakoutByName) {
   const b = breakoutByName?.get(p.name.toLowerCase());
   switch (statId) {
     case 'opp_score':  return b?.opportunity_score != null ? +b.opportunity_score.toFixed(1) : null;
-    case 'snap_pct':   return b?.avg_snap_share != null ? +(b.avg_snap_share * 100).toFixed(1) : null;
+    // snapPct comes from the full player export (covers ~half the pool) — the
+    // breakout-candidates list only ever covers its curated top-30, so prefer
+    // the broader source and fall back to it only when the full field is missing.
+    case 'snap_pct':   return p.snapPct > 0 ? +p.snapPct.toFixed(1)
+                             : b?.avg_snap_share != null ? +(b.avg_snap_share * 100).toFixed(1) : null;
     case 'snap_delta': return b?.snap_share_delta != null ? +(b.snap_share_delta * 100).toFixed(1) : null;
     case 'tgt_share':  return p.targetShare > 0 ? +p.targetShare.toFixed(1) : null;
     case 'yac':        return p.yac > 0 ? +p.yac.toFixed(1) : null;
