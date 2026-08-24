@@ -1,13 +1,30 @@
 import React from 'react';
 import { LEAGUE_TEAMS } from '../lib/data.js';
-import { findPlayer } from '../lib/playerStore.js';
+import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
+import { fetchCbsLeagueDraft, matchCbsDraft, hasCbsCookie } from '../lib/cbsDraftImport.js';
 
 export default function PreviousDraftsScreen() {
   const [years, setYears]   = React.useState(null); // null = loading
   const [selected, setSelected] = React.useState(null);
   const [error, setError]   = React.useState(null);
+  const storePlayerList = usePlayers();
+
+  const [showImport, setShowImport] = React.useState(false);
+  const [importYear, setImportYear] = React.useState(() => new Date().getFullYear());
+  const [importStatus, setImportStatus] = React.useState('idle'); // idle | loading | ready | error | imported
+  const [importError, setImportError] = React.useState(null);
+  const [importFetched, setImportFetched] = React.useState(null);
+
+  function reload() {
+    api.draftArchive.get().then(res => {
+      const yearsObj = res?.years || {};
+      const sorted = Object.keys(yearsObj).map(Number).sort((a, b) => b - a);
+      setYears(yearsObj);
+      setSelected(prev => (prev != null && yearsObj[String(prev)]) ? prev : (sorted[0] ?? null));
+    }).catch(() => setError('Failed to load draft archive.'));
+  }
 
   React.useEffect(() => {
     let cancelled = false;
@@ -21,6 +38,34 @@ export default function PreviousDraftsScreen() {
     return () => { cancelled = true; };
   }, []);
 
+  async function fetchImportYear() {
+    setImportStatus('loading'); setImportError(null); setImportFetched(null);
+    try {
+      const data = await fetchCbsLeagueDraft(importYear);
+      const matched = matchCbsDraft(data, storePlayerList);
+      setImportFetched({ ...data, matched });
+      setImportStatus('ready');
+    } catch (e) {
+      setImportError(e.message || 'Fetch failed');
+      setImportStatus('error');
+    }
+  }
+
+  async function confirmImportYear() {
+    if (!importFetched) return;
+    const picks = importFetched.matched
+      .filter(m => m.matchedTeam)
+      .map(m => ({
+        pickNum: m.pickNum, round: m.round, slot: m.pickInRound,
+        teamId: m.matchedTeam.id, playerId: m.matchedPlayer ? m.matchedPlayer.id : null,
+      }));
+    const teamNames = Object.fromEntries(LEAGUE_TEAMS.map(t => [t.id, t.name]));
+    await api.draftArchive.save(importYear, picks, teamNames, importFetched.fetchedAt);
+    setImportStatus('imported');
+    setSelected(importYear);
+    reload();
+  }
+
   if (years === null) {
     return <div className="dim" style={{ padding: '20px 0', textAlign: 'center', fontSize: 12 }}>Loading previous drafts…</div>;
   }
@@ -30,10 +75,61 @@ export default function PreviousDraftsScreen() {
 
   const sortedYears = Object.keys(years).map(Number).sort((a, b) => b - a);
 
+  const importPanel = (
+    <div className="muted-card" style={{ padding: 12, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: showImport ? 10 : 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 800 }}>Import a Season from CBS</span>
+        <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={() => setShowImport(s => !s)}>
+          {showImport ? 'Hide' : 'Import…'}
+        </button>
+      </div>
+      {showImport && (
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.5 }}>
+            Pulls a completed draft directly from CBS Sports for the given season and archives it here —
+            useful for seasons that predate this app or were run entirely on CBS.
+          </div>
+          {!hasCbsCookie() && (
+            <div style={{ padding: '8px 10px', borderRadius: 6, background: 'rgba(255,152,0,.08)', border: '1px solid rgba(255,152,0,.3)', fontSize: 11, marginBottom: 10 }}>
+              No CBS session connected yet. Connect your CBS cookie (Sources → CBS Connect) first.
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <input type="number" className="input" style={{ width: 90, fontSize: 12 }} value={importYear} onChange={e => setImportYear(Number(e.target.value))} />
+            <button className="btn primary sm" disabled={!hasCbsCookie() || importStatus === 'loading'} onClick={fetchImportYear}>
+              {importStatus === 'loading' ? '⟳ Fetching…' : 'Fetch from CBS'}
+            </button>
+          </div>
+          {importStatus === 'error' && (
+            <div style={{ padding: '6px 10px', borderRadius: 6, background: 'rgba(255,90,110,.08)', border: '1px solid rgba(255,90,110,.3)', fontSize: 11, color: '#ff5a6e', marginBottom: 10 }}>
+              {importError}
+            </div>
+          )}
+          {importFetched && importStatus !== 'imported' && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+                {importFetched.matched.length} picks found for {importYear}.{' '}
+                {importFetched.matched.some(m => !m.matchedTeam) && <span style={{ color: '#ff5a6e' }}>Some picks couldn't be matched to a team. </span>}
+                {importFetched.matched.some(m => m.matchedTeam && !m.matchedPlayer) && <span style={{ color: '#ffb547' }}>Some players couldn't be matched.</span>}
+              </div>
+              <button className="btn primary sm" onClick={confirmImportYear}>Archive {importYear}</button>
+            </div>
+          )}
+          {importStatus === 'imported' && (
+            <div style={{ fontSize: 12, color: '#4caf82', fontWeight: 700 }}>✓ {importYear} archived.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   if (sortedYears.length === 0) {
     return (
-      <div className="dim" style={{ padding: '30px 0', textAlign: 'center', fontSize: 12 }}>
-        No archived drafts yet. A season's draft is archived automatically once it completes.
+      <div style={{ padding: '16px 20px' }}>
+        {importPanel}
+        <div className="dim" style={{ padding: '20px 0', textAlign: 'center', fontSize: 12 }}>
+          No archived drafts yet. A season's draft is archived automatically once it completes.
+        </div>
       </div>
     );
   }
@@ -81,6 +177,8 @@ export default function PreviousDraftsScreen() {
           </span>
         )}
       </div>
+
+      {importPanel}
 
       {picks.length === 0 ? (
         <div className="dim" style={{ padding: '20px 0', textAlign: 'center', fontSize: 12 }}>No picks recorded for {selected}.</div>

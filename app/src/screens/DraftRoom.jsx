@@ -7,6 +7,7 @@ import { useR2BreakoutCandidates } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
 import { api } from '../api.js';
+import { fetchCbsLeagueDraft, matchCbsDraft, hasCbsCookie } from '../lib/cbsDraftImport.js';
 
 const dstOverallRank = (posRank) => 150 + (posRank - 1) * 3;
 
@@ -1829,6 +1830,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
               { id: 'chatactivity', label: 'Chat', icon: '💬' },
               { id: 'ghosts', label: 'Ghost', icon: '👻' },
               ...(isCommissioner ? [{ id: 'commish', label: 'Commish', icon: '👑' }] : []),
+              ...(isCommissioner ? [{ id: 'remotesync', label: 'Sync', icon: '🔄' }] : []),
             ].map(t => (
               <button key={t.id} onClick={() => {
                 setMobileDraftTab(t.id);
@@ -2302,6 +2304,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             { id: 'chatactivity', label: '💬 Chat & Activity' },
             { id: 'ghosts', label: '👻 Ghost Picks' },
             ...(isCommissioner ? [{ id: 'commish', label: '👑 Commish Concierge' }] : []),
+            ...(isCommissioner ? [{ id: 'remotesync', label: '🔄 Remote Draft Sync' }] : []),
           ].map(tab => (
             <button key={tab.id}
               onClick={() => setRosterPanelView(tab.id)}
@@ -2674,6 +2677,15 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
           </div>
         )}
 
+        {/* REMOTE DRAFT SYNC view */}
+        {activePanelView === 'remotesync' && isCommissioner && (
+          <RemoteDraftSyncPanel
+            storePlayerList={storePlayerList}
+            draftDate={draftDate}
+            setLivePicks={setLivePicks}
+          />
+        )}
+
         {/* CHAT & ACTIVITY view */}
         {activePanelView === 'chatactivity' && (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -2850,6 +2862,134 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
 
       {showRecap && <DraftRecap round={currentRound - 1} picks={allPicks} teamCount={DRAFT_TEAM_COUNT} onClose={() => setShowRecap(false)} />}
 
+    </div>
+  );
+}
+
+// Pulls a completed real draft straight from CBS Sports and imports it as this
+// room's live picks. Team assignment per pick comes entirely from CBS's own
+// data (matched via each team's stable cbsId, not name — names can be renamed
+// between seasons) — NOT from this app's own DRAFT_PICKS/TEAMS_ORDER template,
+// which is just a placeholder snake order that doesn't match CBS's real,
+// separately-determined draft order (confirmed: pick 1 in our template and
+// pick 1 on CBS were different teams for the same season).
+function RemoteDraftSyncPanel({ storePlayerList, draftDate, setLivePicks }) {
+  const [year, setYear] = React.useState(() => draftDate ? draftDate.getFullYear() : new Date().getFullYear());
+  const [status, setStatus] = React.useState('idle'); // idle | loading | ready | error | imported
+  const [error, setError] = React.useState(null);
+  const [fetched, setFetched] = React.useState(null);
+  const [confirmImport, setConfirmImport] = React.useState(false);
+
+  const hasCookie = hasCbsCookie();
+
+  async function fetchFromCbs() {
+    setStatus('loading'); setError(null); setFetched(null); setConfirmImport(false);
+    try {
+      const data = await fetchCbsLeagueDraft(year);
+      const matched = matchCbsDraft(data, storePlayerList);
+      setFetched({ ...data, matched });
+      setStatus('ready');
+    } catch (e) {
+      setError(e.message || 'Fetch failed');
+      setStatus('error');
+    }
+  }
+
+  function doImport() {
+    if (!fetched) return;
+    const newPicks = fetched.matched
+      .filter(m => m.matchedTeam) // a pick with no resolvable team can't be placed anywhere
+      .map(m => ({
+        pickNum: m.pickNum,
+        round: m.round,
+        slot: m.pickInRound,
+        teamId: m.matchedTeam.id,
+        playerId: m.matchedPlayer ? m.matchedPlayer.id : null,
+        pickedAt: fetched.fetchedAt,
+      }));
+    setLivePicks(newPicks);
+    try { localStorage.setItem('fantasai_live_picks', JSON.stringify(newPicks)); } catch {}
+    api.draftPicks.save(newPicks);
+    setStatus('imported');
+    setConfirmImport(false);
+  }
+
+  const unmatchedTeams   = fetched ? fetched.matched.filter(m => !m.matchedTeam).length : 0;
+  const unmatchedPlayers = fetched ? fetched.matched.filter(m => m.matchedTeam && !m.matchedPlayer).length : 0;
+
+  return (
+    <div style={{ padding: 16, overflow: 'auto', flex: 1 }}>
+      <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 8 }}>Remote Draft Sync</div>
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.5 }}>
+        Pull a completed draft directly from CBS Sports and import it here — every team's roster gets set
+        exactly as it happened on CBS, using CBS's own draft order (not this room's default snake order).
+        Live mock draft rooms (mockdraftN-*.football.cbssports.com) can't be synced this way — CBS renders
+        those entirely client-side over a websocket with no data a script can read.
+      </div>
+
+      {!hasCookie && (
+        <div style={{ padding: '10px 12px', borderRadius: 8, background: 'rgba(255,152,0,.08)', border: '1px solid rgba(255,152,0,.3)', fontSize: 11, marginBottom: 14 }}>
+          No CBS session connected yet. Connect your CBS cookie (Sources → CBS Connect) first, then come back here.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Season</span>
+        <input type="number" className="input" style={{ width: 90, fontSize: 12 }} value={year} onChange={e => setYear(Number(e.target.value))} />
+        <button className="btn primary sm" disabled={!hasCookie || status === 'loading'} onClick={fetchFromCbs}>
+          {status === 'loading' ? '⟳ Fetching…' : 'Fetch from CBS'}
+        </button>
+      </div>
+
+      {status === 'error' && (
+        <div style={{ padding: '8px 12px', borderRadius: 6, background: 'rgba(255,90,110,.08)', border: '1px solid rgba(255,90,110,.3)', fontSize: 11, color: '#ff5a6e', marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+
+      {fetched && (
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10 }}>
+            {fetched.matched.length} picks found for {year}.{' '}
+            {unmatchedTeams > 0 && <span style={{ color: '#ff5a6e' }}>{unmatchedTeams} couldn't be matched to a team (skipped). </span>}
+            {unmatchedPlayers > 0 && <span style={{ color: '#ffb547' }}>{unmatchedPlayers} matched a team but not a player — those slots import as open.</span>}
+            {unmatchedTeams === 0 && unmatchedPlayers === 0 && 'All picks matched cleanly.'}
+          </div>
+
+          <div style={{ maxHeight: 360, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 14 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead style={{ position: 'sticky', top: 0, background: 'var(--panel)' }}>
+                <tr>
+                  <th style={{ padding: '5px 8px', textAlign: 'left' }}>Pick</th>
+                  <th style={{ padding: '5px 8px', textAlign: 'left' }}>Team</th>
+                  <th style={{ padding: '5px 8px', textAlign: 'left' }}>Player</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fetched.matched.map(m => (
+                  <tr key={m.pickNum} style={{ borderTop: '1px solid var(--border)', opacity: (m.matchedTeam && m.matchedPlayer) ? 1 : 0.55 }}>
+                    <td style={{ padding: '4px 8px', fontFamily: 'var(--font-mono)' }}>{m.round}.{String(m.pickInRound).padStart(2, '0')}</td>
+                    <td style={{ padding: '4px 8px' }}>{m.matchedTeam ? m.matchedTeam.name : `⚠ ${m.team}`}</td>
+                    <td style={{ padding: '4px 8px' }}>{m.matchedPlayer ? m.matchedPlayer.name : `⚠ ${m.player || '—'}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {status === 'imported' ? (
+            <div style={{ fontSize: 12, color: '#4caf82', fontWeight: 700 }}>✓ Imported — rosters will update as each owner's browser syncs.</div>
+          ) : confirmImport ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, color: '#ff5a6e' }}>This replaces this room's current live draft picks for every team. Sure?</span>
+              <button className="btn sm" style={{ background: '#ff5a6e', color: '#fff', borderColor: '#ff5a6e' }} onClick={doImport}>Yes, Import</button>
+              <button className="btn ghost sm" onClick={() => setConfirmImport(false)}>Cancel</button>
+            </div>
+          ) : (
+            <button className="btn primary sm" onClick={() => setConfirmImport(true)}>Import into FantasAI</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
