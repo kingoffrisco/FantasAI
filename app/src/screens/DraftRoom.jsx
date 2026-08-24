@@ -2879,6 +2879,17 @@ function RemoteDraftSyncPanel({ storePlayerList, draftDate, setLivePicks }) {
   const [error, setError] = React.useState(null);
   const [fetched, setFetched] = React.useState(null);
   const [confirmImport, setConfirmImport] = React.useState(false);
+  const [liveMode, setLiveMode] = React.useState(false);
+  const [autoApply, setAutoApply] = React.useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = React.useState(null);
+  const [appliedMadeCount, setAppliedMadeCount] = React.useState(0);
+  const pollRef = React.useRef(null);
+  const inFlightRef = React.useRef(false);
+  // storePlayerList's array identity changes on every unrelated player-store
+  // patch — read it via a ref inside the poll loop so that doesn't restart
+  // the 20s interval each time (only `year` should do that).
+  const storePlayerListRef = React.useRef(storePlayerList);
+  React.useEffect(() => { storePlayerListRef.current = storePlayerList; }, [storePlayerList]);
 
   const hasCookie = hasCbsCookie();
 
@@ -2888,6 +2899,7 @@ function RemoteDraftSyncPanel({ storePlayerList, draftDate, setLivePicks }) {
       const data = await fetchCbsLeagueDraft(year);
       const matched = matchCbsDraft(data, storePlayerList);
       setFetched({ ...data, matched });
+      setLastSyncedAt(new Date());
       setStatus('ready');
     } catch (e) {
       setError(e.message || 'Fetch failed');
@@ -2895,7 +2907,27 @@ function RemoteDraftSyncPanel({ storePlayerList, draftDate, setLivePicks }) {
     }
   }
 
-  function doImport() {
+  // Poll variant used by Live Sync — keeps the current table visible while
+  // refreshing instead of clearing it, so watching a draft in progress doesn't
+  // flash to a loading state on every tick.
+  const pollFromCbs = React.useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    try {
+      const data = await fetchCbsLeagueDraft(year);
+      const matched = matchCbsDraft(data, storePlayerListRef.current);
+      setError(null);
+      setFetched({ ...data, matched });
+      setLastSyncedAt(new Date());
+      setStatus(s => (s === 'error' ? 'ready' : s));
+    } catch (e) {
+      setError(e.message || 'Fetch failed');
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, [year]);
+
+  function doImport(fromAuto = false) {
     if (!fetched) return;
     const newPicks = fetched.matched
       .filter(m => m.matchedTeam) // a pick with no resolvable team can't be placed anywhere
@@ -2910,21 +2942,43 @@ function RemoteDraftSyncPanel({ storePlayerList, draftDate, setLivePicks }) {
     setLivePicks(newPicks);
     try { localStorage.setItem('fantasai_live_picks', JSON.stringify(newPicks)); } catch {}
     api.draftPicks.save(newPicks);
-    setStatus('imported');
+    setAppliedMadeCount(fetched.matched.filter(m => m.player).length);
+    if (!fromAuto) setStatus('imported');
     setConfirmImport(false);
   }
 
+  const madeCount = fetched ? fetched.matched.filter(m => m.player).length : 0;
+  const totalCount = fetched ? fetched.matched.length : 0;
   const unmatchedTeams   = fetched ? fetched.matched.filter(m => !m.matchedTeam).length : 0;
   const unmatchedPlayers = fetched ? fetched.matched.filter(m => m.matchedTeam && !m.matchedPlayer).length : 0;
+
+  // Live Sync: poll every 20s while enabled. Auto-apply only writes to the
+  // live picks when the number of made picks actually grew since the last
+  // apply — never re-applies on an unchanged or shrinking count (CBS wouldn't
+  // shrink, but this stays safe if it ever glitches).
+  React.useEffect(() => {
+    if (!liveMode) { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } return; }
+    pollFromCbs();
+    pollRef.current = setInterval(pollFromCbs, 20000);
+    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  }, [liveMode, pollFromCbs]);
+
+  React.useEffect(() => {
+    if (!liveMode || !autoApply || !fetched) return;
+    if (madeCount > appliedMadeCount) doImport(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveMode, autoApply, madeCount, fetched]);
 
   return (
     <div style={{ padding: 16, overflow: 'auto', flex: 1 }}>
       <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 8 }}>Remote Draft Sync</div>
       <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.5 }}>
-        Pull a completed draft directly from CBS Sports and import it here — every team's roster gets set
-        exactly as it happened on CBS, using CBS's own draft order (not this room's default snake order).
-        Live mock draft rooms (mockdraftN-*.football.cbssports.com) can't be synced this way — CBS renders
-        those entirely client-side over a websocket with no data a script can read.
+        Pull a draft directly from CBS Sports and import it here — every team's roster gets set exactly as
+        it happened on CBS, using CBS's own draft order (not this room's default snake order). Live Sync
+        polls CBS's draft-results page every 20s while a real draft is in progress there — this depends on
+        CBS updating that page as picks happen, which is unverified until tried during an actual live draft.
+        Live mock draft rooms (mockdraftN-*.football.cbssports.com) can't be synced this way at all — CBS
+        renders those entirely client-side over a websocket with no data a script can read.
       </div>
 
       {!hasCookie && (
@@ -2933,12 +2987,31 @@ function RemoteDraftSyncPanel({ storePlayerList, draftDate, setLivePicks }) {
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Season</span>
-        <input type="number" className="input" style={{ width: 90, fontSize: 12 }} value={year} onChange={e => setYear(Number(e.target.value))} />
-        <button className="btn primary sm" disabled={!hasCookie || status === 'loading'} onClick={fetchFromCbs}>
+        <input type="number" className="input" style={{ width: 90, fontSize: 12 }} disabled={liveMode} value={year} onChange={e => setYear(Number(e.target.value))} />
+        <button className="btn primary sm" disabled={!hasCookie || status === 'loading' || liveMode} onClick={fetchFromCbs}>
           {status === 'loading' ? '⟳ Fetching…' : 'Fetch from CBS'}
         </button>
+        <button
+          className="btn sm"
+          disabled={!hasCookie}
+          onClick={() => setLiveMode(v => !v)}
+          style={liveMode ? { background: '#ff5a6e', color: '#fff', borderColor: '#ff5a6e' } : {}}
+        >
+          {liveMode ? '⏹ Stop Live Sync' : '▶ Start Live Sync'}
+        </button>
+        {liveMode && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--text-dim)' }}>
+            <input type="checkbox" checked={autoApply} onChange={e => setAutoApply(e.target.checked)} />
+            Auto-apply new picks
+          </label>
+        )}
+        {liveMode && lastSyncedAt && (
+          <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+            {madeCount}/{totalCount} picks made · synced {lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </span>
+        )}
       </div>
 
       {status === 'error' && (
@@ -2977,12 +3050,16 @@ function RemoteDraftSyncPanel({ storePlayerList, draftDate, setLivePicks }) {
             </table>
           </div>
 
-          {status === 'imported' ? (
+          {liveMode && autoApply ? (
+            <div style={{ fontSize: 11, color: '#4caf82' }}>
+              ✓ Auto-applying — {appliedMadeCount} of {madeCount} made picks currently live in this room.
+            </div>
+          ) : status === 'imported' ? (
             <div style={{ fontSize: 12, color: '#4caf82', fontWeight: 700 }}>✓ Imported — rosters will update as each owner's browser syncs.</div>
           ) : confirmImport ? (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <span style={{ fontSize: 11, color: '#ff5a6e' }}>This replaces this room's current live draft picks for every team. Sure?</span>
-              <button className="btn sm" style={{ background: '#ff5a6e', color: '#fff', borderColor: '#ff5a6e' }} onClick={doImport}>Yes, Import</button>
+              <button className="btn sm" style={{ background: '#ff5a6e', color: '#fff', borderColor: '#ff5a6e' }} onClick={() => doImport(false)}>Yes, Import</button>
               <button className="btn ghost sm" onClick={() => setConfirmImport(false)}>Cancel</button>
             </div>
           ) : (
