@@ -228,7 +228,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     if (err) { setDraftLimitToast(err); return; }
     const round = Math.ceil(mockPickNum / 12);
     const s     = (mockPickNum - 1) % 12;
-    setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId, playerId, round, slot: s + 1 }]);
+    setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId, playerId, round, slot: s + 1, pickedAt: new Date().toISOString() }]);
     setMockPickNum(n => n + 1);
     setSeconds(clockSeconds);
     setQueue(q => q.filter(id => id !== playerId));
@@ -238,7 +238,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     if (!mockActive) return;
     const round = Math.ceil(mockPickNum / 12);
     const s     = (mockPickNum - 1) % 12;
-    setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId: forTeamId, playerId, round, slot: s + 1 }]);
+    setMockPicks(prev => [...prev, { pickNum: mockPickNum, teamId: forTeamId, playerId, round, slot: s + 1, pickedAt: new Date().toISOString() }]);
     setMockPickNum(n => n + 1);
     setSeconds(clockSeconds);
     setQueue(q => q.filter(id => id !== playerId));
