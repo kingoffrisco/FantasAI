@@ -35,6 +35,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -581,6 +582,61 @@ def _to_profile(p: dict) -> dict:
     }
 
 
+NAME_SUFFIX_RE = re.compile(r"\b(jr|sr|ii|iii|iv|v)\.?$")
+
+
+def _normalize_name_for_adp_match(name: str) -> str:
+    """Lowercase, strip punctuation and a trailing generational suffix, so
+    'Marvin Harrison' (as frozen in the stale Databricks gold_player_profiles
+    export) matches 'Marvin Harrison Jr.' (as scraped fresh by ingest_adp.py).
+    Without this, every suffixed player's ADP join silently misses and falls
+    back to the gold export's frozen 999 sentinel — confirmed live 2026-08-23:
+    Marvin Harrison Jr. showed adp_rank_ppr=999 in a writeup despite a real,
+    current ADP of 67 in players/adp_ppr.json.
+    """
+    n = re.sub(r"[.'’]", "", (name or "").strip().lower())
+    n = NAME_SUFFIX_RE.sub("", n).strip()
+    return re.sub(r"\s+", " ", n)
+
+
+def _load_fresh_adp_lookup() -> dict:
+    """players/player_profiles.json (the Databricks gold export Job 3 reads
+    for stats/ADP/news context) has no active producer left in this repo and
+    can go stale indefinitely — confirmed frozen at a single profile_updated_at
+    of 2026-06-15 with adp_rank_ppr=999 for 636 of its 998 records. The local
+    ingest_adp.py pipeline scrapes FantasyPros fresh and correctly, so overlay
+    its output on top of the gold export rather than trusting the latter's ADP.
+    Returns {normalized_name: {"adp_rank_ppr", "adp_ppr", "adp_rank_standard", "adp_standard"}}.
+    """
+    lookup: dict = {}
+    ppr = r2_get("players/adp_ppr.json") or {}
+    for row in (ppr.get("players") or []):
+        key = _normalize_name_for_adp_match(row.get("player_name"))
+        if key:
+            lookup.setdefault(key, {})["adp_rank_ppr"] = row.get("adp_rank")
+            lookup[key]["adp_ppr"] = row.get("adp_value")
+    std = r2_get("players/adp_standard.json") or {}
+    for row in (std.get("players") or []):
+        key = _normalize_name_for_adp_match(row.get("player_name"))
+        if key:
+            lookup.setdefault(key, {})["adp_rank_standard"] = row.get("adp_rank")
+            lookup[key]["adp_standard"] = row.get("adp_value")
+    print(f"[Job 3] Fresh ADP overlay: {len(lookup)} players from ingest_adp.py's live output.")
+    return lookup
+
+
+def _apply_fresh_adp_overlay(profiles_list: list, adp_lookup: dict) -> int:
+    overlaid = 0
+    for p in profiles_list:
+        key = _normalize_name_for_adp_match(p.get("full_name") or p.get("name"))
+        fresh = adp_lookup.get(key)
+        if not fresh:
+            continue
+        p.update(fresh)
+        overlaid += 1
+    return overlaid
+
+
 def load_profiles_fallback() -> list:
     """Try existing R2 player exports in priority order, then the live DB endpoint."""
     r2_paths = [
@@ -753,6 +809,12 @@ def main():
             print("ERROR: No player data available. Exiting.")
             sys.exit(1)
         print(f"[Job 3] Fallback: {len(profiles_list)} profiles ready.")
+
+    # ── Overlay fresh ADP over the (possibly stale) profile export ──────────
+    adp_lookup = _load_fresh_adp_lookup()
+    if adp_lookup:
+        overlaid = _apply_fresh_adp_overlay(profiles_list, adp_lookup)
+        print(f"[Job 3] Overlaid fresh ADP onto {overlaid}/{len(profiles_list)} profiles.")
 
     # ── Enrich profiles with Sleeper bio data ───────────────────────────────
     print("[Job 3] Fetching Sleeper bio data (years_exp, age, height, weight, college)...")
