@@ -35,6 +35,7 @@ import AccountEditScreen, { THEME_VARS } from './screens/AccountEdit.jsx';
 import TransactionsScreen from './screens/Transactions.jsx';
 import PowerRankingsScreen from './screens/PowerRankings.jsx';
 import DraftRecapScreen from './screens/DraftRecap.jsx';
+import PreviousDraftsScreen from './screens/PreviousDrafts.jsx';
 
 // DST positional rank (1-32) → overall draft rank (~120-244).
 // Keeps defenses in the correct draft range instead of competing with top picks.
@@ -977,6 +978,20 @@ export default function App() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
+      // Defensive re-archive of any real draft before it's wiped below — the
+      // primary archive happens the moment a real draft completes (DraftRoom.jsx),
+      // this only catches the edge case where that somehow never fired. Best-effort
+      // only: falls back to the current calendar year since draftDate isn't
+      // available here, and is idempotent server-side either way.
+      try {
+        const live = JSON.parse(localStorage.getItem('fantasai_live_picks') || 'null');
+        const realPicks = Array.isArray(live) ? live.filter(p => p?.playerId) : [];
+        if (realPicks.length > 0) {
+          const teamNames = Object.fromEntries(LEAGUE_TEAMS.map(t => [t.id, t.name]));
+          await api.draftArchive.save(new Date().getFullYear(), realPicks, teamNames, null);
+        }
+      } catch {}
+
       // Wipe mock draft state (legitimately local/ephemeral)
       ['fantasai_mock_picks_saved', 'fantasai_live_picks',
        'fantasai_mock_picks_wip',   'fantasai_mock_session'].forEach(k => localStorage.removeItem(k));
@@ -1356,13 +1371,14 @@ export default function App() {
           {active === 'trade'     && <TradeScreen key={tradeInit.key} initOtherTeamId={tradeInit.otherTeamId} initGetIds={tradeInit.getIds} myRosterIds={myRosterIds} user={user} onSendTradeOffer={handleSendTradeOffer} tradeOffers={tradeOffers} onRespondTradeOffer={handleRespondTradeOffer} onDeleteTradeOffer={handleDeleteTradeOffer} />}
           {/* Draft — always mounted so timer and AI auto-picks continue when user navigates to another screen */}
           {(() => {
-            const isDraftPage = active === 'draft' || active === 'draftrecap';
-            const tab = active === 'draftrecap' ? 'recap' : draftTab;
+            const isDraftPage = active === 'draft' || active === 'draftrecap' || active === 'previousdrafts';
+            const tab = active === 'draftrecap' ? 'recap' : active === 'previousdrafts' ? 'previous' : draftTab;
             return (
               <div style={{ display: isDraftPage ? 'flex' : 'none', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                 <div className="tabs" style={{ padding: '0 18px', flexShrink: 0, borderBottom: '1px solid var(--border)', background: 'var(--bg-2)' }}>
                   <div className={`tab ${tab === 'room' ? 'active' : ''}`} onClick={() => { setActive('draft'); setDraftTab('room'); }}>● Draft Room</div>
                   <div className={`tab ${tab === 'recap' ? 'active' : ''}`} onClick={() => { setActive('draft'); setDraftTab('recap'); }}>🏆 Draft Recap</div>
+                  <div className={`tab ${tab === 'previous' ? 'active' : ''}`} onClick={() => { setActive('draft'); setDraftTab('previous'); }}>🗂 Previous Years Drafts</div>
                 </div>
                 <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
                   {/* DraftRoom kept mounted at all times — display:none hides it without unmounting */}
@@ -1386,6 +1402,7 @@ export default function App() {
                     }} />
                   </div>
                   {tab === 'recap' && <DraftRecapScreen user={user} />}
+                  {tab === 'previous' && <PreviousDraftsScreen />}
                 </div>
               </div>
             );

@@ -194,6 +194,20 @@ export const api = {
       }).catch(() => null),
   },
 
+  draftArchive: {
+    // Returns { years: { "2026": { season, completedAt, archivedAt, picks, teamNames } } }
+    get: () =>
+      fetch(`${API_BASE}/api/v1/draft/archive`)
+        .then(r => r.ok ? r.json() : { years: {} })
+        .catch(() => ({ years: {} })),
+    save: (year, picks, teamNames, completedAt) =>
+      fetch(`${API_BASE}/api/v1/draft/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year, picks, teamNames, completedAt }),
+      }).catch(() => null),
+  },
+
   draftChat: {
     get: () =>
       fetch(`${API_BASE}/api/v1/r2/fantasai/draft/chat_log.json`)

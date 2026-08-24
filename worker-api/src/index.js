@@ -178,6 +178,7 @@ export default {
         if (url.pathname === '/api/v1/weather/refresh')       return handleWeatherRefresh(request, env);
         if (url.pathname === '/api/v1/transactions')          return handleTransactionsPost(request, env);
         if (url.pathname === '/api/v1/draft/picks')           return handleDraftPicksPost(request, env);
+        if (url.pathname === '/api/v1/draft/archive')         return handleDraftArchivePost(request, env);
         if (url.pathname === '/api/v1/scrape')                return handleScrape(request);
         // Push notifications (open — anyone with the app can subscribe/unsubscribe)
         if (url.pathname === '/api/v1/push/subscribe')        return handlePushSubscribe(request, env);
@@ -222,6 +223,7 @@ export default {
       if (url.pathname === '/api/v1/weather')            return await handleWeatherGet(env);
       if (url.pathname === '/api/v1/transactions')      return await handleTransactionsGet(env);
       if (url.pathname === '/api/v1/draft/picks')       return await handleDraftPicksGet(env);
+      if (url.pathname === '/api/v1/draft/archive')     return await handleDraftArchiveGet(env);
       if (url.pathname === '/api/v1/cbs/rankings')        return await handleCbsRankings(url, request, env);
       if (url.pathname === '/api/v1/twitter/beat')        return await handleBeatWriterNews();
       if (url.pathname === '/api/v1/db/players')          return await handleDbPlayers(env);
@@ -1219,7 +1221,8 @@ async function handleTransactionsPost(request, env) {
 // to everyone, not just the browser that ran the draft. Client always sends
 // the full current array, so this is a plain overwrite — no read-modify-write
 // race like the transactions log has.
-const DRAFT_PICKS_R2_KEY = 'fantasai/league/draft_picks.json';
+const DRAFT_PICKS_R2_KEY   = 'fantasai/league/draft_picks.json';
+const DRAFT_ARCHIVE_R2_KEY = 'fantasai/league/draft_archive.json';
 
 async function handleDraftPicksGet(env) {
   if (!env.BUCKET) return json([], 200);
@@ -1242,6 +1245,52 @@ async function handleDraftPicksPost(request, env) {
     httpMetadata: { contentType: 'application/json' },
   });
   return json({ status: 'ok', count: picks.length }, 200);
+}
+
+// ── Draft Archive — one entry per season, never touched by /rosters/reset ─────
+// { years: { "2026": { season, completedAt, archivedAt, picks, teamNames } } }
+// Written once a real (non-mock) draft completes, and defensively re-written by
+// the commissioner's Reset All Rosters flow right before it wipes the live pick
+// store, so a season's results always survive being reset into the next season.
+
+async function handleDraftArchiveGet(env) {
+  if (!env.BUCKET) return json({ years: {} }, 200);
+  const obj = await env.BUCKET.get(DRAFT_ARCHIVE_R2_KEY);
+  if (!obj) return json({ years: {} }, 200);
+  try {
+    const data = await obj.json();
+    return json({ years: (data && typeof data.years === 'object' && data.years) || {} }, 200);
+  } catch {
+    return json({ years: {} }, 200);
+  }
+}
+
+async function handleDraftArchivePost(request, env) {
+  if (!env.BUCKET) return json({ error: 'R2 not configured' }, 503);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
+  const year = parseInt(body.year, 10);
+  if (!year || !Array.isArray(body.picks)) return json({ error: 'year and picks[] required' }, 400);
+
+  let existing = { years: {} };
+  try {
+    const obj = await env.BUCKET.get(DRAFT_ARCHIVE_R2_KEY);
+    if (obj) existing = await obj.json();
+    if (!existing || typeof existing.years !== 'object') existing = { years: {} };
+  } catch {}
+
+  existing.years[String(year)] = {
+    season:      year,
+    completedAt: body.completedAt || null,
+    archivedAt:  new Date().toISOString(),
+    picks:       body.picks,
+    teamNames:   body.teamNames && typeof body.teamNames === 'object' ? body.teamNames : {},
+  };
+
+  await env.BUCKET.put(DRAFT_ARCHIVE_R2_KEY, JSON.stringify(existing), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+  return json({ status: 'ok', year, count: body.picks.length }, 200);
 }
 
 // ── Web Scrape Proxy ─────────────────────────────────────────────────────────

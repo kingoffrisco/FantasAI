@@ -1468,6 +1468,16 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     if (!draftComplete) return;
     // Notify parent so it can sync rosters from draft picks immediately
     onDraftComplete?.();
+    // Archive a completed REAL draft permanently — mock drafts are intentionally
+    // ephemeral and never archived. Reset All Rosters later wipes livePicks, so
+    // this is the record that survives into next season. Idempotent (overwrites
+    // that year's entry), so redundant saves from multiple owners' browsers all
+    // converge to the same result.
+    if (!mockActive) {
+      const year = draftDate ? draftDate.getFullYear() : new Date().getFullYear();
+      const teamNames = Object.fromEntries(LEAGUE_TEAMS.map(t => [t.id, t.name]));
+      api.draftArchive.save(year, livePicks.filter(p => p.playerId), teamNames, new Date().toISOString());
+    }
     const t = setTimeout(() => {
       onDraftStatusChange?.(null);
       try { localStorage.removeItem('fantasai_draft_paused'); } catch {}
