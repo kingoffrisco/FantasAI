@@ -8,6 +8,9 @@ import { api } from '../api.js';
 import { useApi, useR2CriticalAlerts } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 import { sendLeaguePush } from '../lib/pushNotifications.js';
+// 2026 is year 29 (2027 will be year 30) — compute dynamically each season
+// rather than hardcoding a count that needs a manual bump every year.
+const LEAGUE_FOUNDED_YEAR = 1998;
 const SLOT_ELIGIBLE = {
   QB: ['QB'], RB: ['RB'], WR: ['WR'], TE: ['TE'],
   K: ['K'], DST: ['DST'], FLEX: ['RB', 'WR'],
@@ -949,6 +952,12 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
         </div>
         <div className="flex gap-8" style={{ alignItems: 'center' }}>
+          <span
+            title={`Founded ${LEAGUE_FOUNDED_YEAR}`}
+            style={{ fontSize: 11, fontWeight: 800, color: '#FFD700', background: 'rgba(255,215,0,.10)', border: '1px solid rgba(255,215,0,.35)', borderRadius: 6, padding: '4px 10px', whiteSpace: 'nowrap' }}
+          >
+            Running {new Date().getFullYear() - LEAGUE_FOUNDED_YEAR + 1} Years
+          </span>
           <button className="btn primary" onClick={() => onNav('draft')}>▶ Open Draft Room</button>
         </div>
       </div>
