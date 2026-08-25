@@ -12,11 +12,14 @@ function saveOverrides(overrides) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
 }
 
-function syncToS3(overrides) {
+// Sends only the changed team's patch — the server merges it into the
+// existing config, so this never needs (or has, since GET no longer
+// returns passwords) the full picture for every other team.
+function syncToS3(teamId, patch) {
   fetch(`${API_BASE}/api/v1/owners/config`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(overrides),
+    body:    JSON.stringify({ [teamId]: patch }),
   }).catch(err => console.warn('S3 sync failed:', err.message));
 }
 
@@ -28,21 +31,19 @@ export default function AdminOwners() {
 
   function toggleCommissioner(teamId) {
     const existing = overrides[teamId] || {};
-    const next = {
-      ...overrides,
-      [teamId]: { ...existing, isCommissioner: !existing.isCommissioner },
-    };
+    const patch = { isCommissioner: !existing.isCommissioner };
+    const next = { ...overrides, [teamId]: { ...existing, ...patch } };
     saveOverrides(next);
     setOverrides(next);
-    syncToS3(next);
+    syncToS3(teamId, patch);
   }
 
   function startEdit(team) {
     const ov = overrides[team.id] || {};
     setForm({
-      name:     ov.name     ?? team.name,
-      email:    ov.email    ?? team.email,
-      password: ov.password ?? '',
+      name:     ov.name  ?? team.name,
+      email:    ov.email ?? team.email,
+      password: '', // never available from the server anymore — blank means "keep current"
     });
     setEditing(team.id);
     setSaved(null);
@@ -55,10 +56,12 @@ export default function AdminOwners() {
 
   function saveEdit(teamId) {
     const existing = overrides[teamId] || {};
-    const next = { ...overrides, [teamId]: { ...existing, ...form } };
+    const { password, ...rest } = form;
+    const patch = password ? { ...rest, password, passwordSet: true } : rest;
+    const next = { ...overrides, [teamId]: { ...existing, ...patch } };
     saveOverrides(next);
     setOverrides(next);
-    syncToS3(next);
+    syncToS3(teamId, patch);
     setEditing(null);
     setSaved(teamId);
     setTimeout(() => setSaved(null), 2000);
@@ -69,7 +72,7 @@ export default function AdminOwners() {
     delete next[teamId];
     saveOverrides(next);
     setOverrides(next);
-    syncToS3(next);
+    syncToS3(teamId, null); // null explicitly deletes this team's override server-side
     setEditing(null);
   }
 

@@ -1,11 +1,6 @@
 import React from 'react';
 
-const OWNERS_KEY = 'fantasai_owners_config';
 const API_BASE   = 'https://api.fantasai.net';
-
-function loadOwnerConfig() {
-  try { return JSON.parse(localStorage.getItem(OWNERS_KEY) || '{}'); } catch { return {}; }
-}
 
 // ── First-login password change ───────────────────────────────────────────────
 
@@ -25,21 +20,21 @@ export default function ChangePassword({ user, onDone, onCancel }) {
 
     setSaving(true);
 
-    const overrides = loadOwnerConfig();
-    const next = {
-      ...overrides,
-      [user.teamId]: { ...overrides[user.teamId], password: newPass, passwordSet: true },
-    };
-    localStorage.setItem(OWNERS_KEY, JSON.stringify(next));
-
-    // Sync to S3 (non-blocking — app proceeds even if this fails)
+    // Send only this team's patch — the server merges it into the existing
+    // config, so there's no need (and no way, since GET no longer returns
+    // passwords) to round-trip every other team's data through this client.
     try {
-      await fetch(`${API_BASE}/api/v1/owners/config`, {
+      const res = await fetch(`${API_BASE}/api/v1/owners/config`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(next),
+        body:    JSON.stringify({ [user.teamId]: { password: newPass, passwordSet: true } }),
       });
-    } catch {}
+      if (!res.ok) throw new Error('Server error');
+    } catch {
+      setError('Failed to save — check your connection and try again.');
+      setSaving(false);
+      return;
+    }
 
     onDone();
   }
@@ -104,12 +99,6 @@ export function ResetPasswordScreen({ token, onDone }) {
       const d = await res.json();
       if (!res.ok) { setError(d.error || 'Reset failed.'); setSaving(false); return; }
 
-      // Mirror to localStorage so next login picks it up even before S3 fetch
-      if (d.teamId) {
-        const overrides = loadOwnerConfig();
-        overrides[d.teamId] = { ...overrides[d.teamId], password: newPass, passwordSet: true };
-        localStorage.setItem(OWNERS_KEY, JSON.stringify(overrides));
-      }
       setSuccess(true);
       setTimeout(onDone, 1800);
     } catch {

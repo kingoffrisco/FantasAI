@@ -403,8 +403,6 @@ export default function AccountEditScreen({ user }) {
   const [passStatus, setPassStatus]     = React.useState(null);
 
   const API_BASE = 'https://api.fantasai.net';
-  const OWNERS_KEY = 'fantasai_owners_config';
-  const DEFAULT_PASSWORD = 'fantasy2025';
 
   React.useEffect(() => {
     setAiPrompt(`Fantasy football team logo for "${teamName}", sports emblem, bold design, dark background, professional`);
@@ -478,13 +476,26 @@ export default function AccountEditScreen({ user }) {
       logoTextColor,
       logoImg: logoImg || null,
     };
-    saveMyTeamPrefs(prefs);
+    saveMyTeamPrefs(prefs); // instant local echo for this browser
+    // Persist to the shared server store too — previously local-only, so
+    // nobody but this exact browser ever saw a custom logo, even the team's
+    // own owner logging in elsewhere.
+    fetch(`${API_BASE}/api/v1/owners/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [teamId]: prefs }),
+    }).catch(() => {});
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   }
 
   function handleReset() {
     clearMyTeamPrefs();
+    fetch(`${API_BASE}/api/v1/owners/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [teamId]: { name: null, owner: null, logo: null, color: null, logoTextColor: null, logoImg: null } }),
+    }).catch(() => {});
     setTeamName(baseTeam.name);
     setOwnerName(baseTeam.owner);
     setLogo(baseTeam.logo);
@@ -536,20 +547,24 @@ export default function AccountEditScreen({ user }) {
     e.preventDefault();
     setPassError('');
     setPassStatus(null);
-    const overrides = (() => { try { return JSON.parse(localStorage.getItem(OWNERS_KEY) || '{}'); } catch { return {}; } })();
-    const myOverride = overrides[teamId] || {};
-    const expected = myOverride.password || DEFAULT_PASSWORD;
-    if (currentPass !== expected) { setPassError('Current password is incorrect.'); return; }
     if (newPass.length < 8)       { setPassError('New password must be at least 8 characters.'); return; }
     if (newPass !== confirmPass)  { setPassError('New passwords do not match.'); return; }
     setPassStatus('saving');
-    const next = { ...overrides, [teamId]: { ...myOverride, password: newPass, passwordSet: true } };
-    localStorage.setItem(OWNERS_KEY, JSON.stringify(next));
     try {
+      // Verify the current password server-side — passwords are no longer
+      // sent to any client, so this can't be checked locally anymore.
+      const vres = await fetch(`${API_BASE}/api/v1/owners/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamId, password: currentPass }),
+      });
+      const vdata = await vres.json();
+      if (!vdata.ok) { setPassStatus(null); setPassError('Current password is incorrect.'); return; }
+
       const res = await fetch(`${API_BASE}/api/v1/owners/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next),
+        body: JSON.stringify({ [teamId]: { password: newPass, passwordSet: true } }),
       });
       if (!res.ok) throw new Error('Server error');
       setPassStatus('saved');
@@ -557,7 +572,7 @@ export default function AccountEditScreen({ user }) {
       setTimeout(() => setPassStatus(null), 3000);
     } catch {
       setPassStatus('error');
-      setPassError('Saved locally but failed to sync to server. Try again.');
+      setPassError('Failed to change password. Check your connection and try again.');
     }
   }
 

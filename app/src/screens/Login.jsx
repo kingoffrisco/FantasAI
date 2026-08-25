@@ -3,7 +3,6 @@ import { LEAGUE_TEAMS } from '../lib/data.js';
 
 const ADMIN_EMAIL      = 'admin@fantasai.net';
 const ADMIN_PASSWORD   = 'admin2025';
-const DEFAULT_PASSWORD = 'fantasy2025';
 const OWNERS_KEY       = 'fantasai_owners_config';
 const API_BASE         = 'https://api.fantasai.net';
 // Same shared app key used everywhere else in api.js — leagues/create and
@@ -118,32 +117,37 @@ export default function Login({ onLogin }) {
 
     setLoading(true);
 
-    // Fetch live config from S3 (falls back to localStorage on error/timeout)
+    // Fetch live config from S3 (falls back to localStorage on error/timeout).
+    // No longer contains passwords — verified server-side below instead.
     const overrides = await fetchS3Config();
 
     // Find team by email in overrides, then fall back to LEAGUE_TEAMS
     let team = null;
-    let expectedPassword = DEFAULT_PASSWORD;
-
     for (const [teamId, cfg] of Object.entries(overrides)) {
       if (teamId === 'resetTokens') continue;
       if ((cfg.email || '').toLowerCase() === trimmed) {
         team = LEAGUE_TEAMS.find(t => t.id === parseInt(teamId));
-        if (cfg.password) expectedPassword = cfg.password;
         break;
       }
     }
     if (!team) {
-      // Email not stored in S3 config — find via static data, then check overrides for password by team ID
+      // Email not stored in S3 config — find via static data instead
       team = LEAGUE_TEAMS.find(t => (t.email || '').toLowerCase() === trimmed);
-      if (team) {
-        const ov = overrides[String(team.id)] || overrides[team.id] || {};
-        if (ov.password) expectedPassword = ov.password;
-      }
     }
 
     if (!team) { setLoading(false); setError('No account found for that email address.'); return; }
-    if (pass !== expectedPassword) { setLoading(false); setError('Incorrect password.'); return; }
+
+    try {
+      const vres = await fetch(`${API_BASE}/api/v1/owners/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamId: team.id, password: pass }),
+      });
+      const vdata = await vres.json();
+      if (!vdata.ok) { setLoading(false); setError('Incorrect password.'); return; }
+    } catch {
+      setLoading(false); setError('Could not reach the server — check your connection and try again.'); return;
+    }
 
     const ov = overrides[team.id] || {};
     onLogin({

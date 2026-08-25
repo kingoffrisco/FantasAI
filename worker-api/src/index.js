@@ -126,6 +126,7 @@ const NFL_TEAMS = {
 };
 
 const S3_KEY              = 'fantasai/owners-config.json';
+const DEFAULT_OWNER_PASSWORD = 'fantasy2025'; // matches app/src/screens/Login.jsx's DEFAULT_PASSWORD
 const S3_LEAGUE_KEY       = 'fantasai/league-config.json';
 const S3_ROSTERS_KEY      = 'fantasai/rosters.json';
 const S3_SCHEDULE_KEY     = 'fantasai/schedule.json';
@@ -166,6 +167,7 @@ export default {
       if (method === 'POST') {
         if (url.pathname === '/api/v1/chat')                  return handleChat(request, env);
         if (url.pathname === '/api/v1/owners/config')         return handleOwnersConfigPost(request, env);
+        if (url.pathname === '/api/v1/owners/verify')         return handleOwnersVerify(request, env);
         if (url.pathname === '/api/v1/owners/reset-request')  return handleResetRequest(request, env);
         if (url.pathname === '/api/v1/owners/reset-complete') return handleResetComplete(request, env);
         if (url.pathname === '/api/v1/week/current')          return handleWeekSet(request, env);
@@ -263,7 +265,17 @@ async function handleOwnersConfigGet(env) {
     const res = await s3Fetch(env, 'GET', S3_KEY, null);
     if (res.status === 404) return json({}, 200);
     if (!res.ok) throw new Error(`S3 ${res.status}`);
-    const { resetTokens: _drop, ...publicData } = await res.json();
+    const { resetTokens: _drop, ...rest } = await res.json();
+    // Strip password from every team — this response has no auth gate and was
+    // confirmed live 2026-08-24 to hand out every owner's plaintext password to
+    // a bare unauthenticated GET. Nothing legitimate needs it from here anymore:
+    // login verifies server-side via /api/v1/owners/verify instead.
+    const publicData = {};
+    for (const [teamId, cfg] of Object.entries(rest)) {
+      if (!cfg || typeof cfg !== 'object') { publicData[teamId] = cfg; continue; }
+      const { password: _pw, ...safe } = cfg;
+      publicData[teamId] = safe;
+    }
     return json(publicData, 200);
   } catch (err) {
     console.error('S3 GET owners/config:', err.message);
@@ -281,10 +293,38 @@ async function handleOwnersConfigPost(request, env) {
     if (res.ok) existing = await res.json();
   } catch {}
 
-  const merged = { ...ownerUpdates, resetTokens: existing.resetTokens || {} };
+  // Deep-merge per team instead of trusting the client's object as a full
+  // replacement. Required now that GET no longer returns passwords — a client
+  // legitimately doesn't have the full picture anymore, so a naive full
+  // replace would silently wipe every other team's password (and anything
+  // else it doesn't know about) on every save. A team entry sent as `null`
+  // explicitly deletes that team's override (used by "reset to defaults").
+  const merged = { resetTokens: existing.resetTokens || {} };
+  const allTeamIds = new Set([...Object.keys(existing), ...Object.keys(ownerUpdates)].filter(k => k !== 'resetTokens'));
+  for (const teamId of allTeamIds) {
+    if (Object.prototype.hasOwnProperty.call(ownerUpdates, teamId) && ownerUpdates[teamId] === null) continue; // deleted
+    merged[teamId] = { ...(existing[teamId] || {}), ...(ownerUpdates[teamId] || {}) };
+  }
+
   const put = await s3Fetch(env, 'PUT', S3_KEY, merged);
   if (!put.ok) throw new Error(`S3 PUT ${put.status}: ${await put.text()}`);
   return json({ ok: true }, 200);
+}
+
+// Verifies one team's password server-side without ever exposing the stored
+// password list to any client. Body: { teamId, password } -> { ok: boolean }.
+async function handleOwnersVerify(request, env) {
+  const { teamId, password } = await request.json().catch(() => ({}));
+  if (teamId == null || password == null) return json({ ok: false, error: 'teamId and password required' }, 400);
+
+  let config = {};
+  try {
+    const res = await s3Fetch(env, 'GET', S3_KEY, null);
+    if (res.ok) config = await res.json();
+  } catch {}
+
+  const stored = config[String(teamId)]?.password || DEFAULT_OWNER_PASSWORD;
+  return json({ ok: password === stored }, 200);
 }
 
 // ── Password Reset ────────────────────────────────────────────────────────────
