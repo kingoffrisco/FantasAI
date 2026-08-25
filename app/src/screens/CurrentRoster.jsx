@@ -829,6 +829,35 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     return m;
   }, [r2InjuryData]);
 
+  // Merge the real injury_overlay.json designation (IR/Out/Questionable/etc)
+  // into the global player store's .status. r2InjuryByName above was already
+  // built from this same data but only ever used for a display badge lookup —
+  // nothing actually applied it, so a player's real IR status never reached
+  // .status at all, and anything gating on p.status (like the lineup
+  // optimizer) silently treated every IR player as fully healthy. Confirmed
+  // live 2026-08-25: injury_overlay.json correctly has injury_status: "IR"
+  // for Patrick Taylor, but nothing wrote that onto his player object.
+  React.useEffect(() => {
+    const list = Array.isArray(r2InjuryData) ? r2InjuryData : [];
+    if (!list.length) return;
+    const STATUS_ALIASES = {
+      Injured_Reserve: 'IR', Out: 'O', Questionable: 'Q', Doubtful: 'D',
+      Non_Football_Injury: 'NFI', Physically_Unable_to_Perform: 'PUP', Suspended: 'SUSPENDED',
+    };
+    const byName = new Map();
+    for (const r of list) {
+      if (!r.player_name || r.player_name === 'All Players' || !r.injury_status) continue;
+      const raw = String(r.injury_status).trim();
+      byName.set(r.player_name.toLowerCase().trim(), STATUS_ALIASES[raw] || raw.toUpperCase());
+    }
+    if (!byName.size) return;
+    patchPlayers(p => {
+      const status = byName.get(p.name?.toLowerCase().trim());
+      if (!status || p.status === status) return p;
+      return { ...p, status };
+    });
+  }, [r2InjuryData]);
+
   // liveData[playerId] = [{ note, proj, source, sourceId, liveStatus }, ...]  — one entry per API source
   const [liveData,          setLiveData]          = React.useState({});
 
