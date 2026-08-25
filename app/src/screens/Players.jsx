@@ -3,7 +3,7 @@ import WatchlistScreen from './Watchlist.jsx';
 import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer, getPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge, SeasonStatBar, RadarChart, scoreToTier, SCORE_TIER_STYLE } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning, useR2FloorCeiling, useR2PlayerCoverageSplits, useR2TeamCoverageTendency } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning, useR2FloorCeiling, useR2PlayerCoverageSplits, useR2TeamCoverageTendency, useR2PlayerRushBoxSplits, useR2TeamRushBoxTendency } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -2629,6 +2629,38 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     };
   }, [teamTendencyData, player.opp]);
 
+  // Rush box-count matchup — the run-game counterpart to coverage matchup,
+  // shown for RBs instead (a receiver's man/zone splits aren't the relevant
+  // signal for a runner; box count vs rushing outcome is).
+  const { data: rushBoxSplitsData } = useR2PlayerRushBoxSplits();
+  const { data: teamRushTendencyData } = useR2TeamRushBoxTendency();
+  const rushBoxSplits = React.useMemo(() => {
+    if (player.pos !== 'RB') return null;
+    const rows = rushBoxSplitsData?.players;
+    if (!Array.isArray(rows)) return null;
+    const key = player.name?.toLowerCase().trim();
+    if (!key) return null;
+    const mine = rows.filter(r => (r.rusher_name || '').toLowerCase().trim() === key);
+    if (!mine.length) return null;
+    return {
+      boxGroup: mine.filter(r => r.split_type === 'box_group').sort((a, b) => b.attempts - a.attempts),
+      byCount: mine.filter(r => r.split_type === 'box_count').sort((a, b) => Number(a.split_value) - Number(b.split_value)),
+      seasonsIncluded: mine[0]?.seasons_included,
+    };
+  }, [rushBoxSplitsData, player.name, player.pos]);
+  const opponentRushTendency = React.useMemo(() => {
+    if (player.pos !== 'RB') return null;
+    const rows = teamRushTendencyData?.teams;
+    const opp = (player.opp || '').replace(/^@/, '').toUpperCase();
+    if (!Array.isArray(rows) || !opp) return null;
+    const mine = rows.filter(r => (r.team || '').toUpperCase() === opp);
+    if (!mine.length) return null;
+    return {
+      boxGroup: mine.filter(r => r.split_type === 'box_group').sort((a, b) => b.pct_of_rush_plays - a.pct_of_rush_plays),
+      byCount: mine.filter(r => r.split_type === 'box_count').sort((a, b) => Number(a.split_value) - Number(b.split_value)),
+    };
+  }, [teamRushTendencyData, player.opp, player.pos]);
+
   // Pre-baked 2025 Sleeper stats (from R2) — used as fallback when live API unavailable
   const { data: r2Stats2025Data } = useR2PlayerStats2025();
   const r2Stats2025 = React.useMemo(() => {
@@ -3913,9 +3945,17 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                     {detailMatchupRating.score > 0 ? '+' : ''}{detailMatchupRating.score}
                   </div>
                   <div>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: detailMatchupRating.color }}>{detailMatchupRating.label}</div>
-                    <div className="mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                      {player.pos} vs {displayOpp} · #{detailMatchupRating.rank} of 32 defenses · {detailMatchupRating.avg_pts_allowed} pts/g allowed to {player.pos}s
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 15, fontWeight: 800, color: detailMatchupRating.color }}>{detailMatchupRating.label}</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{player.pos} vs</span>
+                      <span style={{
+                        fontSize: 18, fontWeight: 900, fontFamily: 'var(--font-mono)', letterSpacing: '.03em',
+                        color: 'var(--text)', background: 'rgba(255,255,255,.08)', border: `1px solid ${detailMatchupRating.color}66`,
+                        borderRadius: 6, padding: '2px 10px',
+                      }}>{displayOpp}</span>
+                    </div>
+                    <div className="mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>
+                      #{detailMatchupRating.rank} of 32 defenses · {detailMatchupRating.avg_pts_allowed} pts/g allowed to {player.pos}s
                     </div>
                   </div>
                 </div>
@@ -3959,8 +3999,10 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                 );
               })()}
 
-              {/* Coverage Matchup — real man/zone + per-scheme splits from nflverse PBP charting */}
-              {(coverageSplits || opponentTendency) && (
+              {/* Coverage Matchup — real man/zone + per-scheme splits from nflverse PBP charting.
+                  Not shown for RBs — a runner's occasional receiving work isn't the relevant
+                  signal; Rush Box Matchup below covers rushing instead. */}
+              {player.pos !== 'RB' && (coverageSplits || opponentTendency) && (
                 <div className="muted-card" style={{ marginTop: 16, borderLeft: '3px solid #4ea8ff' }}>
                   <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 10 }}>
                     <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: '#4ea8ff' }}>
@@ -4083,6 +4125,112 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   )}
                   <div style={{ marginTop: 10, fontSize: 10, color: 'var(--text-faint)' }}>
                     From real nflverse play-by-play coverage charting — targets/catch rate/yards per target/EPA against each scheme this player has actually faced, and how often {player.opp?.replace('@', '') || 'the opponent'} actually runs each scheme on defense. No CB-specific or route-alignment data exists publicly, so this is scheme-level only, not "vs this specific cornerback." Small target/play counts are noisier — weight accordingly.
+                  </div>
+                </div>
+              )}
+
+              {/* Rush Box Matchup — RB-specific: real box-count splits from nflverse PBP charting */}
+              {player.pos === 'RB' && (rushBoxSplits || opponentRushTendency) && (
+                <div className="muted-card" style={{ marginTop: 16, borderLeft: '3px solid #4caf82' }}>
+                  <div className="flex gap-8" style={{ alignItems: 'center', marginBottom: 10 }}>
+                    <span style={{ fontFamily: 'var(--font-display)', fontStretch: '87%', fontWeight: 800, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: '#4caf82' }}>
+                      Rush Box Matchup
+                    </span>
+                    {rushBoxSplits?.seasonsIncluded && (
+                      <span style={{ marginLeft: 'auto', fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>
+                        {rushBoxSplits.seasonsIncluded} seasons
+                      </span>
+                    )}
+                  </div>
+
+                  {rushBoxSplits?.boxGroup.length > 0 && (
+                    <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+                      {rushBoxSplits.boxGroup.map(bg => (
+                        <div key={bg.split_value} style={{ flex: 1 }}>
+                          <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                            {bg.split_value === 'LIGHT_BOX' ? 'vs Light Box (≤6)' : bg.split_value === 'STANDARD_BOX' ? 'vs Standard (7)' : 'vs Stacked (8+)'} ({bg.attempts} att)
+                          </div>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+                            <span style={{ fontSize: 16, fontWeight: 900, fontFamily: 'var(--font-mono)', color: bg.avg_epa > 0 ? '#4caf82' : '#ff8080' }}>{bg.yards_per_carry.toFixed(1)}</span>
+                            <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>YPC</span>
+                            <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{bg.tds} TD</span>
+                          </div>
+                          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: bg.avg_epa > 0 ? '#4caf82' : '#ff8080' }}>
+                            {bg.avg_epa != null ? `${bg.avg_epa > 0 ? '+' : ''}${bg.avg_epa.toFixed(2)} EPA/rush` : ''}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {rushBoxSplits?.byCount.length > 0 && (
+                    <div style={{ overflowX: 'auto', marginBottom: 10 }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                            {['Box Count', 'Att', 'YPC', 'EPA/rush'].map(h => (
+                              <th key={h} style={{ textAlign: h === 'Box Count' ? 'left' : 'right', padding: '3px 8px', fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rushBoxSplits.byCount.map(s => {
+                            const oppPct = opponentRushTendency?.byCount.find(o => o.split_value === s.split_value)?.pct_of_rush_plays;
+                            return (
+                              <tr key={s.split_value} style={{ borderBottom: '1px solid var(--border)' }}>
+                                <td style={{ padding: '3px 8px', fontWeight: 600 }}>
+                                  {s.split_value} in the box
+                                  {oppPct != null && (
+                                    <span style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-mono)', color: '#4caf82' }} title={`${player.opp?.replace('@', '') || 'Opponent'} loads this box ${oppPct.toFixed(0)}% of the time`}>
+                                      opp {oppPct.toFixed(0)}%
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{s.attempts}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{s.yards_per_carry.toFixed(1)}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: s.avg_epa > 0 ? '#4caf82' : s.avg_epa < 0 ? '#ff8080' : 'var(--text-dim)' }}>
+                                  {s.avg_epa != null ? `${s.avg_epa > 0 ? '+' : ''}${s.avg_epa.toFixed(2)}` : '—'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {(opponentRushTendency?.boxGroup.length > 0 || opponentRushTendency?.byCount.length > 0) && (
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                      <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>
+                        {player.opp?.replace('@', '') || 'Opponent'}'s Box-Count Tendency
+                      </div>
+
+                      {opponentRushTendency.boxGroup.length > 0 && (
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 6 }}>
+                            {opponentRushTendency.boxGroup.map(bg => (
+                              <div
+                                key={bg.split_value}
+                                style={{ width: `${bg.pct_of_rush_plays}%`, background: bg.split_value === 'LIGHT_BOX' ? '#4caf82' : bg.split_value === 'STANDARD_BOX' ? '#f59e0b' : '#ff5a6e' }}
+                                title={`${bg.split_value.replace('_BOX', '')} ${bg.pct_of_rush_plays.toFixed(0)}%`}
+                              />
+                            ))}
+                          </div>
+                          <div style={{ display: 'flex', gap: 16 }}>
+                            {opponentRushTendency.boxGroup.map(bg => (
+                              <span key={bg.split_value} style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                                <span style={{ color: bg.split_value === 'LIGHT_BOX' ? '#4caf82' : bg.split_value === 'STANDARD_BOX' ? '#f59e0b' : '#ff5a6e', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                                  {bg.pct_of_rush_plays.toFixed(0)}%
+                                </span> {bg.split_value === 'LIGHT_BOX' ? 'Light' : bg.split_value === 'STANDARD_BOX' ? 'Standard' : 'Stacked'}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 10, fontSize: 10, color: 'var(--text-faint)' }}>
+                    From real nflverse play-by-play — rushing yards/EPA against each box count this player has actually faced, and how often {player.opp?.replace('@', '') || 'the opponent'} actually loads the box on defense. No blocking scheme or gap-assignment data exists publicly, so this is box-count only. Small attempt counts are noisier — weight accordingly.
                   </div>
                 </div>
               )}

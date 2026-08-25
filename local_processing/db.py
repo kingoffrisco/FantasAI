@@ -859,6 +859,40 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
     );
 
     -- =========================================================
+    -- RUSH BOX-COUNT MATCHUPS (nflverse play-by-play — defenders_in_box,
+    -- free, no auth, 100% coverage on every rush play). The run-game
+    -- equivalent of coverage matchups: light/standard/stacked box performance
+    -- per runner, and how often the upcoming opponent actually loads the box.
+    -- See ingest/ingest_rush_box_splits.py.
+    -- =========================================================
+    CREATE TABLE IF NOT EXISTS player_rush_box_splits (
+        rusher_gsis_id      VARCHAR,
+        rusher_name          VARCHAR,
+        team                  VARCHAR,
+        split_type              VARCHAR,  -- 'box_group' (Light/Standard/Stacked) or 'box_count' (exact defenders_in_box)
+        split_value              VARCHAR,
+        attempts                   INTEGER,
+        yards                       INTEGER,
+        tds                         INTEGER,
+        avg_epa                      DOUBLE,
+        yards_per_carry                DOUBLE,
+        seasons_included               VARCHAR,
+        computed_at                     TIMESTAMP,
+        PRIMARY KEY (rusher_gsis_id, split_type, split_value)
+    );
+
+    CREATE TABLE IF NOT EXISTS team_rush_box_tendency (
+        team                VARCHAR,
+        split_type            VARCHAR,
+        split_value            VARCHAR,
+        plays                   INTEGER,
+        pct_of_rush_plays        DOUBLE,
+        seasons_included           VARCHAR,
+        computed_at                 TIMESTAMP,
+        PRIMARY KEY (team, split_type, split_value)
+    );
+
+    -- =========================================================
     -- KALSHI NFL MARKETS (official, documented public REST API — no auth
     -- required for market data). Append-only: never overwrite prior rows,
     -- so price history over time becomes a usable "line movement" signal.

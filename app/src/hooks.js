@@ -155,6 +155,8 @@ export const useR2KalshiNflMarkets      = () => useR2Analysis(api.r2.kalshiNflMa
 export const useR2FloorCeiling          = () => useR2Analysis(api.r2.floorCeiling)
 export const useR2PlayerCoverageSplits  = () => useR2Analysis(api.r2.playerCoverageSplits)
 export const useR2TeamCoverageTendency  = () => useR2Analysis(api.r2.teamCoverageTendency)
+export const useR2PlayerRushBoxSplits   = () => useR2Analysis(api.r2.playerRushBoxSplits)
+export const useR2TeamRushBoxTendency   = () => useR2Analysis(api.r2.teamRushBoxTendency)
 export const useR2PlayerStats2025       = () => useR2Analysis(api.r2.playerStats2025)
 export const useR2CollegeStats          = () => useR2Analysis(api.r2.collegeStats)
 export const useR2OlineIndex            = () => useR2Analysis(api.r2.olineIndex)
