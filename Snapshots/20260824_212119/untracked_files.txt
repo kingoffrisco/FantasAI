@@ -1,0 +1,6 @@
+.continue/mcpServers/new-mcp-server-1.yaml
+.continue/mcpServers/new-mcp-server-2.yaml
+.continue/mcpServers/new-mcp-server-3.yaml
+.continue/mcpServers/new-mcp-server.yaml
+Snapshots/20260824_212119/status.txt
+Snapshots/20260824_212119/untracked_files.txt
