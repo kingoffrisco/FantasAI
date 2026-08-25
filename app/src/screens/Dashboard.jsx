@@ -919,7 +919,7 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           <span style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', fontSize: 30, fontWeight: 900, color: '#FFD700', letterSpacing: '-.01em', lineHeight: 1, whiteSpace: 'nowrap' }}>
             {commishData.leagueName}
           </span>
-          <span style={{ fontSize: 24, fontWeight: 700, color: '#4ea8ff', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 18, fontWeight: 700, color: '#4ea8ff', whiteSpace: 'nowrap' }}>
             Since {LEAGUE_FOUNDED_YEAR} - {new Date().getFullYear() - LEAGUE_FOUNDED_YEAR + 1} Years
           </span>
 
