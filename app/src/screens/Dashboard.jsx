@@ -919,6 +919,9 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
           <span style={{ fontFamily: 'var(--font-display)', fontStretch: '75%', fontSize: 30, fontWeight: 900, color: '#FFD700', letterSpacing: '-.01em', lineHeight: 1, whiteSpace: 'nowrap' }}>
             {commishData.leagueName}
           </span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
+            Since {LEAGUE_FOUNDED_YEAR} - {new Date().getFullYear() - LEAGUE_FOUNDED_YEAR + 1} Years
+          </span>
 
           {/* Trade pending badge — right of league name */}
           {(() => {
@@ -952,12 +955,6 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
 
         </div>
         <div className="flex gap-8" style={{ alignItems: 'center' }}>
-          <span
-            title={`Founded ${LEAGUE_FOUNDED_YEAR}`}
-            style={{ fontSize: 11, fontWeight: 800, color: '#FFD700', background: 'rgba(255,215,0,.10)', border: '1px solid rgba(255,215,0,.35)', borderRadius: 6, padding: '4px 10px', whiteSpace: 'nowrap' }}
-          >
-            Running {new Date().getFullYear() - LEAGUE_FOUNDED_YEAR + 1} Years
-          </span>
           <button className="btn primary" onClick={() => onNav('draft')}>▶ Open Draft Room</button>
         </div>
       </div>

@@ -820,9 +820,18 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                  day.hourly?.[day.hourly.length > 4 ? Math.floor(day.hourly.length / 2) : 0];
     return { dome: false, date: day.date, maxTempF: day.max_temp_f, minTempF: day.min_temp_f, hour };
   }
+  // The raw R2 file is wrapped as { data: [...], metadata: {...} }, not a
+  // bare array — Array.isArray(r2InjuryData) is always false against the raw
+  // object, silently yielding an empty list. Confirmed live 2026-08-25.
+  function extractInjuryList(raw) {
+    if (Array.isArray(raw)) return raw;
+    if (Array.isArray(raw?.data)) return raw.data;
+    if (Array.isArray(raw?.players)) return raw.players;
+    return [];
+  }
   const r2InjuryByName = React.useMemo(() => {
     const m = {};
-    const list = Array.isArray(r2InjuryData) ? r2InjuryData : [];
+    const list = extractInjuryList(r2InjuryData);
     for (const r of list) {
       if (r.player_name && r.player_name !== 'All Players') m[r.player_name.toLowerCase()] = r;
     }
@@ -838,7 +847,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   // live 2026-08-25: injury_overlay.json correctly has injury_status: "IR"
   // for Patrick Taylor, but nothing wrote that onto his player object.
   React.useEffect(() => {
-    const list = Array.isArray(r2InjuryData) ? r2InjuryData : [];
+    const list = extractInjuryList(r2InjuryData);
     if (!list.length) return;
     const STATUS_ALIASES = {
       Injured_Reserve: 'IR', Out: 'O', Questionable: 'Q', Doubtful: 'D',
