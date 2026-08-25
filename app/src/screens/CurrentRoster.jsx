@@ -504,7 +504,11 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     return m;
   }, [r2RookieScoresData]);
   const totalProj = starters.reduce((s, r) => {
-    const p = findPlayer(r.playerId);
+    // Resolve from the reactive allPlayers array, not findPlayer() — the latter
+    // reads playerStore's module-level snapshot with no subscription, which can
+    // silently lag behind async proj patches (confirmed: this exact staleness
+    // class already caused a Burrow-over-Allen mis-recommendation once before).
+    const p = allPlayers.find(x => x.id === r.playerId);
     if (!p) return s;
     if (p.proj > 0) return s + p.proj;
     const noStats = (p.pts2025 || 0) === 0 && (p.avg || 0) === 0;
@@ -1416,10 +1420,16 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     return myAcc >= oppAcc;
   }, [myMatchup, starters]);
 
-  // Optimal lineup projection for header display — Out/IR/bye players score 0
+  // Optimal lineup projection for header display — Out/IR/bye players score 0.
+  // deriveStatus() defaults to 'OK' (truthy) when there's no live in-game data
+  // for this player, which is the normal case outside game windows — so
+  // `deriveStatus(...) || p.status` was silently always picking 'OK' and never
+  // falling through to check the player's real season-long status (IR, etc).
+  // Every other caller in this file guards with `liveData[p.id]?.length > 0`
+  // before trusting deriveStatus's result; match that pattern here too.
   const optimalProjFn = React.useCallback(p => {
     if (!p) return 0;
-    const derived = deriveStatus(p.id);
+    const derived = liveData[p.id]?.length > 0 ? deriveStatus(p.id) : null;
     const s = (derived || p.status || '').toUpperCase();
     if (['OUT', 'O', 'IR', 'NFI', 'PUP', 'SUSPENDED'].includes(s)) return 0;
     if (p.bye && p.bye === H2H_WEEK) return 0;
@@ -1429,7 +1439,10 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     () => computeOptimal(fullRoster.filter(r => r.slot !== 'BENCH'), rosterPlayers, optimalProjFn, H2H_WEEK),
     [fullRoster, rosterPlayers, optimalProjFn],
   );
-  const optimalTotal = optimalSlots.reduce((s, e) => s + optimalProjFn(findPlayer(e.playerId)), 0);
+  // Same fix as totalProj — resolve from allPlayers (reactive) so the "current
+  // vs optimal" comparison is always apples-to-apples fresh data, not stale on
+  // one side only.
+  const optimalTotal = optimalSlots.reduce((s, e) => s + optimalProjFn(allPlayers.find(p => p.id === e.playerId)), 0);
   const optimalGain  = Math.max(0, optimalTotal - totalProj);
   const [appliedOptimal, setAppliedOptimal] = React.useState(false);
 
