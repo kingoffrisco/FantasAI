@@ -2929,6 +2929,15 @@ function RemoteDraftSyncPanel({ storePlayerList, draftDate, setLivePicks }) {
 
   function doImport(fromAuto = false) {
     if (!fetched) return;
+    // CBS doesn't give us each pick's real absolute time (only a "17 sec"-style
+    // duration), so every pick can't honestly share fetchedAt — Chat & Activity
+    // sorts picks by pickedAt, and giving them all the identical instant would
+    // cluster the whole draft into one moment instead of showing real pick
+    // order. Stagger by pickNum instead: still synthetic, but at least sorts
+    // correctly (earliest pick = earliest timestamp, most recent = closest to
+    // the actual fetch time).
+    const fetchedAtMs = new Date(fetched.fetchedAt).getTime();
+    const totalMatched = fetched.matched.length;
     const newPicks = fetched.matched
       .filter(m => m.matchedTeam) // a pick with no resolvable team can't be placed anywhere
       .map(m => ({
@@ -2937,7 +2946,7 @@ function RemoteDraftSyncPanel({ storePlayerList, draftDate, setLivePicks }) {
         slot: m.pickInRound,
         teamId: m.matchedTeam.id,
         playerId: m.matchedPlayer ? m.matchedPlayer.id : null,
-        pickedAt: fetched.fetchedAt,
+        pickedAt: m.player ? new Date(fetchedAtMs - (totalMatched - m.pickNum) * 1000).toISOString() : null,
       }));
     setLivePicks(newPicks);
     try { localStorage.setItem('fantasai_live_picks', JSON.stringify(newPicks)); } catch {}
