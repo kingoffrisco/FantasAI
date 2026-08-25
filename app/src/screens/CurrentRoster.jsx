@@ -503,20 +503,9 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     for (const r of arr) { if (r.player_name) m.set(r.player_name.toLowerCase().trim(), r); }
     return m;
   }, [r2RookieScoresData]);
-  const totalProj = starters.reduce((s, r) => {
-    // Resolve from the reactive allPlayers array, not findPlayer() — the latter
-    // reads playerStore's module-level snapshot with no subscription, which can
-    // silently lag behind async proj patches (confirmed: this exact staleness
-    // class already caused a Burrow-over-Allen mis-recommendation once before).
-    const p = allPlayers.find(x => x.id === r.playerId);
-    if (!p) return s;
-    if (p.proj > 0) return s + p.proj;
-    const noStats = (p.pts2025 || 0) === 0 && (p.avg || 0) === 0;
-    if (!noStats) return s;
-    const rr = p.rookie ? rookieScoreMap.get(p.name.toLowerCase().trim()) : null;
-    const rProj = rr ? rookieProjFromScore(rr, p.pos) : null;
-    return s + (rProj || estimateProjFromAdp(p) || 0);
-  }, 0);
+  // totalProj is computed further down (right before optimalProjFn/optimalGain)
+  // so it can share the exact same live-proj/status resolution — see the note
+  // there for why they need to match.
   const startSitMap = React.useMemo(() => {
     const players = r2StartSitRaw?.players || {};
     const m = new Map();
@@ -1458,21 +1447,66 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     return myAcc >= oppAcc;
   }, [myMatchup, starters]);
 
-  // Optimal lineup projection for header display — Out/IR/bye players score 0.
-  // deriveStatus() defaults to 'OK' (truthy) when there's no live in-game data
-  // for this player, which is the normal case outside game windows — so
-  // `deriveStatus(...) || p.status` was silently always picking 'OK' and never
-  // falling through to check the player's real season-long status (IR, etc).
-  // Every other caller in this file guards with `liveData[p.id]?.length > 0`
-  // before trusting deriveStatus's result; match that pattern here too.
-  const optimalProjFn = React.useCallback(p => {
-    if (!p) return 0;
+  // Status check shared by totalProj and optimalProjFn below — see optimalProjFn's
+  // comment for why the liveData-length guard matters.
+  function isUnavailable(p) {
+    if (!p) return true;
     const derived = liveData[p.id]?.length > 0 ? deriveStatus(p.id) : null;
     const s = (derived || p.status || '').toUpperCase();
-    if (['OUT', 'O', 'IR', 'NFI', 'PUP', 'SUSPENDED'].includes(s)) return 0;
-    if (p.bye && p.bye === H2H_WEEK) return 0;
-    return p.proj ?? 0;
+    if (['OUT', 'O', 'IR', 'NFI', 'PUP', 'SUSPENDED'].includes(s)) return true;
+    if (p.bye && p.bye === H2H_WEEK) return true;
+    return false;
+  }
+
+  // "Current" total, computed from the actual starting lineup — resolved from
+  // the reactive allPlayers array (not findPlayer(), which reads a snapshot
+  // with no subscription and can lag behind async proj patches), through the
+  // exact same resolveRealProj() the Optimal side and the table's own Proj
+  // column both use, and now correctly zeroing an Out/IR/bye starter instead
+  // of previously falling through to a rookie/ADP estimate for them too.
+  const totalProj = starters.reduce((s, r) => {
+    const p = allPlayers.find(x => x.id === r.playerId);
+    if (isUnavailable(p)) return s;
+    return s + resolveRealProj(p);
+  }, 0);
+
+  // Optimal lineup projection for header display — Out/IR/bye players score 0.
+  //
+  // Two bugs stacked here. First: deriveStatus() defaults to 'OK' (truthy)
+  // when there's no live in-game data for this player, which is the normal
+  // case outside game windows — so `deriveStatus(...) || p.status` was
+  // silently always picking 'OK' and never falling through to the player's
+  // real season-long status (IR, etc). Fixed to match the liveData-length
+  // guard every other caller in this file already uses.
+  //
+  // Second, bigger bug: this only ever read the bare p.proj field, while the
+  // roster table's own "Proj" column (a few hundred lines down) resolves a
+  // completely different way — live Sleeper API override first, then base
+  // proj, then a rookie/ADP estimate. Confirmed live 2026-08-25: Jonathan
+  // Taylor's live Sleeper proj (16.9) differs substantially from his base
+  // proj (21.3, actually his season PPG). The Optimal Lineup comparison was
+  // silently using different numbers than what the page displays for every
+  // player. Both now go through the same resolveRealProj() so "current" and
+  // "optimal" are always computed from what's actually on screen.
+  const optimalProjFn = React.useCallback(p => {
+    if (isUnavailable(p)) return 0;
+    return resolveRealProj(p);
   }, [liveData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Single source of truth for "what does this player actually project" —
+  // matches the roster table's Proj column exactly: live Sleeper override >
+  // base proj > rookie/ADP estimate (when there are no 2025 stats at all).
+  function resolveRealProj(p) {
+    const liveProj = (liveData[p.id] || []).find(e => e.proj != null);
+    if (liveProj) return liveProj.proj;
+    if (p.proj > 0) return p.proj;
+    const noStats = (p.pts2025 || 0) === 0 && (p.avg || 0) === 0;
+    if (!noStats) return 0;
+    const rookieRow = p.rookie ? rookieScoreMap.get(p.name.toLowerCase().trim()) : null;
+    const rookieProj = rookieRow ? rookieProjFromScore(rookieRow, p.pos) : null;
+    const adpProj = !rookieProj ? estimateProjFromAdp(p) : null;
+    return rookieProj ?? adpProj ?? 0;
+  }
   const optimalSlots = React.useMemo(
     () => computeOptimal(fullRoster.filter(r => r.slot !== 'BENCH'), rosterPlayers, optimalProjFn, H2H_WEEK),
     [fullRoster, rosterPlayers, optimalProjFn],
