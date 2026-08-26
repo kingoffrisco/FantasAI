@@ -29,6 +29,55 @@ function dstPtsAllowedBonus(ptsAllowed) {
   return -4;
 }
 
+// Same formula as calcFantasyPts, but returns each contributing stat's raw
+// amount and the points it produced, instead of just the total — for UIs
+// that want to show "why" a player scored what they scored (e.g. Head to
+// Head's Player Scores tab), not just the final number.
+export function buildStatPointsBreakdown(stats, rules, pos) {
+  const s = stats || {};
+  const r = rules || {};
+  const fgMade50 = s.fgMade50 ?? 0;
+  const fgMadeUnder50 = Math.max(0, (s.fgMade ?? 0) - fgMade50);
+  const fgMissed = Math.max(0, (s.fgAtt ?? 0) - (s.fgMade ?? 0));
+  const isDst = pos === 'DST';
+
+  const rows = [
+    { label: 'Pass Yds',   amount: s.passYds,  unit: 'yd',rate: r.passYd ?? 0.04 },
+    { label: 'Pass TD',    amount: s.passTds,  unit: '',  rate: r.passTD ?? 4 },
+    { label: 'Int',        amount: s.passInt,  unit: '',  rate: r.passInt ?? -2 },
+    { label: 'Rush Yds',   amount: s.rushYds,  unit: 'yd',rate: r.rushYd ?? 0.1 },
+    { label: 'Rush TD',    amount: s.rushTds,  unit: '',  rate: r.rushTD ?? 6 },
+    { label: 'Rec Yds',    amount: s.recYds,   unit: 'yd',rate: r.recYd ?? 0.1 },
+    { label: 'Rec TD',     amount: s.recTds,   unit: '',  rate: r.recTD ?? 6 },
+    { label: 'Rec',        amount: s.rec,      unit: '',  rate: r.rec ?? 0.5 },
+    { label: 'Fum Lost',   amount: s.fumLost,  unit: '',  rate: r.fumbleLost ?? -2 },
+    { label: 'FG 50+',     amount: fgMade50,       unit: '', rate: r.kFg50 ?? 5 },
+    { label: 'FG <50',     amount: fgMadeUnder50,  unit: '', rate: r.kFgUnder50 ?? 3 },
+    { label: 'FG Miss',    amount: fgMissed,       unit: '', rate: r.kFgMiss ?? -1 },
+  ];
+  if (isDst) {
+    rows.push(
+      { label: 'Sacks',    amount: s.sacks,    unit: '', rate: r.dstSack ?? 1 },
+      { label: 'Int',      amount: s.ints,     unit: '', rate: r.dstInt ?? 2 },
+      { label: 'Fum Rec',  amount: s.fumRec,   unit: '', rate: r.dstFumRec ?? 2 },
+      { label: 'Safety',   amount: s.safeties, unit: '', rate: r.dstSafety ?? 2 },
+      { label: 'Def TD',   amount: s.tds,      unit: '', rate: r.dstTd ?? 6 },
+    );
+    if ((r.dstPtsAllowed ?? true) && s.ptsAllowed != null) {
+      rows.push({ label: 'Pts Allowed', amount: s.ptsAllowed, unit: '', rate: null, pts: dstPtsAllowedBonus(s.ptsAllowed) });
+    }
+  }
+
+  return rows
+    .filter(row => (row.amount ?? 0) !== 0 || row.pts != null)
+    .map(row => ({
+      label: row.label,
+      amount: row.amount ?? 0,
+      unit: row.unit,
+      pts: row.pts ?? (row.amount ?? 0) * row.rate,
+    }));
+}
+
 export function calcFantasyPts(stats, rules, pos) {
   const s = stats || {};
   const r = rules || {};

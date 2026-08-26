@@ -2,7 +2,7 @@ import React from 'react';
 import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters } from '../lib/data.js';
 import { findPlayer, findPlayerByName, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
-import { getScoringRules, calcFantasyPts, normalizeTeamAbbr, getGameProgress, blendProjectedFinal, fetchEspnScoreboardDirect, fetchEspnPlayerStatsDirect } from '../lib/liveScoring.js';
+import { getScoringRules, calcFantasyPts, buildStatPointsBreakdown, normalizeTeamAbbr, getGameProgress, blendProjectedFinal, fetchEspnScoreboardDirect, fetchEspnPlayerStatsDirect } from '../lib/liveScoring.js';
 
 const NUM_WEEKS = 14;
 
@@ -440,6 +440,7 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
 // livePlayerPts already fetched for the matchup cards; no separate request.
 function PlayerScoresTab({ livePlayerPts, seasonType, week }) {
   const [posFilter, setPosFilter] = React.useState('ALL');
+  const rules = React.useMemo(() => getScoringRules(), []);
   const players = Object.values(livePlayerPts || {});
   const sorted = [...(posFilter === 'ALL' ? players : players.filter(p => p.pos === posFilter))]
     .sort((a, b) => b.pts - a.pts);
@@ -480,13 +481,22 @@ function PlayerScoresTab({ livePlayerPts, seasonType, week }) {
             <span style={{ textAlign: 'right' }}>Pts</span>
           </div>
           {sorted.map(p => {
-            const statLine = formatStatLine({ pos: p.pos }, p.stats);
+            const breakdown = buildStatPointsBreakdown(p.stats, rules, p.pos);
             return (
               <div key={p.name} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 40px 1fr 60px', alignItems: 'center', padding: '6px 14px', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,.04)' }}>
                 <PosBadge pos={p.pos} />
                 <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
                 <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{p.team}</span>
-                <span style={{ fontSize: 10, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{statLine || '—'}</span>
+                <span style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
+                  {breakdown.length === 0 ? '—' : breakdown.map(row => (
+                    <span key={row.label} title={`${row.label}: ${row.amount}${row.unit} × rate = ${row.pts >= 0 ? '+' : ''}${row.pts.toFixed(1)} pts`}>
+                      {row.label} {row.amount}{row.unit}
+                      <span style={{ color: row.pts > 0 ? '#4caf82' : row.pts < 0 ? '#ff5a6e' : 'var(--text-faint)', fontWeight: 700 }}>
+                        {' '}({row.pts >= 0 ? '+' : ''}{row.pts.toFixed(1)})
+                      </span>
+                    </span>
+                  ))}
+                </span>
                 <span style={{ textAlign: 'right', fontWeight: 800, color: p.pts >= 15 ? 'var(--accent)' : p.pts >= 8 ? '#4ea8ff' : 'var(--text)' }}>{p.pts.toFixed(1)}</span>
               </div>
             );
