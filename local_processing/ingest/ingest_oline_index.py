@@ -74,6 +74,9 @@ DEFAULT_SEASONS = [2021, 2022, 2023, 2024, 2025]
 PBP_COLS = [
     "season", "week", "posteam", "defteam", "play_type", "down", "ydstogo", "yards_gained",
     "epa", "sack", "qb_hit", "rush_attempt", "pass_attempt", "qb_dropback",
+    "rusher_player_id", "rusher_player_name",
+    "receiver_player_id", "receiver_player_name",
+    "passer_player_id", "passer_player_name",
 ]
 
 
@@ -220,15 +223,48 @@ def write_oline_index(conn, df: pd.DataFrame, dry_run: bool):
 
 # ── Player → team-per-season (handles in-season trades) ───────────────────────
 
-def build_player_team_seasons(conn) -> pd.DataFrame:
-    df = conn.execute("""
-        SELECT player_name, season, team, COUNT(DISTINCT week) AS games
-        FROM silver_weekly_stats
-        WHERE source IN ('nflverse', 'sleeper') AND player_name != '' AND team != '' AND season IS NOT NULL
-        GROUP BY player_name, season, team
-    """).df()
-    if df.empty:
-        return df
+def load_gsis_name_map() -> dict:
+    """pbp's own player-name fields are abbreviated ("D.Montgomery"), not the
+    app's full-name convention ("David Montgomery") — same crosswalk pattern
+    as ingest_coverage_matchups.py / ingest_rush_box_splits.py."""
+    import nfl_data_py as nfl
+    players = nfl.import_players()
+    return dict(zip(players["gsis_id"], players["display_name"]))
+
+
+def build_player_team_seasons(pbp: pd.DataFrame, gsis_name_map: dict) -> pd.DataFrame:
+    """Built directly from play-by-play (posteam per play), not
+    silver_weekly_stats. Sleeper's /stats/nfl/regular/{season}/{week} response
+    has no per-week team field at all (confirmed live 2026-08-27) —
+    ingest_sleeper_stats.py falls back to the player's CURRENT roster team
+    from Sleeper's player database for every row it writes, silently
+    rewriting every past week to a player's new team the moment they're
+    traded. Real case: David Montgomery's entire 2025 season (17/17 games,
+    confirmed via nflverse play-by-play) was mislabeled HOU — his 2026 team —
+    instead of DET. Play-by-play's posteam is genuinely per-play/historical
+    and has no such issue, and (confirmed live) silver_weekly_stats has zero
+    nflverse-sourced rows for the entire 2025 season to fall back on anyway.
+    """
+    roles = [
+        ("rusher_player_id", "rusher_player_name"),
+        ("receiver_player_id", "receiver_player_name"),
+        ("passer_player_id", "passer_player_name"),
+    ]
+    frames = []
+    for id_col, name_col in roles:
+        sub = pbp[pbp[id_col].notna()][[id_col, name_col, "season", "week", "posteam"]].copy()
+        sub.columns = ["gsis_id", "raw_name", "season", "week", "team"]
+        frames.append(sub)
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined[combined["team"].notna() & (combined["team"] != "")]
+    combined["player_name"] = combined["gsis_id"].map(gsis_name_map).fillna(combined["raw_name"])
+
+    df = (
+        combined.groupby(["player_name", "season", "team"])["week"]
+        .nunique()
+        .reset_index(name="games")
+    )
+    df = df[df["player_name"].notna() & (df["player_name"] != "")]
     df["games"] = df["games"].astype(int)
     df = df.sort_values(["player_name", "season", "games"], ascending=[True, True, False])
     # First row per (player_name, season) after sorting by games desc = the team they played most for
@@ -370,7 +406,9 @@ def main():
         write_oline_index(conn, oline_df, args.dry_run)
 
         print("\n── Building player-team-season history ─────────────────────────────")
-        pts_df = build_player_team_seasons(conn)
+        gsis_name_map = load_gsis_name_map()
+        print(f"   Loaded {len(gsis_name_map):,} gsis_id → name mappings")
+        pts_df = build_player_team_seasons(pbp, gsis_name_map)
         write_player_team_seasons(conn, pts_df, args.dry_run)
 
     print("\n── Exporting to R2 ─────────────────────────────────────────────────")
