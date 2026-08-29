@@ -456,6 +456,29 @@ const CRUMBS = {
 export default function App() {
   const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
 
+  // New-version detection: browsers can keep running an old JS bundle
+  // indefinitely once a tab is open (SPAs don't auto-reload on deploy). Poll
+  // the live index.html (no-store, bypasses any cache) and compare its
+  // referenced bundle filename to the one this tab actually loaded; if they
+  // differ, a new deploy has happened and this tab is stale.
+  const [newVersionAvailable, setNewVersionAvailable] = React.useState(false);
+  React.useEffect(() => {
+    const currentSrc = document.querySelector('script[type="module"][src*="/assets/"]')?.getAttribute('src');
+    if (!currentSrc) return;
+    const checkForNewVersion = async () => {
+      try {
+        const res = await fetch('/', { cache: 'no-store' });
+        const html = await res.text();
+        const match = html.match(/<script[^>]*type="module"[^>]*src="([^"]*\/assets\/[^"]+)"/);
+        if (match && match[1] !== currentSrc) setNewVersionAvailable(true);
+      } catch { /* network hiccup — try again next interval */ }
+    };
+    const interval = setInterval(checkForNewVersion, 5 * 60 * 1000);
+    const onVisible = () => { if (document.visibilityState === 'visible') checkForNewVersion(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
+  }, []);
+
   // Apply the saved color theme once at startup — CSS custom properties set via
   // JS don't survive a reload, and this shouldn't re-trigger just from visiting
   // My Account (that used to live in AccountEdit's own mount effect).
@@ -517,6 +540,12 @@ export default function App() {
     setDraftInProgress(type);
     if (meta) setDraftMeta(meta);
   }, []);
+  // DraftRoom is always mounted, so it registers its exitMockDraft function here.
+  // This lets the global TopBar's "End Mock" button work even while `active === 'draft'`,
+  // where draftInProgress is deliberately nulled out for the TopBar's own draft-status badge.
+  const exitMockDraftRef = React.useRef(null);
+  const registerExitMock = React.useCallback(fn => { exitMockDraftRef.current = fn; }, []);
+  const handleExitMock = React.useCallback(() => { exitMockDraftRef.current?.(); }, []);
   const [user, setUser] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_user') || 'null'); } catch { return null; }
   });
@@ -1336,6 +1365,22 @@ export default function App() {
 
   return (
     <React.Fragment>
+      {newVersionAvailable && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 99999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+          padding: '8px 16px', background: '#c6ff3a', color: '#0a1300',
+          fontSize: 13, fontWeight: 800, fontFamily: 'var(--font-mono)',
+        }}>
+          A new version of FantasAI is available — you're viewing an older cached copy.
+          <button
+            onClick={() => window.location.reload()}
+            style={{ background: '#0a1300', color: '#c6ff3a', border: 'none', borderRadius: 5, padding: '4px 14px', fontWeight: 800, cursor: 'pointer', fontSize: 12 }}
+          >
+            Reload Now
+          </button>
+        </div>
+      )}
       <LiveScoreTicker myTeamId={user?.teamId} onNav={setActive} />
       <div className={shellClass} style={shellLayoutStyle}>
         <div className="logo-area">
@@ -1358,6 +1403,8 @@ export default function App() {
           draftMeta={draftMeta}
           fontSize={appFontSize}
           onFontSizeChange={handleAppFontSize}
+          mockDraftActive={draftInProgress === 'mock'}
+          onExitMock={handleExitMock}
         />
         <Sidebar active={active} onNav={id => setActive(id)} user={user} lineupAlertCount={lineupAlertCount} myRosterIds={myRosterIds} cookieAlert={cookieAlert} collapsed={!showMobile && leftNavCollapsed} onToggleCollapse={() => setLeftNavCollapsed(v => !v)} />
 
@@ -1383,7 +1430,7 @@ export default function App() {
                 <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
                   {/* DraftRoom kept mounted at all times — display:none hides it without unmounting */}
                   <div style={{ display: tab === 'room' ? 'flex' : 'none', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                    <DraftRoom aiMode={aiMode} user={user} showMobile={showMobile} draftPriorityIds={draftPriorityIds} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} onOpenPlayer={setOpenPlayer} onDraftPick={id => {
+                    <DraftRoom aiMode={aiMode} user={user} showMobile={showMobile} draftPriorityIds={draftPriorityIds} onNav={id => { if (id === 'draftrecap') { setActive('draft'); setDraftTab('recap'); } else setActive(id); }} onDraftStatusChange={handleDraftStatusChange} registerExitMock={registerExitMock} onOpenPlayer={setOpenPlayer} onDraftPick={id => {
                       let nextIds = null;
                       setMyRosterIds(prev => {
                         const next = new Set([...prev, id]);

@@ -103,19 +103,25 @@ function fmtNg(val, statId) {
   return String(val);
 }
 
-export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftComplete, onDraftStatusChange, onOpenPlayer, showMobile = false, draftPriorityIds }) {
+export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftComplete, onDraftStatusChange, registerExitMock, onOpenPlayer, showMobile = false, draftPriorityIds }) {
   const REAL_currentPickNum = 40;
   const isCommissioner = user?.isAdmin || user?.isCommissioner;
 
-  // Mock draft mode — state is persisted to localStorage so navigating away and back resumes seamlessly
-  const [mockPicks, setMockPicks] = React.useState(() => {
+  // Mock draft mode — state is persisted to localStorage so navigating away and back
+  // (or refreshing the page) resumes seamlessly rather than silently abandoning the mock.
+  const _mockWipRaw = (() => {
     try { const s = JSON.parse(localStorage.getItem('fantasai_mock_picks_wip') || 'null'); return Array.isArray(s) ? s : []; } catch { return []; }
-  });
-  const [mockActive, setMockActive]           = React.useState(false);
-  const [mockPickNum, setMockPickNum]         = React.useState(1);
-  const [mockUserTeamId, setMockUserTeamId]   = React.useState(null);
+  })();
+  const _hasWip = _mockWipRaw.length > 0;
+  const _mockSession = (() => {
+    try { return JSON.parse(localStorage.getItem('fantasai_mock_session') || 'null'); } catch { return null; }
+  })();
+  const [mockPicks, setMockPicks]             = React.useState(_mockWipRaw);
+  const [mockActive, setMockActive]           = React.useState(() => _mockSession?.active === true && _hasWip);
+  const [mockPickNum, setMockPickNum]         = React.useState(() => _mockSession?.active === true && _hasWip ? (_mockSession.pickNum ?? 1) : 1);
+  const [mockUserTeamId, setMockUserTeamId]   = React.useState(() => _mockSession?.userTeamId ?? null);
   const [mockSetup, setMockSetup]             = React.useState(false);
-  const [mockTeamsOrder, setMockTeamsOrder]   = React.useState([...TEAMS_ORDER]);
+  const [mockTeamsOrder, setMockTeamsOrder]   = React.useState(() => _mockSession?.teamsOrder ?? [...TEAMS_ORDER]);
   const [mockSlotIndex, setMockSlotIndex]     = React.useState(null);
 
   // Persist mock session to localStorage whenever active state changes
@@ -196,6 +202,15 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
     setUserDraftMode('manual');
     onDraftStatusChange?.(null);
   }
+
+  // Expose exitMockDraft to the always-mounted parent so the global TopBar's
+  // "End Mock" button works even while viewing the Draft Room itself (where
+  // draftInProgress is deliberately nulled out for the TopBar's own status badge).
+  React.useEffect(() => {
+    registerExitMock?.(exitMockDraft);
+    return () => registerExitMock?.(null);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [draftLimitToast, setDraftLimitToast] = React.useState(null);
   React.useEffect(() => { if (draftLimitToast) { const t = setTimeout(() => setDraftLimitToast(null), 3000); return () => clearTimeout(t); } }, [draftLimitToast]);
 
@@ -1724,18 +1739,51 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
           <div style={{ fontSize: 15, fontWeight: 900, letterSpacing: '.04em', color: draftStatusColor, textShadow: `0 0 12px ${draftStatusColor}66`, lineHeight: 1 }}>
             {draftStatusText}
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{
+            display: 'flex', gap: 8, alignItems: 'center',
+            flexWrap: isMobileView ? 'nowrap' : 'wrap',
+            overflowX: isMobileView ? 'auto' : 'visible',
+            maxWidth: '100%',
+            WebkitOverflowScrolling: 'touch',
+          }}>
+            {/* Mock controls first — must survive wrapping/scrolling on narrow screens */}
             {mockActive && (
-              <span style={{ fontSize: 10, fontWeight: 700, color: '#ffb547', background: 'rgba(255,180,0,.12)', border: '1px solid rgba(255,180,0,.3)', borderRadius: 4, padding: '2px 8px', letterSpacing: '.06em' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#ffb547', background: 'rgba(255,180,0,.12)', border: '1px solid rgba(255,180,0,.3)', borderRadius: 4, padding: '2px 8px', letterSpacing: '.06em', flexShrink: 0 }}>
                 MOCK · {LEAGUE_TEAMS.find(t => t.id === mockUserTeamId)?.logo}
               </span>
             )}
-            <button className="btn ghost sm" onClick={() => setShowRecap(!showRecap)}>Round {currentRound - 1} Recap</button>
+            {mockActive && (
+              <button
+                className="btn sm"
+                style={{ background: '#ff7a45', color: '#fff', borderColor: '#ff7a45', fontWeight: 800, flexShrink: 0 }}
+                onClick={exitMockDraft}
+                title="End this mock draft"
+              >
+                ⛔ End Mock
+              </button>
+            )}
+            {!mockActive && !mockDraftLocked && (
+              <button
+                className="btn sm"
+                style={{ background: '#ffb547', color: '#000', borderColor: '#ffb547', fontWeight: 800, flexShrink: 0 }}
+                onClick={startMockDraft}
+                title="Start a new mock draft"
+              >
+                🏈 Start Mock
+              </button>
+            )}
+            {mockActive && !isMyTurn && !paused && (
+              <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>AI picking…</span>
+            )}
+            {mockActive && paused && (
+              <span style={{ fontSize: 11, color: '#ffb547', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>AI paused</span>
+            )}
+            <button className="btn ghost sm" style={{ flexShrink: 0 }} onClick={() => setShowRecap(!showRecap)}>Round {currentRound - 1} Recap</button>
             <button
               className="btn ghost sm"
               onClick={() => setSoundOn(s => !s)}
               title={soundOn ? 'Mute draft sounds (turn/on-deck chimes + voice announcements, autodraft alerts)' : 'Unmute draft sounds'}
-              style={soundOn ? {} : { color: 'var(--text-faint)' }}
+              style={{ flexShrink: 0, ...(soundOn ? {} : { color: 'var(--text-faint)' }) }}
             >
               {soundOn ? '🔊 Sound' : '🔇 Muted'}
             </button>
@@ -1745,7 +1793,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
               onChange={e => setTurnChimeId(e.target.value)}
               disabled={!soundOn}
               title="Sound played when it becomes your turn to draft"
-              style={{ fontSize: 11, padding: '2px 4px', width: 118 }}
+              style={{ fontSize: 11, padding: '2px 4px', width: 118, flexShrink: 0 }}
             >
               {TURN_CHIMES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
@@ -1757,7 +1805,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                 const chime = TURN_CHIMES.find(c => c.id === turnChimeId) || TURN_CHIMES[0];
                 playChime(chime.notes);
               }}
-              style={{ padding: '3px 8px' }}
+              style={{ padding: '3px 8px', flexShrink: 0 }}
             >
               ▶
             </button>
@@ -1772,6 +1820,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
                   border: `1px solid ${syncError ? 'rgba(255,90,110,.35)' : 'var(--border)'}`,
                   background: syncError ? 'rgba(255,90,110,.08)' : 'rgba(255,255,255,.02)',
                   whiteSpace: 'nowrap',
+                  flexShrink: 0,
                 }}
                 title={syncError ? 'Latest sync failed. Check API connectivity.' : 'Auto-sync runs every 3 seconds.'}
               >
@@ -1781,37 +1830,12 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             {!mockActive && (
               <button
                 className="btn ghost sm"
+                style={{ flexShrink: 0 }}
                 onClick={() => pullSharedDraftState({ manual: true })}
                 disabled={syncActive}
                 title="Force a sync from shared draft picks"
               >
                 {syncActive ? 'Syncing...' : 'Resync Now'}
-              </button>
-            )}
-            {!mockActive && !mockDraftLocked && (
-              <button
-                className="btn sm"
-                style={{ background: '#ffb547', color: '#000', borderColor: '#ffb547', fontWeight: 800 }}
-                onClick={startMockDraft}
-                title="Start a new mock draft"
-              >
-                🏈 Start Mock
-              </button>
-            )}
-            {mockActive && !isMyTurn && !paused && (
-              <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>AI picking…</span>
-            )}
-            {mockActive && paused && (
-              <span style={{ fontSize: 11, color: '#ffb547', fontFamily: 'var(--font-mono)' }}>AI paused</span>
-            )}
-            {mockActive && (
-              <button
-                className="btn sm"
-                style={{ marginLeft: 8, background: '#ff7a45', color: '#fff', borderColor: '#ff7a45', fontWeight: 800 }}
-                onClick={exitMockDraft}
-                title="End this mock draft"
-              >
-                ⛔ End Mock
               </button>
             )}
           </div>

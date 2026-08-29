@@ -32,7 +32,7 @@ function getH2HWeek() {
 }
 
 
-export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showChat, onToggleChat, user, onLogout, onExport, draftInProgress, draftMeta, fontSize, onFontSizeChange }) => {
+export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showChat, onToggleChat, user, onLogout, onExport, draftInProgress, draftMeta, fontSize, onFontSizeChange, mockDraftActive, onExitMock }) => {
   const isComplete = draftInProgress && draftMeta?.draftComplete;
   const isPaused   = draftInProgress && !isComplete && draftMeta?.draftPaused;
   const isActive   = draftInProgress && !isComplete && !isPaused;
@@ -68,6 +68,16 @@ export const TopBar = ({ crumbs, right, onMenu, showMobile, onToggleView, showCh
     </div>
     <div className="topbar-right">
       {right}
+      {mockDraftActive && (
+        <button
+          className="btn sm"
+          onClick={onExitMock}
+          title="End the current mock draft"
+          style={{ marginRight: 8, background: '#ff7a45', color: '#fff', borderColor: '#ff7a45', fontWeight: 800, whiteSpace: 'nowrap' }}
+        >
+          ⛔ End Mock
+        </button>
+      )}
       {onFontSizeChange && (
         <div className="hide-mobile" style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 8, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px' }}>
           <span style={{ fontSize: 10, color: 'var(--text-faint)', fontWeight: 600 }}>Aa</span>
