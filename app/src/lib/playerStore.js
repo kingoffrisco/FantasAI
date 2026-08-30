@@ -165,7 +165,14 @@ export function normalizePlayerList(rawArr) {
 
     // Tertiary dedup: same Sleeper player_id in the same source file means the same player
     // regardless of minor name formatting differences (e.g. "Geno Smith" vs "Geno C Smith").
-    const sleeperId  = p.playerId || p.player_id || p.id || null;
+    // master_player_id is what export_players_2026_draft.json (the R2 file that
+    // actually feeds this store, per App.jsx) calls its stable id — it was never
+    // checked here, so every player in that file fell through to the volatile
+    // `10000 + result.length` fallback below, which silently reassigns whichever
+    // player gets which id if the file's row order ever changes between fetches.
+    // Confirmed live: a team's saved roster pointed at the wrong player after a
+    // later fetch reordered the underlying export.
+    const sleeperId  = p.playerId || p.player_id || p.id || p.master_player_id || null;
     const sleeperKey = sleeperId ? String(sleeperId) : null;
     if (sleeperKey && seenIds.has(sleeperKey)) continue;
 

@@ -260,16 +260,32 @@ async function fetchS3Roster(teamId) {
   } catch { return null; }
 }
 
-// Build the authoritative roster for a team by merging:
-//   1. Saved draft picks (primary — captures every pick made in the draft room)
-//   2. S3 roster (adds/drops made after the draft)
-// Excludes players currently on waivers (dropped).
+// Build the authoritative roster for a team.
+// S3/R2 (fantasai/rosters.json) is authoritative once populated — it reflects
+// the real completed draft plus every waiver add/drop since. Local draft-pick
+// storage (fantasai_live_picks / mock picks) is only a fallback for the brief
+// window right after a draft finishes in THIS browser, before the async sync
+// to S3 completes. Previously this unioned local picks on top of S3 data
+// unconditionally, which could resurrect players from a stale local copy
+// (an old mock draft, or a since-overwritten import) even after the correct
+// roster was saved server-side — confirmed live: a team kept showing an extra
+// QB from a stale local `fantasai_live_picks` entry after its real 2026 CBS
+// roster was already correctly saved to R2.
 function buildMergedRoster(teamId, s3Ids) {
   try {
     const { claims: waiverRaw } = getWaivers();
     const droppedIds = new Set(Object.keys(waiverRaw).map(Number));
 
-    // Use whichever pick source has the most filled picks for this team
+    if (Array.isArray(s3Ids) && s3Ids.length > 0) {
+      const merged = new Set();
+      for (const id of s3Ids) {
+        if (!droppedIds.has(Number(id))) merged.add(Number(id));
+      }
+      return merged;
+    }
+
+    // No S3 roster yet for this team — fall back to whichever local pick
+    // source has the most filled picks for this team.
     const tryParse = key => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; } };
     const live  = tryParse('fantasai_live_picks');
     const saved = tryParse('fantasai_mock_picks_saved');
@@ -285,15 +301,7 @@ function buildMergedRoster(teamId, s3Ids) {
           .filter(p => Number(p.teamId) === Number(teamId) && p.playerId && !droppedIds.has(Number(p.playerId)))
           .map(p => Number(p.playerId))
       : [];
-
-    // Start from draft picks, layer in S3 additions, exclude drops
-    const merged = new Set(pickIds);
-    if (s3Ids) {
-      for (const id of s3Ids) {
-        if (!droppedIds.has(Number(id))) merged.add(Number(id));
-      }
-    }
-    return merged;
+    return new Set(pickIds);
   } catch {
     return new Set(s3Ids || []);
   }

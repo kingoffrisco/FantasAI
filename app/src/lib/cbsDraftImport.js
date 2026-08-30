@@ -17,13 +17,26 @@ export async function fetchCbsLeagueDraft(year) {
   return data; // { source, fetchedAt, year, picks, teams }
 }
 
+// Strips a trailing generational suffix (Jr., Sr., II, III, IV) so "Kenneth
+// Walker III" (CBS) matches "Kenneth Walker" (our player pool) or vice versa —
+// the two sources aren't consistent about which one includes it. This exact
+// mismatch already caused a real bug once before (Marvin Harrison Jr.'s ADP
+// data silently missing its overlay), so it's handled generically here too.
+const SUFFIX_RE = /\s+(jr\.?|sr\.?|ii|iii|iv)$/i;
+const stripSuffix = s => s.replace(SUFFIX_RE, '').trim();
+
 function matchPlayer(pick, storePlayerList) {
   if (!storePlayerList?.length) return null;
   if (pick.pos === 'DST') {
     return storePlayerList.find(p => p.pos === 'DST' && p.team === pick.nflTeam) || null;
   }
   const norm = (pick.player || '').toLowerCase().trim();
-  const exact = storePlayerList.filter(p => p.name?.toLowerCase().trim() === norm);
+  let exact = storePlayerList.filter(p => p.name?.toLowerCase().trim() === norm);
+  if (!exact.length) {
+    // Fallback: compare with generational suffixes stripped from both sides.
+    const normStripped = stripSuffix(norm);
+    exact = storePlayerList.filter(p => stripSuffix(p.name?.toLowerCase().trim() || '') === normStripped);
+  }
   if (exact.length === 1) return exact[0];
   if (exact.length > 1 && pick.pos) {
     const byPos = exact.find(p => p.pos === pick.pos);
