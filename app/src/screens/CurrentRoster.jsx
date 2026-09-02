@@ -1,5 +1,5 @@
 import React from 'react';
-import { TEAM_ROSTERS, findTeam, NEWS, SLOT_ELIGIBILITY, ROSTER_CONFIG, LEAGUE_TEAMS, buildRosterFrame, assignRoster, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES } from '../lib/data.js';
+import { TEAM_ROSTERS, findTeam, NEWS, SLOT_ELIGIBILITY, ROSTER_CONFIG, LEAGUE_TEAMS, buildRosterFrame, assignRoster, FREE_DATA_SOURCES, LIMITED_FREE_SOURCES, refreshTeamRostersFromServer } from '../lib/data.js';
 import { usePlayers, findPlayer, findPlayerByName, getPlayers, patchPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge, Sparkline } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats, getPlayerMap } from '../lib/sleeper.js';
@@ -430,6 +430,44 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   const [tab, setTab] = React.useState('roster');
   const [dragId, setDragId] = React.useState(null);
   const [dragOver, setDragOver] = React.useState(null);
+  // Native HTML5 drag-and-drop doesn't auto-scroll a container as you drag near
+  // its edges — confirmed as the exact complaint: dragging a bench player up to
+  // a starter slot scrolled out of view just does nothing. rosterScrollRef is
+  // the tab's scrollable container; a dragover handler on it drives a rAF loop
+  // that scrolls it while the pointer sits within EDGE px of the top/bottom.
+  const rosterScrollRef = React.useRef(null);
+  const dragScrollSpeedRef = React.useRef(0);
+  const dragScrollRAFRef = React.useRef(null);
+  const stopRosterAutoScroll = React.useCallback(() => {
+    if (dragScrollRAFRef.current) { cancelAnimationFrame(dragScrollRAFRef.current); dragScrollRAFRef.current = null; }
+    dragScrollSpeedRef.current = 0;
+  }, []);
+  const startRosterAutoScroll = React.useCallback(() => {
+    if (dragScrollRAFRef.current) return;
+    const step = () => {
+      const speed = dragScrollSpeedRef.current;
+      if (speed !== 0 && rosterScrollRef.current) rosterScrollRef.current.scrollTop += speed;
+      dragScrollRAFRef.current = requestAnimationFrame(step);
+    };
+    dragScrollRAFRef.current = requestAnimationFrame(step);
+  }, []);
+  const handleRosterDragOverScroll = React.useCallback(e => {
+    const container = rosterScrollRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const EDGE = 70, MAX_SPEED = 16;
+    const distFromTop = e.clientY - rect.top;
+    const distFromBottom = rect.bottom - e.clientY;
+    if (distFromTop < EDGE) {
+      dragScrollSpeedRef.current = -MAX_SPEED * (1 - Math.max(distFromTop, 0) / EDGE);
+      startRosterAutoScroll();
+    } else if (distFromBottom < EDGE) {
+      dragScrollSpeedRef.current = MAX_SPEED * (1 - Math.max(distFromBottom, 0) / EDGE);
+      startRosterAutoScroll();
+    } else {
+      stopRosterAutoScroll();
+    }
+  }, [startRosterAutoScroll, stopRosterAutoScroll]);
   const [swapTarget, setSwapTarget] = React.useState(null);      // { playerId, slot }
   const [compareIds, setCompareIds] = React.useState([]);         // [id1, id2] for compare popup
   const [addDropPending, setAddDropPending] = React.useState(null); // { addPlayer, dropPlayerId }
@@ -1238,12 +1276,22 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     setDragId(null); setDragOver(null);
   }
 
-  function handleDragEnd() { setDragId(null); setDragOver(null); }
+  function handleDragEnd() { setDragId(null); setDragOver(null); stopRosterAutoScroll(); }
 
   // All players rostered on any team in the league (used for FA filter)
+  // TEAM_ROSTERS is a plain mutable object, not React state — mutating it
+  // (which refreshTeamRostersFromServer does once its async fetch resolves)
+  // doesn't itself trigger a re-render. Without allRosteredIdsVersion in the
+  // deps below, this memo would permanently freeze on whatever TEAM_ROSTERS
+  // held at this component's first render, same bug already found and fixed
+  // in HeadToHead.jsx's allTeamRosters.
+  const [allRosteredIdsVersion, setAllRosteredIdsVersion] = React.useState(0);
+  React.useEffect(() => {
+    refreshTeamRostersFromServer().then(() => setAllRosteredIdsVersion(v => v + 1));
+  }, []);
   const allRosteredIds = React.useMemo(
     () => new Set(Object.values(TEAM_ROSTERS).flatMap(entries => entries.map(e => e.playerId).filter(Boolean))),
-    []
+    [allRosteredIdsVersion]
   );
 
   // Swap-picker options (bench moves + top free agents matching the player's position)
@@ -1673,7 +1721,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
         </div>
       )}
       {tab === 'roster' && !rosterLoading && (
-        <div style={{ flex: 1, overflow: 'auto' }}>
+        <div ref={rosterScrollRef} onDragOver={handleRosterDragOverScroll} style={{ flex: 1, overflow: 'auto' }}>
           <DropCandidatesPanel myRosterIds={myRosterIds} onOpenPlayer={onOpenPlayer} />
           {/* Incoming trade offers */}
           {(() => {

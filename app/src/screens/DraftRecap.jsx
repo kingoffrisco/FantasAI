@@ -119,13 +119,15 @@ export default function DraftRecapScreen({ user, onNav }) {
         const remote = await api.draftPicks.get();
         if (cancelled || !Array.isArray(remote)) return;
         const remoteCount = remote.filter(p => p?.playerId).length;
-        if (remoteCount === 0) return;
-        setRecapData(prev => {
-          const prevCount = (Array.isArray(prev?.picks) ? prev.picks : []).filter(p => p?.playerId).length;
-          if (prevCount >= remoteCount && prev?.source === 'mock') return prev;
-          if (prevCount >= remoteCount && prev?.source === 'live') return prev;
-          return { picks: remote, source: 'live' };
-        });
+        if (remoteCount === 0) return; // no real draft saved yet — keep whatever local data we have
+        // The real season draft (R2 draft_picks.json) is authoritative once it
+        // exists — a leftover local mock/wip save shouldn't shadow it just for
+        // having more total picks. Previously this compared pick counts, which
+        // let an old, fully-filled local mock draft outrank a freshly completed
+        // real draft with fewer rounds (confirmed live: Draft Recap kept showing
+        // a stale mock instead of the real 2026 CBS draft everyone had already
+        // imported).
+        setRecapData({ picks: remote, source: 'live' });
       } catch {
         // best-effort refresh
       }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters, refreshTeamRostersFromServer } from '../lib/data.js';
 import { findPlayer, findPlayerByName, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 import { getScoringRules, calcFantasyPts, buildStatPointsBreakdown, normalizeTeamAbbr, getGameProgress, blendProjectedFinal, fetchEspnScoreboardDirect, fetchEspnPlayerStatsDirect } from '../lib/liveScoring.js';
@@ -132,11 +132,22 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   // against real preseason games before the real season starts.
   const [seasonType, setSeasonType] = React.useState('regular');
 
-  // Sync TEAM_ROSTERS from localStorage whenever H2H is opened so drafted players appear
+  // Sync TEAM_ROSTERS whenever H2H is opened so drafted players appear.
+  // refreshTeamRosters() itself is synchronous (local-storage-only), so
+  // bumping rosterVersion right after it only captures that fast/incomplete
+  // pass. The real, correct data comes from refreshTeamRostersFromServer(),
+  // which is async and resolves moments later — bump rosterVersion again once
+  // it actually completes, or allTeamRosters (built from TEAM_ROSTERS in a
+  // useMemo keyed on rosterVersion) permanently freezes on whatever opponent
+  // rosters looked like before the real fetch landed. Confirmed live
+  // 2026-09-02: every opponent's H2H roster showed almost entirely empty
+  // slots with one or two stale leftover players, while "my own" roster
+  // (built through a completely different, already-fixed path) was correct.
   const [rosterVersion, setRosterVersion] = React.useState(0);
   React.useEffect(() => {
     refreshTeamRosters();
     setRosterVersion(v => v + 1);
+    refreshTeamRostersFromServer().then(() => setRosterVersion(v => v + 1));
   }, []);
 
   // Live per-player stats + per-game status. Primary source is the Worker's

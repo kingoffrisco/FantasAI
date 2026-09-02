@@ -1,5 +1,6 @@
 // Mock data - converted from vanilla prototype to ES module exports
 import { getLiveTeams, getMyTeamPrefs } from './leagueStore.js';
+import { api } from '../api.js';
 
 export const NFL_TEAMS = [
   { abbr: "BAL", color: "#241773" }, { abbr: "BUF", color: "#00338D" },
@@ -677,10 +678,16 @@ export const CBS_DRAFT_HISTORY = {
   },
 };
 
-// Draft picks - 14 rounds Ã— 12 teams = 168 picks, all null (rosters populated only by draft).
-// 14 matches the league roster max: 8 starters + 6 bench.
+// Draft picks - 13 rounds x 12 teams = 156 picks, all null (rosters populated only by draft).
+// 13 matches the real CBS league draft (confirmed live 2026-08-30) — the
+// remaining bench/K spots are filled via waivers after the draft, not every
+// roster slot gets drafted. This must stay in sync with the real draft's
+// actual round count: hydrateDraftPicks() pads remote data out to exactly
+// this many slots, so a mismatch here (this used to be 14, one round too
+// many) let stale local draft-pick caches leak a phantom extra round back
+// into the shared live draft on any browser that still had one cached.
 const TEAMS_ORDER = [2, 5, 11, 7, 12, 1, 8, 3, 10, 4, 9, 6];
-export const DRAFT_ROUNDS = 14;
+export const DRAFT_ROUNDS = 13;
 function buildDraftPicks() {
   const picks = [];
   const teamFor = (round, idx) => round % 2 === 1 ? TEAMS_ORDER[idx] : TEAMS_ORDER[11 - idx];
@@ -696,9 +703,9 @@ export { TEAMS_ORDER };
 
 // â"€â"€â"€ Roster & Scoring Config â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 // Source: https://atotauleague.football.cbssports.com/rules
-// 8 starters: QBÃ—1, RBÃ—1, WRÃ—1, TEÃ—1, RB-WR FLEXÃ—3, DSTÃ—1  |  6 bench  = 14 total
+// 9 starters: QBx1, RBx1, WRx1, TEx1, RB-WR FLEXx3, Kx1, DSTx1  |  6 bench  = 15 total (K added 2026-08-30)
 export const ROSTER_CONFIG = {
-  starters: 8,
+  starters: 9,
   bench:    6,
   slots: [
     { slot: 'QB',   count: 1, eligible: ['QB'] },
@@ -706,9 +713,10 @@ export const ROSTER_CONFIG = {
     { slot: 'WR',   count: 1, eligible: ['WR'] },
     { slot: 'TE',   count: 1, eligible: ['TE'] },
     { slot: 'FLEX', count: 3, eligible: ['RB', 'WR'] },
+    { slot: 'K',    count: 1, eligible: ['K'] },
     { slot: 'DST',  count: 1, eligible: ['DST'] },
   ],
-  rosterLimits: { QB: 2, K: 0 },   // K disabled; all other positions: no limit
+  rosterLimits: { QB: 2, K: 2 },   // 1 starting K + up to 1 backup on bench; all other positions: no limit
 };
 
 // Map: slot name â†' allowed positions
@@ -787,10 +795,47 @@ export function refreshTeamRosters() {
       TEAM_ROSTERS[Number(tid)] = slots;
     }
   } catch {}
+  // Fire-and-forget: give every explicit refresh call (H2H mount, Players
+  // mount, etc.) another chance to pull the real server draft, not just the
+  // one module-load attempt below — self-heals if that first race was unlucky.
+  refreshTeamRostersFromServer();
 }
 
 // Auto-refresh on module load so first render already sees draft data
 refreshTeamRosters();
+
+// refreshTeamRosters() above is local-storage-only — it has no way to see the
+// real drafted rosters unless THIS browser's own fantasai_live_picks happens
+// to hold the full draft, which most browsers never will (only whichever
+// device ran the CBS import gets a full local copy). That left "All Rosters"
+// and Head-to-Head — both built on TEAM_ROSTERS — showing only a couple of
+// players almost everywhere, confirmed live 2026-09-01. This fetches the real
+// draft_picks.json (the same source the roster-import flow itself writes to)
+// and is UNCONDITIONALLY authoritative once it returns anything — this used
+// to only overwrite TEAM_ROSTERS if the server had strictly more total picks
+// than the local-only pass, which sounds safe but isn't: a browser with an
+// old, larger stale mock draft cached locally (e.g. a leftover test draft
+// with more total picks than the real 156-pick season draft) would win that
+// comparison and keep the wrong data forever. Same root mistake — "prefer
+// whichever source has more entries" — that already caused every other
+// draft-data corruption fixed earlier today; there is no case where a
+// browser's local cache should outrank the real server draft.
+export async function refreshTeamRostersFromServer() {
+  try {
+    const remote = await api.draftPicks.get();
+    if (!Array.isArray(remote) || remote.length === 0) return;
+
+    const byTeam = {};
+    for (const pk of remote) {
+      if (!pk.playerId) continue;
+      const tid = Number(pk.teamId);
+      if (!byTeam[tid]) byTeam[tid] = [];
+      byTeam[tid].push({ slot: 'BENCH', playerId: Number(pk.playerId) });
+    }
+    for (const t of LEAGUE_TEAMS) TEAM_ROSTERS[t.id] = byTeam[t.id] || [];
+  } catch { /* best-effort — local-only data (if any) stands */ }
+}
+refreshTeamRostersFromServer();
 
 // â"€â"€â"€ Settings-based roster frame helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const _KEY_TO_SLOT = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', RBWR: 'FLEX', DST: 'DST', K: 'K' };

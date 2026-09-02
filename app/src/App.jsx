@@ -694,8 +694,16 @@ export default function App() {
       setMyRosterIds(buildMergedRoster(user.teamId, s3Ids));
       setRosterLoading(false);
     });
+  // Depends on user?.teamId (not []): this effect used to run exactly once on
+  // mount, which meant it always fired with user still null on a genuinely
+  // fresh login (incognito, or right after logging out) — hooks all run on
+  // first render regardless of what JSX the component conditionally returns,
+  // so it hit `if (!user?.teamId) return` before handleLogin() ever populated
+  // user, and never got a second chance since [] never re-fires. Confirmed
+  // live 2026-09-01: both Current Roster and All Rosters/H2H showed empty
+  // for a fresh incognito login even though the server-side data was correct.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally runs only once on mount
+  }, [user?.teamId]);
 
   // Load live player list from Databricks → Sleeper fallback.
   // Load 2026 player pool from R2 (fantasai/players/export_players_2026_draft.json).

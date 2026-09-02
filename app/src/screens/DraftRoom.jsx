@@ -443,8 +443,15 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   }
 
   function mergeDraftPicks(remoteHydrated, localPicks) {
-    return localPicks.map((local, idx) => {
-      const remote = remoteHydrated[idx] || {};
+    // Iterate over REMOTE's length, not local's. A stale/oversized local cache
+    // (e.g. leftover picks from an old, longer mock draft sitting in this
+    // browser's localStorage) must never resurrect extra picks beyond what the
+    // shared remote draft actually contains — confirmed live: a 168-pick stale
+    // local cache reintroduced a phantom 14th round on top of the real 156-pick
+    // CBS draft, because mapping over localPicks let its 12 extra entries pass
+    // through untouched (remoteHydrated[idx] was undefined for those indices).
+    return remoteHydrated.map((remote, idx) => {
+      const local = localPicks[idx] || {};
       // Remote is authoritative for filled picks, local stays for unfilled slots.
       if (remote.playerId) return { ...local, ...remote };
       return local;

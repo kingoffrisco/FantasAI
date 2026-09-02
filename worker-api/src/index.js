@@ -671,20 +671,57 @@ async function handleRosterSave(request, env) {
   const body = await request.json().catch(() => ({}));
   const { teamId, playerIds } = body;
   if (!teamId || !Array.isArray(playerIds)) return json({ error: 'teamId and playerIds required' }, 400);
+  const incoming = playerIds.map(Number).filter(Boolean);
 
   let existing = { rosters: {} };
   try {
     const res = await s3Fetch(env, 'GET', S3_ROSTERS_KEY, null);
     if (res.ok) existing = await res.json();
   } catch {}
-
   existing.rosters = existing.rosters || {};
-  existing.rosters[String(teamId)] = playerIds.map(Number).filter(Boolean);
+  const currentSaved = existing.rosters[String(teamId)] || [];
+
+  // Guard against a stale browser overwriting a real, already-populated
+  // roster with a completely unrelated set of ids — the exact signature of
+  // a browser still running old code that computed player ids under a
+  // since-fixed (and incompatible) id scheme. Confirmed live 2026-09-02:
+  // this happened to the same team four separate times in one session, each
+  // time replacing a correct 13-player roster with volatile ids matching
+  // nothing real. A legitimate save (waiver add/drop, roster edit) only ever
+  // changes a handful of players at once, so real saves always overlap
+  // heavily with what's already there or with the team's actual draft
+  // picks; a save with ZERO overlap against BOTH is almost certainly bad
+  // data, not a legitimate roster change — reject it rather than accept
+  // silently. Only enforced once a real roster already exists for the team
+  // (an empty currentSaved means this is a legitimate first population).
+  if (currentSaved.length > 0) {
+    const overlapWithCurrent = incoming.filter(id => currentSaved.includes(id)).length;
+    let overlapWithDraft = 0;
+    try {
+      const draftRes = await s3Fetch(env, 'GET', DRAFT_PICKS_R2_KEY, null);
+      if (draftRes.ok) {
+        const picks = await draftRes.json();
+        const draftedIds = new Set(
+          (Array.isArray(picks) ? picks : [])
+            .filter(p => Number(p.teamId) === Number(teamId) && p.playerId)
+            .map(p => Number(p.playerId))
+        );
+        overlapWithDraft = incoming.filter(id => draftedIds.has(id)).length;
+      }
+    } catch {}
+    if (overlapWithCurrent === 0 && overlapWithDraft === 0) {
+      return json({
+        error: 'Rejected: new roster shares zero players with the existing roster or this team\'s real draft picks — likely a stale client computing outdated player ids. Reload the app and try again.',
+      }, 409);
+    }
+  }
+
+  existing.rosters[String(teamId)] = incoming;
   existing.savedAt = new Date().toISOString();
 
   const put = await s3Fetch(env, 'PUT', S3_ROSTERS_KEY, existing);
   if (!put.ok) throw new Error(`S3 PUT ${put.status}`);
-  return json({ ok: true, teamId, count: playerIds.length }, 200);
+  return json({ ok: true, teamId, count: incoming.length }, 200);
 }
 
 async function handleRosterReset(request, env) {
