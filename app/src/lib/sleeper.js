@@ -156,7 +156,15 @@ export async function fetchSleeperPlayerStats(name, pos, season = 2025) {
   // During offseason / preseason, pull regular-season stats from last season
   const isOff = state.season_type === 'off' || state.season_type === 'pre';
   const statsType = isOff ? 'regular' : (state.season_type || 'regular');
-  const maxWeek   = isOff ? 18 : Math.min(currentWeek, 18);
+  // Only cap at the live current week when actually viewing the CURRENT
+  // season in progress — capping unconditionally meant any already-completed
+  // past season (2023/2024/2025, viewed from the popup's year tabs) got
+  // clipped to whatever week Sleeper's real-time NFL state currently reports,
+  // which is 1 right at the start of a new season regardless of which year
+  // was actually requested (confirmed live 2026-09-01: every year's weekly
+  // stats showed only Week 1 once the 2026 season's state ticked over).
+  const isCurrentSeason = !isOff && Number(state.season) === Number(season);
+  const maxWeek = isCurrentSeason ? Math.min(currentWeek, 18) : 18;
 
   // Find player in map
   const map = await getPlayerMap();
