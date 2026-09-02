@@ -562,6 +562,61 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         PRIMARY KEY (season, team)
     );
 
+    -- Same methodology as team_oline_index above, but per (season, week, team)
+    -- instead of per full season — powers the player popup's "O-Line better/
+    -- worse than last week" medallion. Percentile ranks are computed within
+    -- each week across whichever teams played that week (not against the
+    -- full season), so ranks are noisier at this sample size — expected and
+    -- acceptable for a single-week signal. No short_yardage_success_rate
+    -- (too few short-yardage runs in one week to be meaningful at all).
+    CREATE TABLE IF NOT EXISTS team_oline_index_weekly (
+        season                      INTEGER,
+        week                        INTEGER,
+        team                        VARCHAR,
+        dropbacks                   INTEGER,
+        rush_plays                  INTEGER,
+        sack_rate                   DOUBLE,
+        pressure_rate               DOUBLE,
+        pass_epa_per_play           DOUBLE,
+        pass_success_rate           DOUBLE,
+        stuff_rate                  DOUBLE,
+        explosive_run_rate          DOUBLE,
+        rush_epa_per_play           DOUBLE,
+        rush_success_rate           DOUBLE,
+        pass_block_score            DOUBLE,
+        run_block_score             DOUBLE,
+        overall_score                DOUBLE,
+        pass_block_rank             INTEGER,
+        run_block_rank              INTEGER,
+        overall_rank                INTEGER,
+        imported_at                 TIMESTAMP,
+        PRIMARY KEY (season, week, team)
+    );
+
+    -- O-line rookies' draft-capital score, for the O-Line Starters card's
+    -- upgrade/downgrade coloring when a NEW starter is a rookie with no prior
+    -- team performance data to measure against (team_oline_index has nothing
+    -- to compare before the rookie's first real season). Skill positions
+    -- (bronze_rookie_scores) blend draft capital + combine athleticism +
+    -- opportunity, using real fantasy production to calibrate -- none of that
+    -- exists for O-line prospects (no fantasy stats, and nflverse's combine
+    -- data hasn't published the current draft class yet), so this is
+    -- deliberately just draft capital — the one real, available signal —
+    -- using the identical pick-to-score curve as draft_capital_score() in
+    -- ingest_rookie_scores.py for consistency across the app.
+    CREATE TABLE IF NOT EXISTS player_oline_rookie_scores (
+        season                INTEGER,
+        gsis_id               VARCHAR,
+        player_name           VARCHAR,
+        pos                   VARCHAR,   -- OT, OG, C, G, T (nflverse draft-pick position labels)
+        team                  VARCHAR,
+        draft_round           INTEGER,
+        draft_ovr             INTEGER,
+        draft_capital_score   DOUBLE,    -- 0-100, pick 1=100, pick 32~88, UDFA=0
+        imported_at           TIMESTAMP,
+        PRIMARY KEY (season, gsis_id)
+    );
+
     -- Which team a player suited up for each season, from silver_weekly_stats
     -- (nflverse recent_team). Handles in-season trades: is_primary marks the
     -- team the player played the most games for that season.

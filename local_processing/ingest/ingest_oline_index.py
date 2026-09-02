@@ -209,6 +209,100 @@ def build_oline_index(pbp: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def build_oline_index_weekly(pbp: pd.DataFrame) -> pd.DataFrame:
+    """Same methodology as build_oline_index, grouped by (season, week, team)
+    instead of (season, team), and percentile-ranked within each week rather
+    than the full season — powers the "O-Line better/worse than last week"
+    medallion. Sample-size floor is much lower than the season version (one
+    week's plays vs a full season's), so this is inherently noisier; that's
+    an accepted tradeoff of a real weekly signal, not a bug."""
+    pbp = pbp[pbp["posteam"].notna() & (pbp["posteam"] != "")].copy()
+
+    drop = pbp[pbp["qb_dropback"] == 1].copy()
+    drop["is_success"] = drop.apply(_is_success, axis=1)
+    pass_agg = drop.groupby(["season", "week", "posteam"]).agg(
+        dropbacks       = ("qb_dropback", "sum"),
+        sacks           = ("sack", "sum"),
+        qb_hits         = ("qb_hit", "sum"),
+        pass_epa_total  = ("epa", "sum"),
+        pass_success_ct = ("is_success", "sum"),
+    ).reset_index().rename(columns={"posteam": "team"})
+    pass_agg["sack_rate"        ] = pass_agg["sacks"]         / pass_agg["dropbacks"]
+    pass_agg["pressure_rate"    ] = pass_agg["qb_hits"]       / pass_agg["dropbacks"]
+    pass_agg["pass_epa_per_play"] = pass_agg["pass_epa_total"] / pass_agg["dropbacks"]
+    pass_agg["pass_success_rate"] = pass_agg["pass_success_ct"] / pass_agg["dropbacks"]
+
+    rush = pbp[pbp["rush_attempt"] == 1].copy()
+    rush["is_success"]   = rush.apply(_is_success, axis=1)
+    rush["is_stuffed"]   = rush["yards_gained"] <= 0
+    rush["is_explosive"] = rush["yards_gained"] >= 15
+    rush_agg = rush.groupby(["season", "week", "posteam"]).agg(
+        rush_plays      = ("rush_attempt", "sum"),
+        rush_epa_total  = ("epa", "sum"),
+        rush_success_ct = ("is_success", "sum"),
+        stuffed_ct      = ("is_stuffed", "sum"),
+        explosive_ct    = ("is_explosive", "sum"),
+    ).reset_index().rename(columns={"posteam": "team"})
+    rush_agg["rush_epa_per_play"]  = rush_agg["rush_epa_total"] / rush_agg["rush_plays"]
+    rush_agg["rush_success_rate"]  = rush_agg["rush_success_ct"] / rush_agg["rush_plays"]
+    rush_agg["stuff_rate"]         = rush_agg["stuffed_ct"]      / rush_agg["rush_plays"]
+    rush_agg["explosive_run_rate"] = rush_agg["explosive_ct"]    / rush_agg["rush_plays"]
+
+    out = pd.merge(
+        pass_agg[["season", "week", "team", "dropbacks", "sack_rate", "pressure_rate", "pass_epa_per_play", "pass_success_rate"]],
+        rush_agg[["season", "week", "team", "rush_plays", "stuff_rate", "explosive_run_rate", "rush_epa_per_play", "rush_success_rate"]],
+        on=["season", "week", "team"], how="inner",
+    )
+    # Much lower floor than the season version's 100/50 — one week of plays
+    # is naturally a small sample. Still enough to filter out bye weeks / bad joins.
+    out = out[(out["dropbacks"] >= 10) & (out["rush_plays"] >= 5)].copy()
+
+    parts = []
+    for (_season, _week), grp in out.groupby(["season", "week"]):
+        grp = grp.copy()
+        grp["pass_block_score"] = (
+            0.35 * _pctile_score(grp["sack_rate"],         higher_is_better=False) +
+            0.25 * _pctile_score(grp["pressure_rate"],     higher_is_better=False) +
+            0.20 * _pctile_score(grp["pass_epa_per_play"], higher_is_better=True)  +
+            0.20 * _pctile_score(grp["pass_success_rate"], higher_is_better=True)
+        )
+        grp["run_block_score"] = (
+            0.30 * _pctile_score(grp["rush_success_rate"],  higher_is_better=True)  +
+            0.25 * _pctile_score(grp["rush_epa_per_play"],  higher_is_better=True)  +
+            0.20 * _pctile_score(grp["stuff_rate"],         higher_is_better=False) +
+            0.25 * _pctile_score(grp["explosive_run_rate"], higher_is_better=True)
+        )
+        grp["overall_score"]   = 0.5 * grp["pass_block_score"] + 0.5 * grp["run_block_score"]
+        grp["pass_block_rank"] = grp["pass_block_score"].rank(ascending=False, method="min").astype(int)
+        grp["run_block_rank"]  = grp["run_block_score"].rank(ascending=False, method="min").astype(int)
+        grp["overall_rank"]    = grp["overall_score"].rank(ascending=False, method="min").astype(int)
+        parts.append(grp)
+
+    result = pd.concat(parts, ignore_index=True)
+    result = result.round({
+        "sack_rate": 4, "pressure_rate": 4, "pass_epa_per_play": 3, "pass_success_rate": 3,
+        "stuff_rate": 4, "explosive_run_rate": 4, "rush_epa_per_play": 3, "rush_success_rate": 3,
+        "pass_block_score": 1, "run_block_score": 1, "overall_score": 1,
+    })
+    result["dropbacks"]  = result["dropbacks"].astype(int)
+    result["rush_plays"] = result["rush_plays"].astype(int)
+    result["week"]       = result["week"].astype(int)
+    result["imported_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+    return result
+
+
+def write_oline_index_weekly(conn, df: pd.DataFrame, dry_run: bool):
+    if df.empty:
+        print("   No weekly O-line index rows to write"); return
+    if dry_run:
+        print(f"   DRY RUN — would write {len(df)} team-week rows"); return
+    for season in df["season"].unique().tolist():
+        conn.execute("DELETE FROM team_oline_index_weekly WHERE season = ?", [int(season)])
+    conn.register("_oline_wk", df)
+    conn.execute("INSERT INTO team_oline_index_weekly BY NAME SELECT * FROM _oline_wk")
+    print(f"   💾 team_oline_index_weekly: {len(df):,} rows written")
+
+
 def write_oline_index(conn, df: pd.DataFrame, dry_run: bool):
     if df.empty:
         print("   No O-line index rows to write"); return
@@ -346,6 +440,39 @@ def export_oline_r2(conn, dry_run: bool):
     _put_r2("fantasai/analysis/oline_index.json", payload, dry_run)
 
 
+def export_oline_index_weekly_r2(conn, dry_run: bool):
+    rows = conn.execute("SELECT * FROM team_oline_index_weekly ORDER BY season, week, team").df()
+    if rows.empty:
+        print("   No weekly O-line index rows in DB — skipping export"); return
+
+    teams: dict = {}
+    for _, r in rows.iterrows():
+        season_key = str(int(r["season"]))
+        week_key = str(int(r["week"]))
+        teams.setdefault(r["team"], {}).setdefault(season_key, {})[week_key] = {
+            "dropbacks":          int(r["dropbacks"]),
+            "rush_plays":         int(r["rush_plays"]),
+            "pass_block_score":   r["pass_block_score"],
+            "run_block_score":    r["run_block_score"],
+            "overall_score":      r["overall_score"],
+            "pass_block_rank":    int(r["pass_block_rank"]),
+            "run_block_rank":     int(r["run_block_rank"]),
+            "overall_rank":       int(r["overall_rank"]),
+        }
+
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "methodology": (
+            "Same composite as oline_index.json (season version), computed per week instead — "
+            "percentile-ranked within each week across whichever teams played it, not the full "
+            "season. Noisier at this sample size by nature of being one week's plays; use for "
+            "week-over-week trend, not season-level comparison."
+        ),
+        "teams": teams,
+    }
+    _put_r2("fantasai/analysis/oline_index_weekly.json", payload, dry_run)
+
+
 def export_player_team_history_r2(conn, dry_run: bool):
     rows = conn.execute(
         "SELECT * FROM player_team_seasons ORDER BY player_name, season, games DESC"
@@ -405,6 +532,10 @@ def main():
         oline_df = build_oline_index(pbp)
         write_oline_index(conn, oline_df, args.dry_run)
 
+        print("\n── Computing weekly O-Line Index ───────────────────────────────────")
+        oline_weekly_df = build_oline_index_weekly(pbp)
+        write_oline_index_weekly(conn, oline_weekly_df, args.dry_run)
+
         print("\n── Building player-team-season history ─────────────────────────────")
         gsis_name_map = load_gsis_name_map()
         print(f"   Loaded {len(gsis_name_map):,} gsis_id → name mappings")
@@ -413,6 +544,7 @@ def main():
 
     print("\n── Exporting to R2 ─────────────────────────────────────────────────")
     export_oline_r2(conn, args.dry_run)
+    export_oline_index_weekly_r2(conn, args.dry_run)
     export_player_team_history_r2(conn, args.dry_run)
 
     conn.close()

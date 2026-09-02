@@ -1,9 +1,9 @@
 import React from 'react';
 import WatchlistScreen from './Watchlist.jsx';
-import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters } from '../lib/data.js';
+import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters, refreshTeamRostersFromServer } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer, getPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge, SeasonStatBar, RadarChart, scoreToTier, SCORE_TIER_STYLE } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning, useR2FloorCeiling, useR2PlayerCoverageSplits, useR2TeamCoverageTendency, useR2PlayerRushBoxSplits, useR2TeamRushBoxTendency } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2OlineIndexWeekly, useR2OlineRookieScores, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning, useR2FloorCeiling, useR2PlayerCoverageSplits, useR2TeamCoverageTendency, useR2PlayerRushBoxSplits, useR2TeamRushBoxTendency } from '../hooks.js';
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -2242,6 +2242,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   const { data: r2RookieScoresData } = useR2RookieScores();
   const { data: r2CollegeStatsRaw } = useR2CollegeStats();
   const { data: r2OlineIndex } = useR2OlineIndex();
+  const { data: r2OlineIndexWeekly } = useR2OlineIndexWeekly();
   const { data: r2TeamHistory } = useR2PlayerTeamHistory();
   const { data: r2WeaponScores } = useR2WeaponScores();
   const { data: r2TeamSupport } = useR2TeamSupportScores();
@@ -2308,6 +2309,103 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
     const latest = Object.keys(teamRec).map(Number).sort((a, b) => b - a)[0];
     return teamRec[String(latest)] ?? null;
   }, [r2OlineStability, yearTeam]);
+  // O-Line vs last year — real nflverse-derived overall_score/overall_rank
+  // from oline_index.json, comparing the most recent season on file against
+  // the one before it (same "latest year" basis the Ecosystem tab's other
+  // O-Line cards already use, independent of the Game Log year-tab selector).
+  const olineYoY = React.useMemo(() => {
+    const teamRec = r2OlineIndex?.teams?.[yearTeam];
+    if (!teamRec) return null;
+    const years = Object.keys(teamRec).map(Number).sort((a, b) => b - a);
+    const latest = years[0];
+    if (latest == null) return null;
+    // Only show once real play-by-play exists for the actual current
+    // calendar year — before that (e.g. 2026 preseason, before Sept kickoff),
+    // "latest" is really last season, and showing it as if it were a live
+    // comparison for the year about to start is misleading. The medallion
+    // reappears automatically the moment this season's real data lands.
+    if (latest !== new Date().getFullYear()) return null;
+    const cur = teamRec[String(latest)];
+    const prev = teamRec[String(latest - 1)];
+    if (!cur || !prev) return null;
+    return {
+      year: latest,
+      prevYear: latest - 1,
+      scoreDelta: cur.overall_score - prev.overall_score,
+      rankDelta: prev.overall_rank - cur.overall_rank, // positive = improved (lower rank number is better)
+      cur,
+      prev,
+    };
+  }, [r2OlineIndex, yearTeam]);
+  // O-Line vs last week — same real-data gating as olineYoY: only shows once
+  // this actual calendar year has at least two weeks of real play-by-play,
+  // so it can never present a stale prior season as if it were "this week."
+  const olineWoW = React.useMemo(() => {
+    const nowYear = new Date().getFullYear();
+    const seasonRec = r2OlineIndexWeekly?.teams?.[yearTeam]?.[String(nowYear)];
+    if (!seasonRec) return null;
+    const weeks = Object.keys(seasonRec).map(Number).sort((a, b) => b - a);
+    const latestWeek = weeks[0];
+    if (latestWeek == null) return null;
+    const cur = seasonRec[String(latestWeek)];
+    const prev = seasonRec[String(latestWeek - 1)];
+    if (!cur || !prev) return null;
+    return {
+      week: latestWeek,
+      prevWeek: latestWeek - 1,
+      scoreDelta: cur.overall_score - prev.overall_score,
+      rankDelta: prev.overall_rank - cur.overall_rank,
+      cur,
+      prev,
+    };
+  }, [r2OlineIndexWeekly, yearTeam]);
+  // Name -> rookie flag lookup for the O-Line Starters card, sourced from the
+  // same player store (export_players_2026_draft.json's real `is_rookie`
+  // field) everywhere else in the app uses — not a fabricated signal.
+  // Calls usePlayers() independently (rather than reusing allPlayersForRank,
+  // declared later in this component) to avoid a temporal-dead-zone error.
+  const playersForRookieLookup = usePlayers();
+  const rookieByName = React.useMemo(() => {
+    const map = new Map();
+    for (const p of playersForRookieLookup) {
+      if (p.name) map.set(p.name.toLowerCase().trim(), !!p.rookie);
+    }
+    return map;
+  }, [playersForRookieLookup]);
+  // Which O-Line starter slots changed personnel vs last year, so the O-Line
+  // Starters card can flag them — colored by whether the team's overall
+  // O-Line score (a real play-by-play-derived metric, not a fabricated grade)
+  // improved or declined year over year, since no per-player performance
+  // grade exists in this data to attribute the change to the individual.
+  // Which O-Line starter slots changed personnel vs last year — computed
+  // independently of whether real current-season team-level O-Line data
+  // exists yet (olineYoY), since a rookie replacing a departed starter can
+  // be evaluated on draft capital (olineRookieScoreByName below) before a
+  // single real snap is played, even though the TEAM-trend-based coloring
+  // (olineYoY) genuinely can't exist until then.
+  const olineStartersYoY = React.useMemo(() => {
+    const teamRec = r2TeamSupport?.teams?.[yearTeam];
+    if (!teamRec) return null;
+    const years = Object.keys(teamRec).map(Number).sort((a, b) => b - a);
+    const latest = years[0];
+    if (latest == null) return null;
+    const curStarters = teamRec[String(latest)]?.oline_starters || {};
+    const prevStarters = teamRec[String(latest - 1)]?.oline_starters || {};
+    if (!Object.keys(prevStarters).length) return null;
+    return { curStarters, prevStarters, teamImproved: olineYoY ? olineYoY.scoreDelta > 0 : null };
+  }, [r2TeamSupport, yearTeam, olineYoY]);
+  // Name -> O-line rookie draft-capital score (see ingest_oline_rookie_scores.py —
+  // the one real signal available for a rookie starter before he's played a
+  // down for this team: no fantasy production or 2026 combine data exists to
+  // build a fuller score the way skill-position rookies get one).
+  const { data: r2OlineRookieScores } = useR2OlineRookieScores();
+  const olineRookieScoreByName = React.useMemo(() => {
+    const map = new Map();
+    for (const p of (r2OlineRookieScores?.players || [])) {
+      if (p.player_name) map.set(p.player_name.toLowerCase().trim(), p.draft_capital_score);
+    }
+    return map;
+  }, [r2OlineRookieScores]);
   const olLinemen = React.useMemo(() => {
     if (!Array.isArray(r2PlayerOlineStability?.players) || !yearTeam) return [];
     const seasons = r2PlayerOlineStability.players
@@ -2509,7 +2607,17 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
   }, [player.id]);
 
   const isOnRoster    = myRosterIds.has(player.id);
-  const ownerMap      = React.useMemo(() => buildOwnerMap(), []);
+  // TEAM_ROSTERS is a plain mutable object — mutating it (which the async
+  // server refresh inside buildOwnerMap's refreshTeamRosters() call does
+  // once it resolves) doesn't itself trigger a re-render. Without this
+  // version bump the owner map would permanently freeze on whatever
+  // TEAM_ROSTERS held the instant this popup first opened (same bug already
+  // found and fixed in HeadToHead.jsx's allTeamRosters).
+  const [ownerMapVersion, setOwnerMapVersion] = React.useState(0);
+  React.useEffect(() => {
+    refreshTeamRostersFromServer().then(() => setOwnerMapVersion(v => v + 1));
+  }, []);
+  const ownerMap      = React.useMemo(() => buildOwnerMap(), [ownerMapVersion]);
   const ownerTeamId   = isOnRoster ? null : (ownerMap[player.id] ?? null);
   const ownerTeam     = ownerTeamId ? findTeam(ownerTeamId) : null;
   const isOwnedByOther = !!ownerTeamId;
@@ -3701,7 +3809,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                       <span className="mono faint" style={{ fontSize: 9 }}>{yearTeam} · {supportScore.season ?? statYear}</span>
                     </div>
                     <div className="card-body">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 32, fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
                           {supportScore.support_score?.toFixed(0)}
                         </span>
@@ -3709,6 +3817,46 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                           const tier = scoreToTier(supportScore.support_score);
                           const ts = SCORE_TIER_STYLE[tier];
                           return <span style={{ color: ts?.color, background: ts?.bg, border: `1px solid ${ts?.border}`, borderRadius: 4, padding: '3px 8px', fontSize: 11, fontWeight: 700 }}>{tier}</span>;
+                        })()}
+                        {olineYoY && (() => {
+                          const up = olineYoY.scoreDelta > 0;
+                          const flat = Math.abs(olineYoY.scoreDelta) < 0.05;
+                          const color = flat ? 'var(--text-faint)' : up ? '#1affa0' : '#ff4f4f';
+                          return (
+                            <span
+                              title={`O-Line overall score ${olineYoY.cur.overall_score.toFixed(1)} (${olineYoY.year}) vs ${olineYoY.prev.overall_score.toFixed(1)} (${olineYoY.prevYear}) — rank #${olineYoY.cur.overall_rank} vs #${olineYoY.prev.overall_rank}`}
+                              style={{
+                                fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700,
+                                padding: '3px 9px', borderRadius: 20,
+                                color, background: `${color}18`, border: `1px solid ${color}55`,
+                              }}
+                            >
+                              {flat ? '◆ Same as' : up ? '▲ Better than' : '▼ Worse than'} {olineYoY.prevYear}
+                              <span style={{ opacity: 0.75, fontWeight: 600, marginLeft: 5 }}>
+                                ({olineYoY.scoreDelta >= 0 ? '+' : ''}{olineYoY.scoreDelta.toFixed(1)} pts, rank {olineYoY.rankDelta >= 0 ? '+' : ''}{olineYoY.rankDelta})
+                              </span>
+                            </span>
+                          );
+                        })()}
+                        {olineWoW && (() => {
+                          const up = olineWoW.scoreDelta > 0;
+                          const flat = Math.abs(olineWoW.scoreDelta) < 0.05;
+                          const color = flat ? 'var(--text-faint)' : up ? '#1affa0' : '#ff4f4f';
+                          return (
+                            <span
+                              title={`O-Line overall score ${olineWoW.cur.overall_score.toFixed(1)} (Wk ${olineWoW.week}) vs ${olineWoW.prev.overall_score.toFixed(1)} (Wk ${olineWoW.prevWeek}) — rank #${olineWoW.cur.overall_rank} vs #${olineWoW.prev.overall_rank}`}
+                              style={{
+                                fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700,
+                                padding: '3px 9px', borderRadius: 20,
+                                color, background: `${color}18`, border: `1px solid ${color}55`,
+                              }}
+                            >
+                              {flat ? '◆ Same as' : up ? '▲ Better than' : '▼ Worse than'} Wk {olineWoW.prevWeek}
+                              <span style={{ opacity: 0.75, fontWeight: 600, marginLeft: 5 }}>
+                                ({olineWoW.scoreDelta >= 0 ? '+' : ''}{olineWoW.scoreDelta.toFixed(1)} pts)
+                              </span>
+                            </span>
+                          );
                         })()}
                       </div>
                       <SeasonStatBar label="O-Line"          val={supportScore.oline_score?.toFixed(0)}           max={100} />
@@ -3719,14 +3867,58 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                     </div>
                   </div>
                   <div className="card" style={{ marginTop: 16 }}>
-                    <div className="card-head"><div className="card-title">O-Line Starters</div></div>
+                    <div className="card-head">
+                      <div className="card-title">O-Line Starters</div>
+                      {olineStartersYoY && (
+                        <span className="mono faint" style={{ fontSize: 9 }}>vs {olineYoY?.prevYear} — new starter colored by team O-Line trend</span>
+                      )}
+                    </div>
                     <div className="card-body" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8 }}>
-                      {['LT','LG','C','RG','RT'].map(slot => (
-                        <div key={slot} style={{ textAlign: 'center' }}>
-                          <div className="dim" style={{ fontSize: 10 }}>{slot}</div>
-                          <div style={{ fontSize: 12, fontWeight: 700 }}>{supportScore.oline_starters?.[slot] ?? '—'}</div>
-                        </div>
-                      ))}
+                      {['LT','LG','C','RG','RT'].map(slot => {
+                        const name = supportScore.oline_starters?.[slot];
+                        const prevName = olineStartersYoY?.prevStarters?.[slot];
+                        const changed = olineStartersYoY && name && prevName && name !== prevName;
+                        const isRookie = name && rookieByName.get(name.toLowerCase().trim());
+                        const rookieScore = isRookie ? olineRookieScoreByName.get(name.toLowerCase().trim()) : null;
+
+                        // Prefer a real signal in this order: (1) rookie draft-capital
+                        // score, when available — the only real evaluation possible
+                        // before a rookie starter has played a down for this team;
+                        // (2) the team's actual measured O-Line trend, once real
+                        // current-season data exists; (3) no color if neither exists
+                        // yet (e.g. a non-rookie starter change before the season starts).
+                        let trend = null; // true = upgrade, false = downgrade, null = unknown
+                        let label = null;
+                        if (changed && rookieScore != null) {
+                          trend = rookieScore >= 70 ? true : rookieScore < 35 ? false : null;
+                          label = `${trend === true ? '▲' : trend === false ? '▼' : '◆'} rookie (${rookieScore.toFixed(0)} draft capital)`;
+                        } else if (changed && olineStartersYoY.teamImproved != null) {
+                          trend = olineStartersYoY.teamImproved;
+                          label = trend ? '▲ upgrade' : '▼ downgrade';
+                        }
+                        const color = trend === true ? '#1affa0' : trend === false ? '#ff4f4f' : changed ? 'var(--text-faint)' : 'var(--text)';
+                        return (
+                          <div key={slot} style={{ textAlign: 'center' }} title={changed ? `Was ${prevName} in ${olineYoY?.prevYear ?? (new Date().getFullYear() - 1)}` : undefined}>
+                            <div className="dim" style={{ fontSize: 10 }}>{slot}</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}>
+                              {name ?? '—'}
+                              {isRookie && (
+                                <span
+                                  title="Rookie"
+                                  style={{
+                                    fontSize: 9, fontWeight: 900, color: '#b78bff',
+                                    background: 'rgba(183,139,255,.15)', border: '1px solid rgba(183,139,255,.5)',
+                                    borderRadius: 3, padding: '0 4px', lineHeight: '14px',
+                                  }}
+                                >R</span>
+                              )}
+                            </div>
+                            {changed && (
+                              <div style={{ fontSize: 9, fontWeight: 700, color }}>{label ?? 'new starter'}</div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 

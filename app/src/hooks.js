@@ -160,6 +160,8 @@ export const useR2TeamRushBoxTendency   = () => useR2Analysis(api.r2.teamRushBox
 export const useR2PlayerStats2025       = () => useR2Analysis(api.r2.playerStats2025)
 export const useR2CollegeStats          = () => useR2Analysis(api.r2.collegeStats)
 export const useR2OlineIndex            = () => useR2Analysis(api.r2.olineIndex)
+export const useR2OlineIndexWeekly      = () => useR2Analysis(api.r2.olineIndexWeekly)
+export const useR2OlineRookieScores     = () => useR2Analysis(api.r2.olineRookieScores)
 export const useR2PlayerTeamHistory     = () => useR2Analysis(api.r2.playerTeamHistory)
 export const useR2WeaponScores          = () => useR2Analysis(api.r2.weaponScores)
 export const useR2TeamSupportScores     = () => useR2Analysis(api.r2.teamSupportScores)
