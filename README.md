@@ -2,9 +2,9 @@
 
 AI-powered fantasy football platform. React frontend, Cloudflare Worker API, local DuckDB pipeline, local GPU inference.
 
-**Last Updated:** June 19, 2026 | **Data Warehouse:** `local_processing/db/fantasai.duckdb` (17 tables)
+**Last Updated:** August 27, 2026 | **Data Warehouse:** `local_processing/db/fantasai.duckdb` (49 tables)
 
-> **Migration (June 15, 2026):** Databricks infrastructure decommissioned. ETL now runs entirely on the local RTX 4080 server using DuckDB. R2 exports and the frontend are unchanged.
+> **Migration (June 15, 2026):** Databricks infrastructure decommissioned. ETL now runs entirely on the local RTX 4080 server using DuckDB. R2 exports and the frontend are unchanged. A handful of `worker-api` routes (`/api/v1/db/players`, `/api/v1/db/tables`, `/api/v1/news/ai-summaries`, `/api/v1/opportunity/rankings`) still issue last-resort fallback queries against the old Databricks SQL Warehouse behind an R2 primary — status unconfirmed, see [docs/API_ENDPOINTS.md](docs/API_ENDPOINTS.md). Every other route is R2/local-pipeline-backed.
 
 ---
 
@@ -40,53 +40,49 @@ Local DuckDB Pipeline  (RTX 4080 server)
 
 | Layer | Tech | Details |
 |---|---|---|
-| **Frontend** | React + Vite | `app/src/` — 22 screens, deployed to Cloudflare Pages |
+| **Frontend** | React + Vite | `app/src/` — 29 screens, deployed to Cloudflare Pages |
 | **Worker API** | Cloudflare Worker | `worker-api/src/index.js` at `api.fantasai.net` |
-| **Ghost Worker** | Cloudflare Worker | `worker/` — secondary worker project |
+| **CBS Worker** | Cloudflare Worker | `worker/` — cookie-authenticated CBS Sports scrape proxy, `fantasai-cbs.fantasai.workers.dev` |
 | **Storage** | Cloudflare R2 | Primary data store; Worker binds as `env.BUCKET` |
-| **Data Warehouse** | DuckDB | `local_processing/db/fantasai.duckdb` — 17 tables, Bronze/Silver/Gold |
-| **ETL Scheduler** | Windows Task Scheduler | 8 tasks: daily news, weekly stats, weekly deep reasoning, Job 3 × 2, pipeline runner, 5 game-day windows |
-| **Local AI** | Qwen3 8B + 14B via Ollama | `local_processing/` — GPU pipeline on RTX 4080 |
+| **Data Warehouse** | DuckDB | `local_processing/db/fantasai.duckdb` — 49 tables, Bronze/Silver/Gold |
+| **ETL Scheduler** | Windows Task Scheduler | 14 tasks: daily news, weekly stats, weekly deep reasoning, Job 3 × 2, live scores auto-poll, pipeline runner, chat server, 5 game-day windows, one-off catchup |
+| **Local AI** | Qwen3 8B + 14B + 30B via Ollama | `local_processing/` — GPU pipeline on RTX 4080 |
 
 ## Key Directories
 
 ```
 app/                    React + Vite frontend
   src/
-    screens/            22 UI screens
+    screens/            26 UI screens
     components/         Shared components
     hooks.js            R2 data hooks
-    lib/                Stores, API client, data helpers
-worker-api/             Primary Cloudflare Worker
+    lib/                Stores, API client, data helpers (incl. liveScoring.js)
+worker-api/             Primary Cloudflare Worker — api.fantasai.net
   src/index.js          All API routes
-worker/                 Ghost Cloudflare Worker
-local_processing/       Local ETL + AI pipeline
-  db.py                       DuckDB connection + schema (17 tables)
+worker/                 CBS Worker — fantasai-cbs.fantasai.workers.dev (cookie-authenticated CBS Sports scrape proxy)
+local_processing/       Local ETL + AI pipeline (no Databricks anywhere in this tree)
+  db.py                       DuckDB connection + schema (49 tables, Bronze/Silver/Gold + supplements)
   db/fantasai.duckdb          Data warehouse file
   orchestrator_daily.py       Daily pipeline (7AM)
   orchestrator_weekly.py      Weekly pipeline (Tue 3AM)
   orchestrator_weekly_reasoning.py  Weekly deep reasoning (Wed 1:30AM)
-  ingest/
-    ingest_sleeper_players.py   Sleeper API + ESPN IDs
-    ingest_espn_news.py         ESPN News API
-    ingest_google_news.py       Google News RSS
-    ingest_nfl_transactions.py  ESPN Transactions
-    ingest_apisports.py         API-Sports.io game stats
-    ingest_nflverse.py          nfl_data_py stats/depth/NGS
+  ingest/                 ~25 ingest scripts: nflverse, Sleeper, CBS (via worker/ proxy), CFBD (rookies),
+                          ESPN/Google News, API-Sports, weather, DraftKings, Kalshi, and more
   gold/
     gold_player_consolidation.py  master_player_id + gold tables
   export/
-    export_to_r2.py             Uploads 11 JSON keys to R2
+    export_to_r2.py             Uploads JSON keys to R2 (~30+ distinct keys across all export/job scripts)
   job1_news_processor.py      Bulk news (Qwen3 8B)
   job2_fantasy_analyzer.py    Fantasy analysis (Qwen3 14B) + sleeper picks
-  job3_player_writeups.py     Player writeups (Qwen3 14B)
-  job4_weekly_startsit.py     Weekly start/sit advisor (Qwen3 14B) — run Thu/Fri
+  job3_player_writeups.py     Player writeups (Qwen3 14B / 8B)
+  job4_weekly_startsit.py     Weekly start/sit advisor (Qwen3 14B)
   job5_deep_reasoner.py       Deep fantasy reasoning (Qwen3 30B) — weekly overnight
   job_gameday.py              Game-day injuries/inactives/news (no LLM)
+  job_live_scores.py          Local live-scoring poller (R2-backed, replaces direct ESPN calls from the Worker)
+  chat_server.py               Local FastAPI chat backend (port 8000), first hop for worker-api's /api/v1/chat
   pipeline_runner.py          Sequencer for Jobs 1-4
   requirements-local.txt      pip dependencies
-notebooks/              Reference notebooks (Databricks source logic)
-databricks/             SQL + archived notebook backups
+_Archive_20260601/databricks/  Archived — old Databricks SQL/notebooks, not live
 docs/                   Documentation
 ```
 
@@ -95,6 +91,11 @@ docs/                   Documentation
 ```bash
 # Install dependencies
 pip install -r local_processing/requirements-local.txt
+
+# Install Ollama and pull the models the jobs use
+ollama pull qwen3:8b
+ollama pull qwen3:14b
+ollama pull qwen3:30b
 
 # Initialize DuckDB schema
 python -c "from local_processing.db import get_conn, init_schema; init_schema(get_conn())"
@@ -114,12 +115,12 @@ python local_processing/orchestrator_daily.py
 
 The frontend **never queries DuckDB directly**. All data goes through R2:
 
-1. `orchestrator_daily.py` ingests Sleeper → ESPN → Google News → Transactions → DuckDB Bronze/Silver/Gold
-2. `export_to_r2.py` uploads 11 JSON snapshots to R2 via Worker API (`PUT api.fantasai.net/api/v1/r2/{key}`)
-3. Worker API reads R2 via `env.BUCKET` and serves to frontend
+1. `orchestrator_daily.py` / `orchestrator_weekly.py` ingest nflverse, Sleeper, CBS (via `worker/` proxy), CFBD, news, etc. into DuckDB Bronze/Silver/Gold
+2. `export_to_r2.py` (plus several job/ingest scripts directly) upload JSON snapshots to R2 via Worker API (`PUT api.fantasai.net/api/v1/r2/{key}`)
+3. Worker API reads R2 via `env.BUCKET` and serves to frontend; `/api/v1/db/players` remains as a narrow last-resort fallback only, not the primary read path
 4. Frontend hooks (`useR2Analysis`, etc.) consume via `api.fantasai.net`
 
-Local Qwen pipeline reads enriched news from R2, scores players, writes results back to R2.
+Local Qwen pipeline (via a locally-hosted Ollama server) reads enriched news from R2, scores players, writes results back to R2. There is no "gold layer" ingestion into Databricks — that step was deleted in the 2026-06-15 migration.
 
 ## R2 Data Keys (Frontend Data Sources)
 
@@ -143,14 +144,22 @@ Local Qwen pipeline reads enriched news from R2, scores players, writes results 
 
 ## Worker API Routes (Selected)
 
-| Route | Handler | Description |
-|---|---|---|
-| `GET /api/v1/players` | `handlePlayers` | Sleeper player pool (1h cache) |
-| `GET /api/v1/r2/get` | `handleR2Proxy` | Raw R2 access (auth required) |
-| `PUT /api/v1/r2/{key}` | — | R2 write (used by local pipeline) |
-| `GET /api/v1/news/articles` | `handleDbArticles` | Player news, R2-backed |
+Full list in [docs/API_ENDPOINTS.md](docs/API_ENDPOINTS.md). Selected highlights:
 
-**Auth:** `X-FantasAI-Key` header must match `env.FANTASAI_KEY` secret.
+| Route | Description |
+|---|---|
+| `GET /api/v1/players` | Sleeper player pool (1h edge cache) |
+| `GET/PUT/DELETE /api/v1/r2/{key}` | Raw R2 passthrough — how most exports are read/written |
+| `GET /api/v1/news/articles` | Player news, R2-backed (recommended over the legacy `/api/v1/news/ai-summaries`) |
+| `GET /api/v1/db/players` | Last-resort fallback player list — still Databricks-backed, behind the R2 draft board |
+| `GET/POST /api/v1/owners/config`, `POST /api/v1/owners/verify` | Owner map + password login, R2-backed |
+| `GET/POST /api/v1/draft/archive`, `POST /api/v1/draft/remote` | Draft archive + remote/mock draft sync |
+| `GET/POST /api/v1/draft/picks` | Live draft picks array |
+| `GET /api/v1/draft/ghost-board`, `POST /api/v1/draft/ghost-pick` | AI Ghost Picks mock-draft engine |
+| `POST /api/v1/chat` | Chat — local Qwen first, OpenAI/Anthropic fallback (not Databricks) |
+| `GET/POST /api/v1/labels/article`, `GET /api/v1/feedback/scores`, `POST /api/v1/feedback/vote` | Human-in-the-loop article labeling/feedback |
+
+**Auth:** `X-FantasAI-Key` header must match `env.FANTASAI_KEY` secret on gated routes; most POST routes have no auth check at all.
 
 ## Local AI Pipeline
 
@@ -179,15 +188,20 @@ Five jobs on local GPU via Ollama (Jobs 1-4 use Qwen; job_gameday has no LLM):
 
 ## Frontend Screens
 
-Dashboard · DraftRoom · CurrentRoster · Players · Waivers · News · Trade · WarRoom · Compare · HeadToHead · LeagueSettings · PowerRankings · LineupDecisions · OwnerIntel · Transactions · SeasonPerformance · DraftRecap · Watchlist · ScoringTest · Sources · AccountEdit · AdminOwners
+Dashboard · DraftRoom · CurrentRoster · Players · Waivers · News · Trade · WarRoom · Compare · HeadToHead · LeagueSettings · PowerRankings · LineupDecisions · OwnerIntel · Transactions · SeasonPerformance · DraftRecap · Watchlist · ScoringTest · Sources · AccountEdit · AdminOwners · AdminLeagues · Login · LoginLog · ChangePassword · PreviousDrafts · Kalshi · DfsOptimizer
+
+See [app/BACKEND_TO_FRONTEND.md](app/BACKEND_TO_FRONTEND.md) for the full screen-to-endpoint mapping.
 
 ## Secrets
 
 | Secret | Location | Purpose |
 |---|---|---|
-| `FANTASAI_KEY` | Cloudflare Worker secret + `.env` | API auth header |
-| `WWO_API_KEY` | Cloudflare Worker secret | Weather API — never hardcode |
-| `API_SPORTS_KEY` | `.env` only | API-Sports.io stats — never hardcode |
+| `FANTASAI_KEY` | Cloudflare Worker secret + `.env` | `X-FantasAI-Key` auth header, gates a subset of routes |
+| `WWO_API_KEY` | Cloudflare Worker secret | WorldWeatherOnline forecast API — never hardcode |
+| `RESEND_API_KEY` | Cloudflare Worker secret | Password-reset emails |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Cloudflare Worker secret | Chat fallback tiers behind local Qwen |
+| `LOCAL_CHAT_URL` | Cloudflare Worker secret | Points the Worker at `chat_server.py` on the local machine |
+| `API_SPORTS_KEY` | `local_processing/.env` only | API-Sports.io stats — never hardcode |
 
 ---
 

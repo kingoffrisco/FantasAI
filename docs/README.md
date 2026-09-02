@@ -9,9 +9,10 @@
 
 ## 📚 Documentation Index
 
-- **[../ARCHITECTURE.md](../ARCHITECTURE.md)** — Canonical architecture reference: system inventory, DuckDB schema (~33 tables), job schedules (14 live Task Scheduler tasks), AI pipeline (Jobs 1-5), repository structure, known issues
+- **[../ARCHITECTURE.md](../ARCHITECTURE.md)** — Canonical architecture reference: system inventory, DuckDB schema (49 tables), job schedules (14 live Task Scheduler tasks), AI pipeline (Jobs 1-5), repository structure, known issues
 - **[API_ENDPOINTS.md](./API_ENDPOINTS.md)** — Every worker-api route, grouped by feature, with R2-backed vs. still-Databricks-backed status flagged per endpoint
 - **[DATA_SCHEMAS.md](./DATA_SCHEMAS.md)** — JSON shape for every R2 export/endpoint, including the new ones (player scores, deep reasoning, live scoring, O-Line Index/Stability, offensive ecosystem, rookie scores)
+- **[UI_INTEGRATION_GUIDE.md](./UI_INTEGRATION_GUIDE.md)** — Player data field schema and frontend consumption patterns for the draft board export; corrected 2026-08-27 to reflect R2 as primary (was previously written around Databricks as primary)
 - **[../app/BACKEND_TO_FRONTEND.md](../app/BACKEND_TO_FRONTEND.md)** — Frontend integration guide: `app/src/api.js` function-to-endpoint map, screen inventory, known frontend issues
 - **[BETTING_DATA_SOURCES.md](./BETTING_DATA_SOURCES.md)** — DraftKings DFS + Kalshi prediction-market ingestion (new, 2026-08-22): what's live, provider cost comparison, risk notes
 - **[WEEKLY_DEEP_REASONING_TASK.md](./WEEKLY_DEEP_REASONING_TASK.md)** — Task Scheduler setup for the Job 5 (Qwen3:30B) overnight reasoning job — current and accurate

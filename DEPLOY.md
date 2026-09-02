@@ -1,13 +1,16 @@
 # FantasAI Football — Frontend & Workers Reference
 
+**Last Updated:** August 27, 2026 — corrected to remove Databricks/AWS-for-Databricks framing (Databricks was decommissioned 2026-06-15; R2 is bound directly via the native `env.BUCKET` binding, not S3-compatible credentials) and to bring the route/secrets list in `worker-api` up to date. See [docs/API_ENDPOINTS.md](docs/API_ENDPOINTS.md) for the full, authoritative route list.
+
 ## Repository Layout
 
 ```
 d:\Project\Fantasy\
-├── app/             React/Vite frontend  →  Cloudflare Pages
-├── worker/          CBS Worker           →  fantasai-cbs (cookie proxy for CBS Sports)
-├── worker-api/      Main API Worker      →  fantasai-api (api.fantasai.net)
-└── databricks/      ETL scripts that write NFL data to Cloudflare R2
+├── app/                          React/Vite frontend  →  Cloudflare Pages
+├── worker/                       CBS Worker           →  fantasai-cbs (cookie proxy for CBS Sports)
+├── worker-api/                   Main API Worker      →  fantasai-api (api.fantasai.net)
+├── local_processing/             Local Python/DuckDB ETL + Qwen (Ollama) pipeline → writes to R2
+└── _Archive_20260601/databricks/ Archived — old Databricks SQL/notebooks, decommissioned 2026-06-15, not live
 ```
 
 ---
@@ -80,40 +83,47 @@ npx wrangler tail            # live logs
 ### 3. Main API Worker — `worker-api/`
 
 Cloudflare Worker **`fantasai-api`**, served at **`api.fantasai.net`**.
-Hub for R2 storage, Databricks, ESPN, Sleeper, and CBS proxy routes.
+Hub for R2 storage (primary data store), Sleeper, ESPN, CBS proxy, chat (local Qwen/OpenAI/Anthropic), draft, owners/auth, and push-notification routes. Databricks was decommissioned 2026-06-15 — a small handful of routes still fall back to it behind an R2 primary (see below), but it is not part of the primary path for anything.
 
 | | |
 |---|---|
 | Live URL | `https://api.fantasai.net` |
 | Wrangler name | `fantasai-api` |
-| R2 bucket | `fantasai-r2` |
+| R2 bucket | `fantasai-r2` (bound as `env.BUCKET`) |
 
-**Routes:**
-- `/api/health` — liveness check
-- `/api/v1/r2/*` — R2 storage proxy (Databricks exports)
-- `/api/v1/league` `/api/v1/rosters` `/api/v1/injuries` `/api/v1/draft` — proxies to CBS Worker
+**Routes (selected — full list in [docs/API_ENDPOINTS.md](docs/API_ENDPOINTS.md)):**
+- `/api/health`, `/api/v1/storage/test` — liveness / R2 probe
+- `/api/v1/r2/{key}` (GET/PUT/DELETE) — R2 passthrough; this is how most JSON exports are read/written
 - `/api/v1/players` — Sleeper full player pool (1h edge cache)
-- `/api/v1/nfl/scoreboard` `/api/v1/nfl/schedule` `/api/v1/nfl/news` — ESPN data
-- `/api/v1/chat` — Databricks AI chat
-- `/api/v1/owners/*` — owner map stored in R2
-- `/api/v1/week/current` — current week/season setting
-- `/api/v1/schedule` `/api/v1/league-settings` — league config stored in R2
-- `/api/v1/proxy` — server-side CORS bypass for whitelisted third-party APIs
-- `/api/v1/transactions` — transaction log
-- `/api/v1/user-prefs` — per-user preferences (GET `?teamId=N`, POST `{ teamId, prefs }`)
-- `/api/v1/trade-offers` — league-wide trade offers (GET, POST `{ offers }`)
-- `/api/v1/waivers` — waiver order + dropped players (GET, POST `{ claims, order }`)
+- `/api/v1/db/players`, `/api/v1/db/tables` — ⚠️ last-resort Databricks fallback, behind R2; status unconfirmed
+- `/api/v1/news/articles` — player news (R2, actively maintained); `/api/v1/news/ai-summaries` and `/api/v1/opportunity/rankings` are ⚠️ Databricks fallback behind R2
+- `/api/v1/nfl/scoreboard` `/api/v1/nfl/player-stats` — live scoring, R2-backed (written by the local `job_live_scores.py` poller); `/api/v1/nfl/schedule` `/api/v1/nfl/news` — direct ESPN
+- `/api/v1/chat` — local Ollama first, OpenAI fallback, Anthropic last resort (NOT Databricks)
+- `/api/v1/owners/config` `/api/v1/owners/verify` `/api/v1/owners/reset-*` — owner map + auth, R2-backed
+- `/api/v1/draft/picks` `/api/v1/draft/archive` `/api/v1/draft/remote` — draft sync, R2-backed
+- `/api/v1/draft/ghost-board` `/api/v1/draft/ghost-pick` `/api/v1/draft/ghost-reset` — AI Ghost Picks mock-draft engine
+- `/api/v1/leagues/create` `/api/v1/leagues/import` — league management (requires `X-FantasAI-Key`)
+- `/api/v1/week/current`, `/api/v1/schedule`, `/api/v1/league-settings`, `/api/v1/community*` — league config, R2-backed
+- `/api/v1/proxy` — server-side CORS bypass for whitelisted third-party APIs; `/api/v1/scrape` — unrestricted server-side fetch (no host whitelist — treat as a hardening item)
+- `/api/v1/transactions`, `/api/v1/trade-offers`, `/api/v1/waivers`, `/api/v1/user-prefs` — league state, R2-backed
+- `/api/v1/labels/article`, `/api/v1/feedback/scores`, `/api/v1/feedback/vote` — human-in-the-loop labeling
+- `/api/v1/login-log` — login audit log (requires `X-FantasAI-Key` to read)
+- `/api/v1/push/subscribe` `/api/v1/push/unsubscribe` `/api/v1/push/send` — Web Push (VAPID); no-ops until `PUSH_SUBS` KV is provisioned
 
-**Secrets:**
+**Secrets** (actual `env.*` usages in `worker-api/src/index.js`):
 
 ```powershell
-wrangler secret put FANTASAI_KEY          --name fantasai-api   # shared secret (required header: X-FantasAI-Key)
+wrangler secret put FANTASAI_KEY          --name fantasai-api   # shared secret (required header: X-FantasAI-Key on gated routes)
 wrangler secret put RESEND_API_KEY        --name fantasai-api   # resend.com → owner password-reset emails
-wrangler secret put AWS_ACCESS_KEY_ID     --name fantasai-api   # R2 token for Databricks → R2 writes
-wrangler secret put AWS_SECRET_ACCESS_KEY --name fantasai-api   # R2 token secret
-wrangler secret put DATABRICKS_HOST       --name fantasai-api   # Databricks workspace URL
-wrangler secret put DATABRICKS_TOKEN      --name fantasai-api   # Databricks personal access token
+wrangler secret put WWO_API_KEY           --name fantasai-api   # WorldWeatherOnline forecasts — never hardcode
+wrangler secret put LOCAL_CHAT_URL        --name fantasai-api   # points at local chat_server.py for the first chat hop
+wrangler secret put OPENAI_API_KEY        --name fantasai-api   # chat fallback tier
+wrangler secret put ANTHROPIC_API_KEY     --name fantasai-api   # chat last-resort fallback tier
+wrangler secret put VAPID_PRIVATE_KEY     --name fantasai-api   # web push (optional — degrades gracefully if unset)
+wrangler secret put VAPID_PUBLIC_KEY      --name fantasai-api   # web push (optional)
 ```
+
+Legacy, last-resort-fallback only — **not required for a new setup**, and status of the underlying warehouse is unconfirmed: `DATABRICKS_HOST`/`DATABRICKS_URL`, `DATABRICKS_TOKEN`, `DATABRICKS_WAREHOUSE_ID`/`DATABRICKS_HTTP_PATH`. There is no AWS S3 usage in `worker-api` — R2 is the store, bound directly as `env.BUCKET`.
 
 ```powershell
 cd worker-api

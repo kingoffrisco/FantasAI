@@ -31,8 +31,8 @@
 **As of August 22, 2026 (verified against live Windows Task Scheduler and full source read):**
 
 ```
-🗄️  DATABASE:   DuckDB (local_processing/db/fantasai.duckdb) — ~33 tables
-   ├─ Bronze:        12  (10 original + bronze_rookie_scores, bronze_team_rss_news)
+🗄️  DATABASE:   DuckDB (local_processing/db/fantasai.duckdb) — 49 tables (verified live 2026-08-27)
+   ├─ Bronze:        18
    ├─ Silver:         4
    ├─ Gold:           3
    ├─ Export:         1
@@ -40,8 +40,11 @@
    ├─ nflverse supplement:  6  (headshots, YAC, NGS, depth, snaps, efficiency)
    ├─ O-Line Index:   2  (team_oline_index, player_team_seasons)
    ├─ Offensive Ecosystem: 2  (player_weapon_scores, team_support_scores)
-   ├─ O-Line Stability: 4  (depth_chart_history, player_roster_bio, player_penalties,
+   ├─ O-Line Stability: 5  (depth_chart_history, player_roster_bio, player_penalties,
    │                        team_oline_stability, player_oline_stability)
+   ├─ Coverage/Rush Box Matchups: 4  (player_coverage_splits, team_coverage_tendency,
+   │                        player_rush_box_splits, team_rush_box_tendency)
+   ├─ Floor/Ceiling Projections: 1  (player_floor_ceiling)
    └─ Misc:           1  (watchlist)
 
 ⚙️ JOBS:       14 Windows Task Scheduler tasks under \FantasAI\ (confirmed live)
@@ -162,7 +165,7 @@ This matches the original design intent exactly — no correction needed here, j
 └───────────────────────────┬───────────────────────────────────────────────┘
                              ▼
          Bronze (raw) → Silver (cleaned) → Gold (business logic)
-         local_processing/db/fantasai.duckdb  (~33 tables)
+         local_processing/db/fantasai.duckdb  (49 tables)
                              │
                              ▼  export_to_r2.py + direct r2_put() calls
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -181,7 +184,7 @@ This matches the original design intent exactly — no correction needed here, j
               └──────────────┬───────────────┘
                              ▼
                     Frontend (React/Vite, app.fantasai.net)
-                    26 screens, 23 routed, 3 orphaned (see Known Issues)
+                    29 screens, 26 routed, 3 orphaned (see Known Issues)
 ```
 
 ---
@@ -289,7 +292,7 @@ Single-purpose wrapper: runs only Job 5 (`--limit 300` default, bumped from 15 o
 
 ```
 local_processing/
-├── db.py                              # DuckDB schema (~33 tables)
+├── db.py                              # DuckDB schema (49 tables)
 ├── db/fantasai.duckdb
 ├── ssl_utils.py                       # Windows cert store (truststore)
 ├── orchestrator_daily.py              # 7 AM: news → gold → R2 (+ AI Task 4)

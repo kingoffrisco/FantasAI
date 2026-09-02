@@ -20,7 +20,7 @@ Each table gets its own JSON file: `{table_name}_schema.json`
 
 ```json
 {
-  "table_name": "main.fantasai.{table_name}",
+  "table_name": "{table_name}",
   "layer": "Bronze|Silver|Gold|Analytics|Export",
   "description": "Brief description of the table's purpose",
   "version": "1.0",
@@ -66,9 +66,11 @@ Each table gets its own JSON file: `{table_name}_schema.json`
 
 ## Documentation Workflow
 
+> **Note (2026-08-27):** This project migrated off Databricks on 2026-06-15. Tables now live in the local DuckDB warehouse (`local_processing/db/fantasai.duckdb`), created and evolved via `local_processing/db.py`. The "document every table here" law is unchanged — only where the table is created has changed.
+
 ### 1. When Creating a New Table
 
-1. Create the table in Databricks
+1. Add the `CREATE TABLE IF NOT EXISTS` definition to `local_processing/db.py` (and, if it's populated by ingestion, add/extend a script under `local_processing/ingest/`)
 2. **Immediately** create a schema file in this directory
 3. Fill in all required fields
 4. Commit to Git
@@ -76,14 +78,15 @@ Each table gets its own JSON file: `{table_name}_schema.json`
 
 ### 2. When Updating an Existing Table
 
-1. Make changes to the table in Databricks
-2. Update the corresponding schema file:
+1. Make changes to the table definition in `local_processing/db.py` (add columns, adjust types — DuckDB `ALTER TABLE` or a rebuild, depending on the change)
+2. If the table feeds an R2 export, update `local_processing/export/export_to_r2.py` (or the job script that writes it directly) accordingly
+3. Update the corresponding schema file:
    - Increment version number
    - Update `last_updated` date
    - Add/modify columns as needed
    - Document breaking changes in description
-3. Commit to Git
-4. Frontend team validates changes against deployed UI
+4. Commit to Git
+5. Frontend team validates changes against deployed UI
 
 ### 3. Schema Validation
 
@@ -97,26 +100,12 @@ Before merging any PR that touches tables:
 ### ✅ Completed
 
 - `gold_player_dim` - Master player dimension
+- `export_player_news`, `export_breakout_candidates`, `export_defense_performance`, `export_sleeper_picks` — see existing `*_schema.json` files in this directory
+- `bronze_article_labels`, `gold_player_mapping_corrections`, `user_settings`, `deep_reasoning` — see existing `*_schema.json` files in this directory
 
-### 🔴 Pending (Priority 1 - Export Tables)
+### 🔴 Pending
 
-- `export_sleeper_picks`
-- `export_breakout_candidates`
-- `export_players_2026_draft`
-- `draft_ready_roster_2026`
-
-### 🔴 Pending (Priority 2 - Gold Layer)
-
-- `gold_player_id_mapping`
-- `gold_weekly_stats`
-- `player_combine_results`
-
-### 🔴 Pending (Priority 3 - Analytics Layer)
-
-- `analytics_player_trends`
-- `analytics_positional_rankings`
-- `analytics_player_season_stats`
-- `ml_predictions`
+Cross-check `local_processing/db.py` (49 tables) against the `*_schema.json` files present in this directory and file schemas for any table still missing one — particularly the newer proprietary-metric tables (O-Line Index, O-Line Stability, Offensive Ecosystem, rookie scores) and anything feeding a new R2 export.
 
 ## Example Usage (Frontend)
 

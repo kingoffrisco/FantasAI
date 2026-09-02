@@ -1,46 +1,39 @@
 # FantasAI UI Integration Guide
 
-**Last Updated:** June 9, 2026  
-**Status:** ✅ Production Ready  
-**Database:** Databricks Unity Catalog (main.fantasai)
+**Last Updated:** August 27, 2026
+**Status:** ✅ Production Ready
+**Data Store:** Cloudflare R2 (primary) — see correction below
+
+> **Correction (2026-08-27):** This guide originally described Databricks Unity Catalog as "the Database" and `GET /api/v1/db/players` as the primary read path. That's no longer accurate. Databricks was decommissioned on 2026-06-15 (see [ARCHITECTURE.md](../ARCHITECTURE.md)). **Cloudflare R2 is the primary data store.** `/api/v1/db/players` still exists in `worker-api`, but only as a narrow last-resort fallback behind an R2 read — its status (whether Databricks credentials are even still provisioned) is unconfirmed. Table/record-count details below reflect the original Databricks-era export tables; the equivalent data now lives in R2 as JSON (see [DATA_SCHEMAS.md](./DATA_SCHEMAS.md) for current shapes) and record counts have drifted since.
 
 ---
 
 ## ⚠️ Data Source Rules
 
-**ALWAYS consume from Export tables. NEVER from Bronze or Silver:**
+**Always consume the R2-backed JSON exports. Treat the legacy `/api/v1/db/*` routes as fallback-only:**
 
-| Layer | Tables | Status |
-|-------|--------|--------|
-| ✅ USE | `main.fantasai.export_*` | Filtered, enriched, frontend-optimized |
-| ❌ AVOID | `main.fantasai.bronze_*` | Raw dumps — nulls, duplicates, untrusted |
-| ❌ AVOID | `main.fantasai.silver_*` | Internal operational data — incomplete joins, sensitive fields |
+| Source | Status |
+|-------|--------|
+| ✅ USE | `GET /api/v1/r2/{key}` (e.g. `fantasai/players/export_players_2026_draft.json`) — primary, local-pipeline-backed |
+| ⚠️ FALLBACK ONLY | `GET /api/v1/db/players`, `/api/v1/db/tables`, `/api/v1/news/ai-summaries`, `/api/v1/opportunity/rankings` — still issue a live Databricks SQL Warehouse query behind an R2 primary; prefer the R2 equivalent |
 
-**Why it matters:**
+**Frontend-facing R2 exports (formerly the Export-table layer):**
 
-| Aspect | `silver_player_news` ❌ | `export_player_news` ✅ |
-|--------|------------------------|------------------------|
-| Rows | 242 (everything) | 86 (filtered to relevant) |
-| Columns | 11 (operational) | 15 (frontend-optimized) |
-| AI Summary | No | Yes (`summary_text`) |
-| Fantasy Insight | No | Yes (`fantasy_insight`) |
-| Impact Score | No | Yes (`impact_score`) |
-| Source | Bronze → Silver | Gold → Export |
-
-**Correct ETL flow:**
-```
-Bronze (raw APIs) → Silver (cleaned) → Gold (enriched) → Export (frontend snapshots) → R2 (gzipped JSON) → Frontend
-```
-
-**Frontend-ready Export tables:**
-
-| Table | Records | Purpose |
+| Data | R2 Key | Purpose |
 |-------|---------|---------|
-| `export_players_2026_draft` | 997 | Draft board with tiers/rankings — all active, all draftable |
-| `export_player_news` | 86 articles | AI-enriched news with fantasy insights |
-| `export_defense_performance` | 606 | Weekly matchup rankings |
-| `export_breakout_candidates` | 7 | ML-powered sleeper picks |
-| `export_sleeper_picks` | 24 | High-value waiver targets |
+| Draft board | `fantasai/players/export_players_2026_draft.json` | Draft board with tiers/rankings — all active, all draftable |
+| Player news | `fantasai/analysis/player_news.json` (falls back to `fantasai/news/enriched_news.json`) | AI-enriched news with fantasy insights |
+| Defense performance | `fantasai/analysis/defense_performance.json` | Weekly matchup rankings |
+| Breakout candidates | `fantasai/analysis/breakout_candidates.json` | ML/LLM-powered sleeper picks |
+| Sleeper picks | part of `fantasai/analysis/player_scores.json` (Job 2) | High-value waiver targets |
+
+Full current key list: [DATA_SCHEMAS.md](./DATA_SCHEMAS.md) and [API_ENDPOINTS.md](./API_ENDPOINTS.md).
+
+**Current data flow:**
+```
+nflverse / Sleeper / CBS / CFBD / news sources → local DuckDB (Bronze → Silver → Gold)
+  → local Qwen enrichment (Jobs 1-5) → R2 (JSON) → worker-api → Frontend
+```
 
 ---
 
@@ -50,7 +43,7 @@ Bronze (raw APIs) → Silver (cleaned) → Gold (enriched) → Export (frontend 
 
 Use **`export_players_2026_draft`** (via R2 / Worker API) as your main player source for the 2026 fantasy draft season.
 
-> **Data Access:** Frontend reads R2 snapshots via `api.fantasai.net/api/v1/db/players` — direct Databricks queries are not used in production.
+> **Data Access:** Frontend reads the R2 snapshot directly via `GET api.fantasai.net/api/v1/r2/fantasai/players/export_players_2026_draft.json`. `GET /api/v1/db/players` still exists but is a last-resort fallback only, behind this R2 read — don't build new code against it as the primary source.
 
 **Key Stats:**
 - **997 total players** (all have `isDraftable: true` — retired players removed June 12, 2026)
@@ -86,9 +79,10 @@ Replace all UI labels like "active players" or "current players" with **"2026 Pl
 
 ### 🏈 Table 1: export_players_2026_draft
 
-**Full Name:** `main.fantasai.export_players_2026_draft`  
-**R2 Access:** `GET api.fantasai.net/api/v1/db/players` (source: `databricks`, table: `export_players_2026_draft`)  
-**Records:** 997 (all `isDraftable: true` — retired players removed June 12, 2026)  
+**Origin table (local DuckDB, pre-export):** `export_players_2026_draft`
+**Primary R2 Access:** `GET api.fantasai.net/api/v1/r2/fantasai/players/export_players_2026_draft.json`
+**Fallback (last-resort, unconfirmed live):** `GET api.fantasai.net/api/v1/db/players` — still queries the old Databricks SQL Warehouse
+**Records:** ~997 as of the original count (all `isDraftable: true`); verify current count via the live R2 payload since it refreshes daily  
 **Purpose:** Draft board, player lists, rankings, search
 
 #### Live R2 Field Schema (camelCase)
@@ -116,11 +110,17 @@ Replace all UI labels like "active players" or "current players" with **"2026 Pl
 
 #### Example Queries
 
-**Fetch all 997 draftable players (via Worker API):**
+**Fetch draftable players (via Worker API, R2-backed — recommended):**
+```js
+const res = await fetch('https://api.fantasai.net/api/v1/r2/fantasai/players/export_players_2026_draft.json');
+const { data: players } = await res.json();
+```
+
+**Legacy fallback (unconfirmed live, avoid in new code):**
 ```js
 const res = await fetch('https://api.fantasai.net/api/v1/db/players');
 const { source, table, count, players } = await res.json();
-// source: "databricks", table: "export_players_2026_draft", count: 997
+// source: "databricks" — only reached if the R2 read above fails
 ```
 
 **Filter by position (client-side):**
@@ -149,127 +149,42 @@ SELECT * FROM main.fantasai.export_players_2026_draft LIMIT 2500;
 
 ---
 
-### 📈 Table 2: ml_weekly_predictions
+### 📈 Weekly Predictions / Start-Sit — Current Equivalent
 
-**Full Name:** `main.fantasai.ml_weekly_predictions`  
-**Size:** 826 KB | 24,862 rows  
-**Purpose:** In-season weekly projections, start/sit recommendations
+> **Correction (2026-08-27):** The original Tables 2-4 here (`ml_weekly_predictions`, `ml_feature_importance`, `ml_player_features`) described a Databricks-trained, position-specific XGBoost model registry that no longer exists — it was decommissioned along with the rest of Databricks on 2026-06-15. There is no ML model registry or feature-importance table in the current system. The equivalent functionality is now produced by the local Qwen pipeline instead of trained ML models:
 
-#### Key Columns
+| Need | Current source |
+|---|---|
+| Weekly projections / start-sit | `fantasai/analysis/weekly_startsit.json` (Job 4, hybrid deterministic score + Qwen3 14B for borderline calls) |
+| Player scoring (waiver/trade/dynasty/matchup) | `fantasai/analysis/player_scores.json` (Job 2, Qwen3 14B, 9-dimension scoring) |
+| "Why this prediction?" style reasoning | `fantasai/analysis/deep_reasoning.json` (Job 5, Qwen3 30B — narrative reasoning, not a feature-importance table; covers only the weekly top-slice, not the full pool) |
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `master_player_id` | STRING | Join to players_2026_draft |
-| `player_name` | STRING | Display name |
-| `position` | STRING | QB/RB/WR/TE |
-| `season` | INTEGER | 2024, 2025, etc. |
-| `week` | INTEGER | Week number (1-18) |
-| `predicted_next_week_points` | DOUBLE | ML prediction for this week |
-| `target_next_week_points` | DOUBLE | Actual points (after game) |
-| `prediction_generated_at` | TIMESTAMP | When prediction was made |
-
-#### Example Query
-
-**Get week 18 projections:**
-```sql
-SELECT 
-  pred.player_name,
-  pred.position,
-  d.current_team,
-  pred.predicted_next_week_points,
-  d.season_avg_points as season_avg
-FROM main.fantasai.ml_weekly_predictions pred
-JOIN main.fantasai.players_2026_draft d 
-  ON pred.master_player_id = d.master_player_id
-WHERE pred.season = 2024 
-  AND pred.week = 18
-  AND d.is_draftable = TRUE
-ORDER BY pred.predicted_next_week_points DESC
-LIMIT 50;
-```
+There is no `is_draftable`-style SQL filtering step for these — each is a flat JSON array fetched via `/api/v1/r2/{key}`; filter/sort client-side.
 
 ---
 
-### 🧠 Table 3: ml_feature_importance
+## ⚡ Performance & Caching
 
-**Full Name:** `main.fantasai.ml_feature_importance`  
-**Purpose:** Model explainability, "Why this prediction?" tooltips
+R2 objects served via `/api/v1/r2/{key}` generally carry `Cache-Control: public, max-age=3600`. There is no query engine or indexing layer in front of these files — the frontend fetches the JSON snapshot and filters/sorts client-side.
 
-#### Key Columns
+### Query/Filter Best Practices
 
-| Column | Type | Purpose |
-|--------|------|---------|
-| `feature` | STRING | Feature name |
-| `importance_pct` | DOUBLE | % contribution to predictions |
-| `model_position` | STRING | QB/RB/WR/TE |
-
-#### Top Features
-
-1. **wow_change** (23%) - Week-over-week performance change (momentum)
-2. **rolling_3g_avg** (22%) - Last 3 games average (recent form)
-3. **rolling_5g_stddev** (6%) - Consistency metric
-
-**Use for tooltips:** "This prediction is based primarily on recent momentum (23%) and 3-game average (22%)"
-
----
-
-### 📊 Table 4: ml_player_features
-
-**Full Name:** `main.fantasai.ml_player_features`  
-**Size:** 162,896 rows | 70 features  
-**Purpose:** Advanced analytics, historical analysis, power user exports
-
-**⚠️ WARNING:** Large table - always use WHERE clauses!
-
----
-
-## ⚡ Performance & Optimization
-
-### R2 Storage Enabled
-
-All tables configured with:
-- ✅ Auto Optimize (automatic compaction)
-- ✅ Auto Compaction (merge small files)
-- ✅ Z-Ordering (physical clustering)
-- ✅ Predictive Optimization (intelligent caching)
-
-### Expected Query Performance
-
-| Query Type | Expected Latency |
-|------------|------------------|
-| Player search (by name) | < 100ms |
-| Position filter (QBs) | < 50ms |
-| Top 100 rankings | < 200ms |
-| Player detail lookup | < 20ms |
-| Weekly predictions | < 300ms |
-
-### Query Best Practices
-
-1. **Always filter by `is_draftable`** - reduces dataset by 18%
-2. **Use indexed columns** - position, master_player_id, is_draftable
-3. **Limit result sets** - use `LIMIT` for paginated lists
-4. **Cache hot queries** - top 100 rankings, position filters
-5. **Batch lookups** - use `IN` clause for multiple player IDs
+1. **Always filter by `isDraftable`** when working with the draft board — the export always contains only draftable players, but new fields may not
+2. **Limit result sets client-side** for large payloads (`fantasai/stats/gold_weekly_stats.json` is ~50-100MB — don't fetch eagerly)
+3. **Cache hot fetches in the frontend** (top rankings, position filters) rather than re-fetching the same R2 key repeatedly
 
 ---
 
 ## 🔄 Data Refresh Strategy
 
-### During Season
+Refresh cadence varies per export — see [ARCHITECTURE.md → Job Schedules](../ARCHITECTURE.md#job-schedules) for the authoritative per-job schedule. Rough guide:
 
-| Table | Refresh Frequency | When |
+| Export | Refresh Frequency | When |
 |-------|------------------|------|
-| `players_2026_draft` | Weekly | Monday mornings |
-| `ml_weekly_predictions` | Weekly | Before each game week |
-| `ml_feature_importance` | Monthly | After model retraining |
-| `ml_player_features` | Weekly | Monday mornings |
-
-### Off-Season
-
-- **players_2026_draft:** Monthly (roster changes)
-- **ml_weekly_predictions:** N/A (no games)
-- **ml_feature_importance:** Quarterly
-- **ml_player_features:** Monthly
+| Draft board (`export_players_2026_draft.json`) | Daily | 08:00 UTC via orchestrator |
+| Weekly start/sit | Weekly | Sunday 2:30 AM |
+| Deep reasoning | Weekly | Wednesday 1:30 AM |
+| Player scores | Daily (after Job 1) | ~7 AM |
 
 ---
 
@@ -334,90 +249,62 @@ Position Rank 26+:    Show percentile instead
 
 ## 📞 Technical Details
 
-### Database Connection
+### Data Access
 
-- **Platform:** Databricks Unity Catalog
-- **Catalog:** `main`
-- **Schema:** `fantasai`
-- **Endpoint:** Databricks SQL Warehouse
-- **Authentication:** Service principal or user token
+- **Primary store:** Cloudflare R2 (bucket `fantasai-r2`, bound as `env.BUCKET` in `worker-api`)
+- **Access pattern:** `GET https://api.fantasai.net/api/v1/r2/{key}` — no query engine, no auth for most reads
+- **Local warehouse (not directly reachable from the frontend):** DuckDB, `local_processing/db/fantasai.duckdb`
+- **Legacy fallback only:** `GET /api/v1/db/players` still issues a Databricks SQL Warehouse query via `queryDatabricks()` in `worker-api/src/index.js`, gated behind `DATABRICKS_HOST`/`DATABRICKS_TOKEN`/`DATABRICKS_WAREHOUSE_ID` secrets whose current validity is unconfirmed
 
 ### API Options
 
-1. **Databricks SQL Connector (Python)**
-   ```python
-   from databricks import sql
-   
-   connection = sql.connect(
-       server_hostname=os.getenv("DATABRICKS_SERVER_HOSTNAME"),
-       http_path=os.getenv("DATABRICKS_HTTP_PATH"),
-       access_token=os.getenv("DATABRICKS_TOKEN")
-   )
+1. **R2 passthrough (recommended):**
+   ```js
+   const res = await fetch('https://api.fantasai.net/api/v1/r2/fantasai/players/export_players_2026_draft.json');
+   const { data } = await res.json();
    ```
-
-2. **REST API**
-   - Use SQL Statement API
-   - Endpoint: `/api/2.0/sql/statements`
-
-3. **JDBC/ODBC**
-   - Standard Databricks connectors
+2. **Local DuckDB (internal tooling only, not reachable from the deployed frontend):**
+   ```python
+   import duckdb
+   conn = duckdb.connect('local_processing/db/fantasai.duckdb')
+   conn.execute("SELECT * FROM export_players_2026_draft LIMIT 50").fetchall()
+   ```
 
 ---
 
 ## 📚 Additional Resources
 
-### Related Documentation
-
-- **Pipeline Documentation:** `/Repos/kingoffrisco@yahoo.com/FantasAI/notebooks/03_ML_Training/`
-- **Model Registry:** Unity Catalog models under `main.fantasai.player_performance_predictor_*`
-- **Job Orchestrator:** Job ID `763487314454311`
-
-### Model Details
-
-| Position | Model ID | Version | Experiment |
-|----------|----------|---------|------------|
-| QB | `main.fantasai.player_performance_predictor_qb` | v1 | fantasai_weekly_predictions |
-| RB | `main.fantasai.player_performance_predictor_rb` | v1 | fantasai_weekly_predictions |
-| WR | `main.fantasai.player_performance_predictor_wr` | v1 | fantasai_weekly_predictions |
-| TE | `main.fantasai.player_performance_predictor_te` | v1 | fantasai_weekly_predictions |
-
-### Model Performance
-
-- **QB:** RMSE=4.92, MAE=2.73, R²=0.776
-- **RB/WR/TE:** Similar performance metrics
+- **Architecture:** [ARCHITECTURE.md](../ARCHITECTURE.md) — canonical system reference
+- **Endpoint list:** [API_ENDPOINTS.md](./API_ENDPOINTS.md)
+- **JSON shapes:** [DATA_SCHEMAS.md](./DATA_SCHEMAS.md)
+- **Local pipeline jobs:** `local_processing/job1_news_processor.py` through `job5_deep_reasoner.py` (Qwen3 8B/14B/30B via Ollama) — there is no separate ML model registry; scoring/prediction logic lives in these jobs
 
 ---
 
 ## ✅ Production Readiness Checklist
 
-- [x] Tables created and optimized
-- [x] R2 storage enabled (auto-optimization)
-- [x] Z-ordering applied for query performance
-- [x] 2026 player list filtered (1,338 draftable)
-- [x] ML predictions generated (24,862 rows)
-- [x] Feature importance documented
-- [x] Query patterns tested
-- [x] Performance validated (< 300ms)
-- [x] Data refresh strategy defined
-- [x] UI integration guide complete
+- [x] Local DuckDB pipeline replacing Databricks (migrated 2026-06-15)
+- [x] R2 exports live and serving the frontend
+- [x] Draft board filtered to draftable players
+- [x] Weekly start/sit + player scoring produced by Jobs 2/4 (Qwen3 14B)
+- [x] Deep reasoning produced by Job 5 (Qwen3 30B, weekly top-slice)
+- [ ] Legacy `/api/v1/db/*` and `/api/v1/news/ai-summaries` routes — Databricks connectivity unconfirmed, don't rely on them
 
 ---
 
 ## 🎯 Summary
 
 **Your UI should:**
-1. Query `main.fantasai.players_2026_draft` for all player data
-2. Always filter by `is_draftable = TRUE`
-3. Sort by `projected_avg_points` for rankings
-4. Label everything as "2026 Players"
-5. Handle nulls in combine metrics gracefully
-6. Expect sub-second query performance
-7. Refresh data weekly during season
+1. Fetch `fantasai/players/export_players_2026_draft.json` via `/api/v1/r2/{key}` for player data — not `/api/v1/db/players`
+2. Filter/sort client-side (`isDraftable`, position, projected points)
+3. Label everything as "2026 Players"
+4. Handle nulls in combine metrics and deep-reasoning fields gracefully (deep reasoning only covers ~top slice of players/week)
+5. Respect each export's own refresh cadence rather than assuming uniform daily/weekly
 
 **Questions?** Contact: kingoffrisco@yahoo.com
 
 ---
 
-**Document Version:** 1.0  
-**Last Modified:** June 4, 2026  
-**Next Review:** Start of 2026 NFL Season
+**Document Version:** 2.0
+**Last Modified:** August 27, 2026
+**Next Review:** As architecture changes further
