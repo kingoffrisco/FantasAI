@@ -529,13 +529,14 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
                             keys, stats_arr,
                             "fieldGoalsMade/fieldGoalAttempts", "fieldGoalsMadeFieldGoalsAttempted",
                         )
-                        xp_made, _ = _split_slash_first(
+                        xp_made, xp_att = _split_slash_first(
                             keys, stats_arr,
                             "extraPointsMade/extraPointAttempts", "extraPointsMadeExtraPointsAttempted",
                         )
                         s["fgMade"] = s.get("fgMade", 0) + fg_made
                         s["fgAtt"] = s.get("fgAtt", 0) + fg_att
                         s["xpMade"] = s.get("xpMade", 0) + xp_made
+                        s["xpAtt"] = s.get("xpAtt", 0) + xp_att
                         s["fgMade50"] = s.get("fgMade50", 0) + _stat_val_first(
                             keys, stats_arr, "fieldGoalsMade50Plus", "fieldGoals50PlusMade", "fg50"
                         )
@@ -647,6 +648,7 @@ def calc_fantasy_pts(stats: dict, rules: dict, pos: str = None) -> float:
     fg_made50 = s.get("fgMade50", 0)
     fg_made_under50 = max(0, s.get("fgMade", 0) - fg_made50)
     fg_missed = max(0, s.get("fgAtt", 0) - s.get("fgMade", 0))
+    xp_missed = max(0, s.get("xpAtt", 0) - s.get("xpMade", 0))
     # DST scoring must be gated on pos == "DST" explicitly, not just on the
     # presence of these fields. sacks/ints/fumRec/tds/safeties are also
     # populated on INDIVIDUAL defensive players' own stat lines (a real
@@ -668,9 +670,11 @@ def calc_fantasy_pts(stats: dict, rules: dict, pos: str = None) -> float:
         + s.get("recTds", 0) * r.get("recTD", 6)
         + s.get("rec", 0) * r.get("rec", 0.5)
         + s.get("fumLost", 0) * r.get("fumbleLost", -2)
-        + fg_made50 * r.get("kFg50", 5)
+        + fg_made50 * r.get("kFg50", 4)
         + fg_made_under50 * r.get("kFgUnder50", 3)
         + fg_missed * r.get("kFgMiss", -1)
+        + s.get("xpMade", 0) * r.get("kXp", 1)
+        + xp_missed * r.get("kXpMiss", -1)
         # DST — bug fixed 2026-08-22: this whole block was missing, so even
         # the synthetic D/ST entries fetch_player_stats() now emits always
         # scored 0. Same rule keys/tiers as ScoringTest.jsx's applyScoring().

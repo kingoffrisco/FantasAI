@@ -86,9 +86,10 @@ const DEFAULT_RULES = {
   dstBlockedKick: 2,
   dstPtsAllowed: true,
   kXp: 1,
+  kXpMiss: -1,
   kFg0_39: 3,
-  kFg40_49: 4,
-  kFg50: 5,
+  kFg40_49: 3,
+  kFg50: 4,
   kFgMiss: -1,
 };
 
@@ -143,6 +144,7 @@ export function applyScoring(player, rules) {
   // Kicker
   if (player.pos === 'K') {
     if (s.xpMade) pts += s.xpMade * (r.kXp ?? 1);
+    if (s.xpMissed) pts += s.xpMissed * (r.kXpMiss ?? -1);
     if (s.fg0_39) pts += s.fg0_39 * (r.kFg0_39 ?? 3);
     if (s.fg40_49) pts += s.fg40_49 * (r.kFg40_49 ?? 4);
     if (s.fg50) pts += s.fg50 * (r.kFg50 ?? 5);
@@ -446,6 +448,7 @@ export default function ScoringTestScreen({ user }) {
 
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', letterSpacing: '.08em', marginBottom: 4, marginTop: 10 }}>KICKER</div>
               <RuleInput label="Extra Point" value={rules.kXp} onChange={v => setRule('kXp', v)} min={0} max={5} />
+              <RuleInput label="Missed Extra Point" value={rules.kXpMiss} onChange={v => setRule('kXpMiss', v)} min={-5} max={0} />
               <RuleInput label="FG 0-39 yds" value={rules.kFg0_39} onChange={v => setRule('kFg0_39', v)} min={0} max={10} />
               <RuleInput label="FG 40-49 yds" value={rules.kFg40_49} onChange={v => setRule('kFg40_49', v)} min={0} max={10} />
               <RuleInput label="FG 50+ yds" value={rules.kFg50} onChange={v => setRule('kFg50', v)} min={0} max={10} />

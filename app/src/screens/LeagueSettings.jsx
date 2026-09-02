@@ -9,11 +9,13 @@ const STORAGE_KEY = 'fantasai_league_settings';
 const MEDIA_KEY   = 'fantasai_commish_media';
 const API_BASE    = 'https://api.fantasai.net';
 
-function formatFieldGoalRuleValue({ kFg50 = 5, kFgUnder50 = 3, kFgMiss = -1 } = {}) {
+function formatFieldGoalRuleValue({ kFg50 = 4, kFgUnder50 = 3, kFgMiss = -1, kXp = 1, kXpMiss = -1 } = {}) {
   return [
     `FG Made (50+ yds): ${kFg50} points`,
     `FG Made (< 50 yds): ${kFgUnder50} points`,
     `FG Missed: ${kFgMiss} points`,
+    `Extra Point Made: ${kXp} points`,
+    `Extra Point Missed: ${kXpMiss} points`,
   ].join('\n');
 }
 
@@ -45,7 +47,7 @@ const DEFAULTS = {
     { key: 'WR',    label: 'WR',     activeMin: 1, activeMax: 1, rosterTotal: 'No Limit' },
     { key: 'TE',    label: 'TE',     activeMin: 1, activeMax: 1, rosterTotal: 'No Limit' },
     { key: 'RBWR',  label: 'RB-WR',  activeMin: 3, activeMax: 3, rosterTotal: 'No Limit' },
-    { key: 'K',     label: 'K',      activeMin: 0, activeMax: 0, rosterTotal: '0'        },
+    { key: 'K',     label: 'K',      activeMin: 1, activeMax: 2, rosterTotal: '0'        },
     { key: 'DST',   label: 'D/ST',   activeMin: 1, activeMax: 1, rosterTotal: 'No Limit' },
   ],
   extraRosterSettings: [
@@ -70,7 +72,7 @@ const DEFAULTS = {
 
   // Scoring — offensive
   offensiveScoring: [
-    { code: 'FG',     name: 'Field Goals',                                                   value: formatFieldGoalRuleValue({ kFg50: 5, kFgUnder50: 3, kFgMiss: -1 }) },
+    { code: 'FG',     name: 'Field Goals',                                                   value: formatFieldGoalRuleValue({ kFg50: 4, kFgUnder50: 3, kFgMiss: -1, kXp: 1, kXpMiss: -1 }) },
     { code: 'FL',     name: 'Fumble Lost, Including ST plays',                               value: '-1 point' },
     { code: 'Fum2PK', name: 'Fumble Recovery Two-point Conversion, Kicking formation',      value: '2 points' },
     { code: 'Fum2PT', name: 'Fumble Recovery Two-point Conversion, Two-point formation',    value: '2 points' },
@@ -118,9 +120,11 @@ const DEFAULTS = {
     recTD: 6,
     rec: 0.5,
     fumbleLost: -2,
-    kFg50: 5,
+    kFg50: 4,
     kFgUnder50: 3,
     kFgMiss: -1,
+    kXp: 1,
+    kXpMiss: -1,
   },
 
   // Scoring policies
@@ -303,9 +307,11 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
   const [editingScore, setEditingScore] = React.useState(null);
   const [editingRoster, setEditingRoster] = React.useState(null);
   const [fgScoringDraft, setFgScoringDraft] = React.useState(() => ({
-    kFg50: 5,
+    kFg50: 4,
     kFgUnder50: 3,
     kFgMiss: -1,
+    kXp: 1,
+    kXpMiss: -1,
   }));
   const [saved, setSaved]     = React.useState(false);
   const [weekData, setWeekData] = React.useState({ week: 1, season: new Date().getFullYear(), type: 'regular' });
@@ -320,11 +326,13 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
 
   React.useEffect(() => {
     setFgScoringDraft({
-      kFg50: data.scoring?.kFg50 ?? 5,
+      kFg50: data.scoring?.kFg50 ?? 4,
       kFgUnder50: data.scoring?.kFgUnder50 ?? 3,
       kFgMiss: data.scoring?.kFgMiss ?? -1,
+      kXp: data.scoring?.kXp ?? 1,
+      kXpMiss: data.scoring?.kXpMiss ?? -1,
     });
-  }, [data.scoring?.kFg50, data.scoring?.kFgUnder50, data.scoring?.kFgMiss]);
+  }, [data.scoring?.kFg50, data.scoring?.kFgUnder50, data.scoring?.kFgMiss, data.scoring?.kXp, data.scoring?.kXpMiss]);
 
   // League Fees state
   const [editingFees, setEditingFees]     = React.useState(false);
@@ -802,11 +810,15 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     const kFg50 = Number(fgScoringDraft.kFg50);
     const kFgUnder50 = Number(fgScoringDraft.kFgUnder50);
     const kFgMiss = Number(fgScoringDraft.kFgMiss);
+    const kXp = Number(fgScoringDraft.kXp);
+    const kXpMiss = Number(fgScoringDraft.kXpMiss);
     const nextScoring = {
       ...(data.scoring || {}),
-      kFg50: Number.isFinite(kFg50) ? kFg50 : 5,
+      kFg50: Number.isFinite(kFg50) ? kFg50 : 4,
       kFgUnder50: Number.isFinite(kFgUnder50) ? kFgUnder50 : 3,
       kFgMiss: Number.isFinite(kFgMiss) ? kFgMiss : -1,
+      kXp: Number.isFinite(kXp) ? kXp : 1,
+      kXpMiss: Number.isFinite(kXpMiss) ? kXpMiss : -1,
     };
     const nextOffense = (data.offensiveScoring || []).map(rule =>
       rule.code === 'FG'
@@ -817,7 +829,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
     persist(next);
     setData(next);
     flash();
-    logChange('scoring', `Updated FG scoring: 50+ = ${nextScoring.kFg50}, under 50 = ${nextScoring.kFgUnder50}, missed = ${nextScoring.kFgMiss}`);
+    logChange('scoring', `Updated kicker scoring: FG 50+ = ${nextScoring.kFg50}, FG under 50 = ${nextScoring.kFgUnder50}, FG missed = ${nextScoring.kFgMiss}, XP made = ${nextScoring.kXp}, XP missed = ${nextScoring.kXpMiss}`);
   }
 
   function getBracketRoundLabel(round, totalRounds) {
@@ -1721,7 +1733,7 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
             <Row label="Matchup Tiebreaker" value={data.scoringPolicies.matchupTiebreaker} />
           </Card>
 
-          <Card title="Field Goal Scoring">
+          <Card title="Kicker Scoring">
             <div style={{ padding: '12px 16px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1757,11 +1769,33 @@ export default function LeagueSettings({ user, onRosterReset, rosterResetState =
                     onChange={e => setFgScoringDraft(prev => ({ ...prev, kFgMiss: e.target.value }))}
                   />
                 </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Extra Point Made</span>
+                  <input
+                    className="input"
+                    type="number"
+                    step="1"
+                    value={fgScoringDraft.kXp}
+                    disabled={!canEdit}
+                    onChange={e => setFgScoringDraft(prev => ({ ...prev, kXp: e.target.value }))}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Extra Point Missed</span>
+                  <input
+                    className="input"
+                    type="number"
+                    step="1"
+                    value={fgScoringDraft.kXpMiss}
+                    disabled={!canEdit}
+                    onChange={e => setFgScoringDraft(prev => ({ ...prev, kXpMiss: e.target.value }))}
+                  />
+                </label>
               </div>
               {canEdit ? (
                 <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: editColor }}>{editLabel}</span>
-                  <button className="btn primary sm" onClick={saveFieldGoalScoring}>Save FG Scoring</button>
+                  <button className="btn primary sm" onClick={saveFieldGoalScoring}>Save Kicker Scoring</button>
                 </div>
               ) : (
                 <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 10 }}>

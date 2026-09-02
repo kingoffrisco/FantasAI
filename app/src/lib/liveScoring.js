@@ -13,7 +13,7 @@ export function getScoringRules() {
     const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
     if (s?.scoring) return s.scoring;
   } catch {}
-  return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2, kFg50: 5, kFgUnder50: 3, kFgMiss: -1 };
+  return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2, kFg50: 4, kFgUnder50: 3, kFgMiss: -1, kXp: 1, kXpMiss: -1 };
 }
 
 // Standard points-allowed tier table — same values as ScoringTest.jsx's
@@ -39,6 +39,7 @@ export function buildStatPointsBreakdown(stats, rules, pos) {
   const fgMade50 = s.fgMade50 ?? 0;
   const fgMadeUnder50 = Math.max(0, (s.fgMade ?? 0) - fgMade50);
   const fgMissed = Math.max(0, (s.fgAtt ?? 0) - (s.fgMade ?? 0));
+  const xpMissed = Math.max(0, (s.xpAtt ?? 0) - (s.xpMade ?? 0));
   const isDst = pos === 'DST';
 
   const rows = [
@@ -51,9 +52,11 @@ export function buildStatPointsBreakdown(stats, rules, pos) {
     { label: 'Rec TD',     amount: s.recTds,   unit: '',  rate: r.recTD ?? 6 },
     { label: 'Rec',        amount: s.rec,      unit: '',  rate: r.rec ?? 0.5 },
     { label: 'Fum Lost',   amount: s.fumLost,  unit: '',  rate: r.fumbleLost ?? -2 },
-    { label: 'FG 50+',     amount: fgMade50,       unit: '', rate: r.kFg50 ?? 5 },
+    { label: 'FG 50+',     amount: fgMade50,       unit: '', rate: r.kFg50 ?? 4 },
     { label: 'FG <50',     amount: fgMadeUnder50,  unit: '', rate: r.kFgUnder50 ?? 3 },
     { label: 'FG Miss',    amount: fgMissed,       unit: '', rate: r.kFgMiss ?? -1 },
+    { label: 'XP Made',    amount: s.xpMade,       unit: '', rate: r.kXp ?? 1 },
+    { label: 'XP Miss',    amount: xpMissed,       unit: '', rate: r.kXpMiss ?? -1 },
   ];
   if (isDst) {
     rows.push(
@@ -84,6 +87,7 @@ export function calcFantasyPts(stats, rules, pos) {
   const fgMade50 = s.fgMade50 ?? 0;
   const fgMadeUnder50 = Math.max(0, (s.fgMade ?? 0) - fgMade50);
   const fgMissed = Math.max(0, (s.fgAtt ?? 0) - (s.fgMade ?? 0));
+  const xpMissed = Math.max(0, (s.xpAtt ?? 0) - (s.xpMade ?? 0));
   // DST scoring must be gated on pos === 'DST' explicitly, not just on these
   // fields being present. sacks/ints/fumRec/tds/safeties also live on
   // INDIVIDUAL defensive players' own stat lines, and ptsAllowed is tagged
@@ -102,9 +106,11 @@ export function calcFantasyPts(stats, rules, pos) {
     (s.recTds  ?? 0) * (r.recTD  ?? 6) +
     (s.rec     ?? 0) * (r.rec    ?? 0.5) +
     (s.fumLost ?? 0) * (r.fumbleLost ?? -2) +
-    fgMade50 * (r.kFg50 ?? 5) +
+    fgMade50 * (r.kFg50 ?? 4) +
     fgMadeUnder50 * (r.kFgUnder50 ?? 3) +
     fgMissed * (r.kFgMiss ?? -1) +
+    (s.xpMade ?? 0) * (r.kXp ?? 1) +
+    xpMissed * (r.kXpMiss ?? -1) +
     // DST — bug fixed 2026-08-22: this whole block was missing, so team
     // defense entries always scored 0 even when their stats were present.
     // Same rule keys/tiers as ScoringTest.jsx's applyScoring().

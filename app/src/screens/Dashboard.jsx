@@ -196,7 +196,7 @@ function getScoringRules() {
     const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
     if (s?.scoring) return s.scoring;
   } catch {}
-  return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2, kFg50: 5, kFgUnder50: 3, kFgMiss: -1 };
+  return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2, kFg50: 4, kFgUnder50: 3, kFgMiss: -1, kXp: 1, kXpMiss: -1 };
 }
 
 function calcFantasyPts(stats, rules) {
@@ -204,6 +204,7 @@ function calcFantasyPts(stats, rules) {
   const fgMade50 = stats.fgMade50 ?? 0;
   const fgMadeUnder50 = stats.fgMadeUnder50 ?? Math.max(0, fgMade - fgMade50);
   const fgMissed = stats.fgMissed ?? Math.max(0, (stats.fgAtt ?? 0) - fgMade);
+  const xpMissed = stats.xpMissed ?? 0;
   return Math.max(0,
     (stats.passYards ?? 0) * (rules.passYd ?? 0.04) +
     (stats.passTDs   ?? 0) * (rules.passTD  ?? 4)   +
@@ -214,9 +215,11 @@ function calcFantasyPts(stats, rules) {
     (stats.recTDs    ?? 0) * (rules.recTD    ?? 6)   +
     (stats.receptions?? 0) * (rules.rec      ?? 0.5) +
     (stats.fumbleLost?? 0) * (rules.fumbleLost ?? -2) +
-    fgMade50 * (rules.kFg50 ?? 5) +
+    fgMade50 * (rules.kFg50 ?? 4) +
     fgMadeUnder50 * (rules.kFgUnder50 ?? 3) +
-    fgMissed * (rules.kFgMiss ?? -1)
+    fgMissed * (rules.kFgMiss ?? -1) +
+    (stats.xpMade ?? 0) * (rules.kXp ?? 1) +
+    xpMissed * (rules.kXpMiss ?? -1)
   );
 }
 
@@ -264,6 +267,19 @@ function parseEspnBoxScore(boxscorePlayers, rules) {
           if (fg50 != null) s.fgMade50 = (s.fgMade50 ?? 0) + fg50;
           const misses = get('fieldGoalsMissed', 'fgMissed');
           if (misses != null) s.fgMissed = (s.fgMissed ?? 0) + misses;
+          // Same combined "made/attempted" key ESPN uses for field goals — see
+          // job_live_scores.py's confirmed-live key names for extra points.
+          const xpPairIdx = idx('extraPointsMadeExtraPointsAttempted');
+          if (xpPairIdx >= 0) {
+            const xpParsed = parseCompAttempts(st[xpPairIdx]);
+            s.xpMade = (s.xpMade ?? 0) + xpParsed.made;
+            s.xpMissed = (s.xpMissed ?? 0) + Math.max(0, xpParsed.att - xpParsed.made);
+          } else {
+            const xpMade = get('extraPointsMade', 'xpm');
+            const xpAtt = get('extraPointsAttempted', 'xpa');
+            if (xpMade != null) s.xpMade = (s.xpMade ?? 0) + xpMade;
+            if (xpAtt != null) s.xpMissed = (s.xpMissed ?? 0) + Math.max(0, xpAtt - (xpMade ?? 0));
+          }
         }
       }
     }
