@@ -215,168 +215,63 @@ async function getSleeperPlayers(req, env) {
   return result;
 }
 
-// Parse the full player list page — returns { id, name, pos, team, status, newsTitle, news }.
+// Parse the recent-player-news feed page — returns { id, name, pos, team,
+// status, rosteredBy, newsTitle, news }.
 //
-// Multi-strategy: uses playerpage link positions as row delimiters so it handles
-// both <tr class="row1"> table layouts and card/div layouts. For each player it
-// extracts the news HEADLINE separately from the BODY so News.jsx can display them
-// as a proper article (title + full paragraph), not a single concatenated blob.
+// CBS redesigned this page (confirmed 2026-09-05): it's no longer a <table>
+// of every player, it's a card feed of recent per-player news items. Each
+// entry's primary link now uses an ABSOLUTE href
+// (https://<league>.football.cbssports.com/players/playerpage/<id>) with a
+// clean `aria-label='Name POS TEAM'` — the previous regex only matched
+// RELATIVE hrefs, which no longer exist on the primary link, only on
+// incidental last-name mentions inside news body text (e.g. "<a ... href='/
+// players/playerpage/123'>Henderson</a> (ankle) was..."), so it was silently
+// extracting the wrong, partial name for every row and effectively always
+// returning 0 usable players. A `newPlayerStatus` div right after the link
+// gives "Rostered By <Team Name>" or "Free Agent" directly — better signal
+// for roster status than anything the old table layout exposed.
 function parsePlayers(html) {
   const players = [];
+  const seenIds = new Set();
 
-  // Convert an HTML fragment to structured lines, preserving block-level boundaries.
-  function htmlToLines(fragment) {
-    return fragment
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/(?:p|div|h[1-6]|li|td|th|span|section)[^>]*>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&#\d+;/g, ' ')
-      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-      .replace(/[ \t]+/g, ' ')
-      .split('\n')
-      .map(l => l.trim())
-      .filter(Boolean);
-  }
+  const linkRe = /<a class='playerLink' aria-label='([^']*)' href='([^']*)'>([^<]*)<\/a>/g;
+  let m;
+  while ((m = linkRe.exec(html)) !== null) {
+    const [full, ariaLabel, href, linkText] = m;
+    const idMatch = href.match(/playerpage\/(\d+)/);
+    if (!idMatch) continue;
+    const id = idMatch[1];
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
 
-  // Find every unique playerpage link (first occurrence wins when a page has
-  // duplicate links for the same player, e.g. desktop + mobile).
-  const seenIds   = new Set();
-  const linkRe    = /href='\/players\/playerpage\/(\d+)'/g;
-  const linkPositions = [];
-  let lm;
-  while ((lm = linkRe.exec(html)) !== null) {
-    if (!seenIds.has(lm[1])) {
-      seenIds.add(lm[1]);
-      linkPositions.push({ idx: lm.index, id: lm[1] });
-    }
-  }
-
-  for (const { idx, id } of linkPositions) {
-    // Grab the enclosing <tr> … </tr> — this contains all columns for the player.
-    const trStart = html.lastIndexOf('<tr', idx);
-    const trEnd   = html.indexOf('</tr>', idx);
-    if (trStart < 0 || trEnd < 0) continue;
-    const rowHtml = html.slice(trStart, trEnd + 5);
-
-    // Player name from the link text.
-    const nameMatch = rowHtml.match(/href='\/players\/playerpage\/\d+'[^>]*>([^<]{1,60})<\/a>/);
-    if (!nameMatch) continue;
-    const name = nameMatch[1].trim();
+    const parts = ariaLabel.trim().split(/\s+/).filter(Boolean);
+    if (parts.length < 2) continue;
+    const team = parts.pop();
+    const pos  = parts.pop();
+    const name = (parts.join(' ') || linkText).trim();
     if (!name) continue;
 
-    // pos + team from aria-label (most reliable CBS source for pos/team).
-    let pos = '', team = '';
-    const ariaMatch = rowHtml.match(/aria-label=['"]([^'"]{3,80})['"]/);
-    if (ariaMatch) {
-      const label = ariaMatch[1]
-        .replace(/&#\d+;/g, ' ').replace(/[•·|]/g, ' ').trim();
-      const parts = label.split(/\s+/).filter(Boolean);
-      team = parts.at(-1) || '';
-      pos  = parts.at(-2) || '';
+    // Roster status + headline both live in the ~300 chars right after the link.
+    const afterIdx = m.index + full.length;
+    const window_  = html.slice(afterIdx, afterIdx + 300);
+
+    let status = null, rosteredBy = null;
+    const rosteredMatch = window_.match(/newPlayerStatus'>\s*Rostered By\s*(?:<[^>]*>)*\s*([^<]*)/);
+    if (rosteredMatch) {
+      rosteredBy = rosteredMatch[1].trim();
+      status = `Rostered By ${rosteredBy}`;
+    } else if (/newPlayerStatus'>\s*Free Agent/.test(window_)) {
+      status = 'Free Agent';
     }
 
-    // Iterate <td> cells, skip the player-info cell (contains the playerLink).
-    const cells = [...rowHtml.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)];
-
+    // Best-effort headline — the real one is the SECOND 'titleHeadline' in the
+    // block (the first wraps the whole newPlayer card, so its content starts
+    // with a nested <div>, not text, and the [^<] guard below skips past it).
     let newsTitle = null;
-    let newsBody  = null;
-    let status    = null;
+    const titleMatch = html.slice(afterIdx, afterIdx + 2000).match(/titleHeadline["']>([^<]{5,180})</);
+    if (titleMatch) newsTitle = titleMatch[1].trim();
 
-    for (const cellMatch of cells) {
-      const cellHtml = cellMatch[1];
-
-      // Skip the player-name cell.
-      if (cellHtml.includes('/players/playerpage/')) continue;
-
-      const lines    = htmlToLines(cellHtml);
-      const fullText = lines.join(' ').trim();
-
-      // ── Status detection (short keyword cells) ──────────────────────────
-      if (!status && fullText.length < 35) {
-        if (/^(Active|Out|Questionable|Doubtful|IR\b|Suspended|PUP|NFI|Limited|DNP)/i.test(fullText)) {
-          status = fullText;
-          continue;
-        }
-      }
-
-      // ── News cell: must be at least 60 chars ────────────────────────────
-      if (fullText.length < 60) continue;
-
-      // ── Title extraction — four strategies in order ──────────────────────
-
-      // 1. Anchor whose href contains "news", "article", or "story"
-      if (!newsTitle) {
-        const m = cellHtml.match(/href=['"][^'"]*(?:news|article|story)[^'"]*['"][^>]*>([^<]{20,180})<\/a>/i);
-        if (m) newsTitle = m[1].trim();
-      }
-
-      // 2. Element with a news/headline class name
-      if (!newsTitle) {
-        const m = cellHtml.match(/class=['"][^'"]*(?:title|headline|newsTitle|news-title|article-title)[^'"]*['"][^>]*>([\s\S]*?)<\/[^>]+>/i);
-        if (m) {
-          const t = m[1].replace(/<[^>]+>/g, '').trim();
-          if (t.length >= 20) newsTitle = t;
-        }
-      }
-
-      // 3. H2/H3/H4 element
-      if (!newsTitle) {
-        const m = cellHtml.match(/<(?:h2|h3|h4)[^>]*>([\s\S]*?)<\/(?:h2|h3|h4)>/i);
-        if (m) {
-          const t = m[1].replace(/<[^>]+>/g, '').trim();
-          if (t.length >= 20) newsTitle = t;
-        }
-      }
-
-      // 4. Scan structured lines for a headline-shaped sentence
-      //    - starts with capital letter and contains lowercase (not ALL-CAPS labels)
-      //    - 20–200 chars
-      //    - not "by Source", not a timestamp, not ownership/status boilerplate
-      if (!newsTitle) {
-        const skipRe = /^(by |from |via |\d+\s*(hr|min|day)|Free Agent|Active$|Out$|Questionable$|Doubtful$|Owned by )/i;
-        for (const line of lines) {
-          if (line.length < 20 || line.length > 200) continue;
-          if (skipRe.test(line)) continue;
-          if (/^[A-Z]/.test(line) && /[a-z]/.test(line)) {
-            newsTitle = line;
-            break;
-          }
-        }
-      }
-
-      // ── Body extraction ──────────────────────────────────────────────────
-      // Strip the title line, attribution ("by RotoWire | RotoWire"), and
-      // age ("5 hrs ago") from the remaining lines to get clean body text.
-      const attrRe   = /^by\s+\S|\d+\s*(?:hr|min|day)s?\s+ago/i;
-      const titleIdx = newsTitle
-        ? lines.findIndex(l => l.includes(newsTitle.slice(0, Math.min(30, newsTitle.length))))
-        : -1;
-
-      const bodyLines = lines
-        .slice(Math.max(0, titleIdx + 1))
-        .filter(l => !attrRe.test(l) && l !== newsTitle && l.length > 15);
-
-      if (bodyLines.length > 0) {
-        newsBody = bodyLines.join(' ').trim().slice(0, 1000);
-      } else {
-        // Fallback: strip known noise from full text
-        let body = fullText;
-        if (newsTitle) body = body.replace(newsTitle, '').trim();
-        body = body
-          .replace(/by\s+\S[^|·\n]{0,60}[\|·][^\n]{0,60}\s*/gi, '')
-          .replace(/\d+\s*(?:hr|min|day)s?\s+ago\s*/gi, '')
-          .replace(/(?:Free Agent|Active|Out|Questionable|Doubtful)\s*/gi, '')
-          .trim();
-        if (body.length > 15) newsBody = body.slice(0, 1000);
-      }
-
-      if (newsTitle || newsBody) break; // done with this player
-    }
-
-    if (!newsTitle && !newsBody) continue; // no news — skip
-
-    players.push({ id, name, pos, team, status, newsTitle: newsTitle || null, news: newsBody || null });
+    players.push({ id, name, pos, team, status, rosteredBy, newsTitle, news: null });
   }
 
   return players;

@@ -44,7 +44,7 @@ except ImportError:
     print("ERROR: nfl_data_py not installed. Run: pip install nfl_data_py")
     sys.exit(1)
 
-DEFAULT_SEASONS = [2021, 2022, 2023, 2024, 2025]
+DEFAULT_SEASONS = [2021, 2022, 2023, 2024, 2025, 2026]
 OL_POS_ABB = {"LT", "LG", "C", "RG", "RT"}
 
 

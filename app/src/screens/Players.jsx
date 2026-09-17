@@ -186,6 +186,15 @@ function computeSleeperScores(playerList, weights) {
   return scores;
 }
 
+function formatWriteupModel(model) {
+  // Job 3 tiers writeups by ADP: qwen3:14b for top-200 players, qwen3:8b for
+  // the rest — surface which one actually generated this writeup rather than
+  // a generic "Qwen" label. Older cached entries predate the _model field.
+  if (model === 'qwen3:14b') return 'Qwen3 14B';
+  if (model === 'qwen3:8b')  return 'Qwen3 8B';
+  return 'Qwen';
+}
+
 function formatWaiverExpiry(isoStr) {
   const d   = new Date(isoStr);
   const now = new Date();
@@ -701,24 +710,29 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
 
   // Rebuild every render — TEAM_ROSTERS is mutated in-place by refreshTeamRosters()
   // after the draft completes, and players re-renders when the player list updates.
-  const PLAYER_OWNER_MAP = React.useMemo(() => buildOwnerMap(), [allPlayersList]);
+  // Also depends on ownerMapVersion, bumped once refreshTeamRostersFromServer()'s
+  // async fetch actually resolves — mutating TEAM_ROSTERS doesn't itself trigger a
+  // re-render, so without this the map freezes on whatever partial/stale data
+  // existed at this component's first render (same bug class already fixed in
+  // HeadToHead.jsx, CurrentRoster.jsx, and the player popup's own ownerMap).
+  const [ownerMapVersion, setOwnerMapVersion] = React.useState(0);
+  React.useEffect(() => {
+    refreshTeamRostersFromServer().then(() => setOwnerMapVersion(v => v + 1));
+  }, []);
+  const PLAYER_OWNER_MAP = React.useMemo(() => buildOwnerMap(), [allPlayersList, ownerMapVersion]);
 
-  // Read drafted player IDs from all localStorage pick keys (live, completed mock, WIP mock).
-  const draftedIds = React.useMemo(() => {
-    try {
-      const live  = JSON.parse(localStorage.getItem('fantasai_live_picks')       || 'null');
-      const mock  = JSON.parse(localStorage.getItem('fantasai_mock_picks_saved') || 'null');
-      const wip   = JSON.parse(localStorage.getItem('fantasai_mock_picks_wip')   || 'null');
-      const liveCount = Array.isArray(live)  ? live.filter(p => p.playerId).length  : 0;
-      const mockCount = Array.isArray(mock)  ? mock.filter(p => p.playerId).length  : 0;
-      const wipCount  = Array.isArray(wip)   ? wip.filter(p => p.playerId).length   : 0;
-      let picks;
-      if (liveCount >= mockCount && liveCount >= wipCount) picks = live;
-      else if (mockCount >= wipCount) picks = mock;
-      else picks = wip;
-      return new Set((picks || []).filter(p => p.playerId).map(p => Number(p.playerId)));
-    } catch { return new Set(); }
-  }, [allPlayersList]);
+  // "Drafted" = has an owner in PLAYER_OWNER_MAP (built from TEAM_ROSTERS, now
+  // server-synced) — NOT a separate localStorage read. This used to
+  // independently re-derive picks straight from this one browser's own
+  // fantasai_live_picks/mock caches, so a player correctly on a real roster
+  // per the server (and correctly shown as owned in Head-to-Head) could still
+  // show as "available" here if this specific browser's local cache never had
+  // the full draft — confirmed live 2026-09-02 with Jahmyr Gibbs and
+  // Ja'Marr Chase both showing available despite being properly rostered.
+  const draftedIds = React.useMemo(
+    () => new Set(Object.keys(PLAYER_OWNER_MAP).map(Number)),
+    [PLAYER_OWNER_MAP]
+  );
 
   const now = new Date();
   const activeWaivers = new Set(
@@ -2236,7 +2250,7 @@ function PlayerArticlesCard({ articles = [], loading = false }) {
 
 // ─── PlayerDetail ─────────────────────────────────────────────────────────────
 
-export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPlayer, onTradePlayer, sourcesState }) {
+export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPlayer, onTradePlayer, sourcesState, onSelectPlayer }) {
   if (!player) return null;
   const { data: r2DefVsPos } = useR2DefenseVsPos();
   const { data: r2RookieScoresData } = useR2RookieScores();
@@ -3276,7 +3290,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
               {hasLive && tot && (
                 <div className="card" style={{ marginBottom:16 }}>
                   <div className="card-head">
-                    <div className="card-title">2025 Season Stats</div>
+                    <div className="card-title">{statYear} Season Stats</div>
                     <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                       <LiveBadge />
                       <span className="mono faint" style={{ fontSize:9 }}>Sleeper API · direct</span>
@@ -3362,11 +3376,13 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                       return (
                         <div
                           key={p.id}
+                          onClick={isThisPlayer ? undefined : () => onSelectPlayer?.(p.id)}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 8, fontSize: 12,
                             padding: '4px 8px', borderRadius: 5,
                             background: isThisPlayer ? 'rgba(198,255,58,.10)' : 'transparent',
                             border: isThisPlayer ? '1px solid rgba(198,255,58,.3)' : '1px solid transparent',
+                            cursor: isThisPlayer ? 'default' : 'pointer',
                           }}
                         >
                           <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11, width: 18, flexShrink: 0, color: unranked ? 'var(--text-faint)' : 'var(--text-dim)' }}>
@@ -3434,7 +3450,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   <span style={{ fontFamily:'var(--font-display)', fontStretch:'87%', fontWeight:800, fontSize:11, letterSpacing:'.12em', textTransform:'uppercase', color:'var(--accent-2)' }}>FantasAI Insight</span>
                   {playerWriteup && (
                     <span style={{ marginLeft:'auto', fontSize:9, fontFamily:'var(--font-mono)', color:'var(--accent-2)', opacity:.7 }}>
-                      Qwen · {playerWriteup.generated_at ? new Date(playerWriteup.generated_at).toLocaleDateString() : 'local'}
+                      {formatWriteupModel(playerWriteup._model)} · {playerWriteup.generated_at ? new Date(playerWriteup.generated_at).toLocaleDateString() : 'local'}
                     </span>
                   )}
                 </div>
@@ -3680,7 +3696,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                 </div>
               : <>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                    <span className="dim" style={{ fontSize: 11 }}>2025 Season · Advanced Metrics</span>
+                    <span className="dim" style={{ fontSize: 11 }}>{statYear} Season · Advanced Metrics</span>
                     {hasLive && <LiveBadge />}
                     <span className="mono faint" style={{ fontSize: 9 }}>{hasLive ? 'Sleeper API · live' : (tot ? 'R2 · pre-baked' : 'Sleeper API')}</span>
                   </div>

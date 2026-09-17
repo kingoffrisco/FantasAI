@@ -7,6 +7,7 @@ import { registerServiceWorker, getSubscriptionState, requestNotificationPermiss
 import { applyLeagueData, clearLeagueData, getScoringFormat } from './lib/leagueStore.js';
 import { loadUserPrefs, patchPrefs, getPrefs, clearPrefs } from './lib/remotePrefs.js';
 import { loadRemoteState, getTradeOffers, getWaivers, saveTradeOffers, saveWaivers, clearRemoteState } from './lib/remoteState.js';
+import { reloadFreshCode } from './lib/cacheUtils.js';
 import { Sidebar, TopBar, MobileNav } from './components/layout.jsx';
 import AICopilot from './components/AICopilot.jsx';
 import { TweaksPanel, TweakSection, TweakColor, TweakRadio, TweakToggle, useTweaks } from './components/TweaksPanel.jsx';
@@ -920,6 +921,34 @@ export default function App() {
     }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Patch manual status overrides (suspensions, exempt list, etc.) — see
+  // set_player_status_override.py. proj is the field that matters here: no
+  // other patch effect touches it, so this is safe regardless of fetch-race
+  // ordering against the ECR/ADP effects above. Real incident this fixed:
+  // Josh Jacobs (NFL Commissioner's Exempt List, 8/30/2026) still showed his
+  // real 2025 season average (15.8) as his Week 1 projection, because proj is
+  // built from real season stats whenever they exist (see playerStore.js
+  // normalizePlayerList) with no availability check at all — and Sleeper's
+  // injury_status enum has no category for a legal/suspension situation in
+  // the first place, so that check couldn't have caught it even if one existed.
+  React.useEffect(() => {
+    api.r2.statusOverrides().then(raw => {
+      const overrides = raw?.overrides;
+      if (!overrides || typeof overrides !== 'object') return;
+      const byName = new Map();
+      for (const key of Object.keys(overrides)) {
+        const o = overrides[key];
+        if (o?.available === false) byName.set(key.toLowerCase().trim(), o);
+      }
+      if (byName.size === 0) return;
+      patchPlayers(p => {
+        const o = byName.get(p.name?.toLowerCase().trim()) ?? byName.get(stripSuffix(p.name));
+        if (!o) return p;
+        return { ...p, proj: 0, ecr: 999, status: o.status_label || 'Unavailable' };
+      });
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Patch DST ECR + ADP from defense ranking data (2025 stats until 2026 games begin).
   // Primary: gold_adp_defense.json — clean 32-row table from main.fantasai.gold_adp_defense.
   //   Fields: team, adp_rank (pre-computed 1-32), avg_last_4_weeks. No duplicates.
@@ -1390,7 +1419,7 @@ export default function App() {
         }}>
           A new version of FantasAI is available — you're viewing an older cached copy.
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => reloadFreshCode()}
             style={{ background: '#0a1300', color: '#c6ff3a', border: 'none', borderRadius: 5, padding: '4px 14px', fontWeight: 800, cursor: 'pointer', fontSize: 12 }}
           >
             Reload Now
@@ -1543,7 +1572,7 @@ export default function App() {
         })()}
       </div>
 
-      {playerObj && <PlayerDetail player={playerObj} onClose={() => setOpenPlayer(null)} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onTradePlayer={handleTradePlayer} sourcesState={sourcesState} />}
+      {playerObj && <PlayerDetail key={playerObj.id} player={playerObj} onClose={() => setOpenPlayer(null)} myRosterIds={myRosterIds} onAddPlayer={handleAddPlayer} onTradePlayer={handleTradePlayer} sourcesState={sourcesState} onSelectPlayer={setOpenPlayer} />}
 
       {rosterError && (() => {
         const isRosterFull = rosterError.title === 'Roster Full' && rosterError.addingPlayerId;

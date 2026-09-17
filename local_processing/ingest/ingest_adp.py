@@ -427,6 +427,25 @@ def main():
     init_schema(conn)
 
     if not args.skip_scrape:
+        # ECR fetched first — its page still renders as a plain HTML table, so
+        # it's the fallback source when the ADP page's table can't be parsed.
+        print("\n── Scraping FantasyPros ECR ──────────────────────────────────────────")
+        ecr_rows: list[dict] = []
+        ecr_by_adp_format: dict[str, list[dict]] = {}
+        for fmt, url in FP_ECR_PAGES.items():
+            rows = fetch_fp_ecr(fmt, url)
+            ecr_rows.extend(rows)
+            # ECR_PPR -> PPR, ECR_STD -> Standard — matches FP_PAGES keys, so
+            # a failed ADP scrape for a format can substitute these rows.
+            adp_fmt = {"ECR_PPR": "PPR", "ECR_STD": "Standard"}.get(fmt)
+            if adp_fmt:
+                ecr_by_adp_format[adp_fmt] = rows
+            time.sleep(1.5)
+        if ecr_rows:
+            write_bronze(conn, ecr_rows, args.dry_run)
+        else:
+            print("   WARNING: No ECR data scraped")
+
         print("\n── Scraping FantasyPros ADP ──────────────────────────────────────────")
         all_rows: list[dict] = []
 
@@ -434,6 +453,17 @@ def main():
             rows = fetch_fp_html(fmt, url)
             if not rows and fmt == "DST":
                 rows = build_dst_from_sleeper(conn)
+            if not rows and fmt in ecr_by_adp_format and ecr_by_adp_format[fmt]:
+                # FantasyPros' ADP page moved its real table behind a
+                # client-side JS fetch (confirmed 2026-09-05 — page HTML only
+                # embeds a 5-row SSR preview, not the full table pandas.read_html
+                # can see). ECR is a different metric (expert opinion vs actual
+                # draft position) but both rank the same players in roughly the
+                # same order, and it's from the same source and still scrapable
+                # — a real number here beats the 999 sentinel a missing ADP
+                # produces downstream in playerStore.js.
+                print(f"   {fmt}: ADP table unavailable — using ECR as ADP fallback ({len(ecr_by_adp_format[fmt])} players)")
+                rows = [{**r, "format": fmt, "source": "fantasypros_ecr_fallback"} for r in ecr_by_adp_format[fmt]]
             all_rows.extend(rows)
             time.sleep(1.5)
 
@@ -443,17 +473,6 @@ def main():
             print("   WARNING: No ADP data — using Sleeper fallback for DST only")
             dst_rows = build_dst_from_sleeper(conn)
             write_bronze(conn, dst_rows, args.dry_run)
-
-        print("\n── Scraping FantasyPros ECR ──────────────────────────────────────────")
-        ecr_rows: list[dict] = []
-        for fmt, url in FP_ECR_PAGES.items():
-            rows = fetch_fp_ecr(fmt, url)
-            ecr_rows.extend(rows)
-            time.sleep(1.5)
-        if ecr_rows:
-            write_bronze(conn, ecr_rows, args.dry_run)
-        else:
-            print("   WARNING: No ECR data scraped")
     else:
         count = conn.execute(
             "SELECT COUNT(*) FROM bronze_adp_rankings"

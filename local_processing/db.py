@@ -356,7 +356,9 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
         format       VARCHAR,   -- 'PPR', 'Standard', 'DST'
         source       VARCHAR,   -- 'fantasypros'
         fetched_at   TIMESTAMP,
-        PRIMARY KEY (player_name, format)
+        -- team included because FantasyPros' own cheatsheet pages can list two
+        -- distinct real players under the same name (e.g. two "Antonio Williams")
+        PRIMARY KEY (player_name, team, format)
     );
 
     -- =========================================================

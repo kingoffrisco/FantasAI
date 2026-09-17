@@ -52,7 +52,7 @@ OFFENSE_POS_ABB = {"QB", "RB", "FB", "WR", "TE", "LT", "LG", "C", "RG", "RT"}
 # right side), used by the O-Line Stability Index (ingest_oline_stability.py) to get
 # real per-week snap counts for O-line players by name+team.
 OL_SNAP_POSITIONS = {"C", "G", "T", "OL", "FB"}
-DEFAULT_SEASONS = [2021, 2022, 2023, 2024, 2025]
+DEFAULT_SEASONS = [2021, 2022, 2023, 2024, 2025, 2026]
 
 
 # ── Headshots ─────────────────────────────────────────────────────────────────
@@ -114,10 +114,15 @@ def import_yac(conn, seasons: list[int], dry_run: bool):
     for season in seasons:
         print(f"   {season}: downloading play-by-play…")
         try:
+            # include_participation=False: the participation-data release always lags
+            # the base PBP release by days/weeks, so mid-season this 404s — and
+            # nfl_data_py's own except clause references an undefined name, turning
+            # that 404 into a crash instead of a clean skip. We don't use any
+            # participation columns here, so just skip the merge outright.
             pbp = nfl.import_pbp_data([season], columns=[
                 "season", "week", "receiver_player_id", "receiver_player_name",
                 "complete_pass", "yards_after_catch", "receiving_yards", "air_yards"
-            ])
+            ], include_participation=False)
             sub = pbp[
                 (pbp["complete_pass"] == 1) &
                 pbp["yards_after_catch"].notna() &
@@ -217,7 +222,8 @@ def import_efficiency_stats(conn, seasons: list[int], dry_run: bool):
     for season in seasons:
         print(f"   {season}: downloading play-by-play…")
         try:
-            pbp = nfl.import_pbp_data([season], columns=PBP_COLS)
+            # include_participation=False — see import_yac's comment on the same call.
+            pbp = nfl.import_pbp_data([season], columns=PBP_COLS, include_participation=False)
             eff_parts.append(pbp)
             print(f"     ✅ {len(pbp):,} plays")
         except Exception as e:
@@ -405,18 +411,47 @@ def import_ngs(conn, seasons: list[int], dry_run: bool):
 
 def import_depth_charts(conn, seasons: list[int], dry_run: bool):
     print("\n📋 Section 4: Depth Charts")
-    # nflverse's depth chart schema changed entirely (old columns: season/week/game_type/
-    # position/depth_team/formation are gone). New shape: dt (snapshot timestamp), team,
-    # player_name, pos_grp (personnel package — offense is "3WR 1TE"), pos_abb, pos_rank,
-    # pos_slot, gsis_id, espn_id. Multiple dt snapshots exist per season with no reliable
-    # week mapping, so we keep only the latest snapshot per (season, team) as the current
-    # depth chart rather than attempting per-week history.
+    # nflverse's depth chart schema changed starting with the 2025 season —
+    # NOT "entirely gone" as the old comment here claimed; confirmed
+    # 2026-09-05 that 2021-2024 still return the OLD shape (season, week,
+    # game_type, position, depth_team, formation, depth_position, full_name —
+    # one row per player per week, formation is Offense/Defense/Special
+    # Teams, depth_team is the depth rank as a string). Only 2025+ returns
+    # the NEW shape (dt snapshot timestamp, team, player_name, pos_grp
+    # personnel package — offense is "3WR 1TE", pos_abb, pos_rank, pos_slot,
+    # espn_id). Both are normalized to the same want_cols shape below so a
+    # single seasons=[2021..2025] run doesn't KeyError on 'pos_grp' for the
+    # older years.
     depth_parts = []
     for season in seasons:
         print(f"   {season}: downloading depth charts…")
         try:
             depth = nfl.import_depth_charts(years=[season])
-            off = depth[(depth["pos_grp"] == "3WR 1TE") & (depth["pos_abb"].isin(OFFENSE_POS_ABB))].copy()
+            if "pos_grp" in depth.columns:
+                off = depth[(depth["pos_grp"] == "3WR 1TE") & (depth["pos_abb"].isin(OFFENSE_POS_ABB))].copy()
+            else:
+                # Old schema: no personnel-package field — filter on formation
+                # instead, and normalize a few alternate position abbreviations
+                # (HB for RB, LOT/ROT for LT/RT) that only appear pre-2025.
+                pos_alias = {"HB": "RB", "LOT": "LT", "ROT": "RT"}
+                dep_pos = depth["depth_position"].replace(pos_alias)
+                off = depth[(depth["formation"] == "Offense") & (dep_pos.isin(OFFENSE_POS_ABB))].copy()
+                off["depth_position"] = dep_pos[off.index]
+                off = off.rename(columns={
+                    "depth_position": "pos_abb",
+                    "depth_team":     "pos_rank",
+                    "full_name":      "player_name",
+                    "club_code":      "team",
+                })
+                # No true snapshot timestamp pre-2025 — synthesize one from
+                # the season's highest observed week so the groupby-latest
+                # logic below (pick the most recent dt per season/team) still
+                # picks the last available depth chart of the season.
+                # tz="UTC" to match the real 2025+ dt values (ISO strings
+                # ending in "Z") once both go through pd.to_datetime() below —
+                # a naive/aware mix there raises "Mixed timezones detected".
+                season_start = pd.Timestamp(year=season, month=1, day=1, tz="UTC")
+                off["dt"] = season_start + pd.to_timedelta(off["week"].fillna(0).astype(int), unit="W")
             off["season"] = season
             print(f"     ✅ {len(off):,} records")
             depth_parts.append(off)
@@ -506,11 +541,12 @@ def import_penalties(conn, seasons: list[int], dry_run: bool):
     for season in seasons:
         print(f"   {season}: downloading play-by-play…", end=" ", flush=True)
         try:
+            # include_participation=False — see import_yac's comment on the same call.
             pbp = nfl.import_pbp_data([season], columns=[
                 "game_id", "play_id", "season", "week", "posteam",
                 "penalty", "penalty_team", "penalty_type",
                 "penalty_player_id", "penalty_player_name", "penalty_yards",
-            ])
+            ], include_participation=False)
             pens = pbp[
                 (pbp["penalty"] == 1)
                 & (pbp["penalty_type"].isin(["Offensive Holding", "False Start"]))
@@ -551,15 +587,18 @@ def import_penalties(conn, seasons: list[int], dry_run: bool):
 
 def _fetch_weekly_stats_direct(season: int) -> "pd.DataFrame":
     """Fallback for seasons where nfl_data_py's URL no longer works.
-    nflverse renamed the file from player_stats_{y}.parquet to
-    stats_player_week_{y}.parquet starting with the 2025 season.
+    nflverse renamed both the file (player_stats_{y}.parquet ->
+    stats_player_week_{y}.parquet) AND the GitHub release tag itself
+    (player_stats -> stats_player) starting with the 2025 season — confirmed
+    2026-09-05 via the releases API; the "player_stats" tag's assets stop at
+    2024, "stats_player" has 1999-2025 under the new naming.
     """
     import io, urllib.request
     url = (
         f"https://github.com/nflverse/nflverse-data/releases/download/"
-        f"player_stats/stats_player_week_{season}.parquet"
+        f"stats_player/stats_player_week_{season}.parquet"
     )
-    print(f"     Trying new URL pattern: stats_player_week_{season}.parquet")
+    print(f"     Trying new URL pattern: stats_player/stats_player_week_{season}.parquet")
     with urllib.request.urlopen(url, timeout=60) as resp:
         return pd.read_parquet(io.BytesIO(resp.read()))
 
@@ -596,23 +635,33 @@ def import_weekly_stats(conn, seasons: list[int], dry_run: bool):
         player_id = row.get("player_id") or row.get("gsis_id") or ""
         if not player_id:
             continue
+        # stats_dict has NaN already converted to None — build every flat field from
+        # it, not from the raw row. Concatenating seasons whose source schemas differ
+        # (2026's fallback source has a `team` column but no `recent_team`, unlike
+        # 2021-2025) makes pandas fill the missing column with NaN for the 2026 rows
+        # once seasons are combined via pd.concat — and `NaN or x` evaluates to NaN
+        # in Python (NaN is truthy), so an `row.get(a) or row.get(b)` chain silently
+        # locks onto the NaN column instead of falling through to `b`. This shipped
+        # real data: every 2026 row's team ended up as the literal string "nan".
+        # None, by contrast, is falsy, so the same `or` chain works correctly once
+        # sourced from stats_dict.
         stats_dict = {c: (None if pd.isna(v) else v) for c, v in row.items()}
         rows.append({
             "player_id":     str(player_id),
             "week":          int(row.get("week", 0)),
             "season":        int(row.get("season", 0)),
-            "fantasy_points": float(row.get("fantasy_points_ppr") or row.get("fantasy_points") or 0),
+            "fantasy_points": float(stats_dict.get("fantasy_points_ppr") or stats_dict.get("fantasy_points") or 0),
             "stats":         json.dumps(stats_dict, default=str),
             "source":        "nflverse",
-            "player_name":   str(row.get("player_display_name") or row.get("player_name") or ""),
-            "position":      str(row.get("position") or ""),
-            "team":          str(row.get("recent_team") or row.get("team") or ""),
+            "player_name":   str(stats_dict.get("player_display_name") or stats_dict.get("player_name") or ""),
+            "position":      str(stats_dict.get("position") or ""),
+            "team":          str(stats_dict.get("recent_team") or stats_dict.get("team") or ""),
             "ingested_at":   now,
-            "receiving_yards_after_catch": float(row["receiving_yards_after_catch"])
-                                           if "receiving_yards_after_catch" in row and not pd.isna(row.get("receiving_yards_after_catch")) else None,
-            "passing_yards_after_catch":  float(row["passing_air_yards"])
-                                           if "passing_air_yards" in row and not pd.isna(row.get("passing_air_yards")) else None,
-            "headshot_url":  str(row.get("headshot_url") or "") or None,
+            "receiving_yards_after_catch": float(stats_dict["receiving_yards_after_catch"])
+                                           if stats_dict.get("receiving_yards_after_catch") is not None else None,
+            "passing_yards_after_catch":  float(stats_dict["passing_air_yards"])
+                                           if stats_dict.get("passing_air_yards") is not None else None,
+            "headshot_url":  str(stats_dict.get("headshot_url") or "") or None,
         })
 
     import_df = pd.DataFrame(rows)

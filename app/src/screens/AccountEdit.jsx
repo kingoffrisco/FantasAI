@@ -3,6 +3,35 @@ import { LEAGUE_TEAMS, findTeam } from '../lib/data.js';
 import { getMyTeamPrefs, saveMyTeamPrefs, clearMyTeamPrefs } from '../lib/leagueStore.js';
 import { TeamLogoBadge } from '../components/ui.jsx';
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
+import { clearSiteDataAndReload } from '../lib/cacheUtils.js';
+
+function ClearSiteDataButton() {
+  const [confirming, setConfirming] = React.useState(false);
+  const [clearing, setClearing] = React.useState(false);
+  if (clearing) {
+    return <button className="btn ghost sm" disabled style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>Clearing…</button>;
+  }
+  if (!confirming) {
+    return (
+      <button className="btn ghost sm" onClick={() => setConfirming(true)} style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}>
+        🧹 Clear Site Data &amp; Reload
+      </button>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>This will log you out. Continue?</span>
+      <button
+        className="btn sm"
+        style={{ background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)', fontWeight: 700 }}
+        onClick={() => { setClearing(true); clearSiteDataAndReload(); }}
+      >
+        Yes, Clear &amp; Reload
+      </button>
+      <button className="btn ghost sm" onClick={() => setConfirming(false)}>Cancel</button>
+    </div>
+  );
+}
 
 // ── Scoring weight config ─────────────────────────────────────────────────────
 
@@ -937,6 +966,16 @@ export default function AccountEditScreen({ user }) {
                 {passStatus === 'error' && <span style={{ fontSize: 12, color: 'var(--warn)', fontFamily: 'var(--font-mono)' }}>Saved locally · server sync failed</span>}
               </div>
             </form>
+
+            <div style={{ marginTop: 40, paddingTop: 24, borderTop: '1px solid var(--border)' }}>
+              <label style={labelStyle}>Troubleshooting</label>
+              <div style={{ fontSize: 12, color: 'var(--text-faint)', marginBottom: 14, lineHeight: 1.6 }}>
+                If the app is showing stale data or missing recent fixes even after a normal reload, your
+                browser may be holding onto old cached code. This clears everything this site has stored in
+                your browser (cache, saved preferences, login) and reloads fresh — you'll need to log back in.
+              </div>
+              <ClearSiteDataButton />
+            </div>
           </div>
         )}
 

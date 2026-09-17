@@ -29,6 +29,8 @@ Usage:
   python job3_player_writeups.py --mode all --limit 50
   python job3_player_writeups.py --mode all --pos QB,RB
   python job3_player_writeups.py --mode all --full
+  python job3_player_writeups.py --player "Jahmyr Gibbs"          # force just this one, ignores cache
+  python job3_player_writeups.py --player "Jahmyr Gibbs,Ja'Marr Chase"
 """
 
 import argparse
@@ -90,7 +92,7 @@ INJURY STATUS: {injury_status}
   Fantasy points: {fantasy_pts:.1f} total  ({ppg:.1f} PPG)
 {stats_block}  Touchdowns:     {tds}
 
-{efficiency_block}DRAFT CONTEXT:
+{current_season_block}{efficiency_block}DRAFT CONTEXT:
   ADP rank (PPR):      {adp_rank_ppr}
   ADP value (PPR):     {adp_ppr}
   ADP rank (Standard): {adp_rank_std}
@@ -100,7 +102,7 @@ RECENT NEWS ({news_count} articles in last 30 days):
 
 {college_stats_block}{combine_block}Paragraph 1: {para1_instruction}
 Paragraph 2: Discuss current news, team situation, and any injury/role concerns.
-Paragraph 3: Give a 2026 fantasy draft outlook — who should target them, at what round, and why.
+Paragraph 3: {para3_instruction}
 
 Write the three paragraphs now (no labels, no headers):"""
 
@@ -120,16 +122,16 @@ INJURY STATUS: {injury_status}
   Defensive TDs:  {def_tds}
   Points allowed: {pts_allowed}
 
-DRAFT CONTEXT:
+{current_season_block}DRAFT CONTEXT:
   ADP rank (PPR):      {adp_rank_ppr}
   ADP rank (Standard): {adp_rank_std}
 
 RECENT NEWS ({news_count} articles in last 30 days):
 {news_block}
 
-Paragraph 1: Summarize the 2025 defensive performance — scoring, turnover generation, big plays.
+Paragraph 1: {para1_instruction}
 Paragraph 2: Discuss coaching staff, key personnel, any changes heading into 2026.
-Paragraph 3: Give a 2026 fantasy draft outlook — strength of schedule, matchup upside, target round.
+Paragraph 3: {para3_instruction}
 
 Write the three paragraphs now (no labels, no headers):"""
 
@@ -189,26 +191,16 @@ def _cache_key(profile: dict) -> str:
         str(profile.get("recent_news_count") or 0),
         str(profile.get("adp_rank_ppr") or 0),
         str(profile.get("total_fantasy_points_2025") or 0),
+        # games_played_2026 / total_fantasy_points_2026 are the signal that actually
+        # busts the cache once the season starts — without them, a player's cache_key
+        # never changes between games (2025 totals are frozen, injury/ADP/news often
+        # don't move week to week either), so a writeup would sit unchanged through
+        # every game of the season until the 21-day hard ceiling forced it.
+        str(profile.get("games_played_2026") or 0),
+        str(profile.get("total_fantasy_points_2026") or 0),
         "|".join(_recent_headline_titles(profile)),
     ])
     return hashlib.md5(sig.encode()).hexdigest()[:12]
-
-
-def _already_fresh(entry: dict, mode: str) -> bool:
-    """Return True if this player's writeup is fresh enough to skip."""
-    ts = entry.get("generated_at")
-    if not ts:
-        return False
-    try:
-        generated = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
-        age_hours = (now - generated).total_seconds() / 3600
-        if mode == "rostered":
-            return age_hours < 20        # skip if generated within the last 20 hours
-        else:
-            return age_hours < 6 * 24    # skip if generated within the last 6 days
-    except Exception:
-        return False
 
 
 MAX_CACHE_KEY_SKIP_DAYS = 21  # hard ceiling — see _too_stale_to_trust_cache_key
@@ -348,6 +340,45 @@ def _efficiency_block(pos: str, eff_row: dict) -> str:
     return "ADVANCED EFFICIENCY (nflverse play-by-play, most recent week charted):\n" + "\n".join(lines) + "\n\n"
 
 
+def _current_season_block(pos: str, profile: dict) -> str:
+    """Build a '2026 SEASON TO DATE' prompt section from the in-progress season's
+    stats (see stats_2026 CTE in export_to_r2.py). Returns "" once no games have
+    been played yet this season, so the section is simply omitted pre-kickoff."""
+    games = profile.get("games_played_2026") or 0
+    if games <= 0:
+        return ""
+    week = profile.get("latest_week_2026") or games
+    fantasy_pts = float(profile.get("total_fantasy_points_2026") or 0)
+    ppg = fantasy_pts / games
+    stats = _stats_block(
+        pos,
+        profile.get("rushing_yards_2026") or 0,
+        profile.get("receiving_yards_2026") or 0,
+        profile.get("passing_yards_2026") or 0,
+    )
+    tds = profile.get("total_touchdowns_2026") or 0
+    return (
+        f"2026 SEASON TO DATE (through Week {week}, {games} game{'s' if games != 1 else ''}):\n"
+        f"  Fantasy points: {fantasy_pts:.1f} total  ({ppg:.1f} PPG)\n"
+        f"{stats}  Touchdowns:     {tds}\n\n"
+    )
+
+
+def _current_season_block_dst(profile: dict) -> str:
+    """DST equivalent of _current_season_block — no rush/rec/pass yard breakdown,
+    just points and games (DST doesn't have a per-stat efficiency section either)."""
+    games = profile.get("games_played_2026") or 0
+    if games <= 0:
+        return ""
+    week = profile.get("latest_week_2026") or games
+    fantasy_pts = float(profile.get("total_fantasy_points_2026") or 0)
+    ppg = fantasy_pts / games
+    return (
+        f"2026 SEASON TO DATE (through Week {week}, {games} game{'s' if games != 1 else ''}):\n"
+        f"  Fantasy points: {fantasy_pts:.1f} total  ({ppg:.1f} PPG)\n\n"
+    )
+
+
 def _years_exp_label(profile: dict) -> str:
     """Return a human-readable NFL experience string for the prompt."""
     ye = profile.get("years_exp")
@@ -369,12 +400,22 @@ def _years_exp_label(profile: dict) -> str:
 def _physical_label(profile: dict) -> str:
     h = profile.get("height_in")
     w = profile.get("weight_lbs")
-    if h and w:
-        ft, inch = divmod(int(h), 12)
-        return f"{ft}'{inch}\", {w} lbs"
+    height_str = None
     if h:
-        ft, inch = divmod(int(h), 12)
-        return f"{ft}'{inch}\""
+        if isinstance(h, str) and "'" in h:
+            # Sleeper returns plain total-inches for most players, but
+            # pre-formatted feet'inches" text for a handful of obscure ones.
+            height_str = h
+        else:
+            try:
+                ft, inch = divmod(int(h), 12)
+                height_str = f"{ft}'{inch}\""
+            except (ValueError, TypeError):
+                height_str = None
+    if height_str and w:
+        return f"{height_str}, {w} lbs"
+    if height_str:
+        return height_str
     if w:
         return f"{w} lbs"
     return "—"
@@ -516,8 +557,14 @@ def load_rostered_names() -> set:
             data = resp.json()
             players = data.get("players") or (data if isinstance(data, list) else [])
             for p in players:
+                # This is a recent-player-news feed (fixed 2026-09-05 — CBS
+                # redesigned the page away from a plain roster table), so it
+                # returns BOTH rostered players and free agents with recent
+                # news. rosteredBy is the actual signal now; the old "any name
+                # here is on a roster" assumption is no longer true.
+                if not p.get("rosteredBy"):
+                    continue
                 name = (p.get("name") or p.get("full_name") or "").strip()
-                # CBS only returns rostered players — any name here is on a roster
                 if name:
                     names.add(name.lower())
             if names:
@@ -565,13 +612,25 @@ def _to_profile(p: dict) -> dict:
         "age":                           p.get("age"),
         "years_exp":                     p.get("years_exp") or p.get("experience"),
         "injury_status":                 p.get("injury_status") or p.get("status") or "",
-        "total_fantasy_points_2025":     p.get("total_fantasy_points_2025") or 0,
+        # players_2026_draft (export_to_r2.py) names these season_total_points_2025 /
+        # season_avg_points_2025 — accept both that and the older gold_player_profiles
+        # names so either source maps correctly.
+        "total_fantasy_points_2025":     p.get("total_fantasy_points_2025") or p.get("season_total_points_2025") or 0,
         "games_played_2025":             p.get("games_played_2025") or 0,
-        "avg_fantasy_points_per_game_2025": p.get("avg_fantasy_points_per_game_2025") or 0,
+        "avg_fantasy_points_per_game_2025": p.get("avg_fantasy_points_per_game_2025") or p.get("season_avg_points_2025") or 0,
         "rushing_yards_2025":            p.get("rushing_yards_2025") or 0,
         "receiving_yards_2025":          p.get("receiving_yards_2025") or 0,
         "passing_yards_2025":            p.get("passing_yards_2025") or 0,
         "total_touchdowns_2025":         p.get("total_touchdowns_2025") or 0,
+        # Current season (in progress) — zeroed out / absent until games are played.
+        "total_fantasy_points_2026":     p.get("total_fantasy_points_2026") or p.get("season_total_points_2026") or 0,
+        "games_played_2026":             p.get("games_played_2026") or 0,
+        "avg_fantasy_points_per_game_2026": p.get("avg_fantasy_points_per_game_2026") or p.get("season_avg_points_2026") or 0,
+        "latest_week_2026":              p.get("latest_week_2026") or 0,
+        "rushing_yards_2026":            p.get("rushing_yards_2026") or 0,
+        "receiving_yards_2026":          p.get("receiving_yards_2026") or 0,
+        "passing_yards_2026":            p.get("passing_yards_2026") or 0,
+        "total_touchdowns_2026":         p.get("total_touchdowns_2026") or 0,
         "adp_ppr":                       p.get("adp_ppr") or p.get("adp"),
         "adp_rank_ppr":                  p.get("adp_rank_ppr") or p.get("adp_rank"),
         "adp_standard":                  p.get("adp_standard"),
@@ -681,7 +740,13 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
     ppg         = (fantasy_pts / games) if games > 0 else 0.0
     pos         = (profile.get("position") or "").upper()
 
+    in_season = (profile.get("games_played_2026") or 0) > 0
+
     if pos == "DST":
+        para1 = ("Summarize their 2026 season so far, and how it compares to their 2025 performance."
+                 if in_season else "Summarize the 2025 defensive performance — scoring, turnover generation, big plays.")
+        para3 = ("Give a rest-of-2026 outlook — is their current pace sustainable, and what should a fantasy manager expect the rest of the way?"
+                 if in_season else "Give a 2026 fantasy draft outlook — strength of schedule, matchup upside, target round.")
         prompt = DST_WRITEUP_PROMPT.format(
             team           = profile.get("team", "Unknown"),
             injury_status  = profile.get("injury_status") or "Active/Healthy",
@@ -692,10 +757,13 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
             interceptions  = profile.get("interceptions_2025") or profile.get("interceptions") or "—",
             def_tds        = profile.get("defensive_tds_2025") or profile.get("def_tds") or "—",
             pts_allowed    = profile.get("points_allowed_2025") or profile.get("points_allowed") or "—",
+            current_season_block = _current_season_block_dst(profile),
             adp_rank_ppr   = profile.get("adp_rank_ppr") or "unranked",
             adp_rank_std   = profile.get("adp_rank_standard") or "unranked",
             news_count     = news_count,
             news_block     = _news_block(profile, notes_lookup),
+            para1_instruction = para1,
+            para3_instruction = para3,
         )
     else:
         is_rookie = int(profile.get("years_exp") or 99) <= 1
@@ -703,9 +771,15 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
         comb_block = _combine_block(profile, combine_data) if is_rookie and combine_data else ""
         eff_row = (efficiency_data or {}).get((profile.get("full_name") or "").lower().strip())
         eff_block = _efficiency_block(pos, eff_row)
-        para1 = ("Summarize their college production and what it means for their NFL transition. Ground it in their actual college stats."
-                 if is_rookie and games == 0 and college_block
-                 else "Summarize their 2025 performance. Ground it in their actual stats.")
+        if in_season:
+            para1 = "Summarize their 2026 season so far, and how it compares to their 2025 performance. Ground it in their actual stats."
+            para3 = "Give a rest-of-2026 outlook — is their current pace sustainable, and what should a fantasy manager (redraft or waiver-wire) expect the rest of the way?"
+        elif is_rookie and games == 0 and college_block:
+            para1 = "Summarize their college production and what it means for their NFL transition. Ground it in their actual college stats."
+            para3 = "Give a 2026 fantasy draft outlook — who should target them, at what round, and why."
+        else:
+            para1 = "Summarize their 2025 performance. Ground it in their actual stats."
+            para3 = "Give a 2026 fantasy draft outlook — who should target them, at what round, and why."
 
         prompt = WRITEUP_PROMPT.format(
             player_name    = profile.get("full_name", "Unknown"),
@@ -726,6 +800,7 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
                 profile.get("passing_yards_2025") or 0,
             ),
             tds            = profile.get("total_touchdowns_2025") or 0,
+            current_season_block = _current_season_block(pos, profile),
             efficiency_block = eff_block,
             adp_rank_ppr   = profile.get("adp_rank_ppr") or "unranked",
             adp_ppr        = profile.get("adp_ppr") or "—",
@@ -735,6 +810,7 @@ def generate_writeup(profile: dict, notes_lookup: dict, model: str = MODEL_TIER1
             college_stats_block = college_block,
             combine_block  = comb_block,
             para1_instruction = para1,
+            para3_instruction = para3,
         )
 
     resp = requests.post(
@@ -781,34 +857,43 @@ def main():
     parser.add_argument("--dry-run", action="store_true",       help="Generate but don't upload")
     parser.add_argument("--full",    action="store_true",       help="Ignore cache, regenerate all")
     parser.add_argument("--pos",     type=str,  default=None,   help="Comma-separated positions, e.g. QB,RB")
+    parser.add_argument("--player",  type=str,  default=None,   help="Comma-separated exact full name(s) — force-regenerate just these, bypassing cache and mode/pos filters")
     args = parser.parse_args()
 
     pos_filter = set(p.strip().upper() for p in args.pos.split(",")) if args.pos else None
+    player_filter = set(p.strip().lower() for p in args.player.split(",")) if args.player else None
 
     print(f"[Job 3] Mode: {'ROSTERED (nightly)' if args.mode == 'rostered' else 'ALL PLAYERS (weekly)'}")
 
     # ── Load player profiles ─────────────────────────────────────────────────
-    print("[Job 3] Loading player profiles from R2...")
-    raw = r2_get("players/player_profiles.json")
-    if raw:
-        profiles_list = raw if isinstance(raw, list) else (raw.get("data") or [])
-        seen, deduped = set(), []
-        for p in profiles_list:
-            key = p.get("player_id") or p.get("full_name") or ""
-            if key and key not in seen:
-                seen.add(key)
-                deduped.append(p)
-        if len(deduped) < len(profiles_list):
-            print(f"[Job 3] Deduplicated {len(profiles_list)} -> {len(deduped)} profiles.")
-        profiles_list = deduped
-        print(f"[Job 3] {len(profiles_list)} profiles loaded from gold_player_profiles export.")
-    else:
-        print("[Job 3] players/player_profiles.json not in R2 yet — using fallback sources.")
-        profiles_list = load_profiles_fallback()
-        if not profiles_list:
-            print("ERROR: No player data available. Exiting.")
-            sys.exit(1)
-        print(f"[Job 3] Fallback: {len(profiles_list)} profiles ready.")
+    # players/player_profiles.json (the old Databricks gold_player_profiles export)
+    # has no active producer left in this repo — it's a frozen 2026-06-15 snapshot
+    # that will never reflect a game played since (see _load_fresh_adp_lookup's
+    # docstring for the same issue with ADP). The local export_to_r2.py pipeline's
+    # players_2026_draft export IS actively refreshed and now carries current-season
+    # (in-progress) stats too, so it's the real primary source; the frozen snapshot
+    # is kept only as an absolute last resort if that live export is unreachable.
+    print("[Job 3] Loading player profiles from R2 (live export_to_r2.py export)...")
+    profiles_list = load_profiles_fallback()
+    if not profiles_list:
+        print("[Job 3] Live export unavailable — falling back to players/player_profiles.json (may be stale).")
+        raw = r2_get("players/player_profiles.json")
+        if raw:
+            profiles_list = raw if isinstance(raw, list) else (raw.get("data") or [])
+            seen, deduped = set(), []
+            for p in profiles_list:
+                key = p.get("player_id") or p.get("full_name") or ""
+                if key and key not in seen:
+                    seen.add(key)
+                    deduped.append(p)
+            if len(deduped) < len(profiles_list):
+                print(f"[Job 3] Deduplicated {len(profiles_list)} -> {len(deduped)} profiles.")
+            profiles_list = deduped
+            print(f"[Job 3] {len(profiles_list)} profiles loaded from gold_player_profiles export.")
+    if not profiles_list:
+        print("ERROR: No player data available. Exiting.")
+        sys.exit(1)
+    print(f"[Job 3] {len(profiles_list)} profiles ready.")
 
     # ── Overlay fresh ADP over the (possibly stale) profile export ──────────
     adp_lookup = _load_fresh_adp_lookup()
@@ -872,6 +957,14 @@ def main():
     # ── Filter and sort candidates ───────────────────────────────────────────
     candidates = []
     for p in profiles_list:
+        name_lc = (p.get("full_name") or "").strip().lower()
+        if player_filter is not None:
+            # Explicit --player target: exact-name match only, skip every
+            # other gate (mode/pos/data-availability) so a named player can't
+            # be silently dropped by an unrelated filter.
+            if name_lc in player_filter:
+                candidates.append(p)
+            continue
         pos = (p.get("position") or "").upper()
         if pos_filter and pos not in pos_filter:
             continue
@@ -883,10 +976,15 @@ def main():
         if not (has_games or has_news or has_adp):
             continue
         if args.mode == "rostered":
-            name = (p.get("full_name") or "").strip().lower()
-            if name not in rostered_names:
+            if name_lc not in rostered_names:
                 continue
         candidates.append(p)
+
+    if player_filter is not None:
+        found_lc = {(p.get("full_name") or "").strip().lower() for p in candidates}
+        missing = player_filter - found_lc
+        if missing:
+            print(f"[Job 3] WARNING: --player name(s) not found in player_profiles.json: {', '.join(missing)}")
 
     # Rostered mode: injured + news-heavy players first, then ADP order
     # All mode: same sort
@@ -909,13 +1007,19 @@ def main():
     for i, profile in enumerate(candidates):
         name = profile.get("full_name", f"player_{i}")
         cache_key = _cache_key(profile)
+        forced = player_filter is not None and name.strip().lower() in player_filter
 
-        if not args.full and name in existing:
+        if not args.full and not forced and name in existing:
             entry = existing[name]
-            if _already_fresh(entry, args.mode):
-                players_out[name] = entry
-                print(f"  [{i+1}/{len(candidates)}] {name} (fresh — skipping)")
-                continue
+            # cache_key is the sole gate now — it already encodes injury/ADP/news/
+            # 2025 points/2026 in-season points, so a real change (like a player's
+            # first game of the season landing) always busts it. There used to be
+            # an age-only "fresh — skip regardless of cache_key" shortcut here
+            # (skip if generated <20h/<6d ago) that bypassed this entirely during
+            # the season: a writeup generated hours before a player's game reads
+            # as "fresh" by age while being silently missing that game's stats,
+            # and could stay that way for days. cache_key catches that the moment
+            # it changes instead of waiting out an arbitrary age window.
             if entry.get("_cache_key") == cache_key and not _too_stale_to_trust_cache_key(entry):
                 players_out[name] = entry
                 print(f"  [{i+1}/{len(candidates)}] {name} (cached — data unchanged)")

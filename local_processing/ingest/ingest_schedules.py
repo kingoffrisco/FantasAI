@@ -47,7 +47,7 @@ R2_BASE      = "https://api.fantasai.net/api/v1/r2"
 FANTASAI_KEY = os.environ.get("FANTASAI_KEY", "")
 HEADERS_R2   = {"X-FantasAI-Key": FANTASAI_KEY, "Content-Type": "application/json"}
 
-CURRENT_SEASON = 2025  # Most recent completed; 2026 starts Sep 2026
+CURRENT_SEASON = 2026
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────

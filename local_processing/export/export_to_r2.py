@@ -442,14 +442,11 @@ def export_analysis(conn, dry_run: bool):
         """)
     r2_put("fantasai/analysis/breakout_candidates.json", breakout, dry_run)
 
-    # 1b. Defense vs Position rankings (2025 season)
+    # 1b. Defense vs Position rankings — 2025 (full season) and 2026 (in progress).
     # Cross-references silver_weekly_stats with bronze_nfl_schedules to compute
     # how many fantasy points each defense allows per position per game.
-    has_schedules = conn.execute(
-        "SELECT COUNT(*) FROM bronze_nfl_schedules WHERE season = 2025"
-    ).fetchone()[0]
-    if has_schedules:
-        def_vs_pos = q(conn, """
+    def _def_vs_pos_for_season(season: int, week_cap: int):
+        return q(conn, """
             WITH player_vs_def AS (
                 SELECT
                     s.position,
@@ -467,7 +464,7 @@ def export_analysis(conn, dry_run: bool):
                        UPPER(TRIM(s.team)) = UPPER(TRIM(g.home_team))
                     OR UPPER(TRIM(s.team)) = UPPER(TRIM(g.away_team))
                    )
-                WHERE s.season = 2025
+                WHERE s.season = ? AND s.week <= ?
                   AND s.fantasy_points > 0
                   AND s.position IN ('QB','RB','WR','TE','K')
             ),
@@ -493,19 +490,57 @@ def export_analysis(conn, dry_run: bool):
             SELECT def_team, position, avg_pts_allowed, sample_size, rank_vs_pos
             FROM ranked
             ORDER BY position, rank_vs_pos
-        """)
-        r2_put("fantasai/analysis/defense_vs_pos.json",
-               {"source": "silver_weekly_stats+bronze_nfl_schedules", "season": 2025,
-                "data": def_vs_pos}, dry_run)
-    else:
-        print("   ⚠️  No 2025 schedule data — skipping defense_vs_pos export")
+        """, [season, week_cap])
+
+    has_schedules_2025 = conn.execute(
+        "SELECT COUNT(*) FROM bronze_nfl_schedules WHERE season = 2025"
+    ).fetchone()[0]
+    def_vs_pos_2025 = _def_vs_pos_for_season(2025, 18) if has_schedules_2025 else []
+    if not has_schedules_2025:
+        print("   ⚠️  No 2025 schedule data — def_vs_pos 2025 will be empty")
+
+    has_schedules_2026 = conn.execute(
+        "SELECT COUNT(*) FROM bronze_nfl_schedules WHERE season = 2026"
+    ).fetchone()[0]
+    # No week cap for 2026 — the season can't have played past its current week yet,
+    # so "all weeks so far" and "regular season" are the same set until January.
+    def_vs_pos_2026 = _def_vs_pos_for_season(2026, 18) if has_schedules_2026 else []
+
+    # Index 2026 by (team, position) so job4 can prefer it once a team has actually
+    # played a 2026 game, falling back to the 2025 row otherwise — a team on a
+    # Week 1 bye or early in the season simply won't have a 2026 entry yet.
+    def_vs_pos_2026_by_key = {(r["def_team"], r["position"]): r for r in def_vs_pos_2026}
+    for row in def_vs_pos_2025:
+        cur = def_vs_pos_2026_by_key.get((row["def_team"], row["position"]))
+        if cur:
+            row["avg_pts_allowed_2026"] = cur["avg_pts_allowed"]
+            row["sample_size_2026"]     = cur["sample_size"]
+            row["rank_vs_pos_2026"]     = cur["rank_vs_pos"]
+
+    r2_put("fantasai/analysis/defense_vs_pos.json",
+           {"source": "silver_weekly_stats+bronze_nfl_schedules", "season": 2025,
+            "current_season": 2026, "data": def_vs_pos_2025}, dry_run)
 
     # 2. Player profiles from Sleeper + DSTs from ADP rankings
     # Kickers (K) are in bronze_player_news_raw (Sleeper tracks them as players).
     # DSTs are NOT — Sleeper stores teams separately, so we pull them from
     # bronze_adp_rankings where format='DST' (populated by ingest_adp.py).
     players_draft = q(conn, """
-        WITH stats_2025 AS (
+        WITH dedup_weekly_stats AS (
+            -- silver_weekly_stats can carry more than one source for the same
+            -- player/week (nflverse + a one-off sleeper backfill both cover parts
+            -- of 2025) — summing across all of them double-counts points/yards.
+            -- Keep one row per (player, season, week), preferring nflverse (the
+            -- actively-maintained, full-season source) over anything else.
+            SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY LOWER(TRIM(player_name)), season, week
+                    ORDER BY CASE source WHEN 'nflverse' THEN 0 ELSE 1 END
+                ) AS _rn
+                FROM silver_weekly_stats
+            ) WHERE _rn = 1
+        ),
+        stats_2025 AS (
             SELECT
                 LOWER(TRIM(player_name))              AS name_key,
                 ROUND(SUM(fantasy_points), 1)         AS season_total_points_2025,
@@ -515,9 +550,53 @@ def export_analysis(conn, dry_run: bool):
                                                       AS games_played_2025,
                 ROUND(ARG_MAX(fantasy_points, week), 1) AS last_pts,
                 list(ROUND(fantasy_points, 1) ORDER BY week ASC)
-                                                      AS trend
-            FROM silver_weekly_stats
-            WHERE season = 2025
+                                                      AS trend,
+                -- stats blob key names differ by source (nflverse: receiving_yards/
+                -- rushing_tds/... vs sleeper: rec_yd/rush_td/...) — COALESCE both so
+                -- this works regardless of which source covers a given season.
+                ROUND(SUM(COALESCE(TRY_CAST(json_extract_string(stats,'$.rush_yd') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.rushing_yards') AS DOUBLE), 0)), 0) AS rushing_yards_2025,
+                ROUND(SUM(COALESCE(TRY_CAST(json_extract_string(stats,'$.rec_yd') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.receiving_yards') AS DOUBLE), 0)), 0) AS receiving_yards_2025,
+                ROUND(SUM(COALESCE(TRY_CAST(json_extract_string(stats,'$.pass_yd') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.passing_yards') AS DOUBLE), 0)), 0) AS passing_yards_2025,
+                ROUND(SUM(
+                    COALESCE(TRY_CAST(json_extract_string(stats,'$.rush_td') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.rushing_tds') AS DOUBLE), 0) +
+                    COALESCE(TRY_CAST(json_extract_string(stats,'$.rec_td') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.receiving_tds') AS DOUBLE), 0) +
+                    COALESCE(TRY_CAST(json_extract_string(stats,'$.pass_td') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.passing_tds') AS DOUBLE), 0)
+                ), 0) AS total_touchdowns_2025
+            FROM dedup_weekly_stats
+            -- week <= 18: regular season only. nflverse tags playoff games with
+            -- the same season year at week 19+ — left in, "season totals" would
+            -- silently include 1-4 extra playoff games fantasy managers don't
+            -- count as part of the season.
+            WHERE season = 2025 AND week <= 18
+            GROUP BY LOWER(TRIM(player_name))
+        ),
+        stats_2026 AS (
+            -- Current-season-in-progress mirror of stats_2025. Populated once
+            -- ingest_nflverse.py has pulled the season (see DEFAULT_SEASONS) —
+            -- empty/NULL for every player until then, which is fine: all
+            -- consumers treat games_played_2026 = 0 as "season hasn't started
+            -- for this player yet" rather than erroring.
+            SELECT
+                LOWER(TRIM(player_name))              AS name_key,
+                ROUND(SUM(fantasy_points), 1)         AS season_total_points_2026,
+                ROUND(AVG(CASE WHEN fantasy_points > 0 THEN fantasy_points END), 1)
+                                                      AS season_avg_points_2026,
+                COUNT(CASE WHEN fantasy_points > 0 THEN 1 END)
+                                                      AS games_played_2026,
+                MAX(week)                             AS latest_week_2026,
+                ROUND(ARG_MAX(fantasy_points, week), 1) AS last_pts_2026,
+                list(ROUND(fantasy_points, 1) ORDER BY week ASC)
+                                                      AS trend_2026,
+                ROUND(SUM(COALESCE(TRY_CAST(json_extract_string(stats,'$.rush_yd') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.rushing_yards') AS DOUBLE), 0)), 0) AS rushing_yards_2026,
+                ROUND(SUM(COALESCE(TRY_CAST(json_extract_string(stats,'$.rec_yd') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.receiving_yards') AS DOUBLE), 0)), 0) AS receiving_yards_2026,
+                ROUND(SUM(COALESCE(TRY_CAST(json_extract_string(stats,'$.pass_yd') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.passing_yards') AS DOUBLE), 0)), 0) AS passing_yards_2026,
+                ROUND(SUM(
+                    COALESCE(TRY_CAST(json_extract_string(stats,'$.rush_td') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.rushing_tds') AS DOUBLE), 0) +
+                    COALESCE(TRY_CAST(json_extract_string(stats,'$.rec_td') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.receiving_tds') AS DOUBLE), 0) +
+                    COALESCE(TRY_CAST(json_extract_string(stats,'$.pass_td') AS DOUBLE), TRY_CAST(json_extract_string(stats,'$.passing_tds') AS DOUBLE), 0)
+                ), 0) AS total_touchdowns_2026
+            FROM dedup_weekly_stats
+            WHERE season = 2026 AND week <= 18
             GROUP BY LOWER(TRIM(player_name))
         ),
         dst_stats_2025 AS (
@@ -532,6 +611,21 @@ def export_analysis(conn, dry_run: bool):
                                                       AS trend
             FROM bronze_dst_weekly_stats
             WHERE season = 2025
+            GROUP BY UPPER(TRIM(team))
+        ),
+        dst_stats_2026 AS (
+            SELECT
+                UPPER(TRIM(team))                     AS team_key,
+                ROUND(SUM(pts_ppr), 1)                AS season_total_points_2026,
+                ROUND(AVG(CASE WHEN pts_ppr > 0 THEN pts_ppr END), 1)
+                                                      AS season_avg_points_2026,
+                COUNT(CASE WHEN pts_ppr > 0 THEN 1 END) AS games_played_2026,
+                MAX(week)                             AS latest_week_2026,
+                ROUND(ARG_MAX(pts_ppr, week), 1)      AS last_pts_2026,
+                list(ROUND(pts_ppr, 1) ORDER BY week ASC)
+                                                      AS trend_2026
+            FROM bronze_dst_weekly_stats
+            WHERE season = 2026
             GROUP BY UPPER(TRIM(team))
         ),
         yac_2025 AS (
@@ -615,6 +709,20 @@ def export_analysis(conn, dry_run: bool):
             s.games_played_2025,
             s.last_pts,
             s.trend,
+            s.rushing_yards_2025,
+            s.receiving_yards_2025,
+            s.passing_yards_2025,
+            s.total_touchdowns_2025,
+            s26.season_total_points_2026,
+            s26.season_avg_points_2026,
+            s26.games_played_2026,
+            s26.latest_week_2026,
+            s26.last_pts_2026,
+            s26.trend_2026,
+            s26.rushing_yards_2026,
+            s26.receiving_yards_2026,
+            s26.passing_yards_2026,
+            s26.total_touchdowns_2026,
             NULL              AS adp_rank,
             ng.yac,
             ng.air_yards,
@@ -639,6 +747,7 @@ def export_analysis(conn, dry_run: bool):
             cb.combine_draft_ovr
         FROM bronze_player_news_raw p
         LEFT JOIN stats_2025 s ON LOWER(TRIM(p.player_name)) = s.name_key
+        LEFT JOIN stats_2026 s26 ON LOWER(TRIM(p.player_name)) = s26.name_key
         LEFT JOIN nextgen_2025 ng ON LOWER(TRIM(p.player_name)) = ng.name_key
         LEFT JOIN snap_2025 sn ON LOWER(TRIM(p.player_name)) = sn.name_key
         LEFT JOIN combine cb ON LOWER(TRIM(p.player_name)) = cb.name_key
@@ -666,6 +775,20 @@ def export_analysis(conn, dry_run: bool):
             d.games_played_2025,
             d.last_pts,
             d.trend,
+            NULL AS rushing_yards_2025,
+            NULL AS receiving_yards_2025,
+            NULL AS passing_yards_2025,
+            NULL AS total_touchdowns_2025,
+            d26.season_total_points_2026,
+            d26.season_avg_points_2026,
+            d26.games_played_2026,
+            d26.latest_week_2026,
+            d26.last_pts_2026,
+            d26.trend_2026,
+            NULL AS rushing_yards_2026,
+            NULL AS receiving_yards_2026,
+            NULL AS passing_yards_2026,
+            NULL AS total_touchdowns_2026,
             dst.adp_rank,
             NULL AS yac,
             NULL AS air_yards,
@@ -721,6 +844,7 @@ def export_analysis(conn, dry_run: bool):
             HAVING dst_team IS NOT NULL AND dst_team != ''
         ) dst
         LEFT JOIN dst_stats_2025 d ON UPPER(dst.dst_team) = d.team_key
+        LEFT JOIN dst_stats_2026 d26 ON UPPER(dst.dst_team) = d26.team_key
 
         ORDER BY position, full_name
     """)

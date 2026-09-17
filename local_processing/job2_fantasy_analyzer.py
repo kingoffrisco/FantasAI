@@ -272,9 +272,13 @@ def load_player_export() -> dict:
             name = (p.get("player_name") or p.get("full_name") or "").strip()
             if not name:
                 continue
+            # Prefer 2026 season-to-date average once the player has actually played
+            # a 2026 game — same reasoning as job4_weekly_startsit.py: current form
+            # beats a different season's full-year average once it exists at all.
+            proj_2026 = float(p.get("season_avg_points_2026") or 0) if (p.get("games_played_2026") or 0) > 0 else 0
             lookup[name.lower()] = {
                 "owned": float(p.get("ownership_pct") or p.get("percent_owned") or 0),
-                "proj":  float(p.get("season_avg_points_2025") or p.get("proj") or 0),
+                "proj":  proj_2026 or float(p.get("season_avg_points_2025") or p.get("proj") or 0),
                 "pos":   p.get("position") or p.get("pos") or "",
                 "team":  p.get("team") or "",
             }

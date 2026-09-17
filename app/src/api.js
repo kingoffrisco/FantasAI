@@ -146,6 +146,12 @@ export const api = {
     ecrPPR:        () => r2Get('players/ecr_ppr.json'),
     ecrStandard:   () => r2Get('players/ecr_std.json'),
     playerWriteups:  () => r2Get('players/player_writeups.json'),
+    // Manual corrections (suspensions, exempt list, etc.) that no automated
+    // source (Sleeper injury_status, FantasyPros ECR, Databricks exports) can
+    // represent on its own — see set_player_status_override.py. Applied as a
+    // patch AFTER every other player data source loads, so it survives any
+    // future automated refresh instead of being overwritten by one.
+    statusOverrides: () => r2Get('fantasai/players/status_overrides.json'),
     nflSchedule:     () => r2Get('fantasai/analysis/nfl_schedule.json'),
     opponentLookup:  () => r2Get('fantasai/analysis/opponent_lookup.json'),
     playerOwnership: () => r2Get('fantasai/analysis/player_ownership.json'),

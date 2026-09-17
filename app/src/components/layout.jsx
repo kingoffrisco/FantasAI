@@ -5,11 +5,18 @@ import { getSubscriptionState, subscribeToPush, unsubscribeFromPush, showLocalNo
 import { getPrefs } from '../lib/remotePrefs.js';
 
 function getDraftStatus() {
+  // TEAM_ROSTERS is server-synced (see refreshTeamRostersFromServer in
+  // data.js) — checking it first means this correctly reflects the real
+  // draft regardless of this browser's own local settings cache. Mirrors
+  // the isDraftComplete() check in Waivers.jsx/Players.jsx. The old check
+  // here (draft.picks.length >= 192, from a local-only settings copy) never
+  // matched the real 156-pick/13-round draft, so this badge got stuck on
+  // LIVE forever once the draft date passed.
+  const totalRostered = Object.values(TEAM_ROSTERS).reduce((s, arr) => s + (arr?.length || 0), 0);
+  if (totalRostered >= 20) return { badge: 'COMPLETE', live: false };
   try {
     const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
     const draft = s?.draft || {};
-    const picks = Array.isArray(draft.picks) ? draft.picks : [];
-    if (picks.length >= 192) return { badge: 'COMPLETE', live: false };
     const d = draft.date ? new Date(draft.date) : null;
     const now = new Date();
     if (d && d <= now) return { badge: 'LIVE', live: true };

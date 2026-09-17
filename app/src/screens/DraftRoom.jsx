@@ -935,10 +935,14 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
   // guard, the clock (and everything downstream of it: turn chimes, autodraft) would keep running
   // against stale/default pick data even with no real draft active.
   React.useEffect(() => {
-    if (paused || !(mockActive || isLive)) return;
+    // draftComplete isn't in scope yet here (declared further down this
+    // component from currentPickNum/TOTAL_PICKS) — recompute the same
+    // condition from state that's already available at this point.
+    const pickNum = mockActive ? mockPickNum : livePickNum;
+    if (paused || pickNum > TOTAL_PICKS || !(mockActive || isLive)) return;
     const t = setInterval(() => setSeconds(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
-  }, [paused, mockActive, isLive]);
+  }, [paused, mockActive, mockPickNum, livePickNum, isLive]);
 
   // When a non-user team's clock expires, auto-draft a pick for them and switch
   // them to Autodraft for the rest of the draft so the room doesn't keep stalling on them.
@@ -1676,14 +1680,19 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
       <div className="draft-clock" style={paused ? { background: 'linear-gradient(180deg, rgba(255,90,110,.18) 0%, rgba(255,90,110,.08) 100%)', animation: 'blink 1.2s infinite' } : isMyTurn ? { background: 'linear-gradient(180deg, rgba(76,175,130,.22) 0%, rgba(76,175,130,.10) 100%)' } : {}}>
         <div style={{ padding: '0 24px', borderRight: `1px solid ${paused ? 'rgba(255,90,110,.3)' : 'var(--border)'}`, display: 'flex', alignItems: 'center', gap: 16, alignSelf: 'stretch' }}>
           <span className={`clock-time ${clockClass}`} style={{ fontSize: 48 }}>
-            {`${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`}
+            {draftComplete ? '✓' : `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`}
           </span>
           <div>
-            <div className="mono dim" style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>ON THE CLOCK</div>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--text)' }}>Pick #{currentPickNum} · Round {currentRound}</div>
+            <div className="mono dim" style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>{draftComplete ? 'DRAFT COMPLETE' : 'ON THE CLOCK'}</div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--text)' }}>{draftComplete ? `${TOTAL_PICKS} of ${TOTAL_PICKS} picks made` : `Pick #${currentPickNum} · Round ${currentRound}`}</div>
           </div>
         </div>
 
+        {draftComplete ? (
+          <div className="on-clock" style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-dim)' }}>All rosters have been synced from the completed draft.</div>
+          </div>
+        ) : (
         <div className="on-clock" style={{ flex: 1 }}>
           <div className="avatar lg" style={{ background: `linear-gradient(135deg, ${onClockTeam.color}cc, ${onClockTeam.color}33)`, color: '#fff' }}>
             <span style={{ position: 'relative', zIndex: 1 }}>{onClockTeam.logo}</span>
@@ -1710,7 +1719,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
               <div style={{ fontSize: 13, fontWeight: 900, color: '#4caf82', letterSpacing: '.10em', textTransform: 'uppercase', animation: 'blink 0.75s infinite', marginTop: 3 }}>
                 ⚡ YOUR PICK
               </div>
-            ) : !draftComplete && myDraftTeamId && (
+            ) : myDraftTeamId && (
               <div style={{ fontSize: 11, fontWeight: 800, color: '#ffb547', letterSpacing: '.08em', textTransform: 'uppercase', marginTop: 3 }}>
                 PICK IN {picksAway} TURN{picksAway !== 1 ? 'S' : ''}
               </div>
@@ -1741,6 +1750,7 @@ export default function DraftRoom({ aiMode, user, onNav, onDraftPick, onDraftCom
             })}
           </div>
         </div>
+        )}
 
         <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6, alignSelf: 'center' }}>
           <div style={{ fontSize: 15, fontWeight: 900, letterSpacing: '.04em', color: draftStatusColor, textShadow: `0 0 12px ${draftStatusColor}66`, lineHeight: 1 }}>

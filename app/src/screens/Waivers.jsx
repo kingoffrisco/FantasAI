@@ -1,5 +1,5 @@
 import React from 'react';
-import { TEAM_ROSTERS, TEAMS_ORDER, findTeam } from '../lib/data.js';
+import { TEAM_ROSTERS, TEAMS_ORDER, findTeam, refreshTeamRostersFromServer } from '../lib/data.js';
 import { usePlayers, findPlayerByName } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 import { useR2Waivers, useR2WeatherForecast } from '../hooks.js';
@@ -9,6 +9,16 @@ const DEFAULT_WAIVER_ORDER = [...TEAMS_ORDER].reverse();
 const FLEX_POS = new Set(['RB', 'WR', 'TE']);
 
 function isDraftComplete() {
+  // TEAM_ROSTERS is server-synced (see refreshTeamRostersFromServer in
+  // data.js) — checking it first means this correctly reflects the real
+  // draft regardless of what this specific browser's own local
+  // fantasai_live_picks cache happens to have. A real completed draft
+  // populates every team with double-digit picks; a stray waiver add or
+  // two wouldn't reach this threshold, so this can't false-positive on an
+  // undrafted season. Falls back to the old local-only check only if
+  // TEAM_ROSTERS hasn't loaded anything yet at all.
+  const totalRostered = Object.values(TEAM_ROSTERS).reduce((s, arr) => s + (arr?.length || 0), 0);
+  if (totalRostered >= 20) return true;
   try {
     const picks = JSON.parse(localStorage.getItem('fantasai_live_picks') || 'null');
     if (!Array.isArray(picks) || picks.length === 0) return false;
@@ -140,7 +150,15 @@ export default function WaiversScreen({ user, myRosterIds = new Set(), onAddPlay
   const [queueOpen, setQueueOpen]     = React.useState(true);
   const [addSuccess, setAddSuccess]   = React.useState(null);
 
-  const draftDone = React.useMemo(() => isDraftComplete(), []);
+  // Bumped once refreshTeamRostersFromServer()'s async fetch resolves —
+  // TEAM_ROSTERS is a plain mutable object, so mutating it doesn't itself
+  // trigger a re-render (same bug class already fixed in HeadToHead.jsx,
+  // CurrentRoster.jsx, and Players.jsx).
+  const [draftDoneVersion, setDraftDoneVersion] = React.useState(0);
+  React.useEffect(() => {
+    refreshTeamRostersFromServer().then(() => setDraftDoneVersion(v => v + 1));
+  }, []);
+  const draftDone = React.useMemo(() => isDraftComplete(), [draftDoneVersion]);
 
   const [waiverOrder, setWaiverOrder] = React.useState(loadWaiverOrder);
 

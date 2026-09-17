@@ -71,7 +71,7 @@ R2_BASE      = "https://api.fantasai.net/api/v1/r2"
 FANTASAI_KEY = os.environ.get("FANTASAI_KEY", "")
 HEADERS_R2   = {"X-FantasAI-Key": FANTASAI_KEY, "Content-Type": "application/json"}
 
-DEFAULT_SEASONS = [2021, 2022, 2023, 2024, 2025]
+DEFAULT_SEASONS = [2021, 2022, 2023, 2024, 2025, 2026]
 OL_SLOTS = ["LT", "LG", "C", "RG", "RT"]
 
 TIER_CUTS = [(85, "Elite"), (70, "Good"), (50, "Average"), (30, "Below Average"), (0, "Poor")]

@@ -1176,22 +1176,34 @@ def main():
         is_questionable = status_up in ("QUESTIONABLE", "Q")
         is_doubtful     = status_up in ("DOUBTFUL", "D")
 
-        # Player export has 2025 season stats built in — use them directly.
-        # Field names from Databricks export_players_2026_draft:
-        #   season_avg_points_2025, last_pts, trend (numpy array string)
-        season_avg  = float(p.get("season_avg_points_2025") or p.get("avg") or p.get("avg_pts") or 0)
-        last_pts    = float(p.get("last_pts") or p.get("last") or p.get("last_week") or 0)
-        trend_vals  = parse_trend_string(p.get("trend") or [])
-        # Projection: use full 2025 season average as the preseason baseline.
-        # Recency-weighted trend is NOT used for proj — coaches rest starters in
-        # Week 17/18, which would unfairly tank elite players' projections.
-        # The trend signal is still used separately in the scoring (10% weight).
+        # Player export carries both 2025 (full season) and 2026 (in-progress)
+        # stats. Once a player has actually played a 2026 game, that's what
+        # "season average" / "last week" / "trend" should mean for start/sit —
+        # a player's current form is a far better signal than a different
+        # season entirely. 2025 is the fallback for anyone who hasn't played
+        # yet this year (bye, injury return, or it's still very early season).
+        games_2026 = int(p.get("games_played_2026") or 0)
+        if games_2026 > 0:
+            season_avg  = float(p.get("season_avg_points_2026") or 0)
+            last_pts    = float(p.get("last_pts_2026") or 0)
+            trend_vals  = parse_trend_string(p.get("trend_2026") or [])
+            proj_year   = "2026"
+        else:
+            season_avg  = float(p.get("season_avg_points_2025") or p.get("avg") or p.get("avg_pts") or 0)
+            last_pts    = float(p.get("last_pts") or p.get("last") or p.get("last_week") or 0)
+            trend_vals  = parse_trend_string(p.get("trend") or [])
+            proj_year   = "2025"
+        # Projection: use the season average above as the baseline (whichever
+        # year it came from). Recency-weighted trend is NOT used for proj —
+        # coaches rest starters late in a season, which would unfairly tank
+        # elite players' projections. The trend signal is still used
+        # separately in the scoring (10% weight).
         proj        = float(p.get("proj") or p.get("projection") or 0)
         proj_source = "2026"
         if proj == 0:
             if season_avg > 0:
                 proj        = season_avg   # full-season avg is the best preseason estimate
-                proj_source = "2025"
+                proj_source = proj_year
             elif p.get("adp_rank"):
                 proj        = proj_from_adp(p["adp_rank"], pos)
                 season_avg  = proj
@@ -1202,12 +1214,20 @@ def main():
         if pos == "DST" and opp_team:
             # For DSTs, evaluate the OPPONENT'S OFFENSE — not their defense
             # Look up how many pts the opponent's offense scores (higher = tougher for DST)
-            # Use QB + RB + WR avg pts allowed as proxy for offensive quality
+            # Use QB + RB + WR avg pts allowed as proxy for offensive quality.
+            # Same 2026-preferred / 2025-fallback rule as the non-DST def_rank lookup
+            # above — an offense's current-season pace is what actually matters once
+            # it has a real sample.
+            def _cur_avg(row):
+                v = row.get("avg_pts_allowed_2026")
+                return float(v) if v is not None else (float(row["avg_pts_allowed"]) if row.get("avg_pts_allowed") else None)
+
             off_pts = []
             for opos in ("QB", "RB", "WR"):
                 row = def_vs_pos.get((opp_team, opos)) or {}
-                if row.get("avg_pts_allowed"):
-                    off_pts.append(float(row["avg_pts_allowed"]))
+                v = _cur_avg(row)
+                if v is not None:
+                    off_pts.append(v)
             if off_pts:
                 # Higher avg_pts_allowed = stronger offense = harder for DST
                 # Invert: rank 32 (allows most pts = strong offense) is bad for DST
@@ -1218,8 +1238,9 @@ def main():
                     t_pts = []
                     for opos in ("QB", "RB", "WR"):
                         r = def_vs_pos.get((t_abbr, opos)) or {}
-                        if r.get("avg_pts_allowed"):
-                            t_pts.append(float(r["avg_pts_allowed"]))
+                        v = _cur_avg(r)
+                        if v is not None:
+                            t_pts.append(v)
                     if t_pts:
                         all_off.append(sum(t_pts) / len(t_pts))
                 all_off.sort()
@@ -1237,8 +1258,17 @@ def main():
         else:
             def_key  = (opp_team, pos)
             def_row  = def_vs_pos.get(def_key) or {} if opp_team else {}
-            def_rank = def_row.get("rank_vs_pos", "?")
-            def_avg  = def_row.get("avg_pts_allowed", "?")
+            # Prefer the opponent's 2026 vs-position numbers once they've actually
+            # played a 2026 game (export_to_r2.py only attaches *_2026 once that
+            # team has a sample) — a defense's real strength this year can differ
+            # a lot from last year's (new coordinator, personnel turnover, etc.),
+            # so 2025 is a fallback for early-bye/no-sample teams, not a blend.
+            if def_row.get("rank_vs_pos_2026") is not None:
+                def_rank = def_row.get("rank_vs_pos_2026", "?")
+                def_avg  = def_row.get("avg_pts_allowed_2026", "?")
+            else:
+                def_rank = def_row.get("rank_vs_pos", "?")
+                def_avg  = def_row.get("avg_pts_allowed", "?")
 
         snap_data  = get_sleeper_snap_trend(pid) if pid else {}
         news_texts = notes_lookup.get(name.lower()) or []
