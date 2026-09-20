@@ -650,6 +650,30 @@ def export_analysis(conn, dry_run: bool):
             LEFT JOIN yac_2025 y ON ng.gsis_id = y.gsis_id
             WHERE ng.season = 2025 AND ng.week = 0
         ),
+        yac_2026 AS (
+            SELECT
+                y.gsis_id,
+                ROUND(SUM(y.total_yac), 1)            AS yac,
+                ROUND(SUM(y.air_yards), 1)            AS air_yards
+            FROM player_yac_stats y
+            WHERE y.season = 2026
+            GROUP BY y.gsis_id
+        ),
+        nextgen_2026 AS (
+            -- NGS publishes a running week=0 "season to date" row that updates as
+            -- the season progresses — same shape as nextgen_2025, just this year.
+            SELECT
+                LOWER(TRIM(ng.player_name))           AS name_key,
+                ng.gsis_id,
+                ROUND(ng.avg_intended_air_yards, 1)   AS adot,
+                ng.targets,
+                ROUND(ng.percent_share_of_intended_air_yards, 1) AS target_share,
+                COALESCE(y.yac, 0)                    AS yac,
+                COALESCE(y.air_yards, 0)              AS air_yards
+            FROM player_nextgen_stats ng
+            LEFT JOIN yac_2026 y ON ng.gsis_id = y.gsis_id
+            WHERE ng.season = 2026 AND ng.week = 0
+        ),
         combine AS (
             SELECT
                 LOWER(TRIM(player_name))              AS name_key,
@@ -692,6 +716,50 @@ def export_analysis(conn, dry_run: bool):
             FROM gold_weekly_stats g
             LEFT JOIN team_tgt_2025 tt ON g.team = tt.team AND g.week = tt.week
             WHERE g.season = 2025 AND g.stats IS NOT NULL
+            GROUP BY LOWER(TRIM(g.player_name))
+        ),
+        -- 2026 mirrors of team_tgt_2025 / snap_2025. gold_weekly_stats for 2026 is
+        -- nflverse-sourced only (no live Sleeper source running), and nflverse's
+        -- stats blob uses different key names than Sleeper's (targets/receiving_yards/
+        -- rushing_yards/carries vs rec_tgt/rec_yd/rush_yd/rush_att) — same schema gap
+        -- documented in ingest_offensive_ecosystem.py. COALESCE both. Snap count/pct
+        -- has no nflverse-blob equivalent at all (off_snp/tm_off_snp are Sleeper-only
+        -- keys), so that piece comes from player_snap_counts instead, which nflverse
+        -- does populate directly with clean offense_snaps/offense_pct columns —
+        -- arguably a better source than the JSON-extraction than what 2025 does, but
+        -- kept separate here rather than rebuilding 2025 to match and risking a
+        -- regression on a season that already works.
+        team_tgt_2026 AS (
+            SELECT team, week,
+                SUM(COALESCE(TRY_CAST(json_extract_string(stats, '$.rec_tgt') AS DOUBLE), TRY_CAST(json_extract_string(stats, '$.targets') AS DOUBLE), 0)) AS team_targets
+            FROM gold_weekly_stats
+            WHERE season = 2026 AND stats IS NOT NULL AND position IN ('RB','WR','TE')
+            GROUP BY team, week
+        ),
+        snaps_2026 AS (
+            SELECT
+                LOWER(TRIM(player_name))              AS name_key,
+                ROUND(AVG(offense_snaps), 1)          AS avg_snaps,
+                ROUND(AVG(offense_pct) * 100, 1)      AS snap_pct
+            FROM player_snap_counts
+            WHERE season = 2026
+            GROUP BY LOWER(TRIM(player_name))
+        ),
+        snap_2026 AS (
+            SELECT
+                LOWER(TRIM(g.player_name))            AS name_key,
+                ROUND(AVG(COALESCE(TRY_CAST(json_extract_string(g.stats, '$.rec_tgt') AS DOUBLE), TRY_CAST(json_extract_string(g.stats, '$.targets') AS DOUBLE))), 1) AS avg_targets_g,
+                ROUND(AVG(COALESCE(TRY_CAST(json_extract_string(g.stats, '$.rush_att') AS DOUBLE), TRY_CAST(json_extract_string(g.stats, '$.carries') AS DOUBLE))), 1) AS avg_carries_g,
+                ROUND(AVG(COALESCE(TRY_CAST(json_extract_string(g.stats, '$.rec_yd') AS DOUBLE), TRY_CAST(json_extract_string(g.stats, '$.receiving_yards') AS DOUBLE), 0) + COALESCE(TRY_CAST(json_extract_string(g.stats, '$.rush_yd') AS DOUBLE), TRY_CAST(json_extract_string(g.stats, '$.rushing_yards') AS DOUBLE), 0)), 1) AS combo_yds_g,
+                ROUND(CASE WHEN SUM(COALESCE(TRY_CAST(json_extract_string(g.stats, '$.rec_tgt') AS DOUBLE), TRY_CAST(json_extract_string(g.stats, '$.targets') AS DOUBLE), 0)) > 0
+                    THEN SUM(COALESCE(TRY_CAST(json_extract_string(g.stats, '$.rec_yd') AS DOUBLE), TRY_CAST(json_extract_string(g.stats, '$.receiving_yards') AS DOUBLE), 0)) / SUM(COALESCE(TRY_CAST(json_extract_string(g.stats, '$.rec_tgt') AS DOUBLE), TRY_CAST(json_extract_string(g.stats, '$.targets') AS DOUBLE), 0))
+                    ELSE NULL END, 1)                 AS yds_per_tgt,
+                ROUND(AVG(CASE WHEN tt.team_targets > 0
+                    THEN COALESCE(TRY_CAST(json_extract_string(g.stats, '$.rec_tgt') AS DOUBLE), TRY_CAST(json_extract_string(g.stats, '$.targets') AS DOUBLE), 0) / tt.team_targets * 100
+                    ELSE NULL END), 1)                AS real_target_share
+            FROM gold_weekly_stats g
+            LEFT JOIN team_tgt_2026 tt ON g.team = tt.team AND g.week = tt.week
+            WHERE g.season = 2026 AND g.stats IS NOT NULL
             GROUP BY LOWER(TRIM(g.player_name))
         )
         SELECT
@@ -736,6 +804,17 @@ def export_analysis(conn, dry_run: bool):
             sn.avg_rz_att_g,
             sn.combo_yds_g,
             sn.yds_per_tgt,
+            ng26.yac                                AS yac_2026,
+            ng26.air_yards                          AS air_yards_2026,
+            ng26.adot                                AS adot_2026,
+            COALESCE(sn26.real_target_share, ng26.target_share) AS target_share_2026,
+            ng26.targets                             AS routes_2026,
+            sn26w.avg_snaps                          AS avg_snaps_2026,
+            sn26w.snap_pct                           AS snap_pct_2026,
+            sn26.avg_targets_g                       AS avg_targets_g_2026,
+            sn26.avg_carries_g                       AS avg_carries_g_2026,
+            sn26.combo_yds_g                         AS combo_yds_g_2026,
+            sn26.yds_per_tgt                         AS yds_per_tgt_2026,
             cb.forty,
             cb.vertical,
             cb.broad_jump,
@@ -750,6 +829,9 @@ def export_analysis(conn, dry_run: bool):
         LEFT JOIN stats_2026 s26 ON LOWER(TRIM(p.player_name)) = s26.name_key
         LEFT JOIN nextgen_2025 ng ON LOWER(TRIM(p.player_name)) = ng.name_key
         LEFT JOIN snap_2025 sn ON LOWER(TRIM(p.player_name)) = sn.name_key
+        LEFT JOIN nextgen_2026 ng26 ON LOWER(TRIM(p.player_name)) = ng26.name_key
+        LEFT JOIN snap_2026 sn26 ON LOWER(TRIM(p.player_name)) = sn26.name_key
+        LEFT JOIN snaps_2026 sn26w ON LOWER(TRIM(p.player_name)) = sn26w.name_key
         LEFT JOIN combine cb ON LOWER(TRIM(p.player_name)) = cb.name_key
         WHERE p.position IN ('QB','RB','WR','TE','K')
           AND p.active = TRUE
@@ -802,6 +884,17 @@ def export_analysis(conn, dry_run: bool):
             NULL AS avg_rz_att_g,
             NULL AS combo_yds_g,
             NULL AS yds_per_tgt,
+            NULL AS yac_2026,
+            NULL AS air_yards_2026,
+            NULL AS adot_2026,
+            NULL AS target_share_2026,
+            NULL AS routes_2026,
+            NULL AS avg_snaps_2026,
+            NULL AS snap_pct_2026,
+            NULL AS avg_targets_g_2026,
+            NULL AS avg_carries_g_2026,
+            NULL AS combo_yds_g_2026,
+            NULL AS yds_per_tgt_2026,
             NULL AS forty,
             NULL AS vertical,
             NULL AS broad_jump,

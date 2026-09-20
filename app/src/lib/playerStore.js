@@ -182,9 +182,16 @@ export function normalizePlayerList(rawArr) {
     const stableId   = idByName.get(nameKey);
     const id         = stableId ?? (Number(sleeperId) || 10000 + result.length);
 
-    // proj: R2 export uses season_avg_points_2025; older schemas use proj / projected_avg_points
+    // proj: R2 export now carries both season_avg_points_2025 (last full season) and
+    // season_avg_points_2026 (this season, in progress) — prefer 2026 once the player
+    // has actually played a game this year, same "current form beats a different
+    // season" rule used server-side (job3/job4). This is only the initial fallback
+    // baseline anyway — App.jsx overwrites proj with a live Sleeper projection once
+    // that fetch completes, for players it covers.
+    const has2026Games = Number(p.games_played_2026) > 0;
+    const seasonAvg2026 = has2026Games ? Number(p.season_avg_points_2026) : 0;
     const projRaw    = Number(p.proj) || Number(p.projected_avg_points)
-                    || Number(p.season_avg_points_2025) || Number(p.career_ppg) || 0;
+                    || seasonAvg2026 || Number(p.season_avg_points_2025) || Number(p.career_ppg) || 0;
     const depthChartOrder = Number(p.depth_chart_order) || null;
     const depthChartPos   = p.depth_chart_position || null;
     // ECR: use positionRank → p.ecr → 999. Never use search_rank (Sleeper popularity index, not a rank).
@@ -269,9 +276,15 @@ export function normalizePlayerList(rawArr) {
       opp:         p.opp                  || '',
       oppRank:     Number(p.oppRank)      || 0,
       proj,
-      last:        Number(p.last_pts) || Number(p.last) || Number(p.avg_fantasy_points_per_game_2025) || 0,
-      avg:         Number(p.season_avg_points_2025) || Number(p.avg) || Number(p.career_ppg) || 0,
+      // last / avg: prefer 2026 (this season, in progress) once the player has a
+      // 2026 game on record — same rule as projRaw above. last_pts_2026 without a
+      // games_played_2026 gate would show stale garbage for anyone who hasn't
+      // played yet (field just absent, but be explicit rather than rely on that).
+      last:        has2026Games ? (Number(p.last_pts_2026) || 0) : (Number(p.last_pts) || Number(p.last) || Number(p.avg_fantasy_points_per_game_2025) || 0),
+      avg:         has2026Games ? (Number(p.season_avg_points_2026) || 0) : (Number(p.season_avg_points_2025) || Number(p.avg) || Number(p.career_ppg) || 0),
       pts2025:     Number(p.total_fantasy_points_2025) || Number(p.season_total_points_2025) || 0,
+      pts2026:     Number(p.total_fantasy_points_2026) || Number(p.season_total_points_2026) || 0,
+      gamesPlayed2026: Number(p.games_played_2026) || 0,
       rookie:      p.pos !== 'DST' && (p.is_rookie === true || p.is_rookie === 'true' || (p.years_exp != null && Number(p.years_exp) === 0)),
       trend,
       depth:       Number(p.depth)        || 1,

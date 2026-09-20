@@ -2,8 +2,23 @@ import React from 'react';
 import { usePlayers, findPlayer } from '../lib/playerStore.js';
 import { PosBadge, PlayerAvatar, Sparkline, TeamLogoBadge } from '../components/ui.jsx';
 import { setCompareContext } from '../components/AICopilot.jsx';
+import { useScheduleOppMap } from './Players.jsx';
+import { useR2DefenseVsPos } from '../hooks.js';
 
 const API_BASE = 'https://api.fantasai.net';
+
+// p.oppRank on the player store is never populated (no such field exists in the
+// backend export — it's always 0). Real opponent + matchup rank has to be
+// resolved live here instead, same as the player detail page: current-week
+// opponent from ESPN's scoreboard, defense-vs-position rank preferring the
+// real 2026 number once that opponent has a 2026 sample.
+function resolveOppRank(p, scheduleOppMap, defVsPos) {
+  const opp = (p.opp || scheduleOppMap.get(p.team) || '').replace(/^@/, '').toUpperCase();
+  if (!opp) return p.oppRank || 0;
+  const row = defVsPos?.data?.find(r => r.def_team?.toUpperCase() === opp && r.position === p.pos);
+  if (!row) return p.oppRank || 0;
+  return row.rank_vs_pos_2026 ?? row.rank_vs_pos ?? p.oppRank ?? 0;
+}
 
 const METRICS = [
   { k: 'Proj',        get: p => p.proj,    fmt: v => v.toFixed(1), higher: true },
@@ -13,7 +28,7 @@ const METRICS = [
   { k: 'ADP',         get: p => p.adp,     fmt: v => v.toFixed(1), higher: false },
   { k: '% Rostered',  get: p => p.owned,   fmt: v => `${v.toFixed(1)}%`, higher: true },
   { k: 'Tier',        get: p => p.tier,    fmt: v => v,             higher: false },
-  { k: 'Opp D Rank',  get: p => p.oppRank, fmt: v => `#${v}`,      higher: false },
+  { k: 'Opp D Rank',  get: p => p._oppRank, fmt: v => `#${v}`,      higher: false },
 ];
 
 export default function CompareScreen() {
@@ -25,7 +40,14 @@ export default function CompareScreen() {
   const [aiVerdict, setAiVerdict] = React.useState(null);
   const [aiError, setAiError] = React.useState(null);
 
-  const selected = playerIds.slice(0, count).map(id => findPlayer(id)).filter(Boolean);
+  const scheduleOppMap = useScheduleOppMap();
+  const { data: defVsPos } = useR2DefenseVsPos();
+
+  const selected = playerIds.slice(0, count).map(id => findPlayer(id)).filter(Boolean)
+    .map(p => {
+      const opp = p.opp || scheduleOppMap.get(p.team) || '';
+      return { ...p, opp, _oppRank: resolveOppRank(p, scheduleOppMap, defVsPos) };
+    });
 
   const selectedKey = selected.map(p => p.id).join(',');
   React.useEffect(() => {
@@ -45,7 +67,7 @@ export default function CompareScreen() {
     if (selected.length < 2) return;
     setAiLoading(true); setAiError(null); setAiVerdict(null);
     try {
-      const fmt = p => `${p.name} (${p.pos}, ${p.team}): Proj ${p.proj}, Last ${p.last}, Avg ${p.avg}, ECR #${p.ecr}, ADP ${p.adp}, Opp ${p.opp} (#${p.oppRank} vs ${p.pos}), Owned ${p.owned}%, Tier ${p.tier}`;
+      const fmt = p => `${p.name} (${p.pos}, ${p.team}): Proj ${p.proj}, Last ${p.last}, Avg ${p.avg}, ECR #${p.ecr}, ADP ${p.adp}, Opp ${p.opp} (#${p._oppRank} vs ${p.pos}), Owned ${p.owned}%, Tier ${p.tier}`;
       // Pre-sort by projection descending so the model isn't the only thing doing the numeric comparison —
       // it was previously handed players in selection order and would sometimes assert the wrong player had
       // the higher Proj number.

@@ -2,9 +2,25 @@ import React from 'react';
 import { buildRosterFrame, assignRoster } from '../lib/data.js';
 import { findPlayer, findPlayerByName, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
-import { useR2Lineup, useR2Injuries } from '../hooks.js';
+import { useR2Lineup, useR2Injuries, useR2DefenseVsPos } from '../hooks.js';
+import { useScheduleOppMap } from './Players.jsx';
 
 const API_BASE = 'https://api.fantasai.net';
+
+// p.oppRank on the player store is never populated (no field like it exists in the
+// backend export — always 0), and p.opp is often empty too. Resolve both live here,
+// same approach as Compare.jsx / Waivers.jsx / the player detail page: current-week
+// opponent from ESPN's scoreboard, defense-vs-position rank preferring the real 2026
+// number once that opponent has a 2026 sample.
+function resolveOpp(p, scheduleOppMap, defVsPos) {
+  if (!p) return { opp: '', oppRank: 0 };
+  const opp = p.opp || scheduleOppMap.get(p.team) || '';
+  const oppTeam = opp.replace(/^@/, '').toUpperCase();
+  if (!oppTeam) return { opp, oppRank: p.oppRank || 0 };
+  const row = defVsPos?.data?.find(r => r.def_team?.toUpperCase() === oppTeam && r.position === p.pos);
+  const oppRank = row ? (row.rank_vs_pos_2026 ?? row.rank_vs_pos ?? p.oppRank ?? 0) : (p.oppRank || 0);
+  return { opp, oppRank };
+}
 
 const _H2H_START = new Date('2026-09-09');
 const _MS_WEEK   = 7 * 24 * 60 * 60 * 1000;
@@ -232,6 +248,8 @@ export default function LineupDecisions({
   // mount even after more current ones land (e.g. recommending a
   // lower-projected player over a higher-projected one using stale data).
   const livePlayers = usePlayers();
+  const scheduleOppMap = useScheduleOppMap();
+  const { data: defVsPos } = useR2DefenseVsPos();
 
   const settings = React.useMemo(() => {
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || null; }
@@ -474,7 +492,7 @@ export default function LineupDecisions({
                         )}
                       </div>
                       <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 2 }}>
-                        vs {curPlayer.opp} · D#{curPlayer.oppRank}
+                        {(() => { const { opp, oppRank } = resolveOpp(curPlayer, scheduleOppMap, defVsPos); return <>vs {opp} · D#{oppRank}</>; })()}
                       </div>
                     </div>
                   </div>
@@ -525,7 +543,7 @@ export default function LineupDecisions({
                         <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{optPlayer.team}</span>
                       </div>
                       <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 2 }}>
-                        vs {optPlayer.opp} · D#{optPlayer.oppRank}
+                        {(() => { const { opp, oppRank } = resolveOpp(optPlayer, scheduleOppMap, defVsPos); return <>vs {opp} · D#{oppRank}</>; })()}
                       </div>
                     </div>
                   </div>
@@ -582,7 +600,7 @@ export default function LineupDecisions({
                       )}
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--text-faint)', marginTop: 1 }}>
-                      vs {p.opp} · D#{p.oppRank}
+                      {(() => { const { opp, oppRank } = resolveOpp(p, scheduleOppMap, defVsPos); return <>vs {opp} · D#{oppRank}</>; })()}
                     </div>
                   </div>
                   {isOptStart && (

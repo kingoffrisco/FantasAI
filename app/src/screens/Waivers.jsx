@@ -2,8 +2,23 @@ import React from 'react';
 import { TEAM_ROSTERS, TEAMS_ORDER, findTeam, refreshTeamRostersFromServer } from '../lib/data.js';
 import { usePlayers, findPlayerByName } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
-import { useR2Waivers, useR2WeatherForecast } from '../hooks.js';
+import { useR2Waivers, useR2WeatherForecast, useR2DefenseVsPos } from '../hooks.js';
 import { getWaivers, saveWaivers } from '../lib/remoteState.js';
+import { useScheduleOppMap } from './Players.jsx';
+
+// p.oppRank on the player store is never populated (no field like it exists in the
+// backend export — always 0), and p.opp is often empty too. Resolve both live here,
+// same approach as Compare.jsx / the player detail page: current-week opponent from
+// ESPN's scoreboard, defense-vs-position rank preferring the real 2026 number once
+// that opponent has a 2026 sample.
+function resolveOpp(p, scheduleOppMap, defVsPos) {
+  const opp = p.opp || scheduleOppMap.get(p.team) || '';
+  const oppTeam = opp.replace(/^@/, '').toUpperCase();
+  if (!oppTeam) return { opp, oppRank: p.oppRank || 0 };
+  const row = defVsPos?.data?.find(r => r.def_team?.toUpperCase() === oppTeam && r.position === p.pos);
+  const oppRank = row ? (row.rank_vs_pos_2026 ?? row.rank_vs_pos ?? p.oppRank ?? 0) : (p.oppRank || 0);
+  return { opp, oppRank };
+}
 
 const DEFAULT_WAIVER_ORDER = [...TEAMS_ORDER].reverse();
 const FLEX_POS = new Set(['RB', 'WR', 'TE']);
@@ -142,6 +157,8 @@ function WaiverAIPanel({ myRosterIds, onOpenPlayer }) {
 
 export default function WaiversScreen({ user, myRosterIds = new Set(), onAddPlayer, onDropPlayer, onOpenPlayer, sourcesState }) {
   const players = usePlayers();
+  const scheduleOppMap = useScheduleOppMap();
+  const { data: defVsPos } = useR2DefenseVsPos();
   const [posFilter, setPosFilter] = React.useState('ALL');
   const [search, setSearch]       = React.useState('');
   const [sortBy, setSortBy]       = React.useState('proj');
@@ -459,6 +476,7 @@ export default function WaiversScreen({ user, myRosterIds = new Set(), onAddPlay
               const isRecvr    = p.pos === 'RB' || p.pos === 'WR' || p.pos === 'TE';
               const depthLabel = p.depth ? `${p.pos}${p.depth}` : null;
               const contested  = draftDone && (claimCountByPlayer[p.id] || 0) > 1;
+              const { opp, oppRank } = resolveOpp(p, scheduleOppMap, defVsPos);
               return (
                 <tr key={p.id}>
                   <td style={{ cursor: 'pointer' }} onClick={() => onOpenPlayer?.(p.id)}>
@@ -491,9 +509,9 @@ export default function WaiversScreen({ user, myRosterIds = new Set(), onAddPlay
                     {isRecvr && p.routes > 0 ? p.routes : <span className="faint" style={{ fontSize: 10 }}>—</span>}
                   </td>
                   <td>
-                    <span className="mono dim" style={{ fontSize: 11 }}>vs {p.opp}</span>
-                    <div className="mono faint" style={{ fontSize: 10 }}>D #{p.oppRank}</div>
-                    <WeatherCell opp={p.opp} />
+                    <span className="mono dim" style={{ fontSize: 11 }}>vs {opp}</span>
+                    <div className="mono faint" style={{ fontSize: 10 }}>D #{oppRank}</div>
+                    <WeatherCell opp={opp} />
                   </td>
                   <td>
                     {p.status !== 'OK' && <span className="status-pill"><StatusDot status={p.status} /> {p.status}</span>}

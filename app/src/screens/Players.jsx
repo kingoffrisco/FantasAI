@@ -71,7 +71,7 @@ function getNflScheduleWeek() {
   return Math.min(Math.max(Math.floor(ms / (7 * 86400000)) + 1, 1), 18);
 }
 
-function useScheduleOppMap() {
+export function useScheduleOppMap() {
   const [map, setMap] = React.useState(new Map());
   React.useEffect(() => {
     const week = getNflScheduleWeek();
