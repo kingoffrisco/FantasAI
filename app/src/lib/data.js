@@ -837,6 +837,64 @@ export async function refreshTeamRostersFromServer() {
 }
 refreshTeamRostersFromServer();
 
+// Resync every team's real current-week starter/bench split from CBS.
+//
+// Nothing else in this app ever learns who an opponent actually started this
+// week — TEAM_ROSTERS only ever carries roster MEMBERSHIP (from drafted
+// picks, all tagged BENCH — see refreshTeamRostersFromServer above), and
+// every screen that needs "starters" auto-assigns them by position order,
+// which is only ever a guess. This is real ground truth instead: CBS's live
+// scoring page (/scoring/live) embeds each team's actual current lineup, and
+// the worker's /api/cbs/lineups endpoint extracts it (see getLiveLineups in
+// worker/src/index.js for how, and why the naive "everyone in rosterPlayers
+// is a starter" read is wrong — has to be filtered to hasBeenStarter===1).
+//
+// findPlayerByNameFn/findPlayerFn are passed in rather than imported directly
+// because playerStore.js imports PLAYER_ID_MAP from this file — importing
+// playerStore.js back from here would be circular.
+export async function syncLineupsFromCbs(findPlayerByNameFn, findPlayerFn) {
+  const resp = await api.lineups();
+  const cbsTeams = Array.isArray(resp?.teams) ? resp.teams : [];
+  if (!cbsTeams.length) return { ok: false, updated: 0, teams: 0 };
+
+  let settings = null;
+  try { settings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch {}
+  const frame = buildRosterFrame(settings);
+
+  let updated = 0;
+  for (const ct of cbsTeams) {
+    const team = LEAGUE_TEAMS.find(t => t.cbsId === ct.cbsTeamId);
+    if (!team) continue; // CBS team with no mapping in LEAGUE_TEAMS.cbsId — skip rather than guess
+
+    const existing = TEAM_ROSTERS[team.id] || [];
+    const rosterIds = existing.map(e => e.playerId).filter(Boolean);
+    if (!rosterIds.length) continue; // no drafted roster to slot yet
+
+    // Match each CBS starter to this app's player id by name, restricted to
+    // players actually on this team's drafted roster (a name collision with
+    // some other team's player should never move a starter flag here).
+    const rosterIdSet = new Set(rosterIds);
+    const starterIds = new Set();
+    for (const s of ct.starters || []) {
+      const p = findPlayerByNameFn(s.name);
+      if (p && rosterIdSet.has(p.id)) starterIds.add(p.id);
+    }
+    if (!starterIds.size) continue; // couldn't match anything real — leave this team's roster alone
+
+    // Real starters first, so assignRoster's auto-slot logic (dedicated
+    // position -> FLEX -> BENCH, first-come-first-served) places them into
+    // their true starting slots before anyone else gets a shot at those
+    // slots; everyone else falls through to BENCH exactly as it should.
+    const reordered = [
+      ...rosterIds.filter(id => starterIds.has(id)),
+      ...rosterIds.filter(id => !starterIds.has(id)),
+    ];
+    TEAM_ROSTERS[team.id] = assignRoster(frame, reordered, {}, findPlayerFn);
+    updated++;
+  }
+  return { ok: true, updated, teams: cbsTeams.length, fetchedAt: resp?.fetchedAt };
+}
+
 // â"€â"€â"€ Settings-based roster frame helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const _KEY_TO_SLOT = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', RBWR: 'FLEX', DST: 'DST', K: 'K' };
 const _DEFAULT_POSITIONS = [

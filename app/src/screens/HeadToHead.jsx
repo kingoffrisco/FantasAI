@@ -1,5 +1,5 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters, refreshTeamRostersFromServer } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters, refreshTeamRostersFromServer, syncLineupsFromCbs } from '../lib/data.js';
 import { findPlayer, findPlayerByName, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 import { getScoringRules, calcFantasyPts, buildStatPointsBreakdown, normalizeTeamAbbr, getGameProgress, blendProjectedFinal, fetchEspnScoreboardDirect, fetchEspnPlayerStatsDirect } from '../lib/liveScoring.js';
@@ -163,6 +163,29 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   const [liveSource, setLiveSource] = React.useState(null); // 'r2' | 'browser' | 'none'
   const [liveRefreshing, setLiveRefreshing] = React.useState(false);
   const [refreshTick, setRefreshTick] = React.useState(0);
+
+  // Resync real starter/bench lineups from CBS — see syncLineupsFromCbs in
+  // data.js for why this exists (nothing else in the app ever learns an
+  // opponent's actual lineup choices, only guesses by position order).
+  const [cbsSyncing, setCbsSyncing] = React.useState(false);
+  const [cbsSyncMsg, setCbsSyncMsg] = React.useState(null);
+  async function handleCbsResync() {
+    if (cbsSyncing) return;
+    setCbsSyncing(true);
+    setCbsSyncMsg(null);
+    try {
+      const result = await syncLineupsFromCbs(findPlayerByName, findPlayer);
+      setRosterVersion(v => v + 1);
+      setCbsSyncMsg(result.updated > 0
+        ? `Synced ${result.updated}/${result.teams} teams`
+        : 'No lineup changes found');
+    } catch (e) {
+      setCbsSyncMsg('Sync failed');
+    } finally {
+      setCbsSyncing(false);
+      setTimeout(() => setCbsSyncMsg(null), 4000);
+    }
+  }
 
   React.useEffect(() => {
     const workerUrl = (localStorage.getItem('fantasai.workerUrl') || '').replace(/\/$/, '');
@@ -383,6 +406,22 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
               {liveSource === 'browser' && !liveRefreshing && (
                 <span style={{ fontSize: 8, fontWeight: 800, color: '#4ea8ff', letterSpacing: '.05em' }}>BROWSER</span>
               )}
+            </button>
+
+            <button
+              onClick={handleCbsResync}
+              disabled={cbsSyncing}
+              title="Pull every team's real current starters/bench from CBS — fixes lineups that were auto-guessed or changed after your last sync"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap',
+                padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                cursor: cbsSyncing ? 'default' : 'pointer', border: '1px solid var(--border)',
+                background: 'var(--panel)', color: 'var(--text-dim)',
+                opacity: cbsSyncing ? 0.6 : 1,
+              }}
+            >
+              <span style={{ display: 'inline-block', transform: cbsSyncing ? 'rotate(180deg)' : 'none', transition: 'transform .4s' }}>⟳</span>
+              {cbsSyncing ? 'Syncing…' : cbsSyncMsg || 'Resync with CBS'}
             </button>
 
             <div style={{ display: 'grid', gridTemplateColumns: seasonType === 'pre' ? 'repeat(3, auto)' : 'repeat(7, auto)', gridAutoFlow: 'row', gap: 3 }}>

@@ -143,6 +143,7 @@ const PROTECTED_GET = {
   '/api/v1/projections': handleProjections,
   '/api/v1/league':      handleLeague,
   '/api/v1/rosters':     handleRosters,
+  '/api/v1/lineups':     handleLineups,
   '/api/v1/draft':       handleDraft,
   '/api/v1/draft/remote': handleRemoteDraft,
   '/api/v1/login-log':   handleLoginLogGet,
@@ -541,6 +542,7 @@ async function handleProjections(url, env) {
 
 async function handleLeague(url, env, req) { return cbsFetch(env, '/api/cbs/league', req?.headers?.get('X-CBS-Cookie')); }
 async function handleRosters(url, env, req) { return cbsFetch(env, '/api/cbs/rosters', req?.headers?.get('X-CBS-Cookie')); }
+async function handleLineups(url, env, req) { return cbsFetch(env, '/api/cbs/lineups', req?.headers?.get('X-CBS-Cookie')); }
 async function handleDraft(url, env, req) {
   const year = url.searchParams.get('year') || new Date().getFullYear();
   return cbsFetch(env, `/api/cbs/draft?year=${year}`, req?.headers?.get('X-CBS-Cookie'));

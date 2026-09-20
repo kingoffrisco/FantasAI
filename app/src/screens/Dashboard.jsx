@@ -969,6 +969,31 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
             <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 3 }}>{subLine}</div>
           </div>
 
+          {/* Compact live score badge — same real data (h2hWinData) as the full
+              scoreboard below, just condensed into the header row. Real ESPN/Sleeper
+              live scoring, not the old simulated top-bar ticker. */}
+          {h2hWinData && (
+            <div
+              onClick={() => onNav('h2h')}
+              title={`${teamName} vs ${h2hWinData.opp.name} — click for full H2H`}
+              style={{
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7,
+                padding: '4px 10px', borderRadius: 8, fontFamily: 'var(--font-mono)',
+                background: h2hWinData.isWinning ? 'rgba(76,175,130,.08)' : 'rgba(255,90,110,.08)',
+                border: `1px solid ${h2hWinData.isWinning ? 'rgba(76,175,130,.3)' : 'rgba(255,90,110,.3)'}`,
+              }}
+            >
+              {h2hWinData.liveCount > 0 && (
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--good)', boxShadow: '0 0 6px var(--good)', flexShrink: 0, animation: 'pulse 2s infinite' }} />
+              )}
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)' }}>{team?.logo || teamName}</span>
+              <span style={{ fontSize: 13, fontWeight: 900, color: h2hWinData.hasLive ? '#1affa0' : '#4ea8ff' }}>{h2hWinData.myScore.toFixed(1)}</span>
+              <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>–</span>
+              <span style={{ fontSize: 13, fontWeight: 900, color: h2hWinData.hasLive ? '#1affa0' : '#4ea8ff' }}>{h2hWinData.oppScore.toFixed(1)}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)' }}>{h2hWinData.opp.logo || h2hWinData.opp.name}</span>
+            </div>
+          )}
+
         </div>
         <div className="flex gap-8" style={{ alignItems: 'center' }}>
           <button className="btn primary" onClick={() => onNav('draft')}>▶ Open Draft Room</button>

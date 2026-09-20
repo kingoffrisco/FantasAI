@@ -52,6 +52,7 @@ const routes = {
   "/api/cbs/league":          getLeague,
   "/api/cbs/teams":           getTeams,
   "/api/cbs/rosters":         getRosters,
+  "/api/cbs/lineups":         getLiveLineups,
   "/api/cbs/rankings":        getRankings,
   "/api/cbs/players":         getPlayers,
   "/api/cbs/draft":           getDraft,
@@ -144,6 +145,106 @@ async function getRosters(req, env) {
     rosters[t.id] = await parseRoster(html);
   }
   return { source: "cbs", fetchedAt: new Date().toISOString(), rosters };
+}
+
+// getRosters (above) is broken and has been for a while — /teams/{id} is CBS's
+// interactive lineup-EDITOR page, and its roster table is populated entirely by
+// client-side JS after load; there's no server-rendered player data for
+// tr.player/data-player-id/data-slot to match, so it silently returns [] for
+// every team. Confirmed live 2026-09-20.
+//
+// /scoring/live is a different, real source: it embeds a
+// `bootstrapLiveScoringData = {...}` JS object literal directly in the served
+// HTML (not client-fetched), containing a `teams` array where each team's
+// `rosterPlayers` is the actual, real set of currently-starting players for
+// that team this week — ground truth CBS itself uses to render the live
+// scoring page, not a guess. This is what makes "resync lineups from CBS"
+// possible at all: everything else in this app can only auto-assign starters
+// by position order because it has no other way to know who a manager
+// actually benched.
+async function getLiveLineups(req, env) {
+  const html = await cbsFetch(env, "/scoring/live", req);
+  const data = extractBootstrapLiveScoringData(html);
+
+  // Crosswalk: CBS's own numeric player id -> name/team/position. Needed because
+  // team.rosterPlayers entries carry only the id — this app's TEAM_ROSTERS uses
+  // its own internal player ids (from the draft-picks import, matched by name),
+  // not CBS's, so the frontend has to match starters back by name.
+  const byId = {};
+  for (const p of (Array.isArray(data?.players) ? data.players : [])) {
+    const id = String(p?.id ?? "");
+    if (!id) continue;
+    const team = p.proTeam || "";
+    // DST entries carry a team nickname as lastName (e.g. "Eagles") with no
+    // firstName — this app's player store names defenses "PHI D/ST", not
+    // "Eagles", so build the matching name here rather than leaving the
+    // frontend's name-based lookup to silently fail on every DST.
+    const name = p.primaryPosition === "DST"
+      ? `${team.toUpperCase()} D/ST`
+      : (p.firstName ? `${p.firstName} ${p.lastName || ""}`.trim() : (p.lastName || ""));
+    byId[id] = { name, team, pos: p.primaryPosition || "" };
+  }
+
+  // teams lives under league, not at the top level — confirmed live 2026-09-20.
+  const rawTeams = Array.isArray(data?.league?.teams) ? data.league.teams : [];
+  const teams = rawTeams.map(t => ({
+    cbsTeamId: String(t.id ?? ""),
+    name: t.name || "",
+    // rosterPlayers is the team's FULL active roster (starters + bench), not
+    // just starters — confirmed live 2026-09-20 (a benched QB showed up right
+    // alongside the real starting QB). hasBeenStarter is the real signal: 1 for
+    // the current starter in that slot, 0 for anyone currently on the bench.
+    // (hasBeenBench tracks the inverse — whether they were ever benched at any
+    // point this week — not "is currently benched", so don't filter on that one.)
+    starters: (Array.isArray(t.rosterPlayers) ? t.rosterPlayers : [])
+      .filter(p => p?.hasBeenStarter === 1)
+      .map(p => {
+        const id = String(p?.id ?? "");
+        const info = byId[id];
+        return id && info?.name ? { cbsPlayerId: id, ...info } : null;
+      })
+      .filter(Boolean),
+  })).filter(t => t.cbsTeamId);
+
+  return { source: "cbs", fetchedAt: new Date().toISOString(), teams };
+}
+
+// Extracts and parses the `bootstrapLiveScoringData = {...}` JS object literal
+// from /scoring/live's HTML. Can't regex to the next "};" — the object is ~700KB
+// with braces nested inside strings and sub-objects — so walk it char-by-char
+// tracking brace depth and string state (with escape handling) until the
+// opening brace's match is found, then JSON.parse that exact substring (CBS
+// emits real double-quoted JSON here, not a loose JS literal, so this parses
+// directly without any further cleanup).
+function extractBootstrapLiveScoringData(html) {
+  const markerIdx = html.indexOf("bootstrapLiveScoringData");
+  if (markerIdx < 0) return null;
+  const braceStart = html.indexOf("{", markerIdx);
+  if (braceStart < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let stringChar = "";
+  let escaped = false;
+  for (let i = braceStart; i < html.length; i++) {
+    const ch = html[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === stringChar) inString = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inString = true; stringChar = ch; continue; }
+    if (ch === "{") { depth++; }
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        try { return JSON.parse(html.slice(braceStart, i + 1)); }
+        catch { return null; }
+      }
+    }
+  }
+  return null;
 }
 
 async function getRankings(req, env, url) {

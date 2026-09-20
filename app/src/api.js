@@ -43,6 +43,7 @@ export const api = {
   rankings: (pos = 'ALL') => get(`/api/cbs/rankings?pos=${pos}`),
   draft:    (year)        => get(`/api/cbs/draft?year=${year}`),
   rosters:  ()            => get('/api/cbs/rosters'),
+  lineups:  ()            => get('/api/cbs/lineups'),
   // Full active NFL player pool from Databricks export_players_2026_draft (via worker-api)
   dbPlayers: () => fetch(`${API_BASE}/api/v1/db/players`, { headers: apiHeaders() }).then(r => r.json()),
   // Sleeper full player list proxied through CBS Worker (no CORS, 1 h edge cache, ~1500 active players)
