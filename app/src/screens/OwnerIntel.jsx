@@ -106,13 +106,13 @@ function flattenDraftPicks(raw) {
 }
 
 // Build teamId → { [year]: { roundPick, picks, rawPicks } }
-function buildDraftOverlay(draft2024Raw, draft2025Raw, teamOverlay) {
+function buildDraftOverlay(draft2024Raw, draft2025Raw, draft2026Raw, teamOverlay) {
   const result = {};
   // Invert teamOverlay: cbsId → teamId
   const cbsIdToTeamId = {};
   Object.entries(teamOverlay).forEach(([tid, ov]) => { cbsIdToTeamId[ov.cbsId] = Number(tid); });
 
-  [[2024, draft2024Raw], [2025, draft2025Raw]].forEach(([year, raw]) => {
+  [[2024, draft2024Raw], [2025, draft2025Raw], [2026, draft2026Raw]].forEach(([year, raw]) => {
     if (!raw) return;
     const allPicks = flattenDraftPicks(raw);
     if (!allPicks.length) return;
@@ -240,13 +240,14 @@ export default function OwnerIntelScreen({ onOpenPlayer, user, myRosterIds, slot
   }, []);
 
   const { data: cbsTeams }   = useApi(() => api.teams(), []);
+  const { data: draft2026 }  = useApi(() => api.draft(2026), []);
   const { data: draft2025 }  = useApi(() => api.draft(2025), []);
   const { data: draft2024 }  = useApi(() => api.draft(2024), []);
 
   const teamOverlay  = React.useMemo(() => buildTeamOverlay(cbsTeams), [cbsTeams]);
   const draftOverlay = React.useMemo(
-    () => buildDraftOverlay(draft2024, draft2025, teamOverlay),
-    [draft2024, draft2025, teamOverlay]
+    () => buildDraftOverlay(draft2024, draft2025, draft2026, teamOverlay),
+    [draft2024, draft2025, draft2026, teamOverlay]
   );
 
   const getTeam = React.useCallback((teamId) => {
@@ -598,7 +599,11 @@ function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOv
 
       {showHistory && (
       <div className="muted-card" style={{ marginTop: 14 }}>
-        <div className="card-mini-label">DRAFT HISTORY · 2024–2025</div>
+        <div className="card-mini-label">
+          DRAFT HISTORY{o.history?.length
+            ? ` · ${Math.min(...o.history.map(h => h.year))}–${Math.max(...o.history.map(h => h.year))}`
+            : ''}
+        </div>
         <table className="history-table">
           <thead>
             <tr><th>Year</th><th>Result</th><th>Slot</th><th>All 14 picks</th><th>Notes</th></tr>

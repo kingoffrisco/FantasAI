@@ -97,7 +97,9 @@ function buildEnrichmentMaps({ breakoutCandidates, sleeperPicks, defenseVsPos, p
   for (const row of posVsPosArr) {
     const team = (row.def_team || row.team || '').toUpperCase();
     const pos = (row.position || row.pos || '').toUpperCase();
-    const rank = Number(row.rank_vs_pos ?? row.rank);
+    // Prefer the real 2026 rank once that opponent has a 2026 sample — same
+    // rule used everywhere else this data shows up.
+    const rank = Number(row.rank_vs_pos_2026 ?? row.rank_vs_pos ?? row.rank);
     if (team && pos && !Number.isNaN(rank)) rankVsPos.set(`${team}|${pos}`, rank);
   }
   const ownershipByName = new Map();

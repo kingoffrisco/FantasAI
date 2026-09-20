@@ -1152,7 +1152,7 @@ const ROSTER_REFRESH = {
   apifootball: async (playerNames, src) => {
     const results = [];
     for (const name of playerNames.slice(0, 5)) {
-      const url = `https://v1.american-football.api-sports.io/players?name=${encodeURIComponent(name)}&league=1&season=2025`;
+      const url = `https://v1.american-football.api-sports.io/players?name=${encodeURIComponent(name)}&league=1&season=2026`;
       const probeUrl = `${WORKER_API}/api/v1/proxy?url=${encodeURIComponent(url)}&keyHeader=${encodeURIComponent(src.keyHeader)}&keyValue=${encodeURIComponent(src.apiKey || '')}`;
       try {
         const res = await fetch(probeUrl, { signal: AbortSignal.timeout(8000) });

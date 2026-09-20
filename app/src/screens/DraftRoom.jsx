@@ -3283,7 +3283,8 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
     let cancelled = false;
     setLoading(true); setSeasons({}); setNews([]);
     async function load() {
-      const [s25, s24, s23] = await Promise.allSettled([
+      const [s26, s25, s24, s23] = await Promise.allSettled([
+        fetchSleeperPlayerStats(p.name, pos, 2026),
         fetchSleeperPlayerStats(p.name, pos, 2025),
         fetchSleeperPlayerStats(p.name, pos, 2024),
         fetchSleeperPlayerStats(p.name, pos, 2023),
@@ -3293,7 +3294,7 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
         if (r.status !== 'fulfilled' || !r.value?.found) return null;
         const tot = r.value.seasonTotals || {}; tot._gp = r.value.gamesPlayed || 0; return tot;
       }
-      setSeasons({ 2025: toTot(s25), 2024: toTot(s24), 2023: toTot(s23) });
+      setSeasons({ 2026: toTot(s26), 2025: toTot(s25), 2024: toTot(s24), 2023: toTot(s23) });
       setLoading(false);
       // Fetch college stats for rookies
       try {
@@ -3432,7 +3433,7 @@ function InlinePlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissi
               )}
               {/* NFL stats table — hidden for rookies with college data and no NFL seasons */}
               {(() => {
-                const nflRows = [2023, 2024, 2025].filter(yr => yr >= nflStart || !hasCollege);
+                const nflRows = [2023, 2024, 2025, 2026].filter(yr => yr >= nflStart || !hasCollege);
                 if (nflRows.length === 0) return null;
                 return (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
@@ -3544,8 +3545,9 @@ function DraftPlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissio
     setNews([]);
 
     async function load() {
-      // Fetch 3 seasons in parallel
-      const [s25, s24, s23] = await Promise.allSettled([
+      // Fetch 4 seasons in parallel — including 2026 (this season, in progress)
+      const [s26, s25, s24, s23] = await Promise.allSettled([
+        fetchSleeperPlayerStats(p.name, p.pos, 2026),
         fetchSleeperPlayerStats(p.name, p.pos, 2025),
         fetchSleeperPlayerStats(p.name, p.pos, 2024),
         fetchSleeperPlayerStats(p.name, p.pos, 2023),
@@ -3560,7 +3562,7 @@ function DraftPlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissio
         return tot;
       }
 
-      setSeasons({ 2025: toTot(s25), 2024: toTot(s24), 2023: toTot(s23) });
+      setSeasons({ 2026: toTot(s26), 2025: toTot(s25), 2024: toTot(s24), 2023: toTot(s23) });
       setLoading(false);
 
       // News: fetch ESPN articles mentioning this player
@@ -3679,7 +3681,7 @@ function DraftPlayerDetail({ player: p, onClose, canDraft, isMyTurn, isCommissio
             </div>
           )}
 
-          {!loading && [2025, 2024, 2023].map(yr => (
+          {!loading && [2026, 2025, 2024, 2023].map(yr => (
             <div key={yr} style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', color: seasons[yr] ? 'var(--accent-2)' : 'var(--text-faint)', marginBottom: 6, letterSpacing: '.06em' }}>
                 {yr} Season {seasons[yr] ? `· ${seasons[yr]._gp}G` : '· no data'}

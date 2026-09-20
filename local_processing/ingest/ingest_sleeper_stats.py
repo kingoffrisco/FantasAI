@@ -9,7 +9,7 @@ Outputs:
   silver_weekly_stats — upserted by (player_id, week, season, source='sleeper')
 
 Usage:
-  python ingest_sleeper_stats.py                  # 2025 regular season
+  python ingest_sleeper_stats.py                  # 2026 regular season
   python ingest_sleeper_stats.py --season 2024    # prior season
   python ingest_sleeper_stats.py --weeks 1,2,3    # specific weeks only
   python ingest_sleeper_stats.py --dry-run
@@ -180,8 +180,8 @@ def upsert_rows(conn, rows: list[dict]) -> int:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--season", type=int, default=2025,
-        help="NFL season year (default: 2025)",
+        "--season", type=int, default=2026,
+        help="NFL season year (default: 2026)",
     )
     parser.add_argument(
         "--weeks", type=str, default=None,

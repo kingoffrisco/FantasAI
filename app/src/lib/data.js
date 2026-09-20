@@ -141,7 +141,7 @@ export const INTEGRATIONS = [
   {
     id: "cbs", platform: "CBS Sports", leagueName: "Atotau League",
     leagueUrl: "atotauleague.football.cbssports.com", connected: true,
-    lastSync: "2 min ago", season: "2025", leagueSize: 12, scoring: "Half PPR",
+    lastSync: "2 min ago", season: "2026", leagueSize: 12, scoring: "Half PPR",
     color: "#0d4ea2",
     pulls: ["Rosters", "Live Scoring", "Draft History (5 yrs)", "Transactions", "Owner Settings", "Cheat Sheets"],
   },

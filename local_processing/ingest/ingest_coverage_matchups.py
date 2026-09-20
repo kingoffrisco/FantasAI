@@ -66,14 +66,40 @@ R2_BASE      = "https://api.fantasai.net/api/v1/r2"
 FANTASAI_KEY = os.environ.get("FANTASAI_KEY", "")
 HEADERS_R2   = {"X-FantasAI-Key": FANTASAI_KEY, "Content-Type": "application/json"}
 
-DEFAULT_SEASONS = [2024, 2025]  # ~2 seasons — enough volume per coverage bucket, still recent
+DEFAULT_SEASONS = [2024, 2025, 2026]  # ~2 prior seasons plus the current one, for volume
 MIN_TARGETS_PER_SPLIT = 3       # below this, exported but the frontend should treat it as low-confidence
 
 
 def load_pbp(seasons: list[int]):
     import nfl_data_py as nfl
-    print(f"   Fetching play-by-play for {seasons} from nflverse...")
-    pbp = nfl.import_pbp_data(seasons, downcast=True)
+    import pandas as pd
+    # defense_coverage_type/defense_man_zone_type live on the PARTICIPATION merge,
+    # not the base PBP release (confirmed live 2026-09-20) — so, unlike
+    # ingest_nflverse.py's PBP calls, this script needs include_participation=True.
+    # The participation release lags the base PBP release, though, so mid-season
+    # it 404s for the current season — and nfl_data_py's own except clause
+    # references an undefined name, turning that 404 into an unrecoverable
+    # NameError instead of a clean per-year skip. Fetch one season per call (the
+    # library processes years in an internal loop with a try/except per year, so
+    # isolating each year to its own call means only the failing year's exception
+    # propagates) and catch that per season here, so a season with no
+    # participation data yet published (like the current one, mid-season) is
+    # skipped instead of taking down every other season's fetch.
+    parts = []
+    for season in seasons:
+        print(f"   Fetching play-by-play for {season} from nflverse...")
+        try:
+            one = nfl.import_pbp_data([season], downcast=True, include_participation=True)
+        except Exception as e:
+            print(f"     ⚠️  {season}: {e} — no participation/coverage data yet, skipping")
+            continue
+        if "defense_coverage_type" not in one.columns:
+            print(f"     ⚠️  {season}: no coverage-charting data published yet — skipping")
+            continue
+        parts.append(one)
+    if not parts:
+        raise RuntimeError(f"No season in {seasons} has coverage-charting data available.")
+    pbp = pd.concat(parts, ignore_index=True) if len(parts) > 1 else parts[0]
     print(f"   {len(pbp):,} total plays loaded")
     return pbp
 

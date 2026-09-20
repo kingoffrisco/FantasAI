@@ -40,6 +40,7 @@ import pandas as pd
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+import ssl_utils  # noqa: F401 — injects Windows cert store
 from db import get_conn, init_schema
 
 try:
@@ -52,7 +53,7 @@ CFBD_BASE = "https://api.collegefootballdata.com"
 CFBD_KEY  = os.environ.get("CFBD_API_KEY", "")
 HEADERS   = {"Authorization": f"Bearer {CFBD_KEY}", "Accept": "application/json"}
 RATE_SEC  = 0.5
-DEFAULT_SEASONS = [2023, 2024, 2025]
+DEFAULT_SEASONS = [2023, 2024, 2025, 2026]
 
 SKILL_CATEGORIES = ["passing", "rushing", "receiving"]
 

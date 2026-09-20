@@ -4,6 +4,14 @@
 
 const SLEEPER = 'https://api.sleeper.app/v1';
 
+// Default season for callers that don't pass one explicitly. Was hardcoded to
+// 2025 — every caller that omits the season arg (CurrentRoster.jsx, Dashboard.jsx,
+// News.jsx) was silently pulling last season's stats even now that 2026 is the
+// live season. Same cutover date used by Players.jsx's statYear.
+function currentSleeperSeason() {
+  return new Date() >= new Date('2026-09-09') ? 2026 : 2025;
+}
+
 // ── Player map (~5 MB) — loaded once per session ────────────────────────────
 let _playerMap = null;
 let _playerMapPromise = null;
@@ -146,7 +154,7 @@ export async function getWeekProjections(season, week) {
  * Returns the same shape as the worker's /api/player/stats endpoint so
  * callers don't need to change their data-consumption code.
  */
-export async function fetchSleeperPlayerStats(name, pos, season = 2025) {
+export async function fetchSleeperPlayerStats(name, pos, season = currentSleeperSeason()) {
   // NFL state (current week / season type)
   const state = await fetch(`${SLEEPER}/state/nfl`)
     .then(r => r.json())

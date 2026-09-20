@@ -619,11 +619,20 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
     let cancelled = false;
     async function loadDepthAndSnaps() {
       try {
-        // Weeks 13-18: trend window. Weeks 14-17 are best for snaps (18 = rest week).
-        const TREND_WEEKS = [13, 14, 15, 16, 17, 18];
+        // Trend window: the most recent up-to-6 completed weeks. Once 2026 has
+        // enough games played to be a meaningful trend (>=3 weeks in), use 2026
+        // weeks so far — otherwise (early season) there's not enough 2026 data
+        // yet, so fall back to 2025's season-ending stretch (weeks 13-18, where
+        // 14-17 are best for snaps; 18 is often a rest week for contenders).
+        const currentWeek = getNflScheduleWeek();
+        const useCurrentSeason = currentWeek >= 3;
+        const trendSeason = useCurrentSeason ? 2026 : 2025;
+        const TREND_WEEKS = useCurrentSeason
+          ? Array.from({ length: Math.min(6, currentWeek - 1) }, (_, i) => currentWeek - 1 - i).reverse()
+          : [13, 14, 15, 16, 17, 18];
         const [map, ...weekStatsArr] = await Promise.all([
           getPlayerMap(),
-          ...TREND_WEEKS.map(w => fetchBulkWeekStats(2025, w)),
+          ...TREND_WEEKS.map(w => fetchBulkWeekStats(trendSeason, w)),
         ]);
         if (cancelled) return;
         const depths  = {};

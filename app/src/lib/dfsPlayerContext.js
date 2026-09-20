@@ -41,7 +41,10 @@ export function defenseVsPosRank(defenseVsPos, team, position) {
     return dTeam === (team || '').toUpperCase() && dPos === (position || '').toUpperCase();
   });
   if (!row) return null;
-  const rank = row.rank_vs_pos ?? row.rank;
+  // Prefer the real 2026 (in-progress season) rank once that opponent has a
+  // 2026 sample — same rule used everywhere else this data shows up (job4,
+  // Compare/Waivers/LineupDecisions, the player detail matchup panel).
+  const rank = row.rank_vs_pos_2026 ?? row.rank_vs_pos ?? row.rank;
   return rank != null ? Number(rank) : null;
 }
 

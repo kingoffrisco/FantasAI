@@ -158,7 +158,7 @@ export function CBSConnectModal({ onClose, onConnected, mode }) {
                   <div className="src-platform-tag sm" style={{ background: '#0d4ea2' }}>AT</div>
                   <div style={{ flex: 1 }}>
                     <div className="t">Atotau League</div>
-                    <div className="s mono">atotauleague.football.cbssports.com · 12 teams · Half PPR · 2025 season</div>
+                    <div className="s mono">atotauleague.football.cbssports.com · 12 teams · Half PPR · 2026 season</div>
                   </div>
                   <span className="cbs-pill active">PRIMARY</span>
                 </label>
@@ -1273,8 +1273,8 @@ export function WorkerConfig({ openCookieTrigger = 0, onCookieSaved, adminOnly =
                   { label: '/api/v1/injuries', path: '/api/v1/injuries' },
                   { label: '/api/v1/draft?year=2026', path: '/api/v1/draft?year=2026' },
                   { label: '/api/v1/storage/test', path: '/api/v1/storage/test' },
-                  { label: '/api/v1/nfl/scoreboard', path: '/api/v1/nfl/scoreboard?week=1&season=2025' },
-                  { label: '/api/v1/nfl/schedule', path: '/api/v1/nfl/schedule?week=1&season=2025' },
+                  { label: '/api/v1/nfl/scoreboard', path: '/api/v1/nfl/scoreboard?week=1&season=2026' },
+                  { label: '/api/v1/nfl/schedule', path: '/api/v1/nfl/schedule?week=1&season=2026' },
                   { label: '/api/v1/nfl/news', path: '/api/v1/nfl/news?limit=5' },
                 ].map(b => (
                   <button key={b.path} className="btn sm ghost" onClick={() => callEndpoint(b.path, setLeagueResult)}>
