@@ -562,13 +562,15 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
     return m;
   }, [r2WriteupsRaw]);
 
-  // Position-specific matchup index: "TEAM|POS" → rank_vs_pos (1=toughest, 32=easiest)
+  // Position-specific matchup index: "TEAM|POS" → rank_vs_pos (1=toughest, 32=easiest).
+  // Prefer the opponent's real 2026 rank once they have a 2026 sample — same rule
+  // used server-side (job4_weekly_startsit.py) and on the player detail page.
   const defVsPosIndex = React.useMemo(() => {
     const arr = r2DefVsPos?.data || [];
     const m = new Map();
     for (const row of arr) {
       if (row.def_team && row.position)
-        m.set(`${row.def_team.toUpperCase()}|${row.position}`, row.rank_vs_pos);
+        m.set(`${row.def_team.toUpperCase()}|${row.position}`, row.rank_vs_pos_2026 ?? row.rank_vs_pos);
     }
     return m;
   }, [r2DefVsPos]);

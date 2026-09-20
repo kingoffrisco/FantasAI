@@ -462,6 +462,15 @@ def load_defense_vs_pos(raw) -> dict:
             out[(team, pos)] = {
                 "rank_vs_pos":     row.get("rank_vs_pos") or row.get("rank") or "?",
                 "avg_pts_allowed": row.get("avg_pts_allowed") or row.get("pts_allowed") or "?",
+                # 2026 (in-progress season) fields — see stats_2026/def_vs_pos_2026 in
+                # export_to_r2.py. This whitelist-style dict silently dropped these
+                # before the def_rank-preference code below ever saw them, so every
+                # matchup rank/avg was using 2025 data regardless of that logic —
+                # shipped real bug: 537/643 weekly_startsit entries on 2026-09-17
+                # had a stale defense number as a result.
+                "rank_vs_pos_2026":     row.get("rank_vs_pos_2026"),
+                "avg_pts_allowed_2026": row.get("avg_pts_allowed_2026"),
+                "sample_size_2026":     row.get("sample_size_2026"),
             }
     return out
 

@@ -2651,10 +2651,17 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
       r => r.def_team?.toUpperCase() === oppTeam && r.position === posKey
     );
     if (!row) return null;
-    const rank = row.rank_vs_pos;
+    // Prefer the opponent's real 2026 vs-position numbers once they have a sample
+    // this season — same rule job4_weekly_startsit.py uses server-side. A team's
+    // actual defensive strength this year can differ a lot from last year's, so
+    // 2025 is only a fallback for a team with no 2026 games yet (bye/early season).
+    const has2026 = row.rank_vs_pos_2026 != null;
+    const rank = has2026 ? row.rank_vs_pos_2026 : row.rank_vs_pos;
     return {
       rank,
-      avg_pts_allowed: row.avg_pts_allowed,
+      avg_pts_allowed: has2026 ? row.avg_pts_allowed_2026 : row.avg_pts_allowed,
+      sampleSize: has2026 ? row.sample_size_2026 : row.sample_size,
+      isCurrentSeason: has2026,
       score: rank <= 5  ? -2
            : rank <= 10 ? -1
            : rank >= 28 ? 2
@@ -4164,6 +4171,9 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                     </div>
                     <div className="mono" style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>
                       #{detailMatchupRating.rank} of 32 defenses · {detailMatchupRating.avg_pts_allowed} pts/g allowed to {player.pos}s
+                      {detailMatchupRating.isCurrentSeason
+                        ? <span style={{ color: 'var(--text-faint)' }}> · 2026 ({detailMatchupRating.sampleSize} game{detailMatchupRating.sampleSize === 1 ? '' : 's'})</span>
+                        : <span style={{ color: 'var(--text-faint)' }}> · 2025 (no 2026 games yet)</span>}
                     </div>
                   </div>
                 </div>
@@ -4181,23 +4191,27 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                 const sorted = posOrder.map(pos => rows.find(r => r.position === pos)).filter(Boolean);
                 return (
                   <>
-                    <div className="card-title" style={{ marginBottom: 8 }}>2026 Defense vs Position · {oppTeam}</div>
+                    <div className="card-title" style={{ marginBottom: 8 }}>Defense vs Position · {oppTeam}</div>
                     <table className="gamelog">
-                      <thead><tr><th>Pos</th><th>Pts Allowed/G</th><th>Rank</th><th>Matchup</th></tr></thead>
+                      <thead><tr><th>Pos</th><th>Pts Allowed/G</th><th>Rank</th><th>Matchup</th><th>Season</th></tr></thead>
                       <tbody>
                         {sorted.map(r => {
                           const isPlayer = r.position === player.pos;
-                          const mc = r.rank_vs_pos <= 5  ? { label: 'AVOID',     color: '#ff5a6e' }
-                                   : r.rank_vs_pos <= 10 ? { label: 'TOUGH',     color: '#ff9f3f' }
-                                   : r.rank_vs_pos >= 28 ? { label: 'SMASH',     color: '#4ed87b' }
-                                   : r.rank_vs_pos >= 23 ? { label: 'FAVORABLE', color: '#4ea8ff' }
+                          const has2026 = r.rank_vs_pos_2026 != null;
+                          const rank = has2026 ? r.rank_vs_pos_2026 : r.rank_vs_pos;
+                          const avgPts = has2026 ? r.avg_pts_allowed_2026 : r.avg_pts_allowed;
+                          const mc = rank <= 5  ? { label: 'AVOID',     color: '#ff5a6e' }
+                                   : rank <= 10 ? { label: 'TOUGH',     color: '#ff9f3f' }
+                                   : rank >= 28 ? { label: 'SMASH',     color: '#4ed87b' }
+                                   : rank >= 23 ? { label: 'FAVORABLE', color: '#4ea8ff' }
                                    : { label: 'NEUTRAL', color: 'var(--text-faint)' };
                           return (
                             <tr key={r.position} style={isPlayer ? { background: 'rgba(255,255,255,.04)', fontWeight: 700 } : {}}>
                               <td><span style={{ color: isPlayer ? mc.color : 'var(--text-dim)' }}>{r.position}{isPlayer ? ' ★' : ''}</span></td>
-                              <td>{r.avg_pts_allowed}</td>
-                              <td style={{ color: mc.color }}>#{r.rank_vs_pos}</td>
+                              <td>{avgPts}</td>
+                              <td style={{ color: mc.color }}>#{rank}</td>
                               <td><span style={{ fontSize: 10, fontWeight: 700, color: mc.color }}>{mc.label}</span></td>
+                              <td style={{ fontSize: 10, color: 'var(--text-faint)' }}>{has2026 ? `'26 (${r.sample_size_2026}g)` : `'25`}</td>
                             </tr>
                           );
                         })}
