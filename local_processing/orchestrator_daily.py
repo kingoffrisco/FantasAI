@@ -1,4 +1,4 @@
-"""
+r"""
 Daily News Ingestion Orchestrator
 Replaces: Databricks Job 943551462212511 (FantasAI - Daily News Ingestion)
           Databricks Job 556044300919171  (API-Sports.io Daily Stats)
