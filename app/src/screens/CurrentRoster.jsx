@@ -2147,7 +2147,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                     <th className="num" style={sideLR}>Trend</th>
                     {/* FANTASY POINTS */}
                     <th className="num" style={sideL}>2025 Pts</th>
-                    <th className="num">2025 PPG</th>
+                    <th className="num">PPG</th>
                     <th className="num" style={sideR}>Proj</th>
                     <th style={{ maxWidth: 420 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>

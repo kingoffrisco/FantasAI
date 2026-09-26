@@ -290,20 +290,28 @@ export function normalizePlayerList(rawArr) {
       depth:       Number(p.depth)        || 1,
       depthChartOrder,
       depthChartPos,
-      targetShare: Number(p.targetShare || p.target_share) || 0,
-      routes:      Number(p.routes)       || 0,
-      yac:         Number(p.yac)          || 0,
-      adot:        Number(p.adot)         || null,
-      airYds:      Number(p.airYds || p.air_yards) || null,
-      avgSnaps:    Number(p.avg_snaps || p.avgSnaps) || null,
-      snapPct:     Number(p.snap_pct || p.snapPct) || null,
-      avgTargetsG: Number(p.avg_targets_g || p.avgTargetsG) || null,
-      avgCarriesG: Number(p.avg_carries_g || p.avgCarriesG) || null,
+      // NGS/usage fields: prefer the 2026 (in-progress season) export field once
+      // the player has a 2026 game, same rule as proj/last/avg above — these
+      // were still reading 2025-only fields even after that fix (missed this
+      // block the first pass). avg_rz_att_g has no 2026 counterpart at all
+      // (nflverse has no clean red-zone-attempts field for the current season
+      // via the free source used here — see export_to_r2.py's snap_2026 CTE
+      // comment), so that one field stays 2025-only regardless of the gate.
+      targetShare: Number(has2026Games ? p.target_share_2026 : (p.targetShare || p.target_share)) || 0,
+      routes:      Number(has2026Games ? p.routes_2026 : p.routes) || 0,
+      yac:         Number(has2026Games ? p.yac_2026 : p.yac) || 0,
+      adot:        Number(has2026Games ? p.adot_2026 : p.adot) || null,
+      airYds:      Number(has2026Games ? p.air_yards_2026 : (p.airYds || p.air_yards)) || null,
+      avgSnaps:    Number(has2026Games ? p.avg_snaps_2026 : (p.avg_snaps || p.avgSnaps)) || null,
+      snapPct:     Number(has2026Games ? p.snap_pct_2026 : (p.snap_pct || p.snapPct)) || null,
+      avgTargetsG: Number(has2026Games ? p.avg_targets_g_2026 : (p.avg_targets_g || p.avgTargetsG)) || null,
+      avgCarriesG: Number(has2026Games ? p.avg_carries_g_2026 : (p.avg_carries_g || p.avgCarriesG)) || null,
       avgRzAttG:   Number(p.avg_rz_att_g || p.avgRzAttG) || null,
-      comboYdsG:   Number(p.combo_yds_g || p.comboYdsG) || null,
-      yptgt:       Number(p.yds_per_tgt || p.yptgt) || null,
-      tgtG:        Number(p.avg_targets_g || p.tgtG) || null,
-      attG:        Number(p.avg_carries_g || p.attG) || null,
+      comboYdsG:   Number(has2026Games ? p.combo_yds_g_2026 : (p.combo_yds_g || p.comboYdsG)) || null,
+      yptgt:       Number(has2026Games ? p.yds_per_tgt_2026 : (p.yds_per_tgt || p.yptgt)) || null,
+      tgtG:        Number(has2026Games ? p.avg_targets_g_2026 : (p.avg_targets_g || p.tgtG)) || null,
+      attG:        Number(has2026Games ? p.avg_carries_g_2026 : (p.avg_carries_g || p.attG)) || null,
+      ngsSeason:   has2026Games ? 2026 : 2025,
       forty:       Number(p.forty) || null,
       vertical:    Number(p.vertical) || null,
       broadJump:   Number(p.broad_jump || p.broadJump) || null,

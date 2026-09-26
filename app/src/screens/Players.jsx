@@ -254,15 +254,16 @@ function fmtWaiverDate(d) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' · 11:59 PM ET';
 }
 
-function WeatherBadge({ team, opp, scheduleOppMap }) {
+function WeatherBadge({ team, opp, scheduleOppMap, liveTeams }) {
   const { data: r2Weather } = useR2WeatherForecast();
-  if (!r2Weather?.teams) return null;
+  const teams = liveTeams || r2Weather?.teams;
+  if (!teams) return null;
   const schedOpp = scheduleOppMap?.get(team) || opp || '';
   const isAway = schedOpp.startsWith('@');
   const oppClean = schedOpp.replace(/^@/, '').toUpperCase();
   const homeTeam = isAway ? oppClean : (team || '').toUpperCase();
   if (!homeTeam) return null;
-  const entry = r2Weather.teams[homeTeam];
+  const entry = teams[homeTeam];
   if (!entry) return null;
   if (entry.is_dome) return <div style={{ fontSize: 10, color: '#1affa0' }}>🏟️ Dome</div>;
   if (!entry.forecast?.length) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
@@ -478,6 +479,34 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
 
   // Also needed at table level (not just inside WeatherBadge) so the Weather column can be sorted.
   const { data: r2WeatherForSort } = useR2WeatherForecast();
+
+  // Live weather refresh — same endpoint/behavior as the "Refresh" button on
+  // the Current Roster page's Weather column, just added here too so the
+  // Players list doesn't have to wait on R2's cached forecast.
+  const [liveWeatherTeams, setLiveWeatherTeams]   = React.useState(null);
+  const [weatherRefreshing, setWeatherRefreshing] = React.useState(false);
+  const [weatherRefreshedAt, setWeatherRefreshedAt] = React.useState(null);
+  async function handleWeatherRefresh() {
+    if (weatherRefreshing) return;
+    setWeatherRefreshing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/weather/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 7 }),
+        signal: AbortSignal.timeout(120000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.teams) {
+          setLiveWeatherTeams(data.teams);
+          setWeatherRefreshedAt(data.fetched_at || new Date().toISOString());
+        }
+      }
+    } catch {}
+    setWeatherRefreshing(false);
+  }
+  const weatherTeamsForSort = liveWeatherTeams || r2WeatherForSort?.teams;
 
   const { data: r2Breakouts } = useR2BreakoutCandidates();
   const breakoutSet = React.useMemo(() => {
@@ -871,8 +900,8 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
         return bv - av;
       }
       if (sort === 'weatherSeverity') {
-        const av = getWeatherSeverity(r2WeatherForSort, a.team, a.opp, scheduleOppMap);
-        const bv = getWeatherSeverity(r2WeatherForSort, b.team, b.opp, scheduleOppMap);
+        const av = getWeatherSeverity({ teams: weatherTeamsForSort }, a.team, a.opp, scheduleOppMap);
+        const bv = getWeatherSeverity({ teams: weatherTeamsForSort }, b.team, b.opp, scheduleOppMap);
         return bv - av;
       }
       if (sort === 'efficiencyScore') {
@@ -1402,8 +1431,23 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                       ...(isDragOver && !isAdv && !isCombine ? { background: 'rgba(255,255,255,.1)' } : {}),
                     }}
                     onClick={col.sortKey ? () => { setSort(col.sortKey); setUseSleeperSort(false); } : undefined}
-                    title={isAdv ? `${col.label} — Next Gen stat · 2025` : isCombine ? `${col.label} — NFL Combine measurable` : `Drag to reorder · Click to sort`}
-                  >{col.label}</th>
+                    title={isAdv ? `${col.label} — Next Gen stat (current season once a player has a 2026 game, else 2025)` : isCombine ? `${col.label} — NFL Combine measurable` : `Drag to reorder · Click to sort`}
+                  >
+                    {col.id === 'weather' ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+                        <span>{col.label}</span>
+                        <button
+                          className="btn sm"
+                          style={{ fontSize: 8, padding: '1px 5px', background: 'rgba(78,168,255,.1)', borderColor: 'rgba(78,168,255,.3)', color: '#4ea8ff', fontWeight: 700, lineHeight: 1.4 }}
+                          disabled={weatherRefreshing}
+                          onClick={e => { e.stopPropagation(); handleWeatherRefresh(); }}
+                          title={weatherRefreshedAt ? `Last refreshed ${new Date(weatherRefreshedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Fetch live weather'}
+                        >
+                          {weatherRefreshing ? '⟳' : 'Refresh'}
+                        </button>
+                      </div>
+                    ) : col.label}
+                  </th>
                 );
               })}
               <th></th>
@@ -1647,7 +1691,7 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
                         {p.benchPress != null ? p.benchPress : <span className="faint">—</span>}
                       </td>
                     );
-                    if (col.id === 'weather') return <td key="weather"><WeatherBadge team={p.team} opp={p.opp} scheduleOppMap={scheduleOppMap} /></td>;
+                    if (col.id === 'weather') return <td key="weather"><WeatherBadge team={p.team} opp={p.opp} scheduleOppMap={scheduleOppMap} liveTeams={liveWeatherTeams} /></td>;
                       return null;
                     })();
                     if (!cell) return cell;
@@ -3730,7 +3774,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                     <div className="card" style={{ marginTop: 16 }}>
                       <div className="card-head">
                         <div className="card-title" style={{ color: '#ffcc44' }}>Per Game Averages</div>
-                        <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>R2 Export · 2025</span>
+                        <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>R2 Export · {player.ngsSeason ?? 2025}</span>
                       </div>
                       <div className="card-body">
                         {player.snapPct != null && <SeasonStatBar label="Snap %" val={`${player.snapPct.toFixed(0)}%`} max={100} leagueAvg={player.pos === 'QB' ? 95 : 55} {...ngRank('snapPct')} />}
