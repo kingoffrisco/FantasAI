@@ -3,7 +3,22 @@ import WatchlistScreen from './Watchlist.jsx';
 import { MY_ROSTER, TEAM_ROSTERS, TEAMS_ORDER, findTeam, NFL_TEAMS, NEWS, SOURCE_META, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, ROSTER_CONFIG, refreshTeamRosters, refreshTeamRostersFromServer } from '../lib/data.js';
 import { usePlayers, isLiveData, findPlayer, getPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, PlayerCell, Sparkline, ProjBar, Delta, AIHint, SourceBadge, TeamLogoBadge, SeasonStatBar, RadarChart, scoreToTier, SCORE_TIER_STYLE } from '../components/ui.jsx';
-import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2OlineIndexWeekly, useR2OlineRookieScores, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning, useR2FloorCeiling, useR2PlayerCoverageSplits, useR2TeamCoverageTendency, useR2PlayerRushBoxSplits, useR2TeamRushBoxTendency } from '../hooks.js';
+import { useApi, useR2BreakoutCandidates, useR2SleeperPicks, useR2Injuries, useR2PlayerNotes, useR2PlayerWriteups, useR2WeatherForecast, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerStats2025, useR2CombineData, useR2RookieScores, useR2CollegeStats, useR2WeeklyStartSit, useR2OlineIndex, useR2OlineIndexWeekly, useR2OlineRookieScores, useR2PlayerTeamHistory, useR2WeaponScores, useR2TeamSupportScores, useR2OlineStability, useR2PlayerOlineStability, useR2DeepReasoning, useR2FloorCeiling, useR2PlayerCoverageSplits, useR2TeamCoverageTendency, useR2PlayerRushBoxSplits, useR2TeamRushBoxTendency, useR2OpponentLookup } from '../hooks.js';
+
+// Team abbr -> "City, ST" for the weather radar link — mirrors
+// local_processing/ingest/ingest_weather.py's NFL_TEAMS table. City-level
+// radar is plenty precise for "is it going to rain on this game"; no need to
+// source/maintain exact stadium coordinates for this.
+const NFL_TEAM_CITIES = {
+  ARI: 'Glendale, AZ', ATL: 'Atlanta, GA', BAL: 'Baltimore, MD', BUF: 'Orchard Park, NY',
+  CAR: 'Charlotte, NC', CHI: 'Chicago, IL', CIN: 'Cincinnati, OH', CLE: 'Cleveland, OH',
+  DAL: 'Arlington, TX', DEN: 'Denver, CO', DET: 'Detroit, MI', GB: 'Green Bay, WI',
+  HOU: 'Houston, TX', IND: 'Indianapolis, IN', JAX: 'Jacksonville, FL', KC: 'Kansas City, MO',
+  LAC: 'Inglewood, CA', LAR: 'Inglewood, CA', LV: 'Las Vegas, NV', MIA: 'Miami Gardens, FL',
+  MIN: 'Minneapolis, MN', NE: 'Foxborough, MA', NO: 'New Orleans, LA', NYG: 'East Rutherford, NJ',
+  NYJ: 'East Rutherford, NJ', PHI: 'Philadelphia, PA', PIT: 'Pittsburgh, PA', SEA: 'Seattle, WA',
+  SF: 'Santa Clara, CA', TB: 'Tampa, FL', TEN: 'Nashville, TN', WAS: 'Landover, MD',
+};
 import { fetchSleeperPlayerStats, getPlayerMap, fetchBulkWeekStats, getTrending, fetchLeagueSeasonTotals } from '../lib/sleeper.js';
 // import { DataSourceDebugger } from './Sources.jsx'; // TEMP DEBUG — uncomment with the panel below
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -254,8 +269,37 @@ function fmtWaiverDate(d) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' · 11:59 PM ET';
 }
 
+// Resolves the forecast day + hourly slot for a team's ACTUAL scheduled game
+// this week, using opponent_lookup.json's real gameday/gametime — replaces
+// blindly taking forecast[0] (today, regardless of when the game actually is)
+// or assuming every game is Sunday afternoon. Falls back to "next Sunday,
+// ~1pm" only when real schedule data isn't available for that team/week yet.
+function resolveGameForecast(entry, homeTeam, opponentLookup) {
+  const week = getNflScheduleWeek();
+  const rec = opponentLookup?.teams?.[homeTeam]?.[String(week)];
+  if (rec?.gameday) {
+    const day = entry.forecast.find(d => d.date === rec.gameday);
+    if (day) {
+      const [hh] = (rec.gametime || '13:00').split(':');
+      const targetHour = `${String(Math.round(Number(hh) || 13)).padStart(2, '0')}00`;
+      const hour = day.hourly?.find(h => h.time === targetHour) || day.hourly?.[0];
+      return { day, hour, real: true };
+    }
+    // Real gameday known but outside the 7-day forecast window (>1 week out).
+    return { day: null, hour: null, real: true, tooFar: true };
+  }
+  // No schedule data for this team/week — fall back to the old approximation.
+  const now = new Date();
+  const daysUntilSunday = (7 - now.getDay()) % 7 || 7;
+  const sundayStr = new Date(now.getTime() + daysUntilSunday * 86400000).toISOString().split('T')[0];
+  const day = entry.forecast.find(d => d.date === sundayStr) || entry.forecast[0];
+  const hour = day?.hourly?.find(h => h.time === '1300') || day?.hourly?.[0];
+  return { day, hour, real: false };
+}
+
 function WeatherBadge({ team, opp, scheduleOppMap, liveTeams }) {
   const { data: r2Weather } = useR2WeatherForecast();
+  const { data: opponentLookup } = useR2OpponentLookup();
   const teams = liveTeams || r2Weather?.teams;
   if (!teams) return null;
   const schedOpp = scheduleOppMap?.get(team) || opp || '';
@@ -267,8 +311,8 @@ function WeatherBadge({ team, opp, scheduleOppMap, liveTeams }) {
   if (!entry) return null;
   if (entry.is_dome) return <div style={{ fontSize: 10, color: '#1affa0' }}>🏟️ Dome</div>;
   if (!entry.forecast?.length) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
-  const day = entry.forecast[0];
-  const hour = day?.hourly?.find(h => h.time === '1300') || day?.hourly?.[0];
+  const { day, hour, tooFar } = resolveGameForecast(entry, homeTeam, opponentLookup);
+  if (tooFar) return <span className="faint" style={{ fontSize: 10 }} title="Game is more than 7 days out — no forecast yet">Too early</span>;
   if (!hour) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
   const temp = Math.round(hour.temp_f || day.max_temp_f || 0);
   const wind = Math.round(hour.wind_mph || 0);
@@ -279,8 +323,13 @@ function WeatherBadge({ team, opp, scheduleOppMap, liveTeams }) {
   const isRain = precip > 0.05 || cond.includes('rain') || cond.includes('drizzle');
   const windColor = wind >= 20 ? 'var(--danger)' : wind >= 15 ? '#ff9800' : wind >= 10 ? '#ffd700' : 'var(--text)';
   const tempColor = temp >= 90 ? '#ff4f4f' : temp >= 75 ? '#ff9800' : temp >= 50 ? '#1affa0' : temp >= 32 ? '#7ecff5' : '#ffffff';
+  const city = NFL_TEAM_CITIES[homeTeam];
   return (
-    <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>
+    <div
+      style={{ fontSize: 11, fontFamily: 'var(--font-mono)', lineHeight: 1.5, cursor: city ? 'pointer' : 'default' }}
+      onClick={city ? () => window.open(`https://www.google.com/search?q=${encodeURIComponent(city + ' weather radar')}`, '_blank', 'noopener') : undefined}
+      title={city ? `Click for live radar — ${city}` : undefined}
+    >
       <span style={{ fontWeight: 700, color: tempColor }}>{temp}°</span>
       {' · '}
       <span style={{ color: windColor }}>{wind}mph</span>

@@ -3,7 +3,27 @@ import { TEAM_ROSTERS, findTeam, NEWS, SLOT_ELIGIBILITY, ROSTER_CONFIG, LEAGUE_T
 import { usePlayers, findPlayer, findPlayerByName, getPlayers, patchPlayers } from '../lib/playerStore.js';
 import { PosBadge, StatusDot, PlayerAvatar, TeamLogoBadge, Sparkline } from '../components/ui.jsx';
 import { fetchSleeperPlayerStats, getPlayerMap } from '../lib/sleeper.js';
-import { useR2Drops, useR2Injuries, useR2PlayerNotes, useR2EnrichedNews, useR2WeatherForecast, useR2BreakoutCandidates, useR2PlayerNewsLinks, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerWriteups, useR2WeeklyStartSit, useR2RookieScores } from '../hooks.js';
+import { useR2Drops, useR2Injuries, useR2PlayerNotes, useR2EnrichedNews, useR2WeatherForecast, useR2BreakoutCandidates, useR2PlayerNewsLinks, useR2DefensePerformance, useR2DefenseVsPos, useR2PlayerWriteups, useR2WeeklyStartSit, useR2RookieScores, useR2OpponentLookup } from '../hooks.js';
+
+// Team abbr -> "City, ST" for the weather radar link — mirrors
+// local_processing/ingest/ingest_weather.py's NFL_TEAMS table. City-level
+// radar is plenty precise for "is it going to rain on this game"; no need to
+// source/maintain exact stadium coordinates for this.
+const NFL_TEAM_CITIES = {
+  ARI: 'Glendale, AZ', ATL: 'Atlanta, GA', BAL: 'Baltimore, MD', BUF: 'Orchard Park, NY',
+  CAR: 'Charlotte, NC', CHI: 'Chicago, IL', CIN: 'Cincinnati, OH', CLE: 'Cleveland, OH',
+  DAL: 'Arlington, TX', DEN: 'Denver, CO', DET: 'Detroit, MI', GB: 'Green Bay, WI',
+  HOU: 'Houston, TX', IND: 'Indianapolis, IN', JAX: 'Jacksonville, FL', KC: 'Kansas City, MO',
+  LAC: 'Inglewood, CA', LAR: 'Inglewood, CA', LV: 'Las Vegas, NV', MIA: 'Miami Gardens, FL',
+  MIN: 'Minneapolis, MN', NE: 'Foxborough, MA', NO: 'New Orleans, LA', NYG: 'East Rutherford, NJ',
+  NYJ: 'East Rutherford, NJ', PHI: 'Philadelphia, PA', PIT: 'Pittsburgh, PA', SEA: 'Seattle, WA',
+  SF: 'Santa Clara, CA', TB: 'Tampa, FL', TEN: 'Nashville, TN', WAS: 'Landover, MD',
+};
+function openWeatherRadar(teamAbbr) {
+  const city = NFL_TEAM_CITIES[teamAbbr?.toUpperCase()];
+  if (!city) return;
+  window.open(`https://www.google.com/search?q=${encodeURIComponent(city + ' weather radar')}`, '_blank', 'noopener');
+}
 import LineupDecisions, { computeOptimal } from './LineupDecisions.jsx';
 
 const H2H_WEEKS   = 14;
@@ -800,6 +820,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   const autoWeatherTriggered = React.useRef(false);
 
   const weatherTeams = liveWeatherTeams || r2WeatherData?.teams || {};
+  const { data: opponentLookupData } = useR2OpponentLookup();
 
   async function handleWeatherRefresh() {
     if (weatherRefreshing) return;
@@ -833,12 +854,28 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
   }, [r2WeatherData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Returns the best game-time forecast hour for a given team's forecast array.
-  // Prefers the upcoming Sunday afternoon (1300h slot); falls back to first day.
+  // Prefers the team's REAL scheduled game date/kickoff hour (from
+  // opponent_lookup.json) — previously this always assumed "next Sunday,
+  // ~1-3pm" regardless of the actual day, which is wrong for any Thursday/
+  // Sunday-night/Monday/international game. Falls back to that old Sunday
+  // approximation only when real schedule data isn't available yet.
   function getGameWeather(teamAbbr) {
-    const entry = weatherTeams[teamAbbr?.toUpperCase()];
+    const team = teamAbbr?.toUpperCase();
+    const entry = weatherTeams[team];
     if (!entry) return null;
     if (entry.is_dome) return { dome: true };
     if (!entry.forecast?.length) return { dome: false, noData: true };
+
+    const rec = opponentLookupData?.teams?.[team]?.[String(H2H_WEEK)];
+    if (rec?.gameday) {
+      const day = entry.forecast.find(d => d.date === rec.gameday);
+      if (!day) return { dome: false, noData: true, tooFar: true };
+      const [hh] = (rec.gametime || '13:00').split(':');
+      const targetHour = `${String(Math.round(Number(hh) || 13)).padStart(2, '0')}00`;
+      const hour = day.hourly?.find(h => h.time === targetHour) || day.hourly?.[0];
+      return { dome: false, date: day.date, maxTempF: day.max_temp_f, minTempF: day.min_temp_f, hour, real: true };
+    }
+
     const now = new Date();
     const daysUntilSunday = (7 - now.getDay()) % 7 || 7;
     const sundayStr = new Date(now.getTime() + daysUntilSunday * 86400000)
@@ -2412,6 +2449,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                             Dome
                           </span>
                         );
+                        if (wx.tooFar) return <span className="faint" style={{ fontSize: 10 }} title="Game is more than 7 days out — no forecast yet">Too early</span>;
                         if (wx.noData) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
                         const h = wx.hour;
                         if (!h) return <span className="faint" style={{ fontSize: 10 }}>—</span>;
@@ -2432,7 +2470,11 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                                        : tempF >= 32 ? '#7ecff5'
                                        : '#ffffff';
                         return (
-                          <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', lineHeight: 1.5 }}>
+                          <div
+                            style={{ fontSize: 13, fontFamily: 'var(--font-mono)', lineHeight: 1.5, cursor: NFL_TEAM_CITIES[p.team?.toUpperCase()] ? 'pointer' : 'default' }}
+                            onClick={() => openWeatherRadar(p.team)}
+                            title={NFL_TEAM_CITIES[p.team?.toUpperCase()] ? `Click for live radar — ${NFL_TEAM_CITIES[p.team?.toUpperCase()]}` : undefined}
+                          >
                             <span style={{ fontWeight: 700, color: tempColor }}>{tempF}°F</span>
                             {' · '}
                             <span style={{ color: windColor }}>{windMph}mph</span>
@@ -3157,6 +3199,7 @@ function MobileRosterList({
                         <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Weather</div>
                         {(() => {
                           const wx = getGameWeather(p.team);
+                          if (wx?.tooFar) return <span className="faint" title="Game is more than 7 days out — no forecast yet">Too early</span>;
                           if (!wx || wx.noData) return <span className="faint">No weather data</span>;
                           if (wx.dome) return <span style={{ fontSize: 13, fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1affa0' }}>Dome</span>;
                           const h = wx.hour;
@@ -3171,7 +3214,11 @@ function MobileRosterList({
                           const windColor = windMph >= 20 ? 'var(--danger)' : windMph >= 15 ? '#ff8c00' : windMph >= 10 ? '#ffd700' : 'var(--text)';
                           const tempColor = tempF >= 90 ? '#ff4f4f' : tempF >= 75 ? '#ff9800' : tempF >= 50 ? '#1affa0' : tempF >= 32 ? '#7ecff5' : '#ffffff';
                           return (
-                            <div style={{ fontSize: 13, fontFamily: 'var(--font-mono)', lineHeight: 1.7 }}>
+                            <div
+                              style={{ fontSize: 13, fontFamily: 'var(--font-mono)', lineHeight: 1.7, cursor: NFL_TEAM_CITIES[p.team?.toUpperCase()] ? 'pointer' : 'default' }}
+                              onClick={() => openWeatherRadar(p.team)}
+                              title={NFL_TEAM_CITIES[p.team?.toUpperCase()] ? `Click for live radar — ${NFL_TEAM_CITIES[p.team?.toUpperCase()]}` : undefined}
+                            >
                               <span style={{ fontWeight: 700, color: tempColor }}>{tempF}°F</span>{' · '}<span style={{ color: windColor }}>{windMph}mph{h.wind_dir ? ` ${h.wind_dir}` : ''}</span>
                               {isSnow && <div style={{ color: '#7ecff5' }}>❄ Snow</div>}
                               {!isSnow && isRain && <div style={{ color: '#ffd700' }}>🌧 Rain</div>}
