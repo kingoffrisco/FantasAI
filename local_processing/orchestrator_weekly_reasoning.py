@@ -45,6 +45,10 @@ except ImportError:
     def send_failure(*a, **kw):
         pass
 
+from log_setup import setup_logging, child_env
+
+_LOG_FH = None
+
 
 def run(script: str, extra_args: list[str], label: str) -> bool:
     cmd = [sys.executable, str(HERE / script)] + extra_args
@@ -53,7 +57,14 @@ def run(script: str, extra_args: list[str], label: str) -> bool:
     print(f"   {' '.join(cmd)}")
     print(f"{'-' * 60}")
     t0 = time.time()
-    result = subprocess.run(cmd)
+    if _LOG_FH:
+        _LOG_FH.flush()
+    result = subprocess.run(
+        cmd,
+        stdout=_LOG_FH,
+        stderr=subprocess.STDOUT if _LOG_FH else None,
+        env=child_env() if _LOG_FH else None,
+    )
     elapsed = round(time.time() - t0, 1)
     ok = result.returncode == 0
     status = "OK" if ok else f"FAILED (exit {result.returncode})"
@@ -72,6 +83,9 @@ def main():
         extra += ["--limit", str(args.limit)]
     if args.dry_run:
         extra.append("--dry-run")
+
+    global _LOG_FH
+    _LOG_FH = setup_logging("weekly_reasoning")
 
     print("=" * 70)
     print("FantasAI — Weekly Deep Reasoning")

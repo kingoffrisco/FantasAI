@@ -55,15 +55,24 @@ try:
 except ImportError:
     def send_failure(*a, **kw): pass
 
+from log_setup import setup_logging, child_env
 
-def run(script: str, extra_args: list[str], label: str) -> bool:
+
+def run(script: str, extra_args: list[str], label: str, log_fh=None) -> bool:
     cmd = [sys.executable, str(HERE / script)] + extra_args
     print(f"\n{'─' * 60}")
     print(f"▶  {label}")
     print(f"   {' '.join(cmd)}")
     print(f"{'─' * 60}")
     t0 = time.time()
-    result = subprocess.run(cmd)
+    if log_fh:
+        log_fh.flush()
+    result = subprocess.run(
+        cmd,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT if log_fh else None,
+        env=child_env() if log_fh else None,
+    )
     elapsed = round(time.time() - t0, 1)
     ok = result.returncode == 0
     status = "✅ OK" if ok else f"❌ FAILED (exit {result.returncode})"
@@ -81,6 +90,11 @@ def main():
 
     extra = ["--dry-run"] if args.dry_run else []
 
+    log_fh = setup_logging("daily")
+
+    def _run(script, extra_args, label):
+        return run(script, extra_args, label, log_fh=log_fh)
+
     print("=" * 70)
     print("FantasAI — Daily News Orchestrator")
     print(f"Started: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
@@ -93,44 +107,44 @@ def main():
     if not args.skip_ingest:
         print("\n\n══ TASK 1: NEWS INGESTION ══════════════════════════════════════════")
 
-        if not run("ingest/ingest_sleeper_players.py", extra, "Sleeper API — players, injuries, trending"):
+        if not _run("ingest/ingest_sleeper_players.py", extra, "Sleeper API — players, injuries, trending"):
             failed.append("sleeper")
 
-        if not run("ingest/ingest_espn_news.py", extra, "ESPN News API — articles"):
+        if not _run("ingest/ingest_espn_news.py", extra, "ESPN News API — articles"):
             failed.append("espn_news")
 
-        if not run("ingest/ingest_google_news.py", ["--mode", "incremental"] + extra,
+        if not _run("ingest/ingest_google_news.py", ["--mode", "incremental"] + extra,
                    "Google News RSS — incremental (last 7 days)"):
             failed.append("google_news")
 
-        if not run("ingest/ingest_nfl_transactions.py", ["--days", "30"] + extra,
+        if not _run("ingest/ingest_nfl_transactions.py", ["--days", "30"] + extra,
                    "NFL Transactions — last 30 days"):
             failed.append("transactions")
 
-        if not run("ingest/ingest_team_rss.py", extra,
+        if not _run("ingest/ingest_team_rss.py", extra,
                    "Team RSS — beat writer coverage (Tier 2/3)"):
             failed.append("team_rss")
 
     # ── Task 2: Gold Transformation ────────────────────────────────────────────
     print("\n\n══ TASK 2: GOLD TRANSFORMATION ══════════════════════════════════════")
-    if not run("gold/gold_player_consolidation.py", extra, "Gold player consolidation"):
+    if not _run("gold/gold_player_consolidation.py", extra, "Gold player consolidation"):
         failed.append("gold")
 
     # ── Task 3: R2 Export ──────────────────────────────────────────────────────
     if not args.skip_export:
         print("\n\n══ TASK 3: R2 EXPORT ════════════════════════════════════════════════")
-        if not run("export/export_to_r2.py", ["--only", "all"] + extra, "Export to Cloudflare R2"):
+        if not _run("export/export_to_r2.py", ["--only", "all"] + extra, "Export to Cloudflare R2"):
             failed.append("r2_export")
 
     # ── Task 4: AI Pipeline (optional — needs Ollama running) ─────────────────
     if not args.skip_ai and not args.dry_run:
         print("\n\n══ TASK 4: AI PIPELINE ══════════════════════════════════════════════")
         # Non-fatal: AI failures don't block the pipeline
-        if not run("job1_news_processor.py", [], "Job 1 — Bulk news processor (Qwen 8B)"):
+        if not _run("job1_news_processor.py", [], "Job 1 — Bulk news processor (Qwen 8B)"):
             print("   ⚠️  Job 1 failed — Ollama may not be running; skipping job2/job3")
         else:
-            run("job2_fantasy_analyzer.py", [], "Job 2 — Fantasy scorer (Qwen 14B)")
-            run("job3_player_writeups.py", ["--mode", "rostered"], "Job 3 — Player writeups (rostered only)")
+            _run("job2_fantasy_analyzer.py", [], "Job 2 — Fantasy scorer (Qwen 14B)")
+            _run("job3_player_writeups.py", ["--mode", "rostered"], "Job 3 — Player writeups (rostered only)")
 
     elapsed = round(time.time() - t_start)
     print(f"\n{'=' * 70}")
