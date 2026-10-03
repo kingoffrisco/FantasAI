@@ -31,15 +31,15 @@ export const CBS_RANKINGS = [];
 export const LEAGUE_TEAMS = [
   { id: 1,  cbsId: "8",  name: "Armed Rodgery",            owner: "Shane Olsen",              email: "kingoffrisco@yahoo.com",    logo: "AR", color: "#c6ff3a", record: "0-0", pf: 0, pa: 0 },
   { id: 2,  cbsId: "1",  name: "Bourbon is a Vegetable",   owner: "Joseph Blalock",           email: "jnbii@att.net",             logo: "BV", color: "#ff5a6e", record: "0-0", pf: 0, pa: 0 },
-  { id: 3,  cbsId: "2",  name: "Howdy Hut",                owner: "David Gray & Gary Remy",   email: "david@dlgog.com",           logo: "HH", color: "#4ea8ff", record: "0-0", pf: 0, pa: 0 },
-  { id: 4,  cbsId: "3",  name: "Start Pulling Out",        owner: "Nathan Jekel",             email: "njekel04@yahoo.com",        logo: "SP", color: "#36d39a", record: "0-0", pf: 0, pa: 0 },
-  { id: 5,  cbsId: "4",  name: "The Epstein Islanders",    owner: "Chendo Gonzalez",          email: "chendogonz@gmail.com",      logo: "EI", color: "#ffa83a", record: "0-0", pf: 0, pa: 0 },
-  { id: 6,  cbsId: "5",  name: "Penn State Shower Power",  owner: "Eric Sam",                 email: "ericsam@live.com",          logo: "PS", color: "#b48cff", record: "0-0", pf: 0, pa: 0 },
-  { id: 7,  cbsId: "6",  name: "Vick's Hushpuppies",       owner: "Wayne Hardcastle",         email: "whardcastle@llroberts.com", logo: "VH", color: "#ffd84a", record: "0-0", pf: 0, pa: 0 },
+  { id: 3,  cbsId: "2",  name: "Fourth and Long",          owner: "David Gray & Gary Remy",   email: "david@dlgog.com",           logo: "FL", color: "#4ea8ff", record: "0-0", pf: 0, pa: 0 },
+  { id: 4,  cbsId: "3",  name: "Dak to the Future",        owner: "Nathan Jekel",             email: "njekel04@yahoo.com",        logo: "DF", color: "#36d39a", record: "0-0", pf: 0, pa: 0 },
+  { id: 5,  cbsId: "4",  name: "Kupp of Tea",              owner: "Chendo Gonzalez",          email: "chendogonz@gmail.com",      logo: "KT", color: "#ffa83a", record: "0-0", pf: 0, pa: 0 },
+  { id: 6,  cbsId: "5",  name: "Fields of Dreams",         owner: "Eric Sam",                 email: "ericsam@live.com",          logo: "FD", color: "#b48cff", record: "0-0", pf: 0, pa: 0 },
+  { id: 7,  cbsId: "6",  name: "Here for the Beer",        owner: "Wayne Hardcastle",         email: "whardcastle@llroberts.com", logo: "HB", color: "#ffd84a", record: "0-0", pf: 0, pa: 0 },
   { id: 8,  cbsId: "7",  name: "Gecko Barflies",           owner: "Kenneth Beerwinkle & Will Henderson", email: "ken@kbrl.me",  logo: "GB", color: "#59c8ff", record: "0-0", pf: 0, pa: 0 },
-  { id: 9,  cbsId: "9",  name: "Swingin' Flamingos",       owner: "Joseph Dunn",              email: "josephdunntx22@gmail.com",  logo: "SF", color: "#ff7a3a", record: "0-0", pf: 0, pa: 0 },
-  { id: 10, cbsId: "10", name: "Gringo Pendejo",           owner: "Jeff Innmon",              email: "jeff.innmon@kdc.com",       logo: "GP", color: "#36d39a", record: "0-0", pf: 0, pa: 0 },
-  { id: 11, cbsId: "11", name: "Fat, Drunk & Stupid",      owner: "William Dunn",             email: "ddunn@dunnsheehan.com",     logo: "FD", color: "#c6ff3a", record: "0-0", pf: 0, pa: 0 },
+  { id: 9,  cbsId: "9",  name: "Hill Street Blues",        owner: "Joseph Dunn",              email: "josephdunntx22@gmail.com",  logo: "HS", color: "#ff7a3a", record: "0-0", pf: 0, pa: 0 },
+  { id: 10, cbsId: "10", name: "Victory Formation",        owner: "Jeff Innmon",              email: "jeff.innmon@kdc.com",       logo: "VF", color: "#36d39a", record: "0-0", pf: 0, pa: 0 },
+  { id: 11, cbsId: "11", name: "The Underdogs",            owner: "William Dunn",             email: "ddunn@dunnsheehan.com",     logo: "UD", color: "#c6ff3a", record: "0-0", pf: 0, pa: 0 },
   { id: 12, cbsId: "12", name: "DJ 8 Trak",                owner: "Kirk King & Kyle King",    email: "kirkkingre@yahoo.com",      logo: "DJ", color: "#ff5a6e", record: "0-0", pf: 0, pa: 0 },
 ];
 
@@ -626,27 +626,27 @@ export const CBS_DRAFT_HISTORY = {
     2024: { slot: 5,  rounds: "WWWWQTWRRRQRWD", picks: [53, 56, 71, 72, 11, 81, null, null, null, null, 15, null, null, 133], notes: "Hill 1.05, A.J. Brown R2, Kupp + Addison WRs R3-R4, Purdy QB R5 - WR-stack" },
     2025: { slot: 9,  rounds: "RRWTRWWQQWTRDW", picks: [34, 24, 56, 82, null, null, null, null, null, null, null, null, null, null], notes: "Jeanty 1.09, Achane R2, A.J. Brown R3, Kittle TE R4" },
   },
-  // id 3 = Howdy Hut (same both years)
+  // id 3 = Fourth and Long (was Howdy Hut)
   3: {
     2024: { slot: 12, rounds: "RQRRRTDWRRRRRR", picks: [30, 1, 46, 32, 40, 88, 122, null, null, null, null, null, null, null], notes: "BUF stack: Cook 1.12 + Allen 2.01, Spears R3, Kamara R4 - rest auto-drafted" },
     2025: { slot: 4,  rounds: "RRWWQRTWDWRQDR", picks: [25, 30, 64, null, null, null, null, null, null, null, null, null, null, null], notes: "Henry 1.04, Cook again R2, Adams WR R3" },
   },
-  // id 4 = Start Pulling Out | 2024: Cuddlebone loves Kamala! (slot 3, Hall R1)
+  // id 4 = Dak to the Future (was Start Pulling Out) | 2024: Cuddlebone loves Kamala! (slot 3, Hall R1)
   4: {
     2024: { slot: 3,  rounds: "RRQRRWWQTDWTRR", picks: [26, 29, 9, 38, 37, null, 76, 14, null, 125, null, null, null, null], notes: "Hall 1.03, Mixon R2, Love QB R3, Stevenson R4, Montgomery R5 - RB-RB-QB" },
     2025: { slot: 6,  rounds: "RRQRWWWRWWTDQR", picks: [20, null, 5, 32, null, null, null, null, null, null, null, null, null, null], notes: "CMC 1.06, Burrow QB R3, Kamara R4 - RB anchor" },
   },
-  // id 5 = The Epstein Islanders | 2024: Pablo Chacon (slot 2, Saquon R1)
+  // id 5 = Kupp of Tea (was The Epstein Islanders) | 2024: Pablo Chacon (slot 2, Saquon R1)
   5: {
     2024: { slot: 2,  rounds: "RRQWTWWDWQWRWR", picks: [22, 24, 4, 74, 85, null, 75, 124, null, null, null, null, null, null], notes: "Saquon 1.02, Achane R2, Mahomes QB R3, DeVonta Smith WR R4, Andrews TE R5" },
     2025: { slot: 1,  rounds: "RWTWRWQRRWDRQW", picks: [22, 57, 80, 62, null, null, null, null, null, null, null, null, null, null], notes: "Saquon 1.01, Drake London R2, Bowers TE1 R3, MHJ R4" },
   },
-  // id 6 = Penn State Shower Power | 2024: Five Pound Bass (slot 6, Amon-Ra R1)
+  // id 6 = Fields of Dreams (was Penn State Shower Power) | 2024: Five Pound Bass (slot 6, Amon-Ra R1)
   6: {
     2024: { slot: 6,  rounds: "WWWRWQRTRWQWWD", picks: [54, 58, 62, 39, 57, 12, null, null, null, null, 17, null, null, 132], notes: "Amon-Ra 1.06, Wilson + MHJ + Pacheco R4, London R5, Dak QB R6 - 4 WRs in first 5" },
     2025: { slot: 11, rounds: "WWRWWTRQRRRQRD", picks: [52, 67, null, null, 58, null, null, null, null, null, null, null, null, null], notes: "CeeDee 1.11, Nabers WR R2, Wilson WR R5 - WR every round" },
   },
-  // id 7 = Vick's Hushpuppies | 2024: My Couch Pulls Out But I Dont (slot 7, CeeDee R1)
+  // id 7 = Here for the Beer (was Vick's Hushpuppies) | 2024: My Couch Pulls Out But I Dont (slot 7, CeeDee R1)
   7: {
     2024: { slot: 7,  rounds: "WWTWWWQRRRWRQD", picks: [52, 51, 84, 64, 70, 65, 6, null, null, null, null, null, 18, 134], notes: "CeeDee 1.07, Jefferson R2, Kelce TE R3, Adams R4, Diggs R5 - elite WRs" },
     2025: { slot: 8,  rounds: "WWRRRWQRWTRQWD", picks: [51, 55, null, 26, null, null, null, null, null, null, null, null, null, null], notes: "Jefferson 1.08, Puka Nacua R2, Breece Hall R4" },
@@ -656,17 +656,17 @@ export const CBS_DRAFT_HISTORY = {
     2024: { slot: 1,  rounds: "RRWRQRWTRDWRWQ", picks: [20, 44, 60, 45, 5, null, 66, 87, null, 130, null, null, null, 19], notes: "CMC 1.01, Edwards R2, Evans R3, Robinson R4, Burrow QB R5 - value in mid-rounds" },
     2025: { slot: 3,  rounds: "RQWRWWRDTRWQWQ", picks: [23, 1, 60, 29, 53, null, null, null, null, null, null, null, null, null], notes: "Gibbs 1.03, Josh Allen QB R2, Evans R3, Mixon + Hill R4-5" },
   },
-  // id 9 = Swingin' Flamingos | 2024: Walton (slot 8, Chase R1)
+  // id 9 = Hill Street Blues (was Swingin' Flamingos) | 2024: Walton (slot 8, Chase R1)
   9: {
     2024: { slot: 8,  rounds: "WRTWWQWWWWWRDQ", picks: [50, 23, 83, 68, 61, 7, 77, null, null, null, 79, null, 120, null], notes: "Chase 1.08, Gibbs R2, LaPorta TE R3, Tee Higgins R4, Metcalf R5 - balanced" },
     2025: { slot: 5,  rounds: "WQRWTWWWDQRRWW", picks: [50, 2, null, 61, 84, null, null, null, null, null, null, null, null, null], notes: "Chase again 1.05, Hurts QB R2, Metcalf R4, Kelce TE R5" },
   },
-  // id 10 = Gringo Pendejo | 2024: Buck Wild (slot 11, Hurts R1)
+  // id 10 = Victory Formation (was Gringo Pendejo) | 2024: Buck Wild (slot 11, Hurts R1)
   10: {
     2024: { slot: 11, rounds: "QRRRTRWDRWQDTW", picks: [2, 28, 41, 42, 82, null, null, 123, null, null, 16, 126, null, null], notes: "Hurts QB 1.11, Kyren Williams R2, Najee R3, Swift R4, Kittle TE R5" },
     2025: { slot: 7,  rounds: "RRWQWTWWQDRTRW", picks: [27, 28, null, 4, null, null, null, null, null, null, null, null, null, null], notes: "Jacobs 1.07, Kyren Williams R2 again, Mahomes QB R4" },
   },
-  // id 11 = Fat, Drunk & Stupid (same both years)
+  // id 11 = The Underdogs (was Fat, Drunk & Stupid)
   11: {
     2024: { slot: 9,  rounds: "RWWQWTRWWWDTRQ", picks: [33, 55, 59, 10, 67, 89, null, 78, null, null, 129, null, null, null], notes: "J.Taylor 1.09, Puka Nacua R2, Nico Collins R3, Darnold QB R4, Nabers R5" },
     2025: { slot: 12, rounds: "WWWRQRWRTWWQWD", picks: [54, 59, null, null, null, null, null, null, null, null, null, null, null, null], notes: "Amon-Ra 1.12, Nico Collins R2 - WR-stack start again" },
