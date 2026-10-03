@@ -51,7 +51,7 @@ const routes = {
   "/api/health":              health,
   "/api/cbs/league":          getLeague,
   "/api/cbs/teams":           getTeams,
-  "/api/cbs/rosters":         getRosters,
+  "/api/cbs/rosters":         getLiveLineups, // getRosters (below) is dead — see note above its definition
   "/api/cbs/lineups":         getLiveLineups,
   "/api/cbs/rankings":        getRankings,
   "/api/cbs/players":         getPlayers,
