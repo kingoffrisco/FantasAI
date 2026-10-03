@@ -915,15 +915,18 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
       if (actual != null) return s + (progress >= 1 ? actual : actual + proj * (1 - progress));
       return s + proj;
     }, 0);
-    const liveCount  = starters.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_IN_PROGRESS'; }).length;
-    const finalCount = starters.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_FINAL'; }).length;
+    const eligible   = starters.filter(r => r.playerId && findPlayer(r.playerId));
+    const liveCount  = eligible.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_IN_PROGRESS'; }).length;
+    const finalCount = eligible.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_FINAL'; }).length;
+    const totalCount = eligible.length;
+    const weekFinal  = totalCount > 0 && finalCount === totalCount;
     const hasLive    = Object.keys(espnGameMap).length > 0;
     const myScore    = hasLive ? myLive : myProj;
     const oppScore   = hasLive ? oppProj : oppProj;
     const diff       = myScore - oppScore;
     const isWinning  = diff >= 0;
     const winPct     = myScore + oppScore > 0 ? Math.round((myScore / (myScore + oppScore)) * 100) : 50;
-    return { opp, oppStarters, myProj, myLive, oppProj, myScore, oppScore, diff, isWinning, winPct, liveCount, finalCount, hasLive };
+    return { opp, oppStarters, myProj, myLive, oppProj, myScore, oppScore, diff, isWinning, winPct, liveCount, finalCount, totalCount, weekFinal, hasLive };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [starters, sleeperRosterData, espnGameMap, espnPlayerActuals, teamId, currentWeek]);
 
@@ -3043,8 +3046,11 @@ function WeeklyRecapBanner({ h2hWinData, starters, weekLabel, teamName, embedded
   const [dismissed, setDismissed] = React.useState(false);
 
   if (!h2hWinData || dismissed) return null;
-  const { opp, myScore, oppScore, isWinning, hasLive, finalCount } = h2hWinData;
-  if (!hasLive) return null;
+  const { opp, myScore, oppScore, isWinning, hasLive, weekFinal } = h2hWinData;
+  // A "Victory!"/"Tough Loss" verdict is a recap — it must wait until every
+  // starter's game that week is final, not just until the Thursday game has
+  // kicked off (hasLive goes true the moment any single game starts).
+  if (!hasLive || !weekFinal) return null;
 
   const mvp = starters.reduce((best, e) => {
     const p = e.playerId ? findPlayer(e.playerId) : null;
