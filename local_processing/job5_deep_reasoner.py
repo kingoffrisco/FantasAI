@@ -114,9 +114,23 @@ def load_breakout_candidates() -> dict:
 
 
 def load_player_notes() -> dict:
+    # fantasai/news/player_notes.json is written by both export_to_r2.py (a
+    # legacy flat list) and job1_news_processor.py (the real Qwen enrichment
+    # dict, {"players": {name: {"articles": [...]}}}) — whichever ran most
+    # recently wins. build_packet() below expects the dict-per-player
+    # {"articles": [...]} shape regardless of which one is currently live
+    # (same collision already fixed in job3_player_writeups.py).
     data = r2_get("fantasai/news/player_notes.json") or {}
-    players = data.get("players") if isinstance(data, dict) else {}
-    return players if isinstance(players, dict) else {}
+    if isinstance(data, dict):
+        players = data.get("players") or {}
+        return players if isinstance(players, dict) else {}
+    if isinstance(data, list):
+        return {
+            item.get("player_name"): {"articles": item.get("notes", [])}
+            for item in data
+            if isinstance(item, dict) and item.get("player_name")
+        }
+    return {}
 
 
 def build_packet(
