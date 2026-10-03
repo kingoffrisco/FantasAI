@@ -164,31 +164,31 @@ def _news_block(profile: dict, notes_lookup: dict) -> str:
     return "\n".join(lines) if lines else "No recent news."
 
 
-def _recent_headline_titles(profile: dict) -> list[str]:
-    """Extract just the headline text from profile['recent_news'], same
-    defensive shape-handling as _news_block (dict / list-tuple / skip)."""
+def _recent_headline_titles(name: str, notes_lookup: dict) -> list[str]:
+    """Extract headline text from Job 1's per-player note records — the
+    actual source of fresh news (profile['recent_news'] doesn't exist
+    anywhere upstream; it's never populated by the export pipeline)."""
     titles = []
-    for item in (profile.get("recent_news") or [])[:5]:
-        if isinstance(item, dict):
-            title = item.get("title") or item.get("headline") or ""
-        elif isinstance(item, (list, tuple)):
-            title = str(item[0]) if len(item) > 0 and item[0] else ""
-        else:
-            continue
+    player_notes = notes_lookup.get(name.strip())
+    articles = (player_notes.get("articles", []) if isinstance(player_notes, dict) else [])
+    for a in articles[:5]:
+        title = (a.get("headline") or a.get("note_text") or "") if isinstance(a, dict) else ""
         if title:
             titles.append(title)
     return titles
 
 
-def _cache_key(profile: dict) -> str:
+def _cache_key(profile: dict, notes_lookup: dict) -> str:
     # NOTE: recent_news_count staying flat does NOT mean nothing happened —
     # a rolling news window can hold the same *count* of totally different
     # articles (e.g. a contract extension replacing an older story). Hashing
     # the actual headline text, not just how many there are, is what makes
     # the cache actually bust when something newsworthy happens.
+    name = (profile.get("full_name") or "").strip()
+    headlines = _recent_headline_titles(name, notes_lookup)
     sig = "|".join([
         str(profile.get("injury_status") or ""),
-        str(profile.get("recent_news_count") or 0),
+        str(len(headlines)),
         str(profile.get("adp_rank_ppr") or 0),
         str(profile.get("total_fantasy_points_2025") or 0),
         # games_played_2026 / total_fantasy_points_2026 are the signal that actually
@@ -198,7 +198,7 @@ def _cache_key(profile: dict) -> str:
         # every game of the season until the 21-day hard ceiling forced it.
         str(profile.get("games_played_2026") or 0),
         str(profile.get("total_fantasy_points_2026") or 0),
-        "|".join(_recent_headline_titles(profile)),
+        "|".join(headlines),
     ])
     return hashlib.md5(sig.encode()).hexdigest()[:12]
 
@@ -925,9 +925,23 @@ def main():
             print(f"[Job 3] ADP proxy: {len(rostered_names)} players (ADP rank <= 200).")
 
     # ── Load Job 1 player notes ──────────────────────────────────────────────
+    # fantasai/news/player_notes.json is written by both export_to_r2.py (the
+    # legacy flat-list export) and job1_news_processor.py (the real Qwen
+    # enrichment, {"players": {name: {"articles": [...]}}}) — whichever ran
+    # most recently wins. Accept either shape so landing on the legacy list
+    # doesn't silently zero out every player's notes.
     print("[Job 3] Loading player notes from R2 (Job 1 enrichment)...")
-    notes_raw  = r2_get("fantasai/news/player_notes.json") or {}
-    notes_dict = notes_raw.get("players", {}) if isinstance(notes_raw, dict) else {}
+    notes_raw = r2_get("fantasai/news/player_notes.json") or {}
+    if isinstance(notes_raw, dict):
+        notes_dict = notes_raw.get("players", {})
+    elif isinstance(notes_raw, list):
+        notes_dict = {
+            item.get("player_name"): {"articles": item.get("notes", [])}
+            for item in notes_raw
+            if isinstance(item, dict) and item.get("player_name")
+        }
+    else:
+        notes_dict = {}
     print(f"[Job 3] {len(notes_dict)} player note records available.")
 
     # ── Load college stats + combine data for rookie writeups ────────────────
@@ -1006,7 +1020,7 @@ def main():
 
     for i, profile in enumerate(candidates):
         name = profile.get("full_name", f"player_{i}")
-        cache_key = _cache_key(profile)
+        cache_key = _cache_key(profile, notes_dict)
         forced = player_filter is not None and name.strip().lower() in player_filter
 
         if not args.full and not forced and name in existing:
