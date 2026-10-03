@@ -915,6 +915,17 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
       if (actual != null) return s + (progress >= 1 ? actual : actual + proj * (1 - progress));
       return s + proj;
     }, 0);
+    const oppLive = oppStarters.reduce((s, e) => {
+      const p = findPlayer(e.playerId);
+      if (!p) return s;
+      const proj     = p.proj ?? p.avg ?? 0;
+      const gameInfo = espnGameMap[(p.team ?? '').toUpperCase()];
+      const actual   = espnPlayerActuals[(p.name ?? '').toLowerCase()] ?? null;
+      if (!gameInfo || gameInfo.statusName === 'STATUS_SCHEDULED') return s + proj;
+      const progress = getGameProgress(gameInfo);
+      if (actual != null) return s + (progress >= 1 ? actual : actual + proj * (1 - progress));
+      return s + proj;
+    }, 0);
     const eligible   = starters.filter(r => r.playerId && findPlayer(r.playerId));
     const liveCount  = eligible.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_IN_PROGRESS'; }).length;
     const finalCount = eligible.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_FINAL'; }).length;
@@ -922,11 +933,11 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     const weekFinal  = totalCount > 0 && finalCount === totalCount;
     const hasLive    = Object.keys(espnGameMap).length > 0;
     const myScore    = hasLive ? myLive : myProj;
-    const oppScore   = hasLive ? oppProj : oppProj;
+    const oppScore   = hasLive ? oppLive : oppProj;
     const diff       = myScore - oppScore;
     const isWinning  = diff >= 0;
     const winPct     = myScore + oppScore > 0 ? Math.round((myScore / (myScore + oppScore)) * 100) : 50;
-    return { opp, oppStarters, myProj, myLive, oppProj, myScore, oppScore, diff, isWinning, winPct, liveCount, finalCount, totalCount, weekFinal, hasLive };
+    return { opp, oppStarters, myProj, myLive, oppProj, oppLive, myScore, oppScore, diff, isWinning, winPct, liveCount, finalCount, totalCount, weekFinal, hasLive };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [starters, sleeperRosterData, espnGameMap, espnPlayerActuals, teamId, currentWeek]);
 
