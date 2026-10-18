@@ -873,22 +873,38 @@ function parseLeague(html) {
 //   <td><img><a href='/teams/N'>Team Name</a></td>
 //   <td>W</td><td>L</td><td>T</td><td>PCT</td><td>GB</td>
 //   <td>Streak</td><td>Wks</td><td>PF</td><td>Back</td><td>PA</td>
+//
+// Cells are located by header name, not position. The old single regex
+// lazily skipped from T to "the next numeric cell, any cell, numeric cell",
+// which landed on GB and Wks — so every team's pf/pa came back as 0-4 /
+// 0-2 (confirmed live 2026-10-17, Week 6).
 async function parseTeams(html) {
   const teams = [];
-  const rowRe = /<tr[^>]+\bid="(\d+)"[^>]*>[\s\S]*?<a\s+href='\/teams\/\d+'>([^<]+)<\/a>\s*<\/td>\s*<td[^>]*>(\d+)<\/td>\s*<td[^>]*>(\d+)<\/td>\s*<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>([\d.]+)<\/td>\s*<td[^>]*>[^<]*<\/td>\s*<td[^>]*>([\d.]+)<\/td>/g;
+  const cellText = s => s.replace(/<[^>]+>/g, "").trim();
+
+  const headerRow = html.match(/<tr\s+class="label"[^>]*>([\s\S]*?)<\/tr>/);
+  if (!headerRow) return teams;
+  const headers = [...headerRow[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(h => cellText(h[1]));
+  const col = name => headers.indexOf(name);
+  const iW = col("W"), iL = col("L"), iT = col("T"), iPF = col("PF"), iPA = col("PA");
+
+  const rowRe = /<tr[^>]+\bid="(\d+)"[^>]*>([\s\S]*?)<\/tr>/g;
   let m;
   while ((m = rowRe.exec(html)) !== null) {
-    const [, id, name, w, l, t, pf, pa] = m;
+    const [, id, body] = m;
+    const nameMatch = body.match(/<a\s+href='\/teams\/\d+'>([^<]+)<\/a>/);
+    if (!nameMatch) continue;
+    const cells = [...body.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(c => cellText(c[1]));
+    const num = i => (i >= 0 && cells[i] != null ? parseFloat(cells[i]) || 0 : 0);
+    const w = num(iW), l = num(iL), t = num(iT);
     teams.push({
       id,
-      name: name.trim(),
+      name: nameMatch[1].trim(),
       owner: "",
       record: `${w}-${l}-${t}`,
-      w: parseInt(w),
-      l: parseInt(l),
-      t: parseInt(t),
-      pf: parseFloat(pf),
-      pa: parseFloat(pa),
+      w, l, t,
+      pf: num(iPF),
+      pa: num(iPA),
     });
   }
   return teams;

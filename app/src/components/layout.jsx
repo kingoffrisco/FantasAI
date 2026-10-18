@@ -3,6 +3,7 @@ import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster } 
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { getSubscriptionState, subscribeToPush, unsubscribeFromPush, showLocalNotification } from '../lib/pushNotifications.js';
 import { getPrefs } from '../lib/remotePrefs.js';
+import { api } from '../api.js';
 
 function getDraftStatus() {
   // TEAM_ROSTERS is server-synced (see refreshTeamRostersFromServer in
@@ -213,6 +214,18 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
   const isAdmin = user?.isAdmin;
   const allPlayers = usePlayers(); // subscribe so h2hInfo recomputes when player projections load
 
+  // Live CBS standings for the team card. findTeam()'s record/pf come from the
+  // league-settings snapshot in R2, which is only ever written by hand and was
+  // frozen at Week 3 (1-2, 276.9) while CBS was already at Week 6.
+  const [cbsTeams, setCbsTeams] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    api.teams()
+      .then(d => { if (!cancelled) setCbsTeams(Array.isArray(d?.teams) ? d.teams : null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const h2hInfo = React.useMemo(() => {
     const teamId = user?.teamId;
     if (!teamId) return null;
@@ -324,6 +337,11 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
       </div>
       {(() => {
         const myTeam = findTeam(user?.teamId || 1) || LEAGUE_TEAMS[0];
+        // cbsId lives only on LEAGUE_TEAMS — the R2 team list findTeam() prefers doesn't carry it
+        const cbsId = LEAGUE_TEAMS.find(t => t.id === myTeam.id)?.cbsId;
+        const live = cbsId ? cbsTeams?.find(t => String(t.id) === String(cbsId)) : null;
+        const record = live ? (live.t ? `${live.w}-${live.l}-${live.t}` : `${live.w}-${live.l}`) : myTeam.record;
+        const pf = live ? live.pf : myTeam.pf;
         return (
           <div className="team-card" style={collapsed ? { padding: 8, margin: '8px 4px' } : undefined}>
             {!collapsed && <div className="label">My Team</div>}
@@ -339,8 +357,8 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
             </div>
             {!collapsed && new Date() >= H2H_SEASON_START && (
             <div className="stats">
-              <div><div className="k">Rec</div><div className="v">{myTeam.record || '0–0'}</div></div>
-              <div><div className="k">PF</div><div className="v">{(myTeam.pf || 0).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</div></div>
+              <div><div className="k">Rec</div><div className="v">{record || '0–0'}</div></div>
+              <div><div className="k">PF</div><div className="v">{(pf || 0).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</div></div>
             </div>
             )}
           </div>

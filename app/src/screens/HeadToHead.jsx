@@ -2,6 +2,7 @@ import React from 'react';
 import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters, refreshTeamRostersFromServer, syncLineupsFromCbs } from '../lib/data.js';
 import { findPlayer, findPlayerByName, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
+import { api } from '../api.js';
 import { getScoringRules, calcFantasyPts, buildStatPointsBreakdown, normalizeTeamAbbr, getGameProgress, blendProjectedFinal, fetchEspnScoreboardDirect, fetchEspnPlayerStatsDirect } from '../lib/liveScoring.js';
 
 const NUM_WEEKS = 14;
@@ -321,12 +322,25 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     return rosters;
   }, [slotFrame, rosterVersion, allPlayers]);
 
+  // Live CBS standings — LEAGUE_TEAMS' record/pf/pa are static placeholders
+  // (0-0 all season), so matchup cards showed every team as 0–0.
+  const [cbsTeams, setCbsTeams] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    api.teams()
+      .then(d => { if (!cancelled) setCbsTeams(Array.isArray(d?.teams) ? d.teams : null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const standings = React.useMemo(() => {
     return LEAGUE_TEAMS.map(t => {
+      const live = cbsTeams?.find(c => String(c.id) === String(t.cbsId));
+      if (live) return { ...t, w: live.w || 0, l: live.l || 0, pf: live.pf || 0, pa: live.pa || 0 };
       const rec = parseRecord(t.record);
       return { ...t, ...rec, pf: t.pf || 0, pa: t.pa || 0 };
     }).sort((a, b) => (b.w - a.w) || (b.pf - a.pf) || (a.pa - b.pa));
-  }, []);
+  }, [cbsTeams]);
 
   return (
     <div style={{ padding: '20px 24px', maxWidth: 1100, display: 'flex', flexDirection: 'column', gap: 20 }}>
