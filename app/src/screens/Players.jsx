@@ -3744,7 +3744,17 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
                   </div>
                   : statYear === 2026
                     ? <div className="muted-card" style={{ padding: 18, textAlign: 'center' }}>
-                        <div className="dim" style={{ fontSize: 12 }}>2026 season hasn't started yet — check back in September.</div>
+                        <div className="dim" style={{ fontSize: 12 }}>
+                          {!sleeperEnabled
+                            ? 'Sleeper API is disabled — enable it in Sources to see 2026 weekly stats.'
+                            : error
+                              ? `Couldn't load 2026 stats from Sleeper (${error}).`
+                              : live && !live.found
+                                ? `Couldn't match "${player.name}" to a Sleeper player.`
+                                : new Date() < new Date('2026-09-09')
+                                  ? "2026 season hasn't started yet — check back in September."
+                                  : 'No 2026 games played yet.'}
+                        </div>
                       </div>
                     : player.rookie
                       ? <div style={{ padding: '12px 0' }}>
