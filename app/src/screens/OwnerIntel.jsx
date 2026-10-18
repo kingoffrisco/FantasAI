@@ -446,6 +446,15 @@ function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOv
   const o = owner;
   const realPosSpend = React.useMemo(() => computePosSpend(team.id), [team.id]);
   const posData = realPosSpend || o.posByRound;
+  const realPosYears = React.useMemo(() => {
+    const years = Object.entries(CBS_DRAFT_HISTORY[team.id] || {})
+      .filter(([, d]) => d.rounds)
+      .map(([y]) => Number(y))
+      .sort((a, b) => a - b);
+    if (!years.length) return '';
+    const span = years.length > 1 ? `${years[0]}–${years[years.length - 1]}` : `${years[0]}`;
+    return `${span} · ${years.length} season${years.length === 1 ? '' : 's'}`;
+  }, [team.id]);
 
   const showProfile = !isMobile || mobileTab === 'profile';
   const showTendencies = isMobile && mobileTab === 'tendencies';
@@ -552,7 +561,7 @@ function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOv
 
       {showSpend && (
       <div className="muted-card" style={{ marginTop: 14 }}>
-        <div className="card-mini-label">POSITION SPEND BY ROUND <span style={{ marginLeft: 8 }} className="faint">{realPosSpend ? '2024–2025 · 2 seasons' : '5-year aggregate'}</span></div>
+        <div className="card-mini-label">POSITION SPEND BY ROUND <span style={{ marginLeft: 8 }} className="faint">{realPosSpend ? realPosYears : '5-year aggregate'}</span></div>
         <PosSpendChart posByRound={posData} />
         <div className="pos-legend">
           {[['QB', '--pos-qb'], ['RB', '--pos-rb'], ['WR', '--pos-wr'], ['TE', '--pos-te'], ['K', '--pos-k'], ['DST', '--pos-dst']].map(([p, v]) => (

@@ -1,5 +1,5 @@
 // Mock data - converted from vanilla prototype to ES module exports
-import { getLiveTeams, getMyTeamPrefs } from './leagueStore.js';
+import { getLiveTeams, getMyTeamPrefs, LEGACY_TEAM_NAME_MAP } from './leagueStore.js';
 import { api } from '../api.js';
 
 export const NFL_TEAMS = [
@@ -55,6 +55,7 @@ export function findTeam(id) {
     const myPrefs = user?.teamId === id ? (getMyTeamPrefs() || {}) : {};
     const merged = { ...base, ...adminOv, ...myPrefs };
     merged.me = user?.teamId === id;
+    if (LEGACY_TEAM_NAME_MAP[merged.name]) merged.name = LEGACY_TEAM_NAME_MAP[merged.name];
     return merged;
   } catch {}
   return base;
@@ -620,61 +621,73 @@ export const CBS_DRAFT_HISTORY = {
   1: {
     2024: { slot: 4,  rounds: "RRRWRQTRQWWTDW", picks: [21, 35, 36, 69, 31, 8, 86, null, 13, null, null, 91, 131, null], notes: "Bijan 1.04, Pollard R2, Mostert R3, Olave WR R4, Daniels QB R6, Pitts TE R7" },
     2025: { slot: 2,  rounds: "RWQTRRWWRRTWQD", picks: [21, 63, 8, 81, null, null, null, null, null, null, null, null, null, null], notes: "Bijan 1.02, Brian Thomas WR R2, Daniels QB R3, McBride TE R4" },
+    2026: { slot: 12, rounds: "RRTRWQRWWKWDQ", picks: [4866, 12507, 12517, 13286, 8167, 11560, 11581, 13279, 13417, 11533, 12501, 10025, 6804], notes: "Barkley 1.12, Hampton RB R2, Loveland TE R3, Price RB R4, Watson WR R5" },
   },
   // id 2 = Bourbon is a Vegetable | 2024: Cheeseheads (slot 5, Hill R1)
   2: {
     2024: { slot: 5,  rounds: "WWWWQTWRRRQRWD", picks: [53, 56, 71, 72, 11, 81, null, null, null, null, 15, null, null, 133], notes: "Hill 1.05, A.J. Brown R2, Kupp + Addison WRs R3-R4, Purdy QB R5 - WR-stack" },
     2025: { slot: 9,  rounds: "RRWTRWWQQWTRDW", picks: [34, 24, 56, 82, null, null, null, null, null, null, null, null, null, null], notes: "Jeanty 1.09, Achane R2, A.J. Brown R3, Kittle TE R4" },
+    2026: { slot: 8,  rounds: "RRRWWQWTQWDRK", picks: [4034, 7588, 6790, 7525, 4983, 6797, 9487, 10236, 8183, 6819, 10017, 8132, 5189], notes: "McCaffrey 1.08, Williams RB R2, Swift RB R3, Smith WR R4, Moore WR R5" },
   },
   // id 3 = Fourth and Long (was Howdy Hut)
   3: {
     2024: { slot: 12, rounds: "RQRRRTDWRRRRRR", picks: [30, 1, 46, 32, 40, 88, 122, null, null, null, null, null, null, null], notes: "BUF stack: Cook 1.12 + Allen 2.01, Spears R3, Kamara R4 - rest auto-drafted" },
     2025: { slot: 4,  rounds: "RRWWQRTWDWRQDR", picks: [25, 30, 64, null, null, null, null, null, null, null, null, null, null, null], notes: "Henry 1.04, Cook again R2, Adams WR R3" },
+    2026: { slot: 11, rounds: "RRRWQWWTDKQTW", picks: [9226, 9224, 12481, 9997, 11566, 8148, 8142, 5022, 10012, 12015, 4892, 9480, 13293], notes: "Achane 1.11, Brown RB R2, Skattebo RB R3, Flowers WR R4, Daniels QB R5" },
   },
   // id 4 = Dak to the Future (was Start Pulling Out) | 2024: Cuddlebone loves Kamala! (slot 3, Hall R1)
   4: {
     2024: { slot: 3,  rounds: "RRQRRWWQTDWTRR", picks: [26, 29, 9, 38, 37, null, 76, 14, null, 125, null, null, null, null], notes: "Hall 1.03, Mixon R2, Love QB R3, Stevenson R4, Montgomery R5 - RB-RB-QB" },
     2025: { slot: 6,  rounds: "RRQRWWWRWWTDQR", picks: [20, null, 5, 32, null, null, null, null, null, null, null, null, null, null], notes: "CMC 1.06, Burrow QB R3, Kamara R4 - RB anchor" },
+    2026: { slot: 2,  rounds: "RRWRWTQWWRRKD", picks: [9509, 12527, 11632, 5892, 6801, 4217, 3294, 5045, 13298, 4199, 13414, 11539, 10001], notes: "Robinson 1.02, Jeanty RB R2, Nabers WR R3, Montgomery RB R4, Higgins WR R5" },
   },
   // id 5 = Kupp of Tea (was The Epstein Islanders) | 2024: Pablo Chacon (slot 2, Saquon R1)
   5: {
     2024: { slot: 2,  rounds: "RRQWTWWDWQWRWR", picks: [22, 24, 4, 74, 85, null, 75, 124, null, null, null, null, null, null], notes: "Saquon 1.02, Achane R2, Mahomes QB R3, DeVonta Smith WR R4, Andrews TE R5" },
     2025: { slot: 1,  rounds: "RWTWRWQRRWDRQW", picks: [22, 57, 80, 62, null, null, null, null, null, null, null, null, null, null], notes: "Saquon 1.01, Drake London R2, Bowers TE1 R3, MHJ R4" },
+    2026: { slot: 5,  rounds: "WWTQRRWRRRKDW", picks: [9488, 5859, 8130, 11564, 12529, 11583, 2216, 11586, 12534, 8136, 3451, 10021, 11646], notes: "Smith-Njigba 1.05, Brown WR R2, McBride TE R3, Maye QB R4, Henderson RB R5" },
   },
   // id 6 = Fields of Dreams (was Penn State Shower Power) | 2024: Five Pound Bass (slot 6, Amon-Ra R1)
   6: {
     2024: { slot: 6,  rounds: "WWWRWQRTRWQWWD", picks: [54, 58, 62, 39, 57, 12, null, null, null, null, 17, null, null, 132], notes: "Amon-Ra 1.06, Wilson + MHJ + Pacheco R4, London R5, Dak QB R6 - 4 WRs in first 5" },
     2025: { slot: 11, rounds: "WWRWWTRQRRRQRD", picks: [52, 67, null, null, 58, null, null, null, null, null, null, null, null, null], notes: "CeeDee 1.11, Nabers WR R2, Wilson WR R5 - WR every round" },
+    2026: { slot: 3,  rounds: "WWWRRRTWQTQKD", picks: [7564, 8112, 8144, 5850, 11584, 8228, 9484, 5846, 11563, 1466, 3163, 13545, 10011], notes: "Chase 1.03, London WR R2, Olave WR R3, Jacobs RB R4, Irving RB R5" },
   },
   // id 7 = Here for the Beer (was Vick's Hushpuppies) | 2024: My Couch Pulls Out But I Dont (slot 7, CeeDee R1)
   7: {
     2024: { slot: 7,  rounds: "WWTWWWQRRRWRQD", picks: [52, 51, 84, 64, 70, 65, 6, null, null, null, null, null, 18, 134], notes: "CeeDee 1.07, Jefferson R2, Kelce TE R3, Adams R4, Diggs R5 - elite WRs" },
     2025: { slot: 8,  rounds: "WWRRRWQRWTRQWD", picks: [51, 55, null, 26, null, null, null, null, null, null, null, null, null, null], notes: "Jefferson 1.08, Puka Nacua R2, Breece Hall R4" },
+    2026: { slot: 4,  rounds: "WWTRWWRQRWRDK", picks: [9493, 7569, 11604, 12512, 12514, 12519, 7021, 12508, 12533, 10222, 10219, 10002, 8259], notes: "Nacua 1.04, Collins WR R2, Bowers TE R3, Judkins RB R4, Egbuka WR R5" },
   },
   // id 8 = Gecko Barflies (same both years)
   8: {
     2024: { slot: 1,  rounds: "RRWRQRWTRDWRWQ", picks: [20, 44, 60, 45, 5, null, 66, 87, null, 130, null, null, null, 19], notes: "CMC 1.01, Edwards R2, Evans R3, Robinson R4, Burrow QB R5 - value in mid-rounds" },
     2025: { slot: 3,  rounds: "RQWRWWRDTRWQWQ", picks: [23, 1, 60, 29, 53, null, null, null, null, null, null, null, null, null], notes: "Gibbs 1.03, Josh Allen QB R2, Evans R3, Mixon + Hill R4-5" },
+    2026: { slot: 7,  rounds: "RWRQWWTRWRKDW", picks: [8138, 6794, 7543, 4881, 2133, 11620, 7553, 8408, 2449, 7567, 2747, 10016, 5872], notes: "Cook 1.07, Jefferson WR R2, Etienne RB R3, Jackson QB R4, Adams WR R5" },
   },
   // id 9 = Hill Street Blues (was Swingin' Flamingos) | 2024: Walton (slot 8, Chase R1)
   9: {
     2024: { slot: 8,  rounds: "WRTWWQWWWWWRDQ", picks: [50, 23, 83, 68, 61, 7, 77, null, null, null, 79, null, 120, null], notes: "Chase 1.08, Gibbs R2, LaPorta TE R3, Tee Higgins R4, Metcalf R5 - balanced" },
     2025: { slot: 5,  rounds: "WQRWTWWWDQRRWW", picks: [50, 2, null, 61, 84, null, null, null, null, null, null, null, null, null], notes: "Chase again 1.05, Hurts QB R2, Metcalf R4, Kelce TE R5" },
+    2026: { slot: 9,  rounds: "RRRWWQWWWTWDK", picks: [3198, 8151, 13287, 11635, 7526, 6904, 11628, 4037, 10232, 8131, 9500, 10026, 7839], notes: "Henry 1.09, Walker RB R2, Love RB R3, McConkey WR R4, Waddle WR R5" },
   },
   // id 10 = Victory Formation (was Gringo Pendejo) | 2024: Buck Wild (slot 11, Hurts R1)
   10: {
     2024: { slot: 11, rounds: "QRRRTRWDRWQDTW", picks: [2, 28, 41, 42, 82, null, null, 123, null, null, 16, 126, null, null], notes: "Hurts QB 1.11, Kyren Williams R2, Najee R3, Swift R4, Kittle TE R5" },
     2025: { slot: 7,  rounds: "RRWQWTWWQDRTRW", picks: [27, 28, null, 4, null, null, null, null, null, null, null, null, null, null], notes: "Jacobs 1.07, Kyren Williams R2 again, Mahomes QB R4" },
+    2026: { slot: 6,  rounds: "RWWQWRTWTQDWK", picks: [6813, 8137, 10229, 6770, 5927, 5967, 10859, 9756, 5012, 4046, 10020, 8676, 11058], notes: "Taylor 1.06, Pickens WR R2, Rice WR R3, Burrow QB R4, McLaurin WR R5" },
   },
   // id 11 = The Underdogs (was Fat, Drunk & Stupid)
   11: {
     2024: { slot: 9,  rounds: "RWWQWTRWWWDTRQ", picks: [33, 55, 59, 10, 67, 89, null, 78, null, null, 129, null, null, null], notes: "J.Taylor 1.09, Puka Nacua R2, Nico Collins R3, Darnold QB R4, Nabers R5" },
     2025: { slot: 12, rounds: "WWWRQRWRTWWQWD", picks: [54, 59, null, null, null, null, null, null, null, null, null, null, null, null], notes: "Amon-Ra 1.12, Nico Collins R2 - WR-stack start again" },
+    2026: { slot: 10, rounds: "WWRWTRWQWRDRK", picks: [7547, 6786, 8155, 12526, 12518, 7611, 11631, 7523, 9754, 7594, 10027, 12474, 11792], notes: "Brown 1.10, Lamb WR R2, Hall RB R3, McMillan WR R4, Warren TE R5" },
   },
   // id 12 = DJ 8 Trak (same both years)
   12: {
     2024: { slot: 10, rounds: "RQRRWRTRRTWDDQ", picks: [25, 3, 27, 43, 73, null, 90, null, null, 80, 63, 127, 128, null], notes: "BAL stack: Henry 1.10 + Lamar R2 + Jacobs R3, Williams R4, Allen WR R5 - loaded" },
     2025: { slot: 10, rounds: "RQRRRTWWRTRRQD", picks: [33, 3, null, null, null, null, null, null, null, null, null, null, null, null], notes: "J.Taylor 1.10, Lamar QB R2 again - consistent R1-R2 build" },
+    2026: { slot: 1,  rounds: "RRQRWTRRDRWKT", picks: [9221, 8150, 4984, 12490, 8146, 12506, 6806, 12489, 10009, 13305, 4981, 11786, 8110], notes: "Gibbs 1.01, Williams RB R2, Allen QB R3, Tuten RB R4, Wilson WR R5" },
   },
 };
 

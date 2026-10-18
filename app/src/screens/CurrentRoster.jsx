@@ -168,6 +168,20 @@ function estimateProjFromAdp(p) {
   return parseFloat(Math.max(floor, base - rank * slope).toFixed(1));
 }
 
+// Current-season point total — prefers 2026 once the player has actually
+// played a game this year (same has2026Games rule used everywhere else).
+// total_fantasy_points_2026 isn't populated in the export yet, so derive it
+// from the already-correct 2026 PPG (p.avg) × games played rather than
+// silently falling back to last year's total.
+function currentSeasonTotal(p) {
+  if (p.gamesPlayed2026 > 0) {
+    if (p.pts2026 > 0) return p.pts2026;
+    if (p.avg > 0) return Math.round(p.avg * p.gamesPlayed2026 * 10) / 10;
+  }
+  if (p.pts2025 > 0) return p.pts2025;
+  return p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null;
+}
+
 function getTrendData(p) {
   if (p?.trend?.some(v => v > 0)) return p.trend;
   const base = p?.avg || p?.proj || 0;
@@ -2183,7 +2197,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                     {/* TRENDS */}
                     <th className="num" style={sideLR}>Trend</th>
                     {/* FANTASY POINTS */}
-                    <th className="num" style={sideL}>2025 Pts</th>
+                    <th className="num" style={sideL}>Pts</th>
                     <th className="num">PPG</th>
                     <th className="num" style={sideR}>Proj</th>
                     <th style={{ maxWidth: 420 }}>
@@ -2494,7 +2508,7 @@ export default function CurrentRosterScreen({ onNav, user, myRosterIds, onAddPla
                     </td>
                     {/* FANTASY POINTS */}
                     <td className="num">{(() => {
-                      const total = p.pts2025 > 0 ? p.pts2025 : (p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null);
+                      const total = currentSeasonTotal(p);
                       return total != null ? <span style={{ color: 'var(--text)', fontWeight: 600 }}>{Number(total).toFixed(1)}</span> : <span className="faint">—</span>;
                     })()}</td>
                     <td className="num">{p.avg > 0 ? <span>{p.avg.toFixed(1)}</span> : <span className="faint">—</span>}</td>
@@ -3243,7 +3257,7 @@ function MobileRosterList({
                       <div style={{ flexShrink: 0, minWidth: 160 }}>
                         <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>Fantasy Points</div>
                         {(() => {
-                          const total = p.pts2025 > 0 ? p.pts2025 : (p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null);
+                          const total = currentSeasonTotal(p);
                           const isOut = ['O', 'IR', 'NFI'].includes(effectiveStatus);
                           let projVal = null, isEstimate = false, rookieProjFlag = false;
                           if (!isOut) {
@@ -3260,7 +3274,7 @@ function MobileRosterList({
                           return (
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, textAlign: 'center' }}>
                               <div>
-                                <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>2025 Total</div>
+                                <div style={{ fontSize: 9, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Season Total</div>
                                 <div style={{ fontSize: 16, fontWeight: 700 }}>{total != null ? total.toFixed(1) : '—'}</div>
                               </div>
                               <div>
@@ -3451,7 +3465,7 @@ function PageLogicPanel() {
       <div style={grid}>
         <span style={k}>Data Source</span><span style={v}>TEAM_ROSTERS from localStorage (synced via roster save API). Auto-assigns players to slots.</span>
         <span style={k}>Sort Order</span><span style={v}>Teams sorted by total starter projection (highest first).</span>
-        <span style={k}>Columns</span><span style={v}>Same as My Roster: Slot, Player, Status, Bye, Opp, Trend, 2025 Pts, PPG, Proj, Start/Sit.</span>
+        <span style={k}>Columns</span><span style={v}>Same as My Roster: Slot, Player, Status, Bye, Opp, Trend, Pts, PPG, Proj, Start/Sit.</span>
       </div>
     ),
     swap: (
@@ -4167,7 +4181,7 @@ function AllRostersView({ myTeamId, slotFrame, onOpenPlayer, nflSchedule, startS
     const rec = ss?.recommendation;
     const ssClr = rec === 'MONITOR' ? '#ff9800' : rec?.startsWith('START') ? '#1affa0' : rec?.startsWith('SIT') ? '#ff4f4f' : '#ffb547';
     const td = getTrendData(p);
-    const total2025 = p.pts2025 > 0 ? p.pts2025 : (p.last > 0 ? Math.round(p.last * 17 * 10) / 10 : null);
+    const seasonTotal = currentSeasonTotal(p);
 
     return (
       <tr key={`${isBench ? 'b' : 's'}${i}`} style={{ opacity: isBench ? 0.6 : 1 }}>
@@ -4196,7 +4210,7 @@ function AllRostersView({ myTeamId, slotFrame, onOpenPlayer, nflSchedule, startS
         <td className="num" style={{ paddingRight: 6 }}>
           {td.length ? <Sparkline data={td} width={60} height={18} /> : <span className="faint">—</span>}
         </td>
-        <td className="num">{total2025 != null ? <span style={{ fontWeight: 600 }}>{Number(total2025).toFixed(1)}</span> : <span className="faint">—</span>}</td>
+        <td className="num">{seasonTotal != null ? <span style={{ fontWeight: 600 }}>{Number(seasonTotal).toFixed(1)}</span> : <span className="faint">—</span>}</td>
         <td className="num">{p.last > 0 ? p.last.toFixed(1) : <span className="faint">—</span>}</td>
         <td className="num" style={{ color: '#4ea8ff', fontWeight: 600 }}>{p.proj > 0 ? p.proj.toFixed(1) : <span className="faint">—</span>}</td>
         <td>
@@ -4264,7 +4278,7 @@ function AllRostersView({ myTeamId, slotFrame, onOpenPlayer, nflSchedule, startS
                         <th className="num">Bye</th>
                         <th>Opp</th>
                         <th className="num">Trend</th>
-                        <th className="num">2025 Pts</th>
+                        <th className="num">Pts</th>
                         <th className="num">PPG</th>
                         <th className="num">Proj</th>
                         <th>Start/Sit</th>
@@ -4378,7 +4392,7 @@ function RosterLegend() {
             <div style={{ fontWeight: 800, fontSize: 10, letterSpacing: '.08em', color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: 6 }}>Columns</div>
             <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: '2px 12px' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>OPP</span><span>This week's opponent — "@" prefix means away game</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>Pts 2025</span><span>Total fantasy points scored in the 2025 season</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>Pts</span><span>Total fantasy points scored this season (2025 once a player has no 2026 games yet)</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>Last</span><span>Fantasy points in most recent game</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>Proj</span><span>Projected fantasy points this week (half-PPR)</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>Trend</span><span>6-week scoring sparkline — rising or falling production</span>

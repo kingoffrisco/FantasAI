@@ -1227,7 +1227,11 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
               <tr><th style={{ width: 32 }}>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">PF</th><th className="num">PA</th><th className="num" title="Power Ranking — weighted by points scored (60%) and win % (40%)">PR</th></tr>
             </thead>
             <tbody>
-              {(sortedStandings || LEAGUE_TEAMS.map(t => { const lt = findTeam(t.id); return { ...t, ...lt, w: 0, l: 0, pf: 0, pa: 0 }; })).map((row, i) => (
+              {(sortedStandings || LEAGUE_TEAMS.map(t => {
+                const lt = findTeam(t.id) || {};
+                const [w, l] = (lt.record || '0-0').split('-').map(Number);
+                return { ...t, ...lt, w: w || 0, l: l || 0, pf: lt.pf || 0, pa: lt.pa || 0 };
+              }).sort((a, b) => (b.w - a.w) || (b.pf - a.pf) || (a.pa - b.pa))).map((row, i) => (
                 <tr key={row.id || i} style={row.me ? { background: 'rgba(198,255,58,.04)' } : {}}>
                   <td className="mono dim" style={{ fontSize: 12 }}>{i + 1}</td>
                   <td>
