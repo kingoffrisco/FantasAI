@@ -185,7 +185,7 @@ function buildStandings(cbsRaw) {
     const pf = ct.pf ?? ct.points_for ?? 0;
     const pa = ct.pa ?? ct.points_against ?? 0;
     const liveTeam = mock?.id ? findTeam(mock.id) : null;
-    return { id: mock?.id, name: ct.name || mock?.name || '—', logo: mock?.logo || '??', logoImg: liveTeam?.logoImg || null, color: mock?.color || '#555', w, l, pf, pa, me: liveTeam?.me || false };
+    return { id: mock?.id, name: liveTeam?.name || mock?.name || ct.name || '—', logo: mock?.logo || '??', logoImg: liveTeam?.logoImg || null, color: mock?.color || '#555', w, l, pf, pa, me: liveTeam?.me || false };
   });
 
   return rows.sort((a, b) => (b.w - a.w) || (b.pf - a.pf) || (a.pa - b.pa));

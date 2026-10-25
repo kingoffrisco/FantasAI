@@ -45,7 +45,7 @@ function buildTeamOverlay(cbsRaw) {
       LEAGUE_TEAMS.find(t => t.name.toLowerCase() === cbsName.toLowerCase()) ||
       LEAGUE_TEAMS[idx];
     if (mock) {
-      result[mock.id] = { owner, name: cbsName || mock.name, record: `${wins}-${losses}`, pf, cbsId };
+      result[mock.id] = { owner, name: findTeam(mock.id)?.name || mock.name || cbsName, record: `${wins}-${losses}`, pf, cbsId };
     }
   });
   return result;
