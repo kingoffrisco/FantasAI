@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "vite build && wrangler pages deploy dist --project-name fantasai-app"
+    "deploy": "vite build && wrangler pages deploy dist --project-name fantasai"
   },
   "dependencies": {
     "javascript-lp-solver": "^1.0.3",
