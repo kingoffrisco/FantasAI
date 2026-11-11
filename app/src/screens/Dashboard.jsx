@@ -191,6 +191,70 @@ function buildStandings(cbsRaw) {
   return rows.sort((a, b) => (b.w - a.w) || (b.pf - a.pf) || (a.pa - b.pa));
 }
 
+// Monte Carlo playoff odds from current standings.
+// Each team's weekly score ~ Normal(mean, SD), where mean is its points per game
+// shrunk toward the league average (early-season PF is noisy). Remaining games
+// use the league's matchup schedule when one is set, otherwise random pairings.
+// Final seeding: wins, then points for (league tiebreaker: win %, total points).
+function simulatePlayoffOdds(standings, { regularSeasonWeeks = 14, playoffTeams = 6, schedule = {}, sims = 5000 } = {}) {
+  if (!standings?.length) return null;
+  const teams = standings.filter(t => t.id != null);
+  const n = teams.length;
+  if (n < 2) return null;
+  const games = teams.map(t => t.w + t.l);
+  const played = Math.max(...games);
+  if (played === 0) return null;
+  const leagueAvg = teams.reduce((s, t) => s + t.pf, 0) / games.reduce((s, g) => s + g, 0);
+  const PRIOR_GAMES = 3;
+  const SD = 25;
+  const means = teams.map((t, i) => (t.pf + leagueAvg * PRIOR_GAMES) / (games[i] + PRIOR_GAMES));
+  const idx = new Map(teams.map((t, i) => [t.id, i]));
+  const meIdx = teams.findIndex(t => t.me);
+
+  // Deterministic PRNG so the number doesn't jitter between renders
+  let seed = 0x9e3779b9;
+  const rand = () => { seed = (seed + 0x6d2b79f5) | 0; let x = Math.imul(seed ^ (seed >>> 15), 1 | seed); x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x; return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };
+  const gauss = () => { let u = 0; while (u === 0) u = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand()); };
+
+  const made = new Array(n).fill(0);
+  const topSeed = new Array(n).fill(0);
+  for (let s = 0; s < sims; s++) {
+    const w = teams.map(t => t.w);
+    const pf = teams.map(t => t.pf);
+    for (let wk = played + 1; wk <= regularSeasonWeeks; wk++) {
+      const scores = means.map(m => m + SD * gauss());
+      let pairs = (schedule[wk] || []).map(([a, b]) => [idx.get(a), idx.get(b)]).filter(([a, b]) => a != null && b != null);
+      if (!pairs.length) {
+        const order = [...Array(n).keys()];
+        for (let i = n - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+        pairs = [];
+        for (let i = 0; i + 1 < n; i += 2) pairs.push([order[i], order[i + 1]]);
+      }
+      for (const [a, b] of pairs) {
+        pf[a] += scores[a]; pf[b] += scores[b];
+        if (scores[a] > scores[b]) w[a]++; else w[b]++;
+      }
+    }
+    const rank = [...Array(n).keys()].sort((a, b) => (w[b] - w[a]) || (pf[b] - pf[a]));
+    for (let r = 0; r < Math.min(playoffTeams, n); r++) made[rank[r]]++;
+    topSeed[rank[0]]++;
+  }
+  const out = teams.map((t, i) => ({ id: t.id, playoffPct: (made[i] / sims) * 100, topSeedPct: (topSeed[i] / sims) * 100 }));
+  return { teams: out, me: meIdx >= 0 ? out[meIdx] : null, remaining: Math.max(0, regularSeasonWeeks - played) };
+}
+
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function formatOdds(pct) {
+  if (pct == null) return '—';
+  if (pct > 0 && pct < 0.1) return '<0.1%';
+  if (pct < 100 && pct > 99.9) return '>99.9%';
+  return `${pct.toFixed(1)}%`;
+}
+
 function getScoringRules() {
   try {
     const s = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
@@ -628,6 +692,26 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch { return null; }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Season average + league rank by points per game
+  const seasonAvg = React.useMemo(() => {
+    if (!standings || !myStanding) return null;
+    const ppg = t => { const g = t.w + t.l; return g > 0 ? t.pf / g : null; };
+    const mine = ppg(myStanding);
+    if (mine == null) return null;
+    const rank = standings.filter(t => (ppg(t) ?? -Infinity) > mine).length + 1;
+    return { avg: mine, rank };
+  }, [standings, myStanding]);
+
+  const playoffOdds = React.useMemo(() => {
+    const pr = rosterSettings?.playoffRules || {};
+    const startWeek = Number(pr.startWeek) || 15;
+    return simulatePlayoffOdds(standings, {
+      regularSeasonWeeks: startWeek - 1,
+      playoffTeams: Number(pr.numTeams) || 6,
+      schedule: rosterSettings?.matchupSchedule || {},
+    });
+  }, [standings, rosterSettings]);
+
   const slotFrame  = React.useMemo(() => buildRosterFrame(rosterSettings), [rosterSettings]);
   const fullRoster = React.useMemo(
     () => assignRoster(slotFrame, myRosterIds, slotOverrides, findPlayer),
@@ -1148,8 +1232,16 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
         ) : (
           <div className="stat"><div className="k">Win Probability</div><div className="v">—</div><div className="sub">No matchup</div></div>
         )}
-        <div className="stat"><div className="k">Season Avg</div><div className="v">128.5</div><div className="sub">2nd in league</div></div>
-        <div className="stat"><div className="k">Playoff Odds</div><div className="v">84.2%</div><div className="sub">Top seed: 21.8%</div></div>
+        <div className="stat">
+          <div className="k">Season Avg</div>
+          <div className="v">{seasonAvg ? seasonAvg.avg.toFixed(1) : '—'}</div>
+          <div className="sub">{seasonAvg ? `${ordinal(seasonAvg.rank)} in league` : 'No games yet'}</div>
+        </div>
+        <div className="stat">
+          <div className="k">Playoff Odds</div>
+          <div className="v">{playoffOdds?.me ? formatOdds(playoffOdds.me.playoffPct) : '—'}</div>
+          <div className="sub">{playoffOdds?.me ? `Top seed: ${formatOdds(playoffOdds.me.topSeedPct)}` : 'No games yet'}</div>
+        </div>
       </div>
 
       {/* ── League Standings + Commish + Transactions + Champions Corner ── */}
