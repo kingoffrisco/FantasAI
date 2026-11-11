@@ -1,37 +1,14 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster } from '../lib/data.js';
-import { findPlayer } from '../lib/playerStore.js';
-import { TeamLogoBadge, PosBadge } from '../components/ui.jsx';
+import { LEAGUE_TEAMS } from '../lib/data.js';
+import { TeamLogoBadge } from '../components/ui.jsx';
+import { getPowerWeek, useCbsSeason, summarizeTeamSeason } from '../lib/powerUtils.js';
 
-const SEASON_START = new Date('2026-09-09');
-const PLAYOFF_START = 13;
-
-function getCurrentWeek() {
-  const today = new Date();
-  if (today < SEASON_START) return 0;
-  return Math.min(Math.floor((today - SEASON_START) / (7 * 86400000)) + 1, 14);
+function getPlayoffStart() {
+  try { return Number(JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null')?.playoffRules?.startWeek) || 15; }
+  catch { return 15; }
 }
 
-function simScore(teamId, week) {
-  const roster   = TEAM_ROSTERS[teamId] || [];
-  const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
-  const base = starters.reduce((s, e) => {
-    const p = findPlayer(e.playerId);
-    return s + (p ? (p.avg || p.proj || 0) : 0);
-  }, 0);
-  const noise = (Math.sin(teamId * 11.3 + week * 7.1) * 12) + (Math.cos(teamId * 3.7 + week * 2.9) * 6);
-  return Math.max(0, Math.round((base + noise) * 10) / 10);
-}
-
-function buildSchedule(ids, weeks) {
-  const n = ids.length;
-  return Array.from({ length: weeks }, (_, w) => {
-    const rest   = ids.slice(1);
-    const rot    = w % (n - 1);
-    const circle = [ids[0], ...[...rest.slice(rot), ...rest.slice(0, rot)]];
-    return Array.from({ length: n / 2 }, (_, i) => [circle[i], circle[n - 1 - i]]);
-  });
-}
+const r1 = n => Math.round(n * 10) / 10;
 
 // Mini sparkline SVG — no external deps
 function MiniSparkline({ values, width = 100, height = 28 }) {
@@ -54,42 +31,21 @@ function MiniSparkline({ values, width = 100, height = 28 }) {
 }
 
 export default function SeasonPerformanceScreen({ user, myRosterIds }) {
-  const currentWeek  = getCurrentWeek();
-  const weeksPlayed  = Math.max(0, currentWeek - 1);
+  const currentWeek  = getPowerWeek();
   const isOffseason  = currentWeek === 0;
+  const PLAYOFF_START = getPlayoffStart();
   const [focusTeam, setFocusTeam] = React.useState(user?.teamId ?? LEAGUE_TEAMS[0]?.id);
   const myTeamId = user?.teamId;
-
-  const ids      = LEAGUE_TEAMS.map(t => t.id);
-  const schedule = React.useMemo(() => buildSchedule(ids, 14), []);
+  const season   = useCbsSeason();
 
   const teamData = React.useMemo(() => {
     return LEAGUE_TEAMS.map(team => {
-      const weeks = Array.from({ length: weeksPlayed }, (_, w) => {
-        const matchup = schedule[w]?.find(([a, b]) => a === team.id || b === team.id);
-        const oppId   = matchup ? (matchup[0] === team.id ? matchup[1] : matchup[0]) : null;
-        const myPts   = simScore(team.id, w + 1);
-        const oppPts  = oppId ? simScore(oppId, w + 1) : 0;
-        return { week: w + 1, pts: myPts, opp: oppId, oppPts, win: myPts > oppPts };
-      });
-      const totalPts = weeks.reduce((s, w) => s + w.pts, 0);
-      const wins     = weeks.filter(w => w.win).length;
-      const losses   = weeks.length - wins;
-      const avgPts   = weeks.length ? totalPts / weeks.length : 0;
-      const best     = weeks.length ? Math.max(...weeks.map(w => w.pts)) : 0;
-      const worst    = weeks.length ? Math.min(...weeks.map(w => w.pts)) : 0;
-      const streak   = (() => {
-        if (!weeks.length) return { type: '—', count: 0 };
-        const last = weeks[weeks.length - 1];
-        let count = 1;
-        for (let i = weeks.length - 2; i >= 0; i--) {
-          if (weeks[i].win === last.win) count++; else break;
-        }
-        return { type: last.win ? 'W' : 'L', count };
-      })();
-      return { team, weeks, totalPts: Math.round(totalPts * 10) / 10, wins, losses, avgPts: Math.round(avgPts * 10) / 10, best: Math.round(best * 10) / 10, worst: Math.round(worst * 10) / 10, streak };
-    }).sort((a, b) => b.totalPts - a.totalPts);
-  }, [weeksPlayed, schedule]);
+      const s = summarizeTeamSeason(season?.get(team.id));
+      const weeks = s.done.map(w => ({ week: w.week, pts: r1(w.pts), opp: w.opp, oppPts: r1(w.oppPts), result: w.result }));
+      return { team, weeks, totalPts: r1(s.totalPts), wins: s.wins, losses: s.losses, ties: s.ties, avgPts: r1(s.avg), best: r1(s.best), worst: r1(s.worst), streak: s.streak };
+    }).sort((a, b) => (b.wins + b.ties / 2) - (a.wins + a.ties / 2) || b.totalPts - a.totalPts);
+  }, [season]);
+  const weeksPlayed = teamData.reduce((m, d) => Math.max(m, d.weeks.at(-1)?.week || 0), 0);
 
   const focused = teamData.find(d => d.team.id === focusTeam) ?? teamData[0];
 
@@ -101,7 +57,11 @@ export default function SeasonPerformanceScreen({ user, myRosterIds }) {
           <div className="sub">
             {isOffseason
               ? 'Pre-season — no games played yet'
-              : `Through Week ${weeksPlayed} · Simulated season scores`}
+              : season === undefined
+                ? 'Loading results from CBS…'
+                : season === null
+                  ? 'Could not load results from CBS'
+                  : `Through Week ${weeksPlayed} · Results from CBS`}
           </div>
         </div>
       </div>
@@ -134,7 +94,7 @@ export default function SeasonPerformanceScreen({ user, myRosterIds }) {
                   <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexShrink: 0 }}>
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>Record</div>
-                      <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13 }}>{d.wins}–{d.losses}</div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13 }}>{d.wins}–{d.losses}{d.ties ? `–${d.ties}` : ''}</div>
                     </div>
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>Total</div>
@@ -173,7 +133,7 @@ export default function SeasonPerformanceScreen({ user, myRosterIds }) {
             </div>
 
             {focused.weeks.length === 0 ? (
-              <div style={{ color: 'var(--text-faint)', fontSize: 13, padding: '16px 0' }}>Season hasn't started yet.</div>
+              <div style={{ color: 'var(--text-faint)', fontSize: 13, padding: '16px 0' }}>{season === undefined ? 'Loading…' : season === null ? 'Results unavailable.' : "Season hasn't started yet."}</div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table className="table" style={{ width: '100%' }}>
@@ -205,8 +165,8 @@ export default function SeasonPerformanceScreen({ user, myRosterIds }) {
                           <td className="num" style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)' }}>{w.pts}</td>
                           <td className="num" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{w.oppPts}</td>
                           <td className="num">
-                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: w.win ? 'var(--good)' : 'var(--danger)' }}>
-                              {w.win ? 'W' : 'L'}
+                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: w.result === 'W' ? 'var(--good)' : w.result === 'L' ? 'var(--danger)' : 'var(--text-dim)' }}>
+                              {w.result}
                             </span>
                           </td>
                           <td className="num" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: margin > 0 ? 'var(--good)' : 'var(--danger)', fontWeight: 700 }}>

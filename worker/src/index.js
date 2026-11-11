@@ -51,6 +51,7 @@ const routes = {
   "/api/health":              health,
   "/api/cbs/league":          getLeague,
   "/api/cbs/teams":           getTeams,
+  "/api/cbs/schedule":        getSchedule,
   "/api/cbs/rosters":         getLiveLineups, // getRosters (below) is dead — see note above its definition
   "/api/cbs/lineups":         getLiveLineups,
   "/api/cbs/rankings":        getRankings,
@@ -135,6 +136,55 @@ async function getTeams(req, env) {
   const html = await cbsFetch(env, "/standings", req);
   const teams = await parseTeams(html);
   return { source: "cbs", fetchedAt: new Date().toISOString(), teams };
+}
+
+// Real week-by-week results for every team. CBS has no league-wide results
+// table — /schedule only shows the logged-in team — so fetch each team's
+// /schedule/team/{id} page (cbsFetch caches each for 5 minutes).
+async function getSchedule(req, env) {
+  const teams = await parseTeams(await cbsFetch(env, "/standings", req));
+  const pages = await Promise.allSettled(
+    teams.map(t => cbsFetch(env, `/schedule/team/${t.id}`, req)),
+  );
+  const schedule = {};
+  teams.forEach((t, i) => {
+    if (pages[i].status === "fulfilled") schedule[t.id] = parseTeamSchedule(pages[i].value);
+  });
+  return { source: "cbs", fetchedAt: new Date().toISOString(), schedule };
+}
+
+// Parse a /schedule/team/{id} page. Row shape (confirmed live 2026-11-11):
+//   <td>1</td><td>[@]<a href='/teams/6'>Swamp Crotch</a></td>
+//   <td><a ...>Won <span title='100.0600'>100.1</span> - <span title='82.2000'>82.2</span></a></td>
+// Future weeks have an empty result cell; the current week says "In Progress".
+function parseTeamSchedule(html) {
+  const weeks = [];
+  const cellText = s => s.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+  // Games against the logged-in (cookie) team are highlighted with class
+  // "bgFan" instead of row1/row2 — missing it drops one game from every team.
+  const rowRe = /<tr\s+class="(?:row[12]|bgFan)"[^>]*>([\s\S]*?)<\/tr>/g;
+  let m;
+  while ((m = rowRe.exec(html)) !== null) {
+    const cells = [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(c => c[1]);
+    if (cells.length < 3) continue;
+    const week = parseInt(cellText(cells[0]), 10);
+    if (!Number.isFinite(week)) continue;
+    const oppMatch = cells[1].match(/href='\/teams\/(\d+)'/);
+    const resultText = cellText(cells[2]);
+    const scores = [...cells[2].matchAll(/<span[^>]*title='([\d.]+)'/g)].map(s => parseFloat(s[1]));
+    const first = resultText.split(" ")[0];
+    const result = first === "Won" ? "W" : first === "Lost" ? "L" : first === "Tied" ? "T" : null;
+    weeks.push({
+      week,
+      oppId: oppMatch ? oppMatch[1] : null,
+      away: cellText(cells[1]).startsWith("@"),
+      result,
+      inProgress: /In Progress/i.test(resultText),
+      pts: result && scores.length >= 2 ? scores[0] : null,
+      oppPts: result && scores.length >= 2 ? scores[1] : null,
+    });
+  }
+  return weeks;
 }
 
 async function getRosters(req, env) {
@@ -886,7 +936,7 @@ async function parseTeams(html) {
   if (!headerRow) return teams;
   const headers = [...headerRow[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(h => cellText(h[1]));
   const col = name => headers.indexOf(name);
-  const iW = col("W"), iL = col("L"), iT = col("T"), iPF = col("PF"), iPA = col("PA");
+  const iW = col("W"), iL = col("L"), iT = col("T"), iPF = col("PF"), iPA = col("PA"), iStreak = col("Streak");
 
   const rowRe = /<tr[^>]+\bid="(\d+)"[^>]*>([\s\S]*?)<\/tr>/g;
   let m;
@@ -905,6 +955,7 @@ async function parseTeams(html) {
       w, l, t,
       pf: num(iPF),
       pa: num(iPA),
+      streak: iStreak >= 0 ? (cells[iStreak] || "") : "",
     });
   }
   return teams;

@@ -2,11 +2,16 @@ import React from 'react';
 import { LEAGUE_TEAMS, findTeam } from '../lib/data.js';
 import { usePlayers } from '../lib/playerStore.js';
 import { TeamLogoBadge } from '../components/ui.jsx';
-import { buildPowerData, buildPowerSchedule, simScore, getPowerWeek } from '../lib/powerUtils.js';
+import { buildPowerData, getPowerWeek, useCbsSeason } from '../lib/powerUtils.js';
 
-const PLAYOFF_START = 13;
+function getPlayoffStart() {
+  try { return Number(JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null')?.playoffRules?.startWeek) || 15; }
+  catch { return 15; }
+}
 
 function getCurrentWeek() { return getPowerWeek(); }
+
+const fmtRecord = d => `${d.wins}–${d.losses}${d.ties ? `–${d.ties}` : ''}`;
 
 function MiniSparkline({ values, width = 60, height = 20 }) {
   if (!values || values.length < 2) return <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>—</span>;
@@ -48,14 +53,26 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
   const isOffseason = currentWeek === 0;
   const [viewMode, setViewMode] = React.useState('power');
   const allPlayers = usePlayers(); // re-run buildPowerData whenever patchPlayers fires
+  const season     = useCbsSeason();
   const data      = React.useMemo(() => {
     const rOv  = user?.teamId && myRosterIds?.size ? { [user.teamId]: myRosterIds } : {};
     const slOv = user?.teamId && Object.keys(slotOverrides).length ? { [user.teamId]: slotOverrides } : {};
-    return buildPowerData(currentWeek, rOv, slOv);
-  }, [currentWeek, allPlayers, myRosterIds, slotOverrides]);
-  const schedule  = React.useMemo(() => buildPowerSchedule(LEAGUE_TEAMS.map(t => t.id), 14), []);
+    return buildPowerData(currentWeek, rOv, slOv, season || null);
+  }, [currentWeek, allPlayers, myRosterIds, slotOverrides, season]);
+  const PLAYOFF_START = getPlayoffStart();
   const myTeamId  = user?.teamId;
   const maxPower  = data[0]?.power || 1;
+  const lastCompletedWeek = React.useMemo(() => {
+    if (!season) return 0;
+    let max = 0;
+    for (const weeks of season.values()) for (const w of weeks) if (w.result && w.week > max) max = w.week;
+    return max;
+  }, [season]);
+  const scheduleWeeks = React.useMemo(() => {
+    let max = 14;
+    if (season) for (const weeks of season.values()) for (const w of weeks) if (w.week > max) max = w.week;
+    return max;
+  }, [season]);
 
   return (
     <div className="col" style={{ height: '100%' }}>
@@ -65,7 +82,11 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
           <div className="sub">
             {isOffseason
               ? 'Pre-season projections — season starts Sep 9'
-              : `Through Week ${currentWeek - 1} · Updated live`}
+              : season === undefined
+                ? 'Loading results from CBS…'
+                : season === null
+                  ? 'Could not load results from CBS · showing projections only'
+                  : `Through Week ${lastCompletedWeek} · Results from CBS`}
           </div>
         </div>
       </div>
@@ -122,7 +143,7 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
 
                       {/* Stats */}
                       <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', flex: 1 }}>
-                        <StatCell label="Record"    value={`${d.wins}–${d.losses}`} />
+                        <StatCell label="Record"    value={fmtRecord(d)} />
                         <StatCell label="Roster"    value={d.playerCount > 0 ? `${d.playerCount}` : '—'} color="var(--text-dim)" />
                         <StatCell label="Total Pts" value={d.totalPts || '—'} color="var(--accent)" />
                         <StatCell label="Avg/Wk"   value={d.avgActual || '—'} color="var(--accent)" />
@@ -135,7 +156,7 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
                         </div>
                         <div style={{ textAlign: 'center', minWidth: 34 }}>
                           <div style={{ fontSize: 8, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>Streak</div>
-                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 13, color: d.streak.type === 'W' ? 'var(--good)' : d.streak.type === 'L' ? 'var(--danger)' : 'var(--text-faint)' }}>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 13, color: d.streak.type === 'W' ? 'var(--good)' : d.streak.type === 'L' ? 'var(--danger)' : 'var(--text-faint)' }} title={d.streak.count ? `${d.streak.count} straight ${d.streak.type === 'W' ? 'win' : d.streak.type === 'L' ? 'loss' : 'tie'}${d.streak.count > 1 ? (d.streak.type === 'L' ? 'es' : 's') : ''}` : undefined}>
                             {d.streak.type}{d.streak.count > 1 ? d.streak.count : ''}
                           </div>
                         </div>
@@ -200,7 +221,7 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
                     <th style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)', fontWeight: 700, letterSpacing: '.06em', borderBottom: '2px solid var(--border)', whiteSpace: 'nowrap' }}>
                       Team
                     </th>
-                    {Array.from({ length: 14 }, (_, i) => {
+                    {Array.from({ length: scheduleWeeks }, (_, i) => {
                       const wk = i + 1;
                       const isCurrent = wk === currentWeek;
                       const isPlayoff = wk >= PLAYOFF_START;
@@ -229,21 +250,19 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
                             <TeamLogoBadge team={d.team} size={26} />
                             <div>
                               <div style={{ fontWeight: isMe ? 700 : 600, fontSize: 12, color: isMe ? 'var(--accent)' : 'var(--text)' }}>{d.team.name}</div>
-                              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{d.wins}–{d.losses}</div>
+                              <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'var(--text-faint)' }}>{fmtRecord(d)}</div>
                             </div>
                           </div>
                         </td>
                         {/* Week cells */}
-                        {schedule.map((weekMatchups, wIdx) => {
+                        {Array.from({ length: scheduleWeeks }, (_, wIdx) => {
                           const wk      = wIdx + 1;
-                          const matchup = weekMatchups.find(([a, b]) => a === d.team.id || b === d.team.id);
-                          const oppId   = matchup ? (matchup[0] === d.team.id ? matchup[1] : matchup[0]) : null;
-                          const opp     = oppId ? findTeam(oppId) : null;
-                          const played  = wk < currentWeek;
-                          const current = wk === currentWeek;
-                          const myPts   = (played || current) ? simScore(d.team.id, wk) : null;
-                          const oppPts  = (played || current) && oppId ? simScore(oppId, wk) : null;
-                          const won     = played ? myPts > oppPts : null;
+                          const g       = d.weeks.find(w => w.week === wk);
+                          const opp     = g?.opp != null ? findTeam(g.opp) : null;
+                          const played  = !!g?.result;
+                          const current = !played && (g?.inProgress || wk === currentWeek);
+                          const myPts   = played ? g.pts : null;
+                          const resColor = g?.result === 'W' ? 'var(--good)' : g?.result === 'L' ? 'var(--danger)' : 'var(--text-dim)';
                           const isPlayoff = wk >= PLAYOFF_START;
                           return (
                             <td key={wIdx} style={{
@@ -256,19 +275,18 @@ export default function PowerRankingsScreen({ user, myRosterIds, slotOverrides =
                             }}>
                               {played ? (
                                 <div>
-                                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11, color: won ? 'var(--good)' : 'var(--danger)', marginBottom: 1 }}>{won ? 'W' : 'L'}</div>
-                                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: won ? 'var(--good)' : 'var(--danger)', fontWeight: 600 }}>{myPts?.toFixed(0)}</div>
-                                  <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{opp ? (opp.abbr || opp.name?.slice(0, 3).toUpperCase()) : '?'}</div>
+                                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11, color: resColor, marginBottom: 1 }}>{g.result}</div>
+                                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: resColor, fontWeight: 600 }} title={`${g.pts.toFixed(1)} – ${g.oppPts.toFixed(1)}`}>{myPts.toFixed(0)}</div>
+                                  <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{opp ? `${g.away ? '@' : ''}${opp.abbr || opp.logo || opp.name?.slice(0, 3).toUpperCase()}` : '?'}</div>
                                 </div>
                               ) : current ? (
                                 <div>
                                   <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)', marginBottom: 1 }}>NOW</div>
-                                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-dim)' }}>{myPts?.toFixed(0)}</div>
-                                  <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{opp ? (opp.abbr || opp.name?.slice(0, 3).toUpperCase()) : '?'}</div>
+                                  <div style={{ fontSize: 9, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>{opp ? `${g?.away ? '@' : ''}${opp.abbr || opp.logo || opp.name?.slice(0, 3).toUpperCase()}` : '?'}</div>
                                 </div>
                               ) : opp ? (
                                 <div style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
-                                  {opp.abbr || opp.name?.slice(0, 3).toUpperCase()}
+                                  {g?.away ? '@' : ''}{opp.abbr || opp.logo || opp.name?.slice(0, 3).toUpperCase()}
                                 </div>
                               ) : (
                                 <span style={{ color: 'var(--border-strong)', fontSize: 10 }}>—</span>

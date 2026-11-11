@@ -1,7 +1,7 @@
 import React from 'react';
 import { TEAM_ROSTERS, findTeam, NEWS, LEAGUE_TEAMS, buildRosterFrame, assignRoster } from '../lib/data.js';
 import { computeOptimal } from './LineupDecisions.jsx';
-import { buildPowerData } from '../lib/powerUtils.js';
+import { buildPowerData, useCbsSeason, remainingMatchups } from '../lib/powerUtils.js';
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { PlayerCell, StatusDot, Sparkline, PosBadge, SourceBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
@@ -530,15 +530,16 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   const isPre       = currentWeek.pre;
 
   const allPlayersList = usePlayers();
+  const cbsSeason = useCbsSeason();
 
   // Power rank from the same buildPowerData used on the Power Rankings screen
   const powerRankMap = React.useMemo(() => {
     const weekNum = isOffseason ? 0 : (currentWeek.num || 0);
     const rOv  = user?.teamId && myRosterIds?.size ? { [user.teamId]: myRosterIds } : {};
     const slOv = user?.teamId && Object.keys(slotOverrides).length ? { [user.teamId]: slotOverrides } : {};
-    const data = buildPowerData(weekNum, rOv, slOv);
+    const data = buildPowerData(weekNum, rOv, slOv, cbsSeason || null);
     return new Map(data.map((d, i) => [d.team.id, i + 1]));
-  }, [isOffseason, currentWeek, allPlayersList, myRosterIds, slotOverrides]);
+  }, [isOffseason, currentWeek, allPlayersList, myRosterIds, slotOverrides, cbsSeason]);
 
   // Standings sorted: pre-season = power ranking only; in-season = wins → PF → PA → PR
   const sortedStandings = React.useMemo(() => {
@@ -708,9 +709,10 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
     return simulatePlayoffOdds(standings, {
       regularSeasonWeeks: startWeek - 1,
       playoffTeams: Number(pr.numTeams) || 6,
-      schedule: rosterSettings?.matchupSchedule || {},
+      // Real remaining CBS matchups; league-settings schedule as a fallback
+      schedule: cbsSeason ? remainingMatchups(cbsSeason) : (rosterSettings?.matchupSchedule || {}),
     });
-  }, [standings, rosterSettings]);
+  }, [standings, rosterSettings, cbsSeason]);
 
   const slotFrame  = React.useMemo(() => buildRosterFrame(rosterSettings), [rosterSettings]);
   const fullRoster = React.useMemo(

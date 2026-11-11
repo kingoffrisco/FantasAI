@@ -1,5 +1,7 @@
+import React from 'react';
 import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster } from './data.js';
 import { findPlayer } from './playerStore.js';
+import { api } from '../api.js';
 
 const SEASON_START = new Date('2026-09-09');
 
@@ -9,31 +11,103 @@ export function getPowerWeek() {
   return Math.min(Math.floor((today - SEASON_START) / (7 * 86400000)) + 1, 14);
 }
 
-export function buildPowerSchedule(ids, weeks) {
-  const n = ids.length;
-  return Array.from({ length: weeks }, (_, w) => {
-    const rest   = ids.slice(1);
-    const rot    = w % (n - 1);
-    const circle = [ids[0], ...[...rest.slice(rot), ...rest.slice(0, rot)]];
-    return Array.from({ length: n / 2 }, (_, i) => [circle[i], circle[n - 1 - i]]);
-  });
+// ── Real season results from CBS ──────────────────────────────────────────────
+// /api/cbs/schedule returns { schedule: { [cbsTeamId]: [{ week, oppId, away,
+// result: 'W'|'L'|'T'|null, inProgress, pts, oppPts }] } }. Convert it to app
+// team ids so screens can join it with LEAGUE_TEAMS.
+export function buildSeasonFromCbs(resp) {
+  const raw = resp?.schedule;
+  if (!raw || typeof raw !== 'object') return null;
+  const byCbs = new Map(LEAGUE_TEAMS.map(t => [String(t.cbsId), t.id]));
+  const season = new Map();
+  for (const [cbsId, weeks] of Object.entries(raw)) {
+    const teamId = byCbs.get(String(cbsId));
+    if (teamId == null || !Array.isArray(weeks)) continue;
+    season.set(teamId, weeks.map(w => ({
+      week:       w.week,
+      opp:        w.oppId != null ? byCbs.get(String(w.oppId)) ?? null : null,
+      away:       !!w.away,
+      result:     w.result || null,
+      inProgress: !!w.inProgress,
+      pts:        w.pts,
+      oppPts:     w.oppPts,
+    })).sort((a, b) => a.week - b.week));
+  }
+  return season.size ? season : null;
 }
 
-export function simScore(teamId, week) {
-  const roster   = TEAM_ROSTERS[teamId] || [];
-  const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
-  const base = starters.reduce((s, e) => {
-    const p = findPlayer(e.playerId);
-    return s + (p ? (p.avg || p.proj || 0) : 0);
-  }, 0);
-  const noise = (Math.sin(teamId * 11.3 + week * 7.1) * 12) + (Math.cos(teamId * 3.7 + week * 2.9) * 6);
-  return Math.max(0, Math.round((base + noise) * 10) / 10);
+// Remaining matchups as { [week]: [[teamIdA, teamIdB], ...] } for weeks with no
+// final result yet — the shape the dashboard's playoff simulation expects.
+export function remainingMatchups(season) {
+  if (!season) return {};
+  const out = {};
+  const seen = new Set();
+  for (const [teamId, weeks] of season) {
+    for (const w of weeks) {
+      if (w.result || w.opp == null) continue;
+      const key = `${w.week}:${Math.min(teamId, w.opp)}:${Math.max(teamId, w.opp)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      (out[w.week] ||= []).push([teamId, w.opp]);
+    }
+  }
+  return out;
 }
 
-export function buildPowerData(currentWeek, rosterOverrides = {}, slotOverridesByTeam = {}) {
-  const ids         = LEAGUE_TEAMS.map(t => t.id);
-  const schedule    = buildPowerSchedule(ids, 14);
-  const weeksPlayed = Math.max(0, currentWeek - 1);
+// One shared fetch for every screen that needs results (5-minute reuse).
+let seasonCache = { at: 0, promise: null };
+function fetchSeason() {
+  if (!seasonCache.promise || Date.now() - seasonCache.at > 5 * 60 * 1000) {
+    seasonCache = {
+      at: Date.now(),
+      promise: api.schedule().then(buildSeasonFromCbs).catch(() => {
+        seasonCache.at = 0; // retry on next mount
+        return null;
+      }),
+    };
+  }
+  return seasonCache.promise;
+}
+
+// undefined = loading, null = unavailable, Map = loaded
+export function useCbsSeason() {
+  const [season, setSeason] = React.useState(undefined);
+  React.useEffect(() => {
+    let alive = true;
+    fetchSeason().then(s => { if (alive) setSeason(s); });
+    return () => { alive = false; };
+  }, []);
+  return season;
+}
+
+// Summarise one team's completed games.
+export function summarizeTeamSeason(weeks = []) {
+  const done = weeks.filter(w => w.result && w.pts != null);
+  const wins   = done.filter(w => w.result === 'W').length;
+  const losses = done.filter(w => w.result === 'L').length;
+  const ties   = done.filter(w => w.result === 'T').length;
+  const weeklyPts = done.map(w => w.pts);
+  const totalPts  = weeklyPts.reduce((s, p) => s + p, 0);
+  const streak = (() => {
+    if (!done.length) return { type: '—', count: 0 };
+    const last = done[done.length - 1].result;
+    let count = 0;
+    for (let i = done.length - 1; i >= 0 && done[i].result === last; i--) count++;
+    return { type: last, count };
+  })();
+  return {
+    done, wins, losses, ties, weeklyPts, totalPts, streak,
+    avg:   done.length ? totalPts / done.length : 0,
+    best:  done.length ? Math.max(...weeklyPts) : 0,
+    worst: done.length ? Math.min(...weeklyPts) : 0,
+  };
+}
+
+const r1 = n => Math.round(n * 10) / 10;
+
+// season: Map from useCbsSeason(). Without it, teams show no games played
+// rather than invented results.
+export function buildPowerData(currentWeek, rosterOverrides = {}, slotOverridesByTeam = {}, season = null) {
   const leagueSettings = (() => { try { return JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch { return null; } })();
   const rosterFrame = buildRosterFrame(leagueSettings);
 
@@ -47,51 +121,23 @@ export function buildPowerData(currentWeek, rosterOverrides = {}, slotOverridesB
       return s + (p ? (p.proj || 0) : 0);
     }, 0);
 
-    let wins = 0, losses = 0, totalPts = 0, weeklyPts = [];
-    for (let w = 0; w < weeksPlayed; w++) {
-      const matchup = schedule[w]?.find(([a, b]) => a === team.id || b === team.id);
-      if (!matchup) continue;
-      const oppId  = matchup[0] === team.id ? matchup[1] : matchup[0];
-      const myPts  = simScore(team.id, w + 1);
-      const oppPts = simScore(oppId, w + 1);
-      weeklyPts.push(myPts);
-      totalPts += myPts;
-      if (myPts > oppPts) wins++; else losses++;
-    }
-
-    const avgActual = weeklyPts.length ? totalPts / weeklyPts.length : 0;
-    const best      = weeklyPts.length ? Math.max(...weeklyPts) : 0;
-    const worst     = weeklyPts.length ? Math.min(...weeklyPts) : 0;
-
-    const weekResults = weeklyPts.map((pts, wi) => {
-      const m = schedule[wi]?.find(([a, b]) => a === team.id || b === team.id);
-      if (!m) return null;
-      const oppId = m[0] === team.id ? m[1] : m[0];
-      return pts > simScore(oppId, wi + 1);
-    }).filter(r => r !== null);
-
-    const streak = (() => {
-      if (!weekResults.length) return { type: '—', count: 0 };
-      const won = weekResults[weekResults.length - 1];
-      let count = 1;
-      for (let i = weekResults.length - 2; i >= 0; i--) {
-        if (weekResults[i] === won) count++; else break;
-      }
-      return { type: won ? 'W' : 'L', count };
-    })();
-
-    const winPct = (wins + losses) > 0 ? wins / (wins + losses) : 0;
-    const power  = Math.round((projPts * 0.4 + avgActual * 0.35 + winPct * 60) * 10) / 10;
+    const s = summarizeTeamSeason(season?.get(team.id));
+    const games  = s.wins + s.losses + s.ties;
+    const winPct = games > 0 ? (s.wins + s.ties / 2) / games : 0;
+    // Projection carries the ranking pre-season; real results take over as
+    // games are played (60 points of weight for win %, 0.35 per avg point).
+    const power  = r1(projPts * 0.4 + s.avg * 0.35 + winPct * 60);
 
     return {
       team,
-      wins, losses,
-      totalPts:  Math.round(totalPts  * 10) / 10,
-      avgActual: Math.round(avgActual * 10) / 10,
-      projPts:   Math.round(projPts   * 10) / 10,
-      best:      Math.round(best      * 10) / 10,
-      worst:     Math.round(worst     * 10) / 10,
-      streak, power, weeklyPts,
+      wins: s.wins, losses: s.losses, ties: s.ties,
+      totalPts:  r1(s.totalPts),
+      avgActual: r1(s.avg),
+      projPts:   r1(projPts),
+      best:      r1(s.best),
+      worst:     r1(s.worst),
+      streak: s.streak, power, weeklyPts: s.weeklyPts,
+      weeks: season?.get(team.id) || [],
       playerCount: playerIdSet.size,
     };
   }).sort((a, b) => b.power - a.power);

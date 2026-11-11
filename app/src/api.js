@@ -40,6 +40,7 @@ function extractPlayerArray(raw) {
 export const api = {
   league:   ()            => get('/api/cbs/league'),
   teams:    ()            => get('/api/cbs/teams'),
+  schedule: ()            => get('/api/cbs/schedule'),
   rankings: (pos = 'ALL') => get(`/api/cbs/rankings?pos=${pos}`),
   draft:    (year)        => get(`/api/cbs/draft?year=${year}`),
   rosters:  ()            => get('/api/cbs/rosters'),
