@@ -141,16 +141,49 @@ async function getTeams(req, env) {
 // Real week-by-week results for every team. CBS has no league-wide results
 // table — /schedule only shows the logged-in team — so fetch each team's
 // /schedule/team/{id} page (cbsFetch caches each for 5 minutes).
+//
+// League results are the same for every viewer, so: try the Worker's own
+// CBS_COOKIE first (a stale cookie saved in someone's browser would otherwise
+// return pages with no results), fall back to the browser's X-CBS-Cookie, and
+// cache the parsed result at the edge for 5 minutes (one CBS crawl per 5 min
+// instead of 13 page fetches on every page view).
 async function getSchedule(req, env) {
-  const teams = await parseTeams(await cbsFetch(env, "/standings", req));
-  const pages = await Promise.allSettled(
-    teams.map(t => cbsFetch(env, `/schedule/team/${t.id}`, req)),
-  );
-  const schedule = {};
-  teams.forEach((t, i) => {
-    if (pages[i].status === "fulfilled") schedule[t.id] = parseTeamSchedule(pages[i].value);
-  });
-  return { source: "cbs", fetchedAt: new Date().toISOString(), schedule };
+  const cache = caches.default;
+  const cacheKey = new Request("https://fantasai-cbs.internal/api/cbs/schedule/v1");
+  const hit = await cache.match(cacheKey);
+  if (hit) return hit.json();
+
+  const headerCookie = req?.headers.get("X-CBS-Cookie") || "";
+  const cookies = [...new Set([env.CBS_COOKIE, headerCookie].filter(Boolean))];
+  let lastErr = null;
+  for (const cookie of cookies) {
+    const asReq = { headers: { get: h => (h === "X-CBS-Cookie" ? cookie : null) } };
+    try {
+      const teams = await parseTeams(await cbsFetch(env, "/standings", asReq));
+      if (!teams.length) { lastErr = new Error("CBS standings page had no teams (cookie expired?)"); continue; }
+      const pages = await Promise.allSettled(
+        teams.map(t => cbsFetch(env, `/schedule/team/${t.id}`, asReq)),
+      );
+      const schedule = {};
+      teams.forEach((t, i) => {
+        if (pages[i].status !== "fulfilled") return;
+        const weeks = parseTeamSchedule(pages[i].value);
+        if (weeks.length) schedule[t.id] = weeks;
+      });
+      if (!Object.keys(schedule).length) { lastErr = new Error("CBS schedule pages had no games (cookie expired?)"); continue; }
+      const body = { source: "cbs", fetchedAt: new Date().toISOString(), teamsFound: teams.length, teamsParsed: Object.keys(schedule).length, schedule };
+      // Only cache a complete crawl, so a partial one is retried next request
+      if (Object.keys(schedule).length === teams.length) {
+        await cache.put(cacheKey, new Response(JSON.stringify(body), {
+          headers: { "Content-Type": "application/json", "Cache-Control": "max-age=300" },
+        }));
+      }
+      return body;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("No CBS cookie available");
 }
 
 // Parse a /schedule/team/{id} page. Row shape (confirmed live 2026-11-11):
