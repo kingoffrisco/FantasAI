@@ -295,6 +295,7 @@ def extract_draft_signal(text: str) -> dict:
 # -- Aggregation helpers ----------------------------------------------------
 
 INJURY_MAX_AGE_DAYS = 10
+NOTES_MAX_AGE_DAYS = 7
 
 
 def build_player_notes(classified: list, roster_lookup: dict = None) -> dict:
@@ -313,9 +314,18 @@ def build_player_notes(classified: list, roster_lookup: dict = None) -> dict:
     best_recent: dict = {}   # name -> (relevance, item)
     newest: dict = {}        # name -> item
 
+    notes_cut = (now - timedelta(days=NOTES_MAX_AGE_DAYS)).isoformat()[:19]
+
     # Oldest → newest, so "last write wins" means "most recent wins".
     for item in sorted(classified, key=_article_time):
         t = _article_time(item)[:19]
+        # Notes only describe the last NOTES_MAX_AGE_DAYS. Falling back to a
+        # player's newest-but-old note surfaced a Week 6 "bold predictions"
+        # line as Brock Bowers' top note in Week 10 (2026-11-16), because the
+        # classifier hadn't tagged him on that week's articles. No recent
+        # note → no FantasAI note; the card falls back to live sources.
+        if t < notes_cut:
+            continue
         for player in item.get("players", []):
             if not player or len(player) < 3:
                 continue

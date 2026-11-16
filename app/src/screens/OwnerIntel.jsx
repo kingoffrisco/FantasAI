@@ -216,14 +216,14 @@ function computePosSpend(teamId, year = null) {
     .filter(([y, d]) => d.rounds && (year == null || Number(y) === Number(year)))
     .map(([, d]) => d);
   if (!years.length) return null;
-  const n = years.length;
   const result = Array.from({ length: 14 }, () => ({ QB: 0, RB: 0, WR: 0, TE: 0, K: 0, DST: 0 }));
-  years.forEach(({ rounds }) => {
-    for (let i = 0; i < Math.min(rounds.length, 14); i++) {
-      const pos = POS_DECODE[rounds[i]];
-      if (pos) result[i][pos] += 100 / n;
-    }
-  });
+  // Each round is split over the seasons that actually HAD a pick in that
+  // round — dividing by all seasons left an empty block in round 14, since
+  // the 2026 draft was only 13 rounds.
+  for (let i = 0; i < 14; i++) {
+    const picks = years.map(({ rounds }) => POS_DECODE[rounds[i]]).filter(Boolean);
+    for (const pos of picks) result[i][pos] += 100 / picks.length;
+  }
   return result;
 }
 
@@ -459,22 +459,20 @@ function OwnerRoster({ teamId, onOpenPlayer, isMyTeam, myRosterIds, slotOverride
 
 function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOverrides, commissioners, selectedId, isMobile = false, mobileTab = 'profile' }) {
   const o = owner;
-  // null = all seasons blended; a year = exactly that season's picks
-  const [spendYear, setSpendYear] = React.useState(null);
+  // A year = exactly that season's picks; null = all seasons blended.
+  // Defaults to the latest season: the blend was read as "5 QBs in one year"
+  // when it was really 2 QBs a season spread over different rounds.
   const spendYears = React.useMemo(() => Object.entries(CBS_DRAFT_HISTORY[team.id] || {})
     .filter(([, d]) => d.rounds)
     .map(([y]) => Number(y))
     .sort((a, b) => b - a), [team.id]);
-  React.useEffect(() => { setSpendYear(null); }, [team.id]);
+  const [spendYear, setSpendYear] = React.useState(() => spendYears[0] ?? null);
+  React.useEffect(() => { setSpendYear(spendYears[0] ?? null); }, [team.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const realPosSpend = React.useMemo(() => computePosSpend(team.id, spendYear), [team.id, spendYear]);
   const posData = realPosSpend || o.posByRound;
-  const realPosYears = React.useMemo(() => {
-    if (spendYear != null) return `${spendYear} draft`;
-    const years = [...spendYears].sort((a, b) => a - b);
-    if (!years.length) return '';
-    const span = years.length > 1 ? `${years[0]}–${years[years.length - 1]}` : `${years[0]}`;
-    return `${span} · ${years.length} seasons blended`;
-  }, [spendYears, spendYear]);
+  // Always one real season — no blended view (it was read as e.g. "5 QBs in
+  // one year" when it was 2 QBs a season over 3 seasons).
+  const realPosYears = spendYear != null ? `${spendYear} draft` : '';
 
   const showProfile = !isMobile || mobileTab === 'profile';
   const showTendencies = isMobile && mobileTab === 'tendencies';
@@ -583,12 +581,12 @@ function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOv
       <div className="muted-card" style={{ marginTop: 14 }}>
         <div className="card-mini-label" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           POSITION SPEND BY ROUND <span className="faint">{realPosSpend ? realPosYears : '5-year aggregate'}</span>
-          {spendYears.length > 1 && (
+          {spendYears.length > 0 && (
             <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4 }}>
-              {[null, ...spendYears].map(y => (
+              {spendYears.map(y => (
                 <button key={y ?? 'all'} className={`btn sm ${spendYear === y ? 'primary' : 'ghost'}`}
                   style={{ padding: '1px 8px', fontSize: 10 }} onClick={() => setSpendYear(y)}>
-                  {y ?? 'All'}
+                  {y}
                 </button>
               ))}
             </span>
@@ -757,7 +755,11 @@ function PosSpendChart({ posByRound }) {
         <div key={idx} className="pos-col">
           <div className="pos-bar">
             {['QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => round[p] > 0 && (
-              <div key={p} className="seg" style={{ height: `${round[p]}%`, background: colors[p] }} title={`Round ${idx + 1} · ${p}: ${Math.round(round[p])}%`}></div>
+              <div key={p} className="seg" title={`Round ${idx + 1}: ${p}`}
+                style={{ height: `${round[p]}%`, background: colors[p], display: 'flex', alignItems: 'center', justifyContent: 'center',
+                         fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 800, color: '#0a0f1c' }}>
+                {round[p] >= 99 ? p : ''}
+              </div>
             ))}
           </div>
           <div className="pos-round">{idx + 1}</div>

@@ -332,7 +332,7 @@ export const OWNER_PROFILES = [
     history: [
       { year: 2024, place: "3rd", roundPick: 6, picks: [22, 50, 56, 30, 80], notes: "Aggressive RB-RB-WR; nailed Bowers in R4." },
       { year: 2023, place: "5th", roundPick: 9, picks: [22, 23, 53, 56, 80], notes: "Hero RB worked early; Tyreek fell apart late." },
-      { year: 2022, place: "ðŸ† Champion", roundPick: 4, picks: [21, 52, 1, 25, 81], notes: "Early Allen paid off; McBride was the steal." },
+      { year: 2022, place: "🏆 Champion", roundPick: 4, picks: [21, 52, 1, 25, 81], notes: "Early Allen paid off; McBride was the steal." },
       { year: 2021, place: "7th", roundPick: 11, picks: [], notes: "Auto-drafted half the team. Don't talk about it." },
       { year: 2020, place: "2nd", roundPick: 2, picks: [], notes: "Lost the chip on a Sunday night Henry stat correction." },
     ],
@@ -354,10 +354,10 @@ export const OWNER_PROFILES = [
       _r(10,20,30,20,10,10), _r(0,20,30,20,20,10), _r(0,10,20,20,30,20), _r(0,10,20,10,40,20),
     ],
     history: [
-      { year: 2024, place: "ðŸ† Champion", roundPick: 12, picks: [20, 25, 53, 81, 26], notes: "Got CMC at 1.12 turn - pure value." },
+      { year: 2024, place: "🏆 Champion", roundPick: 12, picks: [20, 25, 53, 81, 26], notes: "Got CMC at 1.12 turn - pure value." },
       { year: 2023, place: "2nd", roundPick: 5, picks: [], notes: "Textbook draft. Boring. Effective." },
       { year: 2022, place: "4th", roundPick: 8, picks: [], notes: "Bingo card draft." },
-      { year: 2021, place: "ðŸ† Champion", roundPick: 1, picks: [], notes: "Took Taylor 1.01 - the obvious move that won the league." },
+      { year: 2021, place: "🏆 Champion", roundPick: 1, picks: [], notes: "Took Taylor 1.01 - the obvious move that won the league." },
       { year: 2020, place: "6th", roundPick: 7, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 5 },
@@ -430,7 +430,7 @@ export const OWNER_PROFILES = [
       { year: 2023, place: "6th", roundPick: 4, picks: [], notes: "" },
       { year: 2022, place: "3rd", roundPick: 11, picks: [], notes: "" },
       { year: 2021, place: "9th", roundPick: 2, picks: [], notes: "" },
-      { year: 2020, place: "ðŸ† Champion", roundPick: 6, picks: [], notes: "Late Herbert was the league-winner." },
+      { year: 2020, place: "🏆 Champion", roundPick: 6, picks: [], notes: "Late Herbert was the league-winner." },
     ],
     upcomingPick: { round: 4, slot: 8 },
     predictedNext: { topTargets: [28, 64, 24], reasoning: "Another RB or volume WR. QB still 6 rounds away." },
@@ -475,7 +475,7 @@ export const OWNER_PROFILES = [
     ],
     history: [
       { year: 2024, place: "2nd", roundPick: 5, picks: [], notes: "BPA all the way down. Took TE in R2 nobody saw coming." },
-      { year: 2023, place: "ðŸ† Champion", roundPick: 12, picks: [], notes: "Bowers R8 won her the league." },
+      { year: 2023, place: "🏆 Champion", roundPick: 12, picks: [], notes: "Bowers R8 won her the league." },
       { year: 2022, place: "7th", roundPick: 2, picks: [], notes: "" },
       { year: 2021, place: "5th", roundPick: 10, picks: [], notes: "" },
       { year: 2020, place: "9th", roundPick: 3, picks: [], notes: "" },
@@ -505,7 +505,7 @@ export const OWNER_PROFILES = [
       { year: 2020, place: "11th", roundPick: 11, picks: [], notes: "" },
     ],
     upcomingPick: { round: 4, slot: 11 },
-    predictedNext: { topTargets: [83, 31, 65], reasoning: "Will auto. CBS default ranks at slot 4.11 â†' LaPorta or Aaron Jones." },
+    predictedNext: { topTargets: [83, 31, 65], reasoning: "Will auto. CBS default ranks at slot 4.11 → LaPorta or Aaron Jones." },
   },
   {
     teamId: 9, archetype: "Stack & Pray",
@@ -573,7 +573,7 @@ export const OWNER_PROFILES = [
       { year: 2024, place: "7th", roundPick: 7, picks: [], notes: "Got beat by variance, not by draft." },
       { year: 2023, place: "3rd", roundPick: 1, picks: [], notes: "" },
       { year: 2022, place: "2nd", roundPick: 3, picks: [], notes: "" },
-      { year: 2021, place: "ðŸ† Champion", roundPick: 8, picks: [], notes: "Modeled to perfection." },
+      { year: 2021, place: "🏆 Champion", roundPick: 8, picks: [], notes: "Modeled to perfection." },
       { year: 2020, place: "5th", roundPick: 1, picks: [], notes: "" },
     ],
     upcomingPick: { round: 5, slot: 2 },
@@ -596,7 +596,7 @@ export const OWNER_PROFILES = [
     history: [
       { year: 2024, place: "11th", roundPick: 10, picks: [], notes: "Drafted a kicker in R8. Trolled the league chat." },
       { year: 2023, place: "9th", roundPick: 2, picks: [], notes: "" },
-      { year: 2022, place: "ðŸ† Champion", roundPick: 12, picks: [], notes: "Pure chaos win. Still talked about." },
+      { year: 2022, place: "🏆 Champion", roundPick: 12, picks: [], notes: "Pure chaos win. Still talked about." },
       { year: 2021, place: "8th", roundPick: 11, picks: [], notes: "" },
       { year: 2020, place: "10th", roundPick: 9, picks: [], notes: "" },
     ],
@@ -610,7 +610,7 @@ export const findOwner = (teamId) => OWNER_PROFILES.find(o => o.teamId === teamI
 // Real CBS draft history scraped from:
 //   /draft/results/2024:Pre-season:Tau League Draft/
 // Real draft pick data from CBS (2024 + 2025 seasons).
-// 2024 team names â†' internal id mapping:
+// 2024 team names → internal id mapping:
 //   Groom of Deuce(1) - Cheeseheads(2) - Howdy Hut(3) - Cuddlebone loves Kamala!(4)
 //   Pablo Chacon(5) - Five Pound Bass(6) - My Couch Pulls Out But I Dont(7)
 //   Gecko Barflies(8) - Walton(9) - Buck Wild(10) - Fat,Drunk&Stupid(11) - DJ 8 Trak(12)
@@ -732,7 +732,7 @@ export const ROSTER_CONFIG = {
   rosterLimits: { QB: 2, K: 2 },   // 1 starting K + up to 1 backup on bench; all other positions: no limit
 };
 
-// Map: slot name â†' allowed positions
+// Map: slot name → allowed positions
 export const SLOT_ELIGIBILITY = Object.fromEntries([
   ...ROSTER_CONFIG.slots.map(s => [s.slot, s.eligible]),
   ['BENCH', ['QB', 'RB', 'WR', 'TE', 'K', 'DST']],
@@ -1093,7 +1093,7 @@ export function assignRoster(frame, playerIds, slotOverrides = {}, playerLookup 
     unplaced.push(pid);
   }
 
-  // Second pass: auto-assign by player position â†' dedicated slot â†' FLEX â†' BENCH
+  // Second pass: auto-assign by player position → dedicated slot → FLEX → BENCH
   for (const pid of unplaced) {
     const p = _findPlayerLocal(pid) ?? (playerLookup ? playerLookup(pid) : null);
     if (!p) continue;
