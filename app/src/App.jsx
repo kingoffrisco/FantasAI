@@ -1,6 +1,7 @@
 import React from 'react';
-import { findTeam, MY_ROSTER, TEAM_ROSTERS, LEAGUE_TEAMS, TEAMS_ORDER, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, refreshTeamRosters, clearAllRosters } from './lib/data.js';
-import { findPlayer, getPlayers, setPlayers, patchPlayers, normalizePlayerList, recomputePlayerTiers, BYE_WEEKS_2026 } from './lib/playerStore.js';
+import { findTeam, MY_ROSTER, TEAM_ROSTERS, LEAGUE_TEAMS, TEAMS_ORDER, FREE_DATA_SOURCES, RANKING_SOURCES, buildRosterFrame, assignRoster, refreshTeamRosters, clearAllRosters, getWeekMatchups } from './lib/data.js';
+import { findPlayer, getPlayers, setPlayers, patchPlayers, normalizePlayerList, recomputePlayerTiers, BYE_WEEKS_2026, usePlayers } from './lib/playerStore.js';
+import { useRostersVersion, useLiveWeek, buildTeamRoster, buildMyMatchupRoster } from './lib/leagueRosters.js';
 import { api } from './api.js';
 import { getPlayerMap, fetchBulkProjections } from './lib/sleeper.js';
 import { registerServiceWorker, getSubscriptionState, requestNotificationPermission, showLocalNotification } from './lib/pushNotifications.js';
@@ -31,7 +32,7 @@ import LeagueSettings from './screens/LeagueSettings.jsx';
 import DfsOptimizerScreen from './screens/DfsOptimizer.jsx';
 import KalshiScreen from './screens/Kalshi.jsx';
 import CurrentRosterScreen from './screens/CurrentRoster.jsx';
-import HeadToHeadScreen from './screens/HeadToHead.jsx';
+import HeadToHeadScreen, { computeActualTeamTotal, computeBlendedTeamTotal } from './screens/HeadToHead.jsx';
 import AccountEditScreen, { THEME_VARS } from './screens/AccountEdit.jsx';
 import TransactionsScreen from './screens/Transactions.jsx';
 import PowerRankingsScreen from './screens/PowerRankings.jsx';
@@ -46,25 +47,13 @@ const stripSuffix = (n) => (n || '').toLowerCase().trim().replace(/\s+(jr\.?|sr\
 // ── Live Score Ticker ─────────────────────────────────────────────────────────
 const TICKER_SEASON_START = new Date('2026-09-09');
 
-function tickerSimScore(teamId, week) {
-  const roster   = TEAM_ROSTERS[teamId] || [];
-  const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
-  const base = starters.reduce((s, e) => s + (findPlayer(e.playerId)?.avg || 0), 0);
-  const noise = Math.sin(teamId * 11.3 + week * 7.1) * 12 + Math.cos(teamId * 3.7 + week * 2.9) * 6;
-  return Math.max(0, Math.round((base + noise) * 10) / 10);
-}
-
-function buildTickerSchedule(ids, weeks) {
-  const n = ids.length;
-  return Array.from({ length: weeks }, (_, w) => {
-    const rest   = ids.slice(1);
-    const rot    = w % (n - 1);
-    const circle = [ids[0], ...[...rest.slice(rot), ...rest.slice(0, rot)]];
-    return Array.from({ length: n / 2 }, (_, i) => [circle[i], circle[n - 1 - i]]);
-  });
-}
-
-function LiveScoreTicker({ myTeamId, onNav }) {
+// Real league scoreboard for the current week. Was a simulation until
+// 2026-11-16: a home-made round-robin (not the CBS schedule) and "scores" of
+// season averages plus a sin/cos noise term — numbers that never moved
+// during games. Now: real matchups (getWeekMatchups → CBS schedule), real
+// rosters + CBS lineups (lib/leagueRosters.js) and the same live stats and
+// scoring as the Head-to-Head screen and Dashboard card, so all agree.
+function LiveScoreTicker({ myTeamId, myRosterIds, slotOverrides, onNav }) {
   const [visible, setVisible] = React.useState(true);
   const today = new Date();
   const isInSeason = today >= TICKER_SEASON_START;
@@ -72,19 +61,35 @@ function LiveScoreTicker({ myTeamId, onNav }) {
     ? Math.min(Math.floor((today - TICKER_SEASON_START) / (7 * 86400000)) + 1, 14)
     : null;
 
+  const rostersVersion = useRostersVersion();
+  const liveWeek       = useLiveWeek(week);
+  const allPlayers     = usePlayers();
+
   const matchups = React.useMemo(() => {
     if (!week) return [];
-    const ids  = LEAGUE_TEAMS.map(t => t.id);
-    const sched = buildTickerSchedule(ids, 14);
-    return (sched[week - 1] || []).map(([aId, bId]) => {
-      const a    = LEAGUE_TEAMS.find(t => t.id === aId);
-      const b    = LEAGUE_TEAMS.find(t => t.id === bId);
-      const aScore = tickerSimScore(aId, week);
-      const bScore = tickerSimScore(bId, week);
-      const isMe   = aId === myTeamId || bId === myTeamId;
-      return { a, b, aScore, bScore, isMe };
-    });
-  }, [week, myTeamId]);
+    let settings = null;
+    try { settings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch {}
+    const frame  = buildRosterFrame(settings);
+    const status = liveWeek?.statusByTeam || {};
+    const pts    = liveWeek?.ptsByName || {};
+    const started = Object.values(status).some(s => s.state === 'in' || s.state === 'post');
+    const score = teamId => {
+      const roster = teamId === myTeamId && myRosterIds?.size
+        ? buildMyMatchupRoster(teamId, myRosterIds, slotOverrides, frame)
+        : buildTeamRoster(teamId, frame);
+      // Actual points once games have started; projected total before.
+      return started ? computeActualTeamTotal(roster, pts) : computeBlendedTeamTotal(roster, status, pts);
+    };
+    return (getWeekMatchups(week) || []).map(([aId, bId]) => ({
+      a: findTeam(aId) || LEAGUE_TEAMS.find(t => t.id === aId),
+      b: findTeam(bId) || LEAGUE_TEAMS.find(t => t.id === bId),
+      aScore: score(aId),
+      bScore: score(bId),
+      isMe: aId === myTeamId || bId === myTeamId,
+      projected: !started,
+    }));
+  }, [week, myTeamId, myRosterIds, slotOverrides, liveWeek, rostersVersion, allPlayers]);
+  const anyLive = Object.values(liveWeek?.statusByTeam || {}).some(s => s.state === 'in');
 
   if (!week || matchups.length === 0 || !visible) return null;
 
@@ -97,8 +102,8 @@ function LiveScoreTicker({ myTeamId, onNav }) {
       height: 32, overflow: 'hidden',
     }}>
       <div style={{ flexShrink: 0, padding: '0 10px', fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.1em', borderRight: '1px solid rgba(255,255,255,.1)', height: '100%', display: 'flex', alignItems: 'center', gap: 5 }}>
-        <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#c6ff3a', display: 'inline-block', animation: 'pulse 2s infinite' }} />
-        Wk{week}
+        {anyLive && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#c6ff3a', display: 'inline-block', animation: 'pulse 2s infinite' }} />}
+        Wk{week}{matchups[0]?.projected ? ' · Proj' : anyLive ? ' · Live' : ''}
       </div>
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         <div style={{ display: 'flex', gap: 0, animation: matchups.length > 5 ? 'ticker-scroll 30s linear infinite' : 'none', whiteSpace: 'nowrap' }}>
@@ -111,9 +116,9 @@ function LiveScoreTicker({ myTeamId, onNav }) {
                 background: isMe ? 'rgba(198,255,58,.06)' : 'transparent',
               }}>
                 <span style={{ fontSize: 10, fontWeight: aWin ? 800 : 400, color: aWin ? 'var(--text)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{a?.abbr ?? a?.logo}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: aWin ? 'var(--accent)' : 'var(--text-dim)' }}>{aScore}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: aWin ? 'var(--accent)' : 'var(--text-dim)' }}>{aScore.toFixed(1)}</span>
                 <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>–</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: !aWin ? 'var(--accent)' : 'var(--text-dim)' }}>{bScore}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 12, color: !aWin ? 'var(--accent)' : 'var(--text-dim)' }}>{bScore.toFixed(1)}</span>
                 <span style={{ fontSize: 10, fontWeight: !aWin ? 800 : 400, color: !aWin ? 'var(--text)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{b?.abbr ?? b?.logo}</span>
                 {isMe && <span style={{ fontSize: 8, color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>YOU</span>}
               </div>
@@ -1498,7 +1503,7 @@ export default function App() {
           </button>
         </div>
       )}
-      <LiveScoreTicker myTeamId={user?.teamId} onNav={setActive} />
+      <LiveScoreTicker myTeamId={user?.teamId} myRosterIds={myRosterIds} slotOverrides={rosterSlotOverrides} onNav={setActive} />
       <div className={shellClass} style={shellLayoutStyle}>
         <div className="logo-area">
           <span className="logo-dot"></span>

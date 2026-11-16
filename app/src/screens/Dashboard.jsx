@@ -8,7 +8,9 @@ import { api } from '../api.js';
 import { useApi, useR2CriticalAlerts } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 import { sendLeaguePush } from '../lib/pushNotifications.js';
-import { calcFantasyPts as calcSharedFantasyPts } from '../lib/liveScoring.js';
+import { calcFantasyPts as calcSharedFantasyPts, normalizeTeamAbbr } from '../lib/liveScoring.js';
+import { useRostersVersion, useLiveWeek, buildTeamRoster, buildMyMatchupRoster } from '../lib/leagueRosters.js';
+import { computeActualTeamTotal, computeBlendedTeamTotal } from './HeadToHead.jsx';
 // 2026 is year 29 (2027 will be year 30) — compute dynamically each season
 // rather than hardcoding a count that needs a manual bump every year.
 const LEAGUE_FOUNDED_YEAR = 1998;
@@ -978,54 +980,43 @@ export default function Dashboard({ onNav, onOpenPlayer, user, myRosterIds = new
   }, []);
 
   // ── H2H win probability (shared between scoreboard card + stats grid) ──────
+  const rostersVersion = useRostersVersion();      // loads rosters + CBS lineups, bumps on change
+  const liveWeek       = useLiveWeek(currentWeek?.num);
   const h2hWinData = React.useMemo(() => {
     const wkNum = currentWeek.num;
     if (!wkNum) return null;
     const opp = getOpponent(teamId, wkNum);
     if (!opp) return null;
-    const myProj = starters.reduce((s, r) => {
-      const live = sleeperRosterData[r.playerId];
-      return s + (live?.proj != null ? live.proj : (findPlayer(r.playerId)?.proj || 0));
-    }, 0);
-    const oppRoster    = TEAM_ROSTERS[opp.id] || [];
-    const oppStarters  = oppRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
-    const oppProj      = oppStarters.reduce((s, e) => s + (findPlayer(e.playerId)?.proj || findPlayer(e.playerId)?.avg || 0), 0);
-    const myLive = starters.reduce((s, r) => {
-      const p = findPlayer(r.playerId);
-      if (!p) return s;
-      const proj     = sleeperRosterData[r.playerId]?.proj ?? p.proj ?? 0;
-      const gameInfo = espnGameMap[(p.team ?? '').toUpperCase()];
-      const actual   = espnPlayerActuals[(p.name ?? '').toLowerCase()] ?? null;
-      if (!gameInfo || gameInfo.statusName === 'STATUS_SCHEDULED') return s + proj;
-      const progress = getGameProgress(gameInfo);
-      if (actual != null) return s + (progress >= 1 ? actual : actual + proj * (1 - progress));
-      return s + proj;
-    }, 0);
-    const oppLive = oppStarters.reduce((s, e) => {
-      const p = findPlayer(e.playerId);
-      if (!p) return s;
-      const proj     = p.proj ?? p.avg ?? 0;
-      const gameInfo = espnGameMap[(p.team ?? '').toUpperCase()];
-      const actual   = espnPlayerActuals[(p.name ?? '').toLowerCase()] ?? null;
-      if (!gameInfo || gameInfo.statusName === 'STATUS_SCHEDULED') return s + proj;
-      const progress = getGameProgress(gameInfo);
-      if (actual != null) return s + (progress >= 1 ? actual : actual + proj * (1 - progress));
-      return s + proj;
-    }, 0);
-    const eligible   = starters.filter(r => r.playerId && findPlayer(r.playerId));
-    const liveCount  = eligible.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_IN_PROGRESS'; }).length;
-    const finalCount = eligible.filter(r => { const p = findPlayer(r.playerId); const g = espnGameMap[(p?.team ?? '').toUpperCase()]; return g?.statusName === 'STATUS_FINAL'; }).length;
-    const totalCount = eligible.length;
+    // Same rosters, live stats and math as the Head-to-Head screen (shared
+    // via lib/leagueRosters.js). This card used to read TEAM_ROSTERS
+    // directly — where server rosters are all tagged BENCH until H2H assigns
+    // slots — and its own client-side ESPN parse, so it showed "0 starters"
+    // and a stale score until the user visited H2H and came back.
+    const myRoster  = buildMyMatchupRoster(teamId, myRosterIds, slotOverrides, slotFrame);
+    const oppRoster = buildTeamRoster(opp.id, slotFrame);
+    const status = liveWeek?.statusByTeam || {};
+    const pts    = liveWeek?.ptsByName || {};
+    const myStarters  = myRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
+    const oppStarters = oppRoster.filter(r => r.slot !== 'BENCH' && r.playerId);
+    const gameOf = r => status[normalizeTeamAbbr(findPlayer(r.playerId)?.team || '')];
+    const liveCount  = myStarters.filter(r => gameOf(r)?.state === 'in').length;
+    const finalCount = myStarters.filter(r => gameOf(r)?.state === 'post').length;
+    const totalCount = myStarters.length;
     const weekFinal  = totalCount > 0 && finalCount === totalCount;
-    const hasLive    = Object.keys(espnGameMap).length > 0;
-    const myScore    = hasLive ? myLive : myProj;
-    const oppScore   = hasLive ? oppLive : oppProj;
-    const diff       = myScore - oppScore;
-    const isWinning  = diff >= 0;
-    const winPct     = myScore + oppScore > 0 ? Math.round((myScore / (myScore + oppScore)) * 100) : 50;
+    const hasLive    = Object.values(status).some(s => s.state === 'in' || s.state === 'post');
+    const myProj   = computeBlendedTeamTotal(myRoster, status, pts);   // projected final
+    const oppProj  = computeBlendedTeamTotal(oppRoster, status, pts);
+    const myLive   = computeActualTeamTotal(myRoster, pts);             // actual so far
+    const oppLive  = computeActualTeamTotal(oppRoster, pts);
+    const myScore  = hasLive ? myLive : myProj;
+    const oppScore = hasLive ? oppLive : oppProj;
+    const diff     = myScore - oppScore;
+    const isWinning = diff >= 0;
+    // Win % from projected finals — identical to H2H's WinProbabilityBar
+    const winPct   = myProj + oppProj > 0 ? Math.round((myProj / (myProj + oppProj)) * 100) : 50;
     return { opp, oppStarters, myProj, myLive, oppProj, oppLive, myScore, oppScore, diff, isWinning, winPct, liveCount, finalCount, totalCount, weekFinal, hasLive };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [starters, sleeperRosterData, espnGameMap, espnPlayerActuals, teamId, currentWeek]);
+  }, [myRosterIds, slotOverrides, slotFrame, liveWeek, rostersVersion, allPlayersList, teamId, currentWeek]);
 
   return (
     <div className="col" style={{ height: '100%', overflow: isMobile ? 'auto' : 'hidden', display: 'flex', flexDirection: 'column', paddingBottom: isMobile ? 0 : 24 }}>

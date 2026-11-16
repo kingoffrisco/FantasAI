@@ -1,6 +1,6 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster, getWeekMatchups, CBS_LINEUP_SYNCED } from '../lib/data.js';
-import { fetchLiveWeek } from '../lib/liveScoring.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster, getWeekMatchups } from '../lib/data.js';
+import { useLiveWeek, useRostersVersion, buildMyMatchupRoster, buildTeamRoster } from '../lib/leagueRosters.js';
 import { computeBlendedTeamTotal } from '../screens/HeadToHead.jsx';
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { getSubscriptionState, subscribeToPush, unsubscribeFromPush, showLocalNotification } from '../lib/pushNotifications.js';
@@ -228,29 +228,10 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     return () => { cancelled = true; };
   }, []);
 
-  // Live stats for this week (same R2 source as H2H) — refreshed every 2 min
-  // while a game is in progress so the win % tracks the real score.
-  const [liveWeek, setLiveWeek] = React.useState(null);
-  React.useEffect(() => {
-    let cancelled = false, timer = null;
-    const load = () => fetchLiveWeek(getH2HWeek())
-      .then(d => {
-        if (cancelled) return;
-        setLiveWeek(d);
-        if (d.anyLive) timer = setTimeout(load, 120000);
-      })
-      .catch(() => {});
-    load();
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, []);
-  // TEAM_ROSTERS is mutated in place (server rosters, CBS lineup sync) —
-  // recompute once those async loads have had time to land.
-  const [rosterTick, setRosterTick] = React.useState(0);
-  React.useEffect(() => {
-    const t1 = setTimeout(() => setRosterTick(v => v + 1), 4000);
-    const t2 = setTimeout(() => setRosterTick(v => v + 1), 12000);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, []);
+  // Same live stats + rosters/lineups as H2H and the Dashboard card
+  // (lib/leagueRosters.js), so all three show the same win %.
+  const liveWeek   = useLiveWeek(getH2HWeek());
+  const rosterTick = useRostersVersion();
 
   const h2hInfo = React.useMemo(() => {
     const teamId = user?.teamId;
@@ -288,13 +269,8 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     const myIds = myRosterIds && myRosterIds.size > 0
       ? myRosterIds
       : new Set((TEAM_ROSTERS[teamId] || []).map(e => e.playerId).filter(Boolean));
-    // Mirror H2H: CBS's real lineup for my team when synced and identical in membership
-    const cbsMine = CBS_LINEUP_SYNCED.has(teamId) ? (TEAM_ROSTERS[teamId] || []).map(e => e.playerId).filter(Boolean) : [];
-    const myRoster = (cbsMine.length === myIds.size && cbsMine.every(id => myIds.has(id)))
-      ? assignRoster(slotFrame, cbsMine, {}, findPlayer)
-      : assignRoster(slotFrame, myIds, getPrefs().slotOverrides || {}, findPlayer);
-    const oppRaw = (TEAM_ROSTERS[oppId] || []).map(e => e.playerId).filter(Boolean);
-    const oppRoster = assignRoster(slotFrame, oppRaw, {}, findPlayer);
+    const myRoster  = buildMyMatchupRoster(teamId, myIds, getPrefs().slotOverrides || {}, slotFrame);
+    const oppRoster = buildTeamRoster(oppId, slotFrame);
 
     const myProj  = computeBlendedTeamTotal(myRoster, liveWeek?.statusByTeam, liveWeek?.ptsByName);
     const oppProj = computeBlendedTeamTotal(oppRoster, liveWeek?.statusByTeam, liveWeek?.ptsByName);

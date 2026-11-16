@@ -3,6 +3,7 @@ import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, r
 import { findPlayer, findPlayerByName, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
+import { loadLeagueRosters, ROSTERS_UPDATED_EVENT, buildMyMatchupRoster } from '../lib/leagueRosters.js';
 import { getScoringRules, calcFantasyPts, buildStatPointsBreakdown, normalizeTeamAbbr, getGameProgress, blendProjectedFinal, fetchEspnScoreboardDirect, fetchEspnPlayerStatsDirect } from '../lib/liveScoring.js';
 
 const NUM_WEEKS = 14;
@@ -155,11 +156,12 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
     // not only when someone presses "Resync from CBS". Otherwise starters
     // were a position-order guess that happily started bye-week players
     // (Caleb Williams / Loveland / Barkley / PHI D/ST in Week 10).
-    refreshTeamRostersFromServer()
-      .then(() => { CBS_LINEUP_SYNCED.clear(); setRosterVersion(v => v + 1); })
-      .then(() => syncLineupsFromCbs(findPlayerByName, findPlayer))
-      .catch(() => {})
-      .finally(() => setRosterVersion(v => v + 1));
+    // Shared with Dashboard + sidebar (lib/leagueRosters.js) so every
+    // matchup view sees the same rosters/lineups at the same time.
+    const bump = () => setRosterVersion(v => v + 1);
+    window.addEventListener(ROSTERS_UPDATED_EVENT, bump);
+    loadLeagueRosters({ force: true }).catch(() => {}).finally(bump);
+    return () => window.removeEventListener(ROSTERS_UPDATED_EVENT, bump);
   }, []);
 
   // Live per-player stats + per-game status. Primary source is the Worker's
@@ -321,17 +323,12 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   }, []);
   const slotFrame = React.useMemo(() => buildRosterFrame(rosterSettings), [rosterSettings]);
   // allPlayers in deps: re-assign when live player data loads (findPlayer depends on the store)
-  const myLiveRoster = React.useMemo(() => {
-    if (!myRosterIds || !slotFrame) return null;
-    // Prefer CBS's real lineup for my team when it's been synced and covers
-    // exactly the same players as my saved roster (otherwise one of the two
-    // is stale and the in-app slot assignment is the safer choice).
-    const cbs = CBS_LINEUP_SYNCED.has(myTeamId) ? (TEAM_ROSTERS[myTeamId] || []) : [];
-    const cbsIds = cbs.map(e => e.playerId).filter(Boolean);
-    const same = cbsIds.length === myRosterIds.size && cbsIds.every(id => myRosterIds.has(id));
-    if (same) return assignRoster(slotFrame, cbsIds, {}, findPlayer);
-    return assignRoster(slotFrame, myRosterIds, slotOverrides || {}, findPlayer);
-  }, [slotFrame, myRosterIds, slotOverrides, allPlayers, rosterVersion, myTeamId]);
+  // CBS's real lineup when synced and matching my saved roster — see
+  // buildMyMatchupRoster (shared with Dashboard + sidebar).
+  const myLiveRoster = React.useMemo(
+    () => (myRosterIds && slotFrame) ? buildMyMatchupRoster(myTeamId, myRosterIds, slotOverrides, slotFrame) : null,
+    [slotFrame, myRosterIds, slotOverrides, allPlayers, rosterVersion, myTeamId],
+  );
 
   // Build assigned rosters for ALL teams so H2H shows starter slots, not raw BENCH picks
   const allTeamRosters = React.useMemo(() => {
