@@ -3167,8 +3167,7 @@ export function PlayerDetail({ player, onClose, myRosterIds = new Set(), onAddPl
             <div className="meta">
               <span>ECR #{player.ecr}</span><span className="dot"></span>
               {player.adp < 999 && <><span>ADP {player.adp.toFixed(1)}</span><span className="dot"></span></>}
-              <span>Tier {player.tier}</span><span className="dot"></span>
-              <span>{player.owned.toFixed(1)}% rostered</span>
+              <span>Tier {player.tier}</span>
             </div>
             {(isOnRoster || isOwnedByOther) && (() => {
               let label, color;

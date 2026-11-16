@@ -18,12 +18,14 @@ function normalizePlayerNotes(raw) {
             priority:         a.priority || 'low',
             impact_direction: a.sentiment === 'positive' ? 'positive'
                             : a.sentiment === 'negative' ? 'negative' : 'neutral',
-            published_at:     null,
+            published_at:     a.published_at || null,
           })),
           has_critical_news:    articles.some(a => a.priority === 'critical'),
           has_injury_concern:   pn.injury_flag || false,
           overall_impact_score: pn.max_relevance || 0,
-          last_updated:         raw.generated_at || null,
+          // When the player's latest news was published (not when the job ran)
+          last_updated:         pn.latest_published_at || articles[0]?.published_at || raw.generated_at || null,
+          top_priority:         articles[0]?.priority || 'low',
           // Qwen-specific enrichment fields
           sentiment:            pn.latest_sentiment || 'neutral',
           waiver_relevance:     pn.max_waiver_relevance || 0,
@@ -33,7 +35,17 @@ function normalizePlayerNotes(raw) {
           article_count:        pn.article_count || articles.length,
         };
       })
-      .sort((a, b) => b.overall_impact_score - a.overall_impact_score);
+      // Latest news first (by publish day), then priority of that latest
+      // news, then impact score. Was impact score only, so a high-relevance
+      // September article kept a player at the top of the feed for weeks.
+      .sort((a, b) => {
+        const da = (a.last_updated || '').slice(0, 10), db = (b.last_updated || '').slice(0, 10);
+        if (da !== db) return da < db ? 1 : -1;
+        const pr = { critical: 0, high: 1, medium: 2, low: 3 };
+        const pa = pr[a.top_priority] ?? 3, pb = pr[b.top_priority] ?? 3;
+        if (pa !== pb) return pa - pb;
+        return b.overall_impact_score - a.overall_impact_score;
+      });
   }
   // Old Databricks format: already an array
   return Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
@@ -59,7 +71,9 @@ function normalizeAiSummaries(raw) {
                         : s.sentiment === 'negative' ? 'negative' : 'neutral',
         impact_magnitude: s.relevance || 0,
       })),
-      generated_at:           generatedAt,
+      // The article's own publish time when known — the job's run time made
+      // every summary read "Today" no matter how old the article was.
+      generated_at:           s.published_at || generatedAt,
       is_time_sensitive:      !!(s.injury_related && s.priority_level === 'critical'),
       // Qwen-specific enrichment fields
       sentiment:              s.sentiment || 'neutral',

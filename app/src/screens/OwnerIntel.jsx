@@ -196,10 +196,25 @@ function mergeHistory(mockHistory, draftOverlay, teamId) {
 
 const POS_DECODE = { Q: 'QB', R: 'RB', W: 'WR', T: 'TE', K: 'K', D: 'DST' };
 
-function computePosSpend(teamId) {
+// Last name for the compact pick chips, skipping suffixes — the plain
+// "last word" showed "III", "Jr." and "Sr." for James Cook III, Travis
+// Etienne Jr., Deebo Samuel Sr. etc. DSTs keep their team code ("BAL D/ST").
+function shortName(name) {
+  const parts = String(name || '').trim().split(/\s+/);
+  if (/D\/ST$/i.test(name || '')) return parts[0];
+  while (parts.length > 1 && /^(jr\.?|sr\.?|ii|iii|iv|v)$/i.test(parts[parts.length - 1])) parts.pop();
+  return parts[parts.length - 1] || '';
+}
+
+// year: a single season (matches that season's Draft History row exactly) or
+// null for the all-seasons blend (each round = share of seasons that pick
+// went to each position).
+function computePosSpend(teamId, year = null) {
   const teamData = CBS_DRAFT_HISTORY[teamId];
   if (!teamData) return null;
-  const years = Object.values(teamData).filter(d => d.rounds);
+  const years = Object.entries(teamData)
+    .filter(([y, d]) => d.rounds && (year == null || Number(y) === Number(year)))
+    .map(([, d]) => d);
   if (!years.length) return null;
   const n = years.length;
   const result = Array.from({ length: 14 }, () => ({ QB: 0, RB: 0, WR: 0, TE: 0, K: 0, DST: 0 }));
@@ -444,17 +459,22 @@ function OwnerRoster({ teamId, onOpenPlayer, isMyTeam, myRosterIds, slotOverride
 
 function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOverrides, commissioners, selectedId, isMobile = false, mobileTab = 'profile' }) {
   const o = owner;
-  const realPosSpend = React.useMemo(() => computePosSpend(team.id), [team.id]);
+  // null = all seasons blended; a year = exactly that season's picks
+  const [spendYear, setSpendYear] = React.useState(null);
+  const spendYears = React.useMemo(() => Object.entries(CBS_DRAFT_HISTORY[team.id] || {})
+    .filter(([, d]) => d.rounds)
+    .map(([y]) => Number(y))
+    .sort((a, b) => b - a), [team.id]);
+  React.useEffect(() => { setSpendYear(null); }, [team.id]);
+  const realPosSpend = React.useMemo(() => computePosSpend(team.id, spendYear), [team.id, spendYear]);
   const posData = realPosSpend || o.posByRound;
   const realPosYears = React.useMemo(() => {
-    const years = Object.entries(CBS_DRAFT_HISTORY[team.id] || {})
-      .filter(([, d]) => d.rounds)
-      .map(([y]) => Number(y))
-      .sort((a, b) => a - b);
+    if (spendYear != null) return `${spendYear} draft`;
+    const years = [...spendYears].sort((a, b) => a - b);
     if (!years.length) return '';
     const span = years.length > 1 ? `${years[0]}–${years[years.length - 1]}` : `${years[0]}`;
-    return `${span} · ${years.length} season${years.length === 1 ? '' : 's'}`;
-  }, [team.id]);
+    return `${span} · ${years.length} seasons blended`;
+  }, [spendYears, spendYear]);
 
   const showProfile = !isMobile || mobileTab === 'profile';
   const showTendencies = isMobile && mobileTab === 'tendencies';
@@ -561,7 +581,19 @@ function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOv
 
       {showSpend && (
       <div className="muted-card" style={{ marginTop: 14 }}>
-        <div className="card-mini-label">POSITION SPEND BY ROUND <span style={{ marginLeft: 8 }} className="faint">{realPosSpend ? realPosYears : '5-year aggregate'}</span></div>
+        <div className="card-mini-label" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          POSITION SPEND BY ROUND <span className="faint">{realPosSpend ? realPosYears : '5-year aggregate'}</span>
+          {spendYears.length > 1 && (
+            <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4 }}>
+              {[null, ...spendYears].map(y => (
+                <button key={y ?? 'all'} className={`btn sm ${spendYear === y ? 'primary' : 'ghost'}`}
+                  style={{ padding: '1px 8px', fontSize: 10 }} onClick={() => setSpendYear(y)}>
+                  {y ?? 'All'}
+                </button>
+              ))}
+            </span>
+          )}
+        </div>
         <PosSpendChart posByRound={posData} />
         <div className="pos-legend">
           {[['QB', '--pos-qb'], ['RB', '--pos-rb'], ['WR', '--pos-wr'], ['TE', '--pos-te'], ['K', '--pos-k'], ['DST', '--pos-dst']].map(([p, v]) => (
@@ -639,7 +671,7 @@ function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOv
                           onClick={() => onOpenPlayer && onOpenPlayer(p.id)}
                           style={{ cursor: 'pointer' }}>
                           <PosBadge pos={pos} />
-                          <span>{p.name.split(' ').slice(-1)[0]}</span>
+                          <span>{shortName(p.name)}</span>
                         </span>
                       ) : (
                         <span key={i} className="mini-pick pos-only" title={`R${i + 1}: ${pos}`}>
@@ -655,7 +687,7 @@ function OwnerProfile({ owner, team, onOpenPlayer, isMyTeam, myRosterIds, slotOv
                           onClick={() => onOpenPlayer && onOpenPlayer(pid)}
                           title={p.name} style={{ cursor: 'pointer' }}>
                           <PosBadge pos={p.pos} />
-                          <span>{p.name.split(' ').slice(-1)[0]}</span>
+                          <span>{shortName(p.name)}</span>
                         </span>
                       );
                     }) : <span className="faint mono" style={{ fontSize: 11 }}>— archive only —</span>}
@@ -725,7 +757,7 @@ function PosSpendChart({ posByRound }) {
         <div key={idx} className="pos-col">
           <div className="pos-bar">
             {['QB', 'RB', 'WR', 'TE', 'K', 'DST'].map(p => round[p] > 0 && (
-              <div key={p} className="seg" style={{ height: `${round[p]}%`, background: colors[p] }} title={`${p}: ${round[p]}%`}></div>
+              <div key={p} className="seg" style={{ height: `${round[p]}%`, background: colors[p] }} title={`Round ${idx + 1} · ${p}: ${Math.round(round[p])}%`}></div>
             ))}
           </div>
           <div className="pos-round">{idx + 1}</div>

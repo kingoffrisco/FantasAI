@@ -294,11 +294,28 @@ def extract_draft_signal(text: str) -> dict:
 
 # -- Aggregation helpers ----------------------------------------------------
 
+INJURY_MAX_AGE_DAYS = 10
+
+
 def build_player_notes(classified: list, roster_lookup: dict = None) -> dict:
+    """Per-player news notes. Time-aware since 2026-11-16: the headline
+    summary used to be the single MOST RELEVANT article across the whole
+    60-day cache, so a September "start Josh Allen in Week 3" note stayed his
+    top summary into Week 10. Now the summary is the most relevant article
+    from the last SUMMARY_MAX_AGE_DAYS (falling back to the newest one), the
+    injury flag only reflects the last INJURY_MAX_AGE_DAYS, and the article
+    list is newest-first."""
     players: dict = {}
     dropped_non_roster = 0
+    now = datetime.now(timezone.utc)
+    recent_cut = (now - timedelta(days=SUMMARY_MAX_AGE_DAYS)).isoformat()[:19]
+    injury_cut = (now - timedelta(days=INJURY_MAX_AGE_DAYS)).isoformat()[:19]
+    best_recent: dict = {}   # name -> (relevance, item)
+    newest: dict = {}        # name -> item
 
-    for item in classified:
+    # Oldest → newest, so "last write wins" means "most recent wins".
+    for item in sorted(classified, key=_article_time):
+        t = _article_time(item)[:19]
         for player in item.get("players", []):
             if not player or len(player) < 3:
                 continue
@@ -329,8 +346,10 @@ def build_player_notes(classified: list, roster_lookup: dict = None) -> dict:
             rel = item.get("relevance", 0)
             if rel > entry["max_relevance"]:
                 entry["max_relevance"] = rel
-                entry["latest_summary"] = item.get("summary", "")
-                entry["latest_sentiment"] = item.get("sentiment", "neutral")
+            if item.get("summary"):
+                newest[name] = item
+                if t >= recent_cut and rel >= best_recent.get(name, (-1, None))[0]:
+                    best_recent[name] = (rel, item)
 
             wrel = item.get("waiver_relevance", 0)
             if wrel > entry["max_waiver_relevance"]:
@@ -344,13 +363,14 @@ def build_player_notes(classified: list, roster_lookup: dict = None) -> dict:
             if rrel > entry["max_rookie_relevance"]:
                 entry["max_rookie_relevance"] = rrel
 
-            if item.get("injury_related"):
+            if item.get("injury_related") and t >= injury_cut:
                 entry["injury_flag"] = True
                 status = item.get("injury_status", "none")
                 if status != "none":
                     entry["injury_status"] = status
 
             entry["articles"].append({
+                "published_at": _article_time(item),
                 "headline": item.get("headline", "")[:100],
                 "summary": item.get("summary", ""),
                 "relevance": rel,
@@ -362,9 +382,14 @@ def build_player_notes(classified: list, roster_lookup: dict = None) -> dict:
                 "injury_related": item.get("injury_related", False),
             })
 
-    for p in players.values():
+    for name, p in players.items():
+        pick = (best_recent.get(name) or (None, None))[1] or newest.get(name)
+        if pick:
+            p["latest_summary"] = pick.get("summary", "")
+            p["latest_sentiment"] = pick.get("sentiment", "neutral")
+            p["latest_published_at"] = _article_time(pick)
         p["articles"] = sorted(
-            p["articles"], key=lambda a: a["relevance"], reverse=True
+            p["articles"], key=lambda a: a["published_at"], reverse=True
         )[:5]
 
     if roster_lookup and dropped_non_roster:
@@ -380,21 +405,49 @@ def build_player_notes(classified: list, roster_lookup: dict = None) -> dict:
     }
 
 
+def _iso(value) -> str:
+    """Normalize a timestamp (datetime / ISO / 'YYYY-MM-DD HH:MM:SS') to ISO, or ''."""
+    if not value:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value).replace(" ", "T")
+
+
+def _article_time(a: dict) -> str:
+    # published_at only exists on articles classified after 2026-11-16;
+    # classified_at is a close proxy for older ones (articles are classified
+    # the same day they're ingested).
+    return a.get("published_at") or a.get("classified_at") or ""
+
+
+# AI Summaries only ever draw from recent news. The classified cache keeps
+# 60 days (CACHE_TTL_DAYS) for de-duplication, and summaries used to be
+# ranked by priority/feedback/relevance with NO recency at all — so a
+# high-priority "start Josh Allen in your Week 3 lineup" article from
+# September was still the top Allen summary in Week 10, stamped "Today".
+SUMMARY_MAX_AGE_DAYS = 4
+
+
 def build_ai_summaries(classified: list, feedback_scores: dict = None, top_n: int = 50) -> dict:
     feedback_scores = feedback_scores or {}
     priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     fb_score = lambda a: feedback_scores.get(a.get("article_url", ""), {}).get("score", 0)
-    top = sorted(
-        [
-            a for a in classified
-            if a.get("priority_level") in ("critical", "high")
-        ],
-        key=lambda a: (
-            priority_order.get(a.get("priority_level", "low"), 3),
-            -fb_score(a),
-            -a.get("relevance", 0),
-        ),
-    )[:top_n]
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=SUMMARY_MAX_AGE_DAYS)).isoformat()
+    recent = [
+        a for a in classified
+        if a.get("priority_level") in ("critical", "high") and _article_time(a)[:19] >= cutoff[:19]
+    ]
+    # Latest news first, then priority: newest publish DAY first, highest
+    # priority within that day, then newest time, then community feedback
+    # and relevance. (Exact timestamps are nearly all unique, so sorting on
+    # the full time first would make priority meaningless — grouping by day
+    # keeps "latest first" while still letting priority order the day.)
+    recent.sort(key=lambda a: (-fb_score(a), -a.get("relevance", 0)))
+    recent.sort(key=_article_time, reverse=True)
+    recent.sort(key=lambda a: priority_order.get(a.get("priority_level", "low"), 3))
+    recent.sort(key=lambda a: _article_time(a)[:10], reverse=True)
+    top = recent[:top_n]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "article_count": len(top),
@@ -411,6 +464,8 @@ def build_ai_summaries(classified: list, feedback_scores: dict = None, top_n: in
                 "sentiment": a.get("sentiment", "neutral"),
                 "injury_related": a.get("injury_related", False),
                 "source": a.get("source", ""),
+                "article_url": a.get("article_url", ""),
+                "published_at": _article_time(a),
             }
             for a in top
         ],
@@ -586,6 +641,7 @@ def main():
                 "_fid": _fingerprint(article),
                 "article_url": article_url,
                 "classified_at": datetime.now(timezone.utc).isoformat(),
+                "published_at": _iso(article.get("published_at")),
                 "headline": article.get("headline", "")[:100],
                 "source": article.get("source_name", ""),
                 "elapsed_sec": 0,
@@ -632,6 +688,7 @@ def main():
                 "_fid": _fingerprint(article),
                 "article_url": article_url,
                 "classified_at": datetime.now(timezone.utc).isoformat(),
+                "published_at": _iso(article.get("published_at")),
                 "headline": article.get("headline", "")[:100],
                 "source": article.get("source_name", ""),
                 "elapsed_sec": elapsed,

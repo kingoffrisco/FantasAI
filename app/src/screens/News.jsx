@@ -686,17 +686,28 @@ export default function NewsScreen({ onOpenPlayer, sourcesState, user }) {
           merged.title  = item.title;
           merged.type   = item.type;
         }
-        // Keep most-recent fetchedAt
+        // Keep most-recent fetchedAt / publishedAt across sources
         if (item.fetchedAt && item.fetchedAt > (merged.fetchedAt || 0)) {
           merged.fetchedAt = item.fetchedAt;
+        }
+        if (item.publishedAt && item.publishedAt > (merged.publishedAt || 0)) {
+          merged.publishedAt = item.publishedAt;
         }
       }
     }
 
+    // Latest news first, then priority of that news: newest DAY first,
+    // highest impact within the day, then newest time. The old sort gave
+    // every live item age 0, so cards kept arbitrary load order.
+    const newsTime = n => n.publishedAt || n.fetchedAt || (n.mins != null ? Date.now() - n.mins * 60000 : 0);
+    const dayOf = n => { const t = newsTime(n); return t ? new Date(t).toDateString() : ''; };
     return [...byPlayer.values()].sort((a, b) => {
-      const aAge = a.fetchedAt ? 0 : (a.mins ?? 9999);
-      const bAge = b.fetchedAt ? 0 : (b.mins ?? 9999);
-      return aAge - bAge;
+      const ta = newsTime(a), tb = newsTime(b);
+      const sameDay = dayOf(a) === dayOf(b);
+      if (!sameDay) return tb - ta;
+      const ia = IMPACT_RANK[a.impact] ?? 0, ib = IMPACT_RANK[b.impact] ?? 0;
+      if (ia !== ib) return ib - ia;
+      return tb - ta;
     });
   }, [liveItems]);
 
