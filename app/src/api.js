@@ -172,6 +172,8 @@ export const api = {
     // patch AFTER every other player data source loads, so it survives any
     // future automated refresh instead of being overwritten by one.
     statusOverrides: () => r2Get('fantasai/players/status_overrides.json'),
+    // League-scored season averages (job_live_scores.py build_season_summary)
+    seasonLeague: (season = 2026) => r2Get(`fantasai/live/season_${season}_regular.json`),
     nflSchedule:     () => r2Get('fantasai/analysis/nfl_schedule.json'),
     opponentLookup:  () => r2Get('fantasai/analysis/opponent_lookup.json'),
     playerOwnership: () => r2Get('fantasai/analysis/player_ownership.json'),

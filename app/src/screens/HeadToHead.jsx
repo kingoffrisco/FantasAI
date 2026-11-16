@@ -49,7 +49,7 @@ function findLivePlayerEntry(livePlayerPts, p) {
 // contributes 0, whether that's because their game hasn't started, they
 // haven't recorded anything yet, or they have no game this slate at all.
 // This is the "what has actually happened" number.
-function computeActualTeamTotal(roster, livePlayerPts) {
+export function computeActualTeamTotal(roster, livePlayerPts) {
   const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
   let total = 0;
   for (const entry of starters) {
@@ -66,7 +66,7 @@ function computeActualTeamTotal(roster, livePlayerPts) {
 // game info at all (bye week, not playing this slate). This is a distinct
 // "what we expect the final to be" estimate — shown separately from the
 // real/actual score above, never as the main score.
-function computeBlendedTeamTotal(roster, liveGameStatus, livePlayerPts) {
+export function computeBlendedTeamTotal(roster, liveGameStatus, livePlayerPts) {
   const starters = roster.filter(r => r.slot !== 'BENCH' && r.playerId);
   let total = 0;
   for (const entry of starters) {
@@ -103,6 +103,9 @@ function deriveMatchupStatus(homeRoster, awayRoster, liveGameStatus, fallbackIsL
 // Per-player projection: prefer p.proj (same source as Current Roster), fall back to p.avg
 function playerProjPts(p) {
   if (!p) return 0;
+  // A player on bye scores 0 — counting his normal projection inflated the
+  // "proj. final" for anyone starting a bye-week player.
+  if (p.bye && p.bye === CURRENT_WEEK) return 0;
   return Math.max(0, p.proj || p.avg || 0);
 }
 

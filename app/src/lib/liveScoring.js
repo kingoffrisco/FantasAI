@@ -132,6 +132,31 @@ export function buildStatPointsBreakdown(stats, rules, pos) {
     .map(x => ({ label: x.label, amount: x.amount ?? 0, unit: x.unit || '', pts: x.pts }));
 }
 
+// Same live data Head-to-Head uses (R2 cache written by job_live_scores.py),
+// in the same shapes: statusByTeam keyed by ESPN team abbr, ptsByName keyed
+// by lowercased name. Lets other views (the sidebar matchup card) show the
+// SAME win probability as H2H instead of a projections-only guess.
+export async function fetchLiveWeek(week, season = 2026, type = 'regular') {
+  let base = 'https://api.fantasai.net';
+  try { base = (localStorage.getItem('fantasai.workerUrl') || base).replace(/\/$/, ''); } catch {}
+  const [board, stats] = await Promise.all([
+    fetch(`${base}/api/v1/nfl/scoreboard?week=${week}&season=${season}&type=${type}`).then(r => r.json()),
+    fetch(`${base}/api/v1/nfl/player-stats?week=${week}&season=${season}&type=${type}`).then(r => r.json()),
+  ]);
+  const statusByTeam = {};
+  for (const g of board?.games || []) {
+    if (g.home?.abbr) statusByTeam[g.home.abbr] = { ...g.status, kickoff: g.date, opp: g.away?.abbr || null };
+    if (g.away?.abbr) statusByTeam[g.away.abbr] = { ...g.status, kickoff: g.date, opp: g.home?.abbr || null, isAway: true };
+  }
+  const rules = getScoringRules();
+  const ptsByName = {};
+  for (const p of stats?.players || []) {
+    const key = (p.name || '').toLowerCase().trim();
+    if (key) ptsByName[key] = { name: p.name, pos: p.pos, team: p.team, pts: p.pts ?? calcFantasyPts(p.stats, rules, p.pos), stats: p.stats };
+  }
+  return { statusByTeam, ptsByName, anyLive: Object.values(statusByTeam).some(s => s.state === 'in') };
+}
+
 export function calcFantasyPts(stats, rules, pos) {
   const total = buildStatPointsBreakdown(stats, rules, pos).reduce((a, x) => a + x.pts, 0);
   return Math.max(0, Math.round(total * 100) / 100);

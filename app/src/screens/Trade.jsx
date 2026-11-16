@@ -1,6 +1,7 @@
 import React from 'react';
 import { findTeam, LEAGUE_TEAMS, TEAM_ROSTERS } from '../lib/data.js';
 import { findPlayer } from '../lib/playerStore.js';
+import { getNFLWeek } from './LineupDecisions.jsx';
 import { PosBadge, PlayerAvatar, TeamLogoBadge } from '../components/ui.jsx';
 
 function getTeamAllPlayerIds(teamId) {
@@ -30,6 +31,8 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
   const getTotal   = myGet.reduce((s, id)  => s + (findPlayer(id)?.avg || 0), 0);
   const diff       = getTotal - giveTotal;
   const bothSided  = myGive.length > 0 && myGet.length > 0;
+  // Regular-season weeks still to play after the current one (14-week season)
+  const remainingWeeks = Math.max(0, 14 - getNFLWeek());
   const grade      = !bothSided ? '—'
     : diff > 5 ? 'A+' : diff > 3 ? 'A' : diff > 1 ? 'B+' : diff > -1 ? 'B'
     : diff > -3 ? 'C+' : diff > -5 ? 'C' : 'D';
@@ -183,9 +186,12 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
                   <div className="v" style={{ fontSize: 14 }}>{myGet.length} player{myGet.length !== 1 ? 's' : ''}</div>
                 </div>
                 <div className="stat" style={{ padding: 8, flex: 1 }}>
-                  <div className="k">Playoff Odds</div>
+                  {/* Was "Playoff Odds" = diff × 0.8 — a made-up number with
+                      no model behind it. This is the real thing it implied:
+                      the weekly difference over the regular-season weeks left. */}
+                  <div className="k">Rest of Season</div>
                   <div className="v" style={{ fontSize: 14, color: diff > 0 ? 'var(--good)' : 'var(--danger)' }}>
-                    {diff > 0 ? '+' : ''}{(diff * 0.8).toFixed(1)}%
+                    {diff > 0 ? '+' : ''}{(diff * remainingWeeks).toFixed(0)} pts
                   </div>
                 </div>
               </div>
@@ -210,11 +216,26 @@ export default function TradeScreen({ initOtherTeamId, initGetIds = [], myRoster
         const myPosDepth = {};
         for (const id of myRosterArr) { const p = findPlayer(id); if (p) myPosDepth[p.pos] = (myPosDepth[p.pos] || 0) + 1; }
 
-        // Identify needs: pos with 1 or fewer players after give
+        // Identify needs: a position you're GIVING AWAY where, after the trade,
+        // you can no longer fill that position's starting slots. The old rule
+        // ("1 or fewer left, at any position") flagged K and DST on every
+        // single trade — every team rosters exactly one of each — even when
+        // the deal didn't touch them.
+        let lgSettings = null;
+        try { lgSettings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch {}
+        const req = { QB: 1, RB: 1, WR: 1, TE: 1, K: 1, DST: 1, FLEX: 3 };
+        for (const p of lgSettings?.positions || []) {
+          const k = p.key === 'RBWR' ? 'FLEX' : p.key;
+          if (k in req) req[k] = Number(p.activeMax ?? req[k]);
+        }
+        const after = pos => (myPosDepth[pos] || 0) - (givePosMap[pos] || 0) + (getPosMap[pos] || 0);
         const needs = [];
-        for (const [pos, cnt] of Object.entries(myPosDepth)) {
-          const afterGive = cnt - (givePosMap[pos] || 0);
-          if (afterGive <= 1 && !getPosMap[pos]) needs.push(pos);
+        for (const pos of Object.keys(givePosMap)) {
+          if (after(pos) < (req[pos] ?? 1)) needs.push(pos);
+        }
+        // RB/WR also have to cover the RB/WR flex spots between them
+        if ((givePosMap.RB || givePosMap.WR) && after('RB') + after('WR') < req.RB + req.WR + req.FLEX) {
+          for (const pos of ['RB', 'WR']) if (givePosMap[pos] && !needs.includes(pos)) needs.push(pos);
         }
         // Identify upgrades: getting high-avg players
         const topGet = myGet.map(id => findPlayer(id)).filter(Boolean).sort((a, b) => (b.avg || 0) - (a.avg || 0));

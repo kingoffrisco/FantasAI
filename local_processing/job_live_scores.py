@@ -874,6 +874,51 @@ def _milestone_pts(value, bonuses) -> float:
     return float(sum(p for t, p in (bonuses or []) if v >= t))
 
 
+# -- Season summary (league-scored averages) --------------------------------
+
+def season_summary_key(season: int, season_type: str) -> str:
+    return f"fantasai/live/season_{season}_{season_type}.json"
+
+
+def build_season_summary(season: int, season_type: str, through_week: int, dry_run: bool = False) -> dict:
+    """Per-player season totals/averages under THIS league's scoring rules,
+    rebuilt from every week's player_stats file this job has written.
+
+    Added 2026-11-16: the app's avg/last came from export_players_2026_draft,
+    scored with a different (half-PPR) system — Matthew Golden showed 18.2
+    avg vs 12.59 on CBS — which skewed the Trade Analyzer's grade, the chat's
+    advice and lineup explanations. Re-scoring the stored raw stats with the
+    saved league rules makes those numbers line up with CBS.
+
+    Shape: {players: {lower name: {name, pos, team, games, total, avg, last,
+    lastWeek, weeks: {week: pts}}}, throughWeek, rulesSource, builtAt}"""
+    rules = get_scoring_rules()
+    out: dict = {}
+    for w in range(1, through_week + 1):
+        d = r2_get(player_stats_key(season, season_type, w))
+        for p in (d or {}).get("players", []):
+            key = _normalize_name(p.get("name"))
+            if not key:
+                continue
+            pts = calc_fantasy_pts(p.get("stats") or {}, rules, p.get("pos"))
+            e = out.setdefault(key, {"name": p.get("name"), "pos": p.get("pos"), "team": p.get("team"), "weeks": {}})
+            e["weeks"][str(w)] = pts
+            e["team"] = p.get("team") or e["team"]
+    for e in out.values():
+        vals = [e["weeks"][k] for k in sorted(e["weeks"], key=int)]
+        e["games"] = len(vals)
+        e["total"] = round(sum(vals), 2)
+        e["avg"] = round(e["total"] / len(vals), 2) if vals else 0
+        last_w = max(e["weeks"], key=int)
+        e["lastWeek"] = int(last_w)
+        e["last"] = e["weeks"][last_w]
+    payload = {"season": season, "type": season_type, "throughWeek": through_week,
+               "builtAt": datetime.now(timezone.utc).isoformat(), "players": out}
+    if not dry_run:
+        r2_put(season_summary_key(season, season_type), payload)
+    return payload
+
+
 # -- Main -------------------------------------------------------------------
 
 def run_once(week: int, season: int, season_type: str, dry_run: bool, print_top5: bool = True) -> tuple:
@@ -921,6 +966,13 @@ def run_once(week: int, season: int, season_type: str, dry_run: bool, print_top5
         r2_put(scoreboard_key(season, season_type, week), scoreboard_payload)
         r2_put(player_stats_key(season, season_type, week), stats_payload)
         _update_index(season, season_type, week, len(games), len(scored_players))
+        try:
+            idx = r2_get("fantasai/live/index.json") or {}
+            known = [x.get("week", 0) for x in idx.get("weeks", [])
+                     if x.get("season") == season and x.get("type") == season_type]
+            build_season_summary(season, season_type, max([week] + known))
+        except Exception as e:  # never let the summary block live scoring
+            print(f"  [season-summary] skipped: {e}")
 
     if print_top5:
         print("  top scorers this week:")

@@ -285,7 +285,16 @@ function buildMergedRoster(teamId, s3Ids) {
       return merged;
     }
 
-    // No S3 roster yet for this team — fall back to whichever local pick
+    // R2 didn't answer (timeout/network) — use this browser's last known
+    // roster (saved after every load, CBS Resync and add/drop) before ever
+    // falling back to draft picks. Going straight to draft picks made the
+    // roster "revert" to draft day whenever the 4s R2 fetch was slow.
+    const backup = restoreRosterBackup(teamId);
+    if (backup && backup.size > 0) {
+      return new Set([...backup].map(Number).filter(id => !droppedIds.has(id)));
+    }
+
+    // No S3 roster and no local backup — fall back to whichever local pick
     // source has the most filled picks for this team.
     const tryParse = key => { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; } };
     const live  = tryParse('fantasai_live_picks');
@@ -705,7 +714,10 @@ export default function App() {
     if (!user?.teamId) { setRosterLoading(false); return; }
     setRosterLoading(true);
     fetchS3Roster(user.teamId).then(s3Ids => {
-      setMyRosterIds(buildMergedRoster(user.teamId, s3Ids));
+      const merged = buildMergedRoster(user.teamId, s3Ids);
+      setMyRosterIds(merged);
+      // Keep the local fallback copy current whenever R2 answered.
+      if (s3Ids && s3Ids.length) backupRoster(user.teamId, merged);
       setRosterLoading(false);
     });
   // Depends on user?.teamId (not []): this effect used to run exactly once on
@@ -977,6 +989,36 @@ export default function App() {
         return { ...p, proj: 0, ecr: 999, status: o.status_label || 'Unavailable' };
       });
     }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Patch avg / last / latestWeek with THIS league's scoring (CBS rules),
+  // rebuilt by job_live_scores.py from every week's real stats. The export's
+  // own avg used different scoring — Matthew Golden 18.2 vs CBS 12.59,
+  // Christian McCaffrey 20.8 vs 16.5 — which skewed trade grades, chat advice
+  // and lineup explanations. proj is left alone (it's a forward projection).
+  React.useEffect(() => {
+    let cancelled = false;
+    api.r2.seasonLeague().then(raw => {
+      const players = raw?.players;
+      if (!players || cancelled) return;
+      const norm = s => String(s || '').toLowerCase().replace(/[.']/g, '').replace(/\s+(jr|sr|ii|iii|iv)$/, '').replace(/\s+/g, ' ').trim();
+      const apply = () => patchPlayers(p => {
+        const e = players[norm(p.name)];
+        if (!e || !e.games) return p;
+        return { ...p, avg: e.avg, last: e.last, latestWeek: e.lastWeek, gamesPlayed: e.games, seasonTotal: e.total };
+      });
+      // patchPlayers is a no-op until the player list exists — wait for it.
+      let tries = 0;
+      const tick = () => {
+        if (cancelled) return;
+        // Apply again shortly after: DSTs (and other late patches) land a few
+        // seconds after the main list and would otherwise keep export values.
+        if (getPlayers().length > 0) { apply(); setTimeout(() => { if (!cancelled) apply(); }, 15000); return; }
+        if (++tries < 60) setTimeout(tick, 1000);
+      };
+      tick();
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Patch DST ECR + ADP from defense ranking data (2025 stats until 2026 games begin).

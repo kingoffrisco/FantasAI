@@ -1,5 +1,7 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster, getWeekMatchups } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster, getWeekMatchups, CBS_LINEUP_SYNCED } from '../lib/data.js';
+import { fetchLiveWeek } from '../lib/liveScoring.js';
+import { computeBlendedTeamTotal } from '../screens/HeadToHead.jsx';
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { getSubscriptionState, subscribeToPush, unsubscribeFromPush, showLocalNotification } from '../lib/pushNotifications.js';
 import { getPrefs } from '../lib/remotePrefs.js';
@@ -226,6 +228,30 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     return () => { cancelled = true; };
   }, []);
 
+  // Live stats for this week (same R2 source as H2H) — refreshed every 2 min
+  // while a game is in progress so the win % tracks the real score.
+  const [liveWeek, setLiveWeek] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false, timer = null;
+    const load = () => fetchLiveWeek(getH2HWeek())
+      .then(d => {
+        if (cancelled) return;
+        setLiveWeek(d);
+        if (d.anyLive) timer = setTimeout(load, 120000);
+      })
+      .catch(() => {});
+    load();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, []);
+  // TEAM_ROSTERS is mutated in place (server rosters, CBS lineup sync) —
+  // recompute once those async loads have had time to land.
+  const [rosterTick, setRosterTick] = React.useState(0);
+  React.useEffect(() => {
+    const t1 = setTimeout(() => setRosterTick(v => v + 1), 4000);
+    const t2 = setTimeout(() => setRosterTick(v => v + 1), 12000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
+
   const h2hInfo = React.useMemo(() => {
     const teamId = user?.teamId;
     if (!teamId) return null;
@@ -252,32 +278,31 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
     const oppId = pair[0] === teamId ? pair[1] : pair[0];
     const oppTeam = LEAGUE_TEAMS.find(t => t.id === oppId);
 
-    // Use slot-aware assignRoster for both sides — same logic as the H2H page's WinProbabilityBar
-    function rosterStarterProj(rosterIds, slotOverrides = {}) {
-      try {
-        const settings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
-        const slotFrame = buildRosterFrame(settings);
-        const roster = assignRoster(slotFrame, rosterIds, slotOverrides, findPlayer);
-        return roster
-          .filter(r => r.slot !== 'BENCH' && r.playerId)
-          .reduce((s, e) => { const p = findPlayer(e.playerId); return s + Math.max(0, p?.proj || p?.avg || 0); }, 0);
-      } catch { return 0; }
-    }
+    // Same rosters, lineup and math as the Head-to-Head screen, so the two
+    // never disagree (they did: H2H 35% vs sidebar 52% in Week 10, because
+    // this used pre-game projections only and ignored points already scored).
+    let slotFrame;
+    try { slotFrame = buildRosterFrame(JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null')); }
+    catch { slotFrame = buildRosterFrame(null); }
 
     const myIds = myRosterIds && myRosterIds.size > 0
       ? myRosterIds
       : new Set((TEAM_ROSTERS[teamId] || []).map(e => e.playerId).filter(Boolean));
-    const mySlotOverrides = getPrefs().slotOverrides || {};
+    // Mirror H2H: CBS's real lineup for my team when synced and identical in membership
+    const cbsMine = CBS_LINEUP_SYNCED.has(teamId) ? (TEAM_ROSTERS[teamId] || []).map(e => e.playerId).filter(Boolean) : [];
+    const myRoster = (cbsMine.length === myIds.size && cbsMine.every(id => myIds.has(id)))
+      ? assignRoster(slotFrame, cbsMine, {}, findPlayer)
+      : assignRoster(slotFrame, myIds, getPrefs().slotOverrides || {}, findPlayer);
+    const oppRaw = (TEAM_ROSTERS[oppId] || []).map(e => e.playerId).filter(Boolean);
+    const oppRoster = assignRoster(slotFrame, oppRaw, {}, findPlayer);
 
-    const oppIds = new Set((TEAM_ROSTERS[oppId] || []).map(e => e.playerId).filter(Boolean));
-
-    const myProj  = rosterStarterProj(myIds, mySlotOverrides);
-    const oppProj = rosterStarterProj(oppIds);
+    const myProj  = computeBlendedTeamTotal(myRoster, liveWeek?.statusByTeam, liveWeek?.ptsByName);
+    const oppProj = computeBlendedTeamTotal(oppRoster, liveWeek?.statusByTeam, liveWeek?.ptsByName);
     const isWinning = myProj >= oppProj;
     const winPct = myProj + oppProj > 0 ? Math.round((myProj / (myProj + oppProj)) * 100) : 50;
 
     return { week, oppTeam, isWinning, winPct, myProj: Math.round(myProj * 10) / 10, oppProj: Math.round(oppProj * 10) / 10 };
-  }, [user?.teamId, myRosterIds, allPlayers]);
+  }, [user?.teamId, myRosterIds, allPlayers, liveWeek, rosterTick]);
 
   const items = [
     { group: 'League' },
