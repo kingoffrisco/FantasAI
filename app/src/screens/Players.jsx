@@ -380,7 +380,6 @@ const DEFAULT_COLUMNS = [
   { id: 'trend',     label: 'Trend',    visible: true,  sortKey: 'trendAvg',     group: 'std' },
   { id: 'opp_score', label: 'Opp Sc',   visible: true,  sortKey: 'oppScore',     group: 'std' },
   { id: 'bye',       label: 'Bye',      visible: true,  sortKey: 'bye',          group: 'std' },
-  { id: 'owned',     label: '%Own',     visible: true,  sortKey: 'owned',        group: 'std' },
   { id: 'adp',       label: 'ADP',      visible: true,  sortKey: 'adp',          group: 'std' },
   { id: 'ecr_rank',  label: 'Rank',     visible: true,  sortKey: 'rank',         group: 'std' },
   { id: 'depth',     label: 'Depth',    visible: true,  sortKey: 'depthOrder',   group: 'std' },
@@ -1343,7 +1342,6 @@ export default function PlayersScreen({ onOpenPlayer, aiMode, myRosterIds = new 
           <option value="proj">Sort: Projection</option>
           <option value="last">Sort: Last Week</option>
           <option value="avg">Sort: Season Avg</option>
-          <option value="owned">Sort: % Owned</option>
           <option value="adp">Sort: ADP</option>
           <option value="rank">Sort: Expert Rank</option>
           {breakoutSet.size > 0 && <option value="oppScore">Sort: Opportunity Score</option>}

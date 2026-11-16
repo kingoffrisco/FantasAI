@@ -2345,7 +2345,12 @@ function WeeklyCalendar({ weekLabel, waiverPosition, totalTeams, user, currentWe
   const [injuryByTeam,  setInjuryByTeam]  = React.useState({});  // { [teamAbbr]: [{name, pos, status}] }
 
   React.useEffect(() => {
-    fetch(`${API_BASE}/api/v1/nfl/schedule`, { signal: AbortSignal.timeout(8000) })
+    // week/season are required — without them the endpoint defaults to Week 1,
+    // so the calendar showed Week 1's games (e.g. DEN @ KC on Monday night)
+    // all season long.
+    const wk = currentWeek?.num;
+    const qs = wk ? `?week=${wk}&season=2026` : '';
+    fetch(`${API_BASE}/api/v1/nfl/schedule${qs}`, { signal: AbortSignal.timeout(8000) })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.games) setNflGames(d.games); })
       .catch(() => {});

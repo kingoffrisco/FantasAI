@@ -106,8 +106,11 @@ function LiveScoreTicker({ myTeamId, myRosterIds, slotOverrides, onNav }) {
         Wk{week}{matchups[0]?.projected ? ' · Proj' : anyLive ? ' · Live' : ''}
       </div>
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        <div style={{ display: 'flex', gap: 0, animation: matchups.length > 5 ? 'ticker-scroll 30s linear infinite' : 'none', whiteSpace: 'nowrap' }}>
-          {[...matchups, ...matchups].map(({ a, b, aScore, bScore, isMe }, i) => {
+        {/* Marquee: padding-left:100% parks the content just past the right
+            edge; translating by -100% of its own width (padding + content)
+            carries it all the way off the left before the loop restarts. */}
+        <div className="fantasai-ticker-track" style={{ display: 'inline-flex', gap: 0, paddingLeft: '100%', whiteSpace: 'nowrap', animation: `ticker-scroll ${Math.max(20, matchups.length * 6)}s linear infinite` }}>
+          {matchups.map(({ a, b, aScore, bScore, isMe }, i) => {
             const aWin = aScore > bScore;
             return (
               <div key={i} onClick={() => onNav('h2h')} style={{
@@ -132,8 +135,9 @@ function LiveScoreTicker({ myTeamId, myRosterIds, slotOverrides, onNav }) {
       <style>{`
         @keyframes ticker-scroll {
           from { transform: translateX(0); }
-          to   { transform: translateX(-50%); }
+          to   { transform: translateX(-100%); }
         }
+        .fantasai-ticker-track:hover { animation-play-state: paused; }
       `}</style>
     </div>
   );
