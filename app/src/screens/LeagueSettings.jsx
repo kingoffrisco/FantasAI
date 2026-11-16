@@ -9,7 +9,17 @@ const STORAGE_KEY = 'fantasai_league_settings';
 const MEDIA_KEY   = 'fantasai_commish_media';
 const API_BASE    = 'https://api.fantasai.net';
 
-function formatFieldGoalRuleValue({ kFg50 = 4, kFgUnder50 = 3, kFgMiss = -1, kXp = 1, kXpMiss = -1 } = {}) {
+function formatFieldGoalRuleValue({ kFg50 = 4, kFgUnder50 = 3, kFgMiss = -1, kXp = 1, kXpMiss = -1, fgTiers, fgMissTiers } = {}) {
+  // CBS-style distance tiers (what live scoring actually uses when present)
+  if (Array.isArray(fgTiers) && fgTiers.length) {
+    const rng = (lo, hi) => (hi >= 99 ? `${lo}+` : `${lo} to ${hi}`);
+    return [
+      ...fgTiers.map(([lo, hi, p]) => `FG of ${rng(lo, hi)} Yds: ${p} points`),
+      ...(fgMissTiers || []).map(([lo, hi, p]) => `Missed FG of ${rng(lo, hi)} Yds: ${p} points`),
+      `Extra Point Made: ${kXp} points`,
+      `Extra Point Missed: ${kXpMiss} points`,
+    ].join('\n');
+  }
   return [
     `FG Made (50+ yds): ${kFg50} points`,
     `FG Made (< 50 yds): ${kFgUnder50} points`,
@@ -72,7 +82,7 @@ const DEFAULTS = {
 
   // Scoring — offensive
   offensiveScoring: [
-    { code: 'FG',     name: 'Field Goals',                                                   value: formatFieldGoalRuleValue({ kFg50: 4, kFgUnder50: 3, kFgMiss: -1, kXp: 1, kXpMiss: -1 }) },
+    { code: 'FG',     name: 'Field Goals',                                                   value: formatFieldGoalRuleValue({ kXp: 1, kXpMiss: -2, fgTiers: [[0, 49, 3], [50, 59, 3.5], [60, 99, 4]], fgMissTiers: [[0, 39, -2], [40, 49, -1.5], [50, 99, -1]] }) },
     { code: 'FL',     name: 'Fumble Lost, Including ST plays',                               value: '-1 point' },
     { code: 'Fum2PK', name: 'Fumble Recovery Two-point Conversion, Kicking formation',      value: '2 points' },
     { code: 'Fum2PT', name: 'Fumble Recovery Two-point Conversion, Two-point formation',    value: '2 points' },
@@ -107,24 +117,31 @@ const DEFAULTS = {
 
   // Scoring format — drives ADP rankings and projection scoring
   // 'ppr' | 'half-ppr' | 'standard'
-  scoringFormat: 'half-ppr',
+  // CBS league is non-PPR (no points per reception) — confirmed against the
+  // CBS Scoring System page 2026-11-16.
+  scoringFormat: 'standard',
 
-  // Scoring values used by live matchup scoring widgets.
+  // Scoring values used by live matchup scoring (lib/liveScoring.js and
+  // local_processing/job_live_scores.py). Mirrors the CBS Scoring System
+  // page exactly. Tiers are [min, max, pts] inclusive; yardage bonuses are
+  // cumulative [threshold, pts].
   scoring: {
-    passYd: 0.04,
-    passTD: 4,
-    passInt: -2,
-    rushYd: 0.1,
-    rushTD: 6,
-    recYd: 0.1,
-    recTD: 6,
-    rec: 0.5,
-    fumbleLost: -2,
-    kFg50: 4,
-    kFgUnder50: 3,
-    kFgMiss: -1,
-    kXp: 1,
-    kXpMiss: -1,
+    passYd: 0.04, passTD: 4, passInt: -1, passTdLongBonus: 2, pass2pt: 2,
+    passYdBonus: [[300, 2], [400, 2], [500, 3]],
+    rushYd: 0.1, rushTD: 6, rushTdLongBonus: 2, rush2pt: 2,
+    rushYdBonus: [[100, 2], [200, 2], [300, 3]],
+    recYd: 0.1, recTD: 6, recTdLongBonus: 2, rec2pt: 2, rec: 0,
+    recYdBonus: [[100, 2], [200, 2], [300, 3]],
+    fumbleLost: -1,
+    fgTiers: [[0, 49, 3], [50, 59, 3.5], [60, 99, 4]],
+    fgMissTiers: [[0, 39, -2], [40, 49, -1.5], [50, 99, -1]],
+    // Flat fallbacks for a kick whose distance couldn't be read
+    kFg50: 3.5, kFgUnder50: 3, kFgMiss: -1.5,
+    kXp: 1, kXpMiss: -2,
+    dstSack: 1, dstInt: 2, dstFumRec: 2, dstTd: 6, dstSafety: 5,
+    dstBlkFg: 3, dstBlkPunt: 2, dstBlkXp: 2,
+    dstPaTiers: [[0, 6, 8], [7, 13, 6], [14, 20, 4], [21, 27, 2]],
+    dstPtsAllowed: true,
   },
 
   // Scoring policies

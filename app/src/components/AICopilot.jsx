@@ -1,5 +1,6 @@
 import React from 'react';
-import { LEAGUE_TEAMS } from '../lib/data.js';
+import { LEAGUE_TEAMS, buildRosterFrame } from '../lib/data.js';
+import { computeOptimal, getNFLWeek } from '../screens/LineupDecisions.jsx';
 import { findPlayer, findPlayerByName, getPlayers } from '../lib/playerStore.js';
 import { api } from '../api.js';
 
@@ -414,7 +415,11 @@ async function callChat(question, context, rosterPlayers) {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ question, context, rosterPlayers }),
-    signal:  AbortSignal.timeout(35000),
+    // 90s: the API Worker itself waits up to 150s on the home chat server
+    // (cold model load + generation). A 35s cap here made the browser give up
+    // first on any slow answer, so the user saw "signal timed out" even when
+    // the answer was seconds away.
+    signal:  AbortSignal.timeout(90000),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
@@ -435,11 +440,13 @@ function buildRosterContext(user, myRosterIds) {
   const rosterLines = posOrder
     .filter(pos => byPos[pos])
     .flatMap(pos => byPos[pos].map(p =>
-      `  ${p.pos}: ${p.name} (${p.team})${p.status !== 'OK' ? ` [${p.status}]` : ''} | Proj: ${p.proj} | Avg: ${p.avg} | Last: ${p.last} | ECR: ${p.ecr ?? 'N/A'}`
+      `  ${p.pos}: ${p.name} (${p.team})${p.status !== 'OK' ? ` [${p.status}]` : ''}${p.bye && p.bye === getNFLWeek() ? ' [ON BYE THIS WEEK]' : ''} | Proj: ${p.proj} | Avg: ${p.avg} | Last: ${p.last} | ECR: ${p.ecr ?? 'N/A'}`
     ))
     .join('\n');
 
   return `You are FantasAI, an expert fantasy football assistant for the TAU Fantasy League.
+
+League: 12 teams, head-to-head points, STANDARD (non-PPR) scoring — no points per reception. Never describe projections as PPR.
 
 The user's team is: ${team?.name || 'Unknown Team'}
 Their team ID is: ${user?.teamId ?? 'N/A'}
@@ -448,6 +455,103 @@ CURRENT ROSTER (${players.length} players):
 ${rosterLines || '  (No roster data available)'}
 
 Use this roster data to answer questions specifically about this team. When asked about players on the roster, only refer to the players listed above.`;
+}
+
+// ── Waiver wire context ──────────────────────────────────────────────────────
+// Without this the model had no idea who's actually available and invented
+// "waiver targets" from memory — confirmed 2026-11-16: it recommended
+// DeVonta Smith (rostered in this league), Derrick Henry and Ezekiel Elliott
+// with made-up teams/projections. Free agents = every player not on any of
+// the 12 saved rosters (R2 rosters.json, kept in sync with CBS by
+// Sources → Resync).
+const WAIVER_RE = /waiver|free.?agent|pick.?up|\bpickups?\b|\badd\b|stream|\bwire\b|available|who should i (grab|get)/i;
+let _rosteredCache = null; // { at, ids: Set<number> }
+
+async function loadLeagueRosteredIds() {
+  if (_rosteredCache && Date.now() - _rosteredCache.at < 5 * 60 * 1000) return _rosteredCache.ids;
+  const ids = new Set();
+  await Promise.all(LEAGUE_TEAMS.map(async t => {
+    try {
+      const r = await fetch(`${API_BASE}/api/v1/rosters/load?teamId=${t.id}`, { signal: AbortSignal.timeout(6000) });
+      const d = r.ok ? await r.json() : null;
+      for (const id of d?.playerIds || []) ids.add(Number(id));
+    } catch {}
+  }));
+  _rosteredCache = { at: Date.now(), ids };
+  return ids;
+}
+
+async function buildWaiverContext(myRosterIds) {
+  const rostered = await loadLeagueRosteredIds();
+  for (const id of myRosterIds || []) rostered.add(Number(id));
+  const perPos = { QB: 5, RB: 8, WR: 8, TE: 5, K: 3, DST: 4 };
+  const all = getPlayers();
+  // Most recent completed week anyone has stats for. A player whose last game
+  // is 2+ weeks before that has missed at least one non-bye week — almost
+  // always injured or benched, even when injury_status is blank.
+  const currentWeek = all.reduce((m, p) => Math.max(m, p.latestWeek || 0), 0);
+  const recentlyActive = p => !p.latestWeek || !currentWeek || p.latestWeek >= currentWeek - 1;
+  const pool = all.filter(p =>
+    perPos[p.pos] && !rostered.has(Number(p.id)) && Number(p.proj) > 0 && recentlyActive(p) &&
+    !['O', 'OUT', 'IR', 'D'].includes(String(p.status || '').toUpperCase()));
+  const lines = [];
+  for (const [pos, n] of Object.entries(perPos)) {
+    pool.filter(p => p.pos === pos)
+      .sort((a, b) => Number(b.proj) - Number(a.proj))
+      .slice(0, n)
+      .forEach(p => lines.push(
+        `  ${p.pos}: ${p.name} (${p.team})${p.status && p.status !== 'OK' ? ` [${p.status}]` : ''} | Proj: ${p.proj} | Avg: ${p.avg ?? 'N/A'} | Last: ${p.last ?? 'N/A'}${p.latestWeek ? ` | Last played: wk ${p.latestWeek}` : ''}`));
+  }
+  if (!lines.length) return '';
+  return `
+
+AVAILABLE ON THE WAIVER WIRE in this league right now (not on any team's roster), best projections first per position:
+${lines.join('\n')}
+
+When recommending waiver pickups or adds, ONLY recommend players from the list above — every other NFL player is already rostered in this league. Use the team and projection shown; do not invent stats. Prefer players who played in week ${currentWeek || 'the latest week'}; flag anyone who didn't. Say which player on the user's roster each pickup would replace.`;
+}
+
+// ── Lineup context ───────────────────────────────────────────────────────────
+// The model used to build lineups itself from a bare player list and got the
+// basics wrong — confirmed 2026-11-16: it started two QBs in a 1-QB league,
+// started four players on bye (Caleb Williams, Saquon Barkley, Jonah Coleman,
+// Colston Loveland — CHI/PHI/DEN bye week 10) and dropped Kaelon Black
+// entirely. Now the app computes the lineup with the same optimizer the
+// Lineup Decisions screen uses (real slot structure, bye/injury-aware) and
+// the model only explains it.
+const LINEUP_RE = /lineup|start(ing)?\b|\bsit\b|bench|who should i (play|start)|optimi[sz]e/i;
+
+function buildLineupContext(myRosterIds) {
+  let settings = null;
+  try { settings = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null'); } catch {}
+  const frame = buildRosterFrame(settings);
+  const startingSlots = frame.filter(s => s !== 'BENCH').map(slot => ({ slot }));
+  const players = [...(myRosterIds || [])].map(id => findPlayer(id)).filter(Boolean);
+  if (!players.length) return '';
+  const week = getNFLWeek();
+  const proj = p => (p.bye && p.bye === week) ? 0 : Number(p.proj) || 0;
+  const optimal = computeOptimal(startingSlots, players, proj, week);
+  const starterIds = new Set(optimal.map(o => o.playerId).filter(Boolean));
+  const note = p => p.bye === week ? 'ON BYE — scores 0'
+    : (p.status && !['OK', 'Active', ''].includes(p.status)) ? `injury: ${p.status}` : '';
+  const line = (label, p) => `  ${label}: ${p.name} (${p.pos}, ${p.team}) | Proj: ${proj(p).toFixed(1)}${note(p) ? ` | ${note(p)}` : ''}`;
+  const slotLabel = s => s === 'FLEX' ? 'FLEX (RB/WR)' : s;
+  const starters = optimal.map(o => {
+    const p = o.playerId != null ? findPlayer(o.playerId) : null;
+    return p ? line(slotLabel(o.slot), p) : `  ${slotLabel(o.slot)}: (no eligible player available)`;
+  });
+  const bench = players.filter(p => !starterIds.has(p.id)).map(p => line('BN', p));
+  const slotSummary = startingSlots.map(s => slotLabel(s.slot)).join(', ');
+  return `
+
+LINEUP FOR WEEK ${week} — already computed by FantasAI's lineup optimizer.
+Starting slots in this league (exactly ${startingSlots.length}): ${slotSummary}. Only ONE QB starts.
+OPTIMAL STARTERS:
+${starters.join('\n')}
+BENCH:
+${bench.join('\n') || '  (none)'}
+
+When asked to set or optimize the lineup, present exactly this lineup (same players in the same slots) and explain the key start/sit calls. Never start a player marked ON BYE. Do not add, remove or invent players.`;
 }
 
 function detectNonRosterPlayersInQuery(query, myRosterIds) {
@@ -578,6 +682,12 @@ export default function AICopilot({ active, aiMode, user, myRosterIds }) {
       let context = buildRosterContext(user, myRosterIds);
       if (nonRosterPlayers.length > 0) {
         context += buildNonRosterContext(nonRosterPlayers, myRosterIds);
+      }
+      if (LINEUP_RE.test(q)) {
+        try { context += buildLineupContext(myRosterIds); } catch {}
+      }
+      if (WAIVER_RE.test(q)) {
+        try { context += await buildWaiverContext(myRosterIds); } catch {}
       }
       context += buildAiSummariesContext();
       const rosterPlayers = [...(myRosterIds || [])].map(id => findPlayer(id)).filter(Boolean)

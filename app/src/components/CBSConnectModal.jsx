@@ -1,5 +1,5 @@
 import React from 'react';
-import { CBS_RANKINGS } from '../lib/data.js';
+import { CBS_RANKINGS, syncRostersFromCbs } from '../lib/data.js';
 import { getPlayers, findPlayer, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, PlayerCell, TeamLogoBadge } from './ui.jsx';
 import { getPrefs, patchPrefs } from '../lib/remotePrefs.js';
@@ -32,16 +32,22 @@ export function CBSConnectModal({ onClose, onConnected, mode }) {
     setTimeout(() => { setAuthing(false); setStep(2); }, 1100);
   };
 
-  const startSync = () => {
-    setSyncedItems([]);
-    let i = 0;
-    const tick = () => {
-      i++;
-      setSyncedItems(items.slice(0, i));
-      if (i < items.length) setTimeout(tick, 280 + Math.random() * 320);
-      else setTimeout(() => setDone(true), 400);
-    };
-    setTimeout(tick, 350);
+  // Real sync: pulls every team's current roster from CBS and rewrites
+  // rosters.json to match (see syncRostersFromCbs in lib/data.js). This used
+  // to be a timed animation over the hardcoded `items` list above with no
+  // network calls at all, which is why drops made on CBS never showed up.
+  const [result, setResult] = React.useState(null);
+  const startSync = async () => {
+    setDone(false);
+    setResult(null);
+    const t0 = Date.now();
+    try {
+      const r = await syncRostersFromCbs(getPlayers);
+      setResult({ ...r, ms: Date.now() - t0 });
+    } catch (e) {
+      setResult({ ok: false, error: e.message || String(e) });
+    }
+    setDone(true);
   };
 
   React.useEffect(() => {
@@ -184,35 +190,46 @@ export function CBSConnectModal({ onClose, onConnected, mode }) {
           {step === 4 && (
             <div className="cbs-pane sync">
               <div className="cbs-pane-head">
-                <div className="cbs-pane-title">{done ? 'Connected.' : 'Syncing your league…'}</div>
+                <div className="cbs-pane-title">{!done ? 'Syncing rosters from CBS…' : result?.ok ? 'Rosters synced.' : 'Sync failed.'}</div>
                 <div className="cbs-pane-sub">
-                  {done ? "You're live. FantasAI will keep this in sync every 5 minutes." : 'This takes about 3 seconds the first time. Future syncs are incremental.'}
+                  {!done ? 'Reading every team’s current roster from CBS and saving it to FantasAI.'
+                    : result?.ok ? `${result.teams} CBS teams read · ${result.changes.length} roster${result.changes.length === 1 ? '' : 's'} changed`
+                    : result?.error}
                 </div>
               </div>
               <div className="cbs-sync-progress">
-                <div className="cbs-progress-bar"><span style={{ width: `${(syncedItems.length / items.length) * 100}%` }}></span></div>
-                <div className="cbs-progress-text mono">
-                  {done ? `✓ ${items.length}/${items.length} steps complete` : `${syncedItems.length}/${items.length} · in progress`}
-                </div>
+                <div className="cbs-progress-bar"><span style={{ width: done ? '100%' : '35%' }}></span></div>
               </div>
-              <div className="cbs-sync-list">
-                {items.map((item, i) => {
-                  const isDone = i < syncedItems.length;
-                  const isCurrent = i === syncedItems.length && !done;
-                  return (
-                    <div key={i} className={`cbs-sync-item ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''}`}>
-                      <span className="ico">{isDone ? '✓' : isCurrent ? <span className="spinner"></span> : '·'}</span>
-                      <span className="t">{item.label}</span>
-                      <span className="d mono faint">{isDone || isCurrent ? item.detail : ''}</span>
+              {done && result?.ok && (
+                <div className="cbs-sync-list">
+                  {result.changes.length === 0 && (
+                    <div className="cbs-sync-item done"><span className="ico">✓</span><span className="t">Every roster already matched CBS</span><span className="d"></span></div>
+                  )}
+                  {result.changes.map(c => (
+                    <div key={c.teamId} className="cbs-sync-item done">
+                      <span className="ico">✓</span>
+                      <span className="t">{c.teamName}</span>
+                      <span className="d mono">
+                        {c.added.length > 0 && `+ ${c.added.map(id => findPlayer(id)?.name || id).join(', ')}`}
+                        {c.added.length > 0 && c.dropped.length > 0 && '  ·  '}
+                        {c.dropped.length > 0 && `− ${c.dropped.map(id => findPlayer(id)?.name || id).join(', ')}`}
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
+                  ))}
+                  {result.unmatched.map((u, i) => (
+                    <div key={`u${i}`} className="cbs-sync-item current">
+                      <span className="ico">!</span>
+                      <span className="t">{u.teamName}: couldn’t match {u.name}</span>
+                      <span className="d mono">{u.pos} · {u.team} — this team was not changed</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {done && (
                 <div className="cbs-actions">
                   <div className="cbs-success-stat">
                     <div className="k">SYNCED IN</div>
-                    <div className="v">2.8s</div>
+                    <div className="v">{result?.ms != null ? `${(result.ms / 1000).toFixed(1)}s` : '—'}</div>
                   </div>
                   <div className="grow"></div>
                   <button className="btn primary" onClick={finish}>Open League →</button>

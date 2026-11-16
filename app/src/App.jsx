@@ -706,6 +706,23 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.teamId]);
 
+  // A real CBS roster sync (Setup → Sources → Resync) rewrote rosters.json —
+  // reload this team's roster from R2 so Current Roster drops/adds immediately.
+  React.useEffect(() => {
+    function onSynced() {
+      const teamId = userRef.current?.teamId;
+      if (!teamId) return;
+      fetchS3Roster(teamId).then(s3Ids => {
+        if (!s3Ids) return;
+        const merged = buildMergedRoster(teamId, s3Ids);
+        setMyRosterIds(merged);
+        backupRoster(teamId, merged);
+      });
+    }
+    window.addEventListener('fantasai:rosters-synced', onSynced);
+    return () => window.removeEventListener('fantasai:rosters-synced', onSynced);
+  }, []);
+
   // Load live player list from Databricks → Sleeper fallback.
   // Load 2026 player pool from R2 (fantasai/players/export_players_2026_draft.json).
   // Refreshed daily at 8:00 AM UTC by the Databricks ETL — 988 active+IR roster players.

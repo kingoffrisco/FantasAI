@@ -327,6 +327,12 @@ export function normalizePlayerList(rawArr) {
       seasonTier:  tierStr,
       news:        p.news || '',
       status:      injStatusCode(p.injury_status || p.player_status),
+      // Most recent 2026 week this player recorded a game. The export's
+      // injury_status is often null even for players out for weeks (Lamar
+      // Jackson / Davante Adams, 2026-11-16), so recency is the only
+      // reliable "is he actually playing?" signal — used by the chat's
+      // waiver-wire context to skip players who've missed 2+ weeks.
+      latestWeek:  Number(p.latest_week_2026) || null,
     });
   }
 

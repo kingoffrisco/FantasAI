@@ -33,94 +33,108 @@ function dstPtsAllowedBonus(ptsAllowed) {
 // amount and the points it produced, instead of just the total — for UIs
 // that want to show "why" a player scored what they scored (e.g. Head to
 // Head's Player Scores tab), not just the final number.
+// [[min, max, pts], ...] inclusive; first match wins, else 0.
+function tierPts(value, tiers) {
+  const v = Number(value);
+  for (const [lo, hi, p] of tiers || []) if (v >= lo && v <= hi) return Number(p);
+  return 0;
+}
+// [[threshold, pts], ...] cumulative — CBS's "2 pt bonus @ 100+, 2 more @ 200+…"
+function milestonePts(value, bonuses) {
+  const v = Number(value || 0);
+  return (bonuses || []).reduce((sum, [t, p]) => sum + (v >= t ? Number(p) : 0), 0);
+}
+
+// Same formula as calcFantasyPts, but returns each contributing stat's raw
+// amount and the points it produced. MUST stay identical to
+// local_processing/job_live_scores.py's calc_fantasy_pts — that job writes
+// the stats (incl. fgDists/fgMissDists, long-TD and 2-pt counts, DST
+// blocks) that this scores.
 export function buildStatPointsBreakdown(stats, rules, pos) {
   const s = stats || {};
   const r = rules || {};
-  const fgMade50 = s.fgMade50 ?? 0;
-  const fgMadeUnder50 = Math.max(0, (s.fgMade ?? 0) - fgMade50);
   const fgMissed = Math.max(0, (s.fgAtt ?? 0) - (s.fgMade ?? 0));
   const xpMissed = Math.max(0, (s.xpAtt ?? 0) - (s.xpMade ?? 0));
-  const isDst = pos === 'DST';
 
-  const rows = [
-    { label: 'Pass Yds',   amount: s.passYds,  unit: 'yd',rate: r.passYd ?? 0.04 },
-    { label: 'Pass TD',    amount: s.passTds,  unit: '',  rate: r.passTD ?? 4 },
-    { label: 'Int',        amount: s.passInt,  unit: '',  rate: r.passInt ?? -2 },
-    { label: 'Rush Yds',   amount: s.rushYds,  unit: 'yd',rate: r.rushYd ?? 0.1 },
-    { label: 'Rush TD',    amount: s.rushTds,  unit: '',  rate: r.rushTD ?? 6 },
-    { label: 'Rec Yds',    amount: s.recYds,   unit: 'yd',rate: r.recYd ?? 0.1 },
-    { label: 'Rec TD',     amount: s.recTds,   unit: '',  rate: r.recTD ?? 6 },
-    { label: 'Rec',        amount: s.rec,      unit: '',  rate: r.rec ?? 0.5 },
-    { label: 'Fum Lost',   amount: s.fumLost,  unit: '',  rate: r.fumbleLost ?? -2 },
-    { label: 'FG 50+',     amount: fgMade50,       unit: '', rate: r.kFg50 ?? 4 },
-    { label: 'FG <50',     amount: fgMadeUnder50,  unit: '', rate: r.kFgUnder50 ?? 3 },
-    { label: 'FG Miss',    amount: fgMissed,       unit: '', rate: r.kFgMiss ?? -1 },
-    { label: 'XP Made',    amount: s.xpMade,       unit: '', rate: r.kXp ?? 1 },
-    { label: 'XP Miss',    amount: xpMissed,       unit: '', rate: r.kXpMiss ?? -1 },
-  ];
-  if (isDst) {
-    rows.push(
-      { label: 'Sacks',    amount: s.sacks,    unit: '', rate: r.dstSack ?? 1 },
-      { label: 'Int',      amount: s.ints,     unit: '', rate: r.dstInt ?? 2 },
-      { label: 'Fum Rec',  amount: s.fumRec,   unit: '', rate: r.dstFumRec ?? 2 },
-      { label: 'Safety',   amount: s.safeties, unit: '', rate: r.dstSafety ?? 2 },
-      { label: 'Def TD',   amount: s.tds,      unit: '', rate: r.dstTd ?? 6 },
-    );
+  // DST scoring is gated on pos === 'DST': sacks/ints/ptsAllowed also sit on
+  // individual players' lines and must never score for a K/defender
+  // (confirmed live: a kicker was picking up +4 from his team's PA tier).
+  if (pos === 'DST') {
+    const rows = [
+      { label: 'Sacks',       amount: s.sacks,    pts: (s.sacks ?? 0) * (r.dstSack ?? 1) },
+      { label: 'Int',         amount: s.ints,     pts: (s.ints ?? 0) * (r.dstInt ?? 2) },
+      { label: 'Fum Rec',     amount: s.fumRec,   pts: (s.fumRec ?? 0) * (r.dstFumRec ?? 2) },
+      { label: 'Safety',      amount: s.safeties, pts: (s.safeties ?? 0) * (r.dstSafety ?? 2) },
+      { label: 'Def/ST TD',   amount: s.tds,      pts: (s.tds ?? 0) * (r.dstTd ?? 6) },
+      { label: 'Blocked FG',  amount: s.blkFg,    pts: (s.blkFg ?? 0) * (r.dstBlkFg ?? 0) },
+      { label: 'Blocked Punt',amount: s.blkPunt,  pts: (s.blkPunt ?? 0) * (r.dstBlkPunt ?? 0) },
+      { label: 'Blocked XP',  amount: s.blkXp,    pts: (s.blkXp ?? 0) * (r.dstBlkXp ?? 0) },
+    ];
     if ((r.dstPtsAllowed ?? true) && s.ptsAllowed != null) {
-      rows.push({ label: 'Pts Allowed', amount: s.ptsAllowed, unit: '', rate: null, pts: dstPtsAllowedBonus(s.ptsAllowed) });
+      rows.push({ label: 'Pts Allowed', amount: s.ptsAllowed, always: true,
+        pts: r.dstPaTiers ? tierPts(s.ptsAllowed, r.dstPaTiers) : dstPtsAllowedBonus(s.ptsAllowed) });
     }
+    return rows.filter(x => x.always || (x.amount ?? 0) !== 0)
+      .map(x => ({ label: x.label, amount: x.amount ?? 0, unit: '', pts: x.pts }));
   }
 
+  // Kicking — per-distance tiers when distances are known, flat legacy
+  // values for any kick that couldn't be placed.
+  const fgDists = s.fgDists || [];
+  const missDists = s.fgMissDists || [];
+  let fgPts, missPts;
+  if (r.fgTiers && fgDists.length) {
+    fgPts = fgDists.reduce((a, d) => a + tierPts(d, r.fgTiers), 0)
+      + Math.max(0, (s.fgMade ?? 0) - fgDists.length) * (r.kFgUnder50 ?? 3);
+  } else {
+    const fg50 = s.fgMade50 ?? 0;
+    fgPts = fg50 * (r.kFg50 ?? 4) + Math.max(0, (s.fgMade ?? 0) - fg50) * (r.kFgUnder50 ?? 3);
+  }
+  if (r.fgMissTiers && missDists.length) {
+    missPts = missDists.reduce((a, d) => a + tierPts(d, r.fgMissTiers), 0)
+      + Math.max(0, fgMissed - missDists.length) * (r.kFgMiss ?? -1);
+  } else {
+    missPts = fgMissed * (r.kFgMiss ?? -1);
+  }
+
+  // CBS: "0+ Yds = x per yard" — net-negative yardage scores 0, not negative.
+  const pos0 = v => Math.max(0, v ?? 0);
+  const rows = [
+    { label: 'Pass Yds',  amount: s.passYds, unit: 'yd', pts: pos0(s.passYds) * (r.passYd ?? 0.04) },
+    { label: 'Pass Yd Bonus', amount: s.passYds, unit: 'yd', pts: milestonePts(s.passYds, r.passYdBonus), bonus: true },
+    { label: 'Pass TD',   amount: s.passTds, pts: (s.passTds ?? 0) * (r.passTD ?? 4) },
+    { label: 'Pass TD 50+', amount: s.passTd50, pts: (s.passTd50 ?? 0) * (r.passTdLongBonus ?? 0) },
+    { label: 'Pass 2-Pt', amount: s.pass2pt, pts: (s.pass2pt ?? 0) * (r.pass2pt ?? 0) },
+    { label: 'Int',       amount: s.passInt, pts: (s.passInt ?? 0) * (r.passInt ?? -2) },
+    { label: 'Rush Yds',  amount: s.rushYds, unit: 'yd', pts: pos0(s.rushYds) * (r.rushYd ?? 0.1) },
+    { label: 'Rush Yd Bonus', amount: s.rushYds, unit: 'yd', pts: milestonePts(s.rushYds, r.rushYdBonus), bonus: true },
+    { label: 'Rush TD',   amount: s.rushTds, pts: (s.rushTds ?? 0) * (r.rushTD ?? 6) },
+    { label: 'Rush TD 40+', amount: s.rushTd40, pts: (s.rushTd40 ?? 0) * (r.rushTdLongBonus ?? 0) },
+    { label: 'Rush 2-Pt', amount: s.rush2pt, pts: (s.rush2pt ?? 0) * (r.rush2pt ?? 0) },
+    { label: 'Rec Yds',   amount: s.recYds,  unit: 'yd', pts: pos0(s.recYds) * (r.recYd ?? 0.1) },
+    { label: 'Rec Yd Bonus', amount: s.recYds, unit: 'yd', pts: milestonePts(s.recYds, r.recYdBonus), bonus: true },
+    { label: 'Rec TD',    amount: s.recTds,  pts: (s.recTds ?? 0) * (r.recTD ?? 6) },
+    { label: 'Rec TD 50+', amount: s.recTd50, pts: (s.recTd50 ?? 0) * (r.recTdLongBonus ?? 0) },
+    { label: 'Rec 2-Pt',  amount: s.rec2pt,  pts: (s.rec2pt ?? 0) * (r.rec2pt ?? 0) },
+    { label: 'Rec',       amount: s.rec,     pts: (s.rec ?? 0) * (r.rec ?? 0.5) },
+    { label: 'Fum Lost',  amount: s.fumLost, pts: (s.fumLost ?? 0) * (r.fumbleLost ?? -2) },
+    { label: 'FG Made',   amount: s.fgMade,  pts: fgPts },
+    { label: 'FG Miss',   amount: fgMissed,  pts: missPts },
+    { label: 'XP Made',   amount: s.xpMade,  pts: (s.xpMade ?? 0) * (r.kXp ?? 1) },
+    { label: 'XP Miss',   amount: xpMissed,  pts: xpMissed * (r.kXpMiss ?? -1) },
+  ];
+  // Bonus-type rows (milestones, long TDs, 2-pt) only when they scored;
+  // plain stat rows whenever the player has that stat (even at 0 pts, e.g.
+  // receptions in a non-PPR league, so the line still explains itself).
+  const isBonus = x => x.bonus || /2-Pt|TD \d/.test(x.label);
   return rows
-    .filter(row => (row.amount ?? 0) !== 0 || row.pts != null)
-    .map(row => ({
-      label: row.label,
-      amount: row.amount ?? 0,
-      unit: row.unit,
-      pts: row.pts ?? (row.amount ?? 0) * row.rate,
-    }));
+    .filter(x => isBonus(x) ? x.pts !== 0 : ((x.amount ?? 0) !== 0 || x.pts !== 0))
+    .map(x => ({ label: x.label, amount: x.amount ?? 0, unit: x.unit || '', pts: x.pts }));
 }
 
 export function calcFantasyPts(stats, rules, pos) {
-  const s = stats || {};
-  const r = rules || {};
-  const fgMade50 = s.fgMade50 ?? 0;
-  const fgMadeUnder50 = Math.max(0, (s.fgMade ?? 0) - fgMade50);
-  const fgMissed = Math.max(0, (s.fgAtt ?? 0) - (s.fgMade ?? 0));
-  const xpMissed = Math.max(0, (s.xpAtt ?? 0) - (s.xpMade ?? 0));
-  // DST scoring must be gated on pos === 'DST' explicitly, not just on these
-  // fields being present. sacks/ints/fumRec/tds/safeties also live on
-  // INDIVIDUAL defensive players' own stat lines, and ptsAllowed is tagged
-  // onto every player on a team regardless of position — without this gate
-  // a kicker or defender would silently pick up bonus points that belong
-  // only to the team DST entry (confirmed live: a kicker was scoring +4
-  // bogus points from his team's points-allowed tier before this fix).
-  const isDst = pos === 'DST';
-  return Math.max(0,
-    (s.passYds ?? 0) * (r.passYd ?? 0.04) +
-    (s.passTds ?? 0) * (r.passTD ?? 4) +
-    (s.passInt ?? 0) * (r.passInt ?? -2) +
-    (s.rushYds ?? 0) * (r.rushYd ?? 0.1) +
-    (s.rushTds ?? 0) * (r.rushTD ?? 6) +
-    (s.recYds  ?? 0) * (r.recYd  ?? 0.1) +
-    (s.recTds  ?? 0) * (r.recTD  ?? 6) +
-    (s.rec     ?? 0) * (r.rec    ?? 0.5) +
-    (s.fumLost ?? 0) * (r.fumbleLost ?? -2) +
-    fgMade50 * (r.kFg50 ?? 4) +
-    fgMadeUnder50 * (r.kFgUnder50 ?? 3) +
-    fgMissed * (r.kFgMiss ?? -1) +
-    (s.xpMade ?? 0) * (r.kXp ?? 1) +
-    xpMissed * (r.kXpMiss ?? -1) +
-    // DST — bug fixed 2026-08-22: this whole block was missing, so team
-    // defense entries always scored 0 even when their stats were present.
-    // Same rule keys/tiers as ScoringTest.jsx's applyScoring().
-    (isDst ? (s.sacks ?? 0) * (r.dstSack ?? 1) : 0) +
-    (isDst ? (s.ints ?? 0) * (r.dstInt ?? 2) : 0) +
-    (isDst ? (s.fumRec ?? 0) * (r.dstFumRec ?? 2) : 0) +
-    (isDst ? (s.safeties ?? 0) * (r.dstSafety ?? 2) : 0) +
-    (isDst ? (s.tds ?? 0) * (r.dstTd ?? 6) : 0) +
-    (isDst && (r.dstPtsAllowed ?? true) && s.ptsAllowed != null ? dstPtsAllowedBonus(s.ptsAllowed) : 0)
-  );
+  const total = buildStatPointsBreakdown(stats, rules, pos).reduce((a, x) => a + x.pts, 0);
+  return Math.max(0, Math.round(total * 100) / 100);
 }
 
 // ESPN's site API returns some team abbreviations that differ from this

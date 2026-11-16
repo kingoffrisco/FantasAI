@@ -908,6 +908,101 @@ export async function syncLineupsFromCbs(findPlayerByNameFn, findPlayerFn) {
   return { ok: true, updated, teams: cbsTeams.length, fetchedAt: resp?.fetchedAt };
 }
 
+// Make every team's saved roster (R2 rosters.json) match CBS's real current
+// roster. Before this, nothing ever pulled roster MEMBERSHIP from CBS after
+// the draft — rosters.json only changed through in-app adds/drops, so a
+// player dropped on CBS itself (confirmed 2026-11-16: De'Zhaun Stribling)
+// stayed on the in-app roster forever. Setup → Sources → Resync calls this.
+//
+// Safety: a team is only rewritten when CBS gave us a non-empty roster for it
+// and it maps to a LEAGUE_TEAMS entry; every other team keeps its current R2
+// roster untouched. CBS names that can't be matched to an app player are
+// returned in `unmatched` (and left off) rather than guessed at.
+const _SUFFIX_RE = /\b(jr|sr|ii|iii|iv|v)\b/g;
+const _normName = s => String(s || '').toLowerCase()
+  .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[.'’`-]/g, '').replace(_SUFFIX_RE, '').replace(/\s+/g, ' ').trim();
+const _TEAM_ALIAS = { JAC: 'JAX', JAX: 'JAC', WAS: 'WSH', WSH: 'WAS', LA: 'LAR', LAR: 'LA' };
+
+export async function syncRostersFromCbs(getPlayersFn) {
+  const resp = await api.lineups();
+  const cbsTeams = Array.isArray(resp?.teams) ? resp.teams : [];
+  if (!cbsTeams.length) return { ok: false, error: 'CBS returned no teams — check your CBS cookie' };
+
+  const players = getPlayersFn() || [];
+  const byName = new Map();
+  for (const p of players) {
+    const k = _normName(p.name);
+    if (!k) continue;
+    if (!byName.has(k)) byName.set(k, []);
+    byName.get(k).push(p);
+  }
+  const findDst = team => {
+    const t = String(team || '').toUpperCase();
+    return players.find(p => p.pos === 'DST' && [t, _TEAM_ALIAS[t]].includes(String(p.team || '').toUpperCase()));
+  };
+  const match = cp => {
+    if (cp.pos === 'DST') return findDst(cp.team);
+    const cands = byName.get(_normName(cp.name)) || [];
+    if (cands.length <= 1) return cands[0] || null;
+    const t = String(cp.team || '').toUpperCase();
+    return cands.find(p => p.pos === cp.pos && String(p.team || '').toUpperCase() === t)
+        || cands.find(p => p.pos === cp.pos) || cands[0];
+  };
+
+  // Start from what R2 has now, so unmapped teams are preserved as-is.
+  const current = {};
+  await Promise.all(LEAGUE_TEAMS.map(async t => {
+    try {
+      const r = await fetch(`https://api.fantasai.net/api/v1/rosters/load?teamId=${t.id}`);
+      const d = r.ok ? await r.json() : null;
+      current[t.id] = Array.isArray(d?.playerIds) ? d.playerIds.map(Number) : (TEAM_ROSTERS[t.id] || []).map(e => e.playerId).filter(Boolean);
+    } catch { current[t.id] = (TEAM_ROSTERS[t.id] || []).map(e => e.playerId).filter(Boolean); }
+  }));
+
+  const next = { ...current };
+  const changes = [];
+  const unmatched = [];
+  for (const ct of cbsTeams) {
+    const team = LEAGUE_TEAMS.find(t => t.cbsId === ct.cbsTeamId);
+    if (!team || !Array.isArray(ct.roster) || !ct.roster.length) continue;
+    const ids = [];
+    const missing = [];
+    for (const cp of ct.roster) {
+      const p = match(cp);
+      if (p) ids.push(Number(p.id));
+      else missing.push({ teamId: team.id, teamName: team.name, name: cp.name, pos: cp.pos, team: cp.team });
+    }
+    // Any unmatched name → leave this team's saved roster exactly as it was.
+    // Rewriting it would silently delete a real player from the app.
+    if (missing.length) { unmatched.push(...missing); continue; }
+    if (!ids.length) continue;
+    const before = new Set(current[team.id] || []);
+    const after  = new Set(ids);
+    const added   = ids.filter(id => !before.has(id));
+    const dropped = [...before].filter(id => !after.has(id));
+    next[team.id] = [...after];
+    if (added.length || dropped.length) changes.push({ teamId: team.id, teamName: team.name, added, dropped });
+  }
+
+  const res = await fetch('https://api.fantasai.net/api/v1/rosters/bulk-save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rosters: Object.fromEntries(Object.entries(next).map(([k, v]) => [String(k), v])) }),
+  });
+  const saved = await res.json().catch(() => ({}));
+  if (!res.ok || !saved.ok) return { ok: false, error: saved.error || `Save failed (HTTP ${res.status})` };
+
+  // Keep in-memory rosters (All Rosters, H2H, Owner Intel) in step too.
+  for (const [tid, ids] of Object.entries(next)) {
+    TEAM_ROSTERS[Number(tid)] = ids.map(playerId => ({ slot: 'BENCH', playerId }));
+  }
+  const syncedAt = new Date().toISOString();
+  try { localStorage.setItem('fantasai_cbs_last_roster_sync', syncedAt); } catch {}
+  try { window.dispatchEvent(new CustomEvent('fantasai:rosters-synced', { detail: { syncedAt } })); } catch {}
+  return { ok: true, syncedAt, teams: cbsTeams.length, changes, unmatched };
+}
+
 // â"€â"€â"€ Settings-based roster frame helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const _KEY_TO_SLOT = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE', RBWR: 'FLEX', DST: 'DST', K: 'K' };
 const _DEFAULT_POSITIONS = [

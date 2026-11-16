@@ -24,7 +24,7 @@ function resolveOpp(p, scheduleOppMap, defVsPos) {
 
 const _H2H_START = new Date('2026-09-09');
 const _MS_WEEK   = 7 * 24 * 60 * 60 * 1000;
-function getNFLWeek() {
+export function getNFLWeek() {
   return Math.min(Math.max(Math.floor((Date.now() - _H2H_START) / _MS_WEEK) + 1, 1), 18);
 }
 

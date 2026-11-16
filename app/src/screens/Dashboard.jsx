@@ -8,6 +8,7 @@ import { api } from '../api.js';
 import { useApi, useR2CriticalAlerts } from '../hooks.js';
 import { fetchSleeperPlayerStats } from '../lib/sleeper.js';
 import { sendLeaguePush } from '../lib/pushNotifications.js';
+import { calcFantasyPts as calcSharedFantasyPts } from '../lib/liveScoring.js';
 // 2026 is year 29 (2027 will be year 30) — compute dynamically each season
 // rather than hardcoding a count that needs a manual bump every year.
 const LEAGUE_FOUNDED_YEAR = 1998;
@@ -263,28 +264,22 @@ function getScoringRules() {
   return { passYd: 0.04, passTD: 4, passInt: -2, rushYd: 0.1, rushTD: 6, recYd: 0.1, recTD: 6, rec: 0.5, fumbleLost: -2, kFg50: 4, kFgUnder50: 3, kFgMiss: -1, kXp: 1, kXpMiss: -1 };
 }
 
+// Maps this screen's own box-score field names onto lib/liveScoring.js's and
+// scores with the shared formula, so the Dashboard can never drift from
+// Head-to-Head / the live job (it previously had its own copy that lacked
+// yardage bonuses, 2-pt conversions and the 0+ yardage floor).
 function calcFantasyPts(stats, rules) {
   const fgMade = stats.fgMade ?? 0;
-  const fgMade50 = stats.fgMade50 ?? 0;
-  const fgMadeUnder50 = stats.fgMadeUnder50 ?? Math.max(0, fgMade - fgMade50);
-  const fgMissed = stats.fgMissed ?? Math.max(0, (stats.fgAtt ?? 0) - fgMade);
-  const xpMissed = stats.xpMissed ?? 0;
-  return Math.max(0,
-    (stats.passYards ?? 0) * (rules.passYd ?? 0.04) +
-    (stats.passTDs   ?? 0) * (rules.passTD  ?? 4)   +
-    (stats.passInts  ?? 0) * (rules.passInt  ?? -2)  +
-    (stats.rushYards ?? 0) * (rules.rushYd   ?? 0.1) +
-    (stats.rushTDs   ?? 0) * (rules.rushTD   ?? 6)   +
-    (stats.recYards  ?? 0) * (rules.recYd    ?? 0.1) +
-    (stats.recTDs    ?? 0) * (rules.recTD    ?? 6)   +
-    (stats.receptions?? 0) * (rules.rec      ?? 0.5) +
-    (stats.fumbleLost?? 0) * (rules.fumbleLost ?? -2) +
-    fgMade50 * (rules.kFg50 ?? 4) +
-    fgMadeUnder50 * (rules.kFgUnder50 ?? 3) +
-    fgMissed * (rules.kFgMiss ?? -1) +
-    (stats.xpMade ?? 0) * (rules.kXp ?? 1) +
-    xpMissed * (rules.kXpMiss ?? -1)
-  );
+  return calcSharedFantasyPts({
+    passYds: stats.passYards, passTds: stats.passTDs, passInt: stats.passInts,
+    rushYds: stats.rushYards, rushTds: stats.rushTDs,
+    recYds: stats.recYards, recTds: stats.recTDs, rec: stats.receptions,
+    fumLost: stats.fumbleLost,
+    fgMade, fgMade50: stats.fgMade50 ?? 0,
+    fgAtt: stats.fgAtt ?? (fgMade + (stats.fgMissed ?? 0)),
+    xpMade: stats.xpMade ?? 0,
+    xpAtt: stats.xpAtt ?? ((stats.xpMade ?? 0) + (stats.xpMissed ?? 0)),
+  }, rules, stats.pos);
 }
 
 function parseEspnBoxScore(boxscorePlayers, rules) {

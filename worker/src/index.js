@@ -273,6 +273,15 @@ async function getLiveLineups(req, env) {
   const teams = rawTeams.map(t => ({
     cbsTeamId: String(t.id ?? ""),
     name: t.name || "",
+    // Full current roster (starters + bench) — what Setup → Sources → Resync
+    // uses to make rosters.json match CBS after adds/drops made on CBS itself.
+    roster: (Array.isArray(t.rosterPlayers) ? t.rosterPlayers : [])
+      .map(p => {
+        const id = String(p?.id ?? "");
+        const info = byId[id];
+        return id && info?.name ? { cbsPlayerId: id, ...info } : null;
+      })
+      .filter(Boolean),
     // rosterPlayers is the team's FULL active roster (starters + bench), not
     // just starters — confirmed live 2026-09-20 (a benched QB showed up right
     // alongside the real starting QB). hasBeenStarter is the real signal: 1 for

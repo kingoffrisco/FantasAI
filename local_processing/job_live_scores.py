@@ -431,6 +431,113 @@ def _infer_pos(stats: dict) -> str:
     return ""
 
 
+_TD_PASS_RE = re.compile(r"^(.+?) (\d+) Yd pass from (.+?)(?: \(|$)")
+_TD_RUSH_RE = re.compile(r"^(.+?) (\d+) Yd Rush")
+_FG_GOOD_RE = re.compile(r"^(.+?) (\d+) Yd Field Goal")
+_2PT_PASS_RE = re.compile(r"\(([^()]+?) Pass to ([^()]+?) for Two-Point Conversion\)")
+_2PT_RUN_RE = re.compile(r"\(([^()]+?) Run for Two-Point Conversion\)")
+_FG_MISS_RE = re.compile(r"(\d+) yard field goal", re.I)
+_OFFENSE_SCORE_TYPES = {"Passing Touchdown", "Rushing Touchdown", "Field Goal Good"}
+
+
+def _apply_play_details(data: dict, teams: list, player_map: dict, team_def_stats: dict) -> None:
+    """Adds the stats the box score doesn't carry but the league's CBS
+    scoring needs (added 2026-11-16 to match CBS exactly):
+
+      per player: fgDists / fgMissDists (yards of each made / missed FG),
+                  passTd50 / recTd50 / rushTd40 (long-TD bonus counts),
+                  pass2pt / rec2pt / rush2pt (successful 2-pt conversions)
+      per D/ST:   tds (INT/fumble/return TDs), safeties, fumRec,
+                  blkFg / blkPunt / blkXp
+
+    Sources: ESPN summary "scoringPlays" (full names + yardage, e.g.
+    "DK Metcalf 22 Yd pass from Aaron Rodgers (Aaron Rodgers Pass to DK
+    Metcalf for Two-Point Conversion)") and "drives" (missed FGs, blocks,
+    fumble recoveries, with the offense's team on each drive)."""
+    by_name: dict = {}
+    for pid, p in player_map.items():
+        if p.get("team") in teams:
+            by_name[(_normalize_name(p["name"]), p["team"])] = pid
+
+    def stats_for(name: str, team: str = None):
+        n = _normalize_name(name)
+        for t in ([team] if team else []) + teams:
+            pid = by_name.get((n, t))
+            if pid:
+                return player_map[pid]["stats"]
+        return None
+
+    def bump(s, key, v=1):
+        if s is not None:
+            s[key] = s.get(key, 0) + v
+
+    def other(team):
+        return next((t for t in teams if t != team), None)
+
+    for sp in data.get("scoringPlays") or []:
+        text = (sp.get("text") or "").strip()
+        ttype = (sp.get("type") or {}).get("text", "")
+        team = (sp.get("team") or {}).get("abbreviation")
+        if ttype == "Passing Touchdown":
+            m = _TD_PASS_RE.match(text)
+            if m:
+                yds = int(m.group(2))
+                if yds >= 50:
+                    bump(stats_for(m.group(1), team), "recTd50")
+                    bump(stats_for(m.group(3), team), "passTd50")
+        elif ttype == "Rushing Touchdown":
+            m = _TD_RUSH_RE.match(text)
+            if m and int(m.group(2)) >= 40:
+                bump(stats_for(m.group(1), team), "rushTd40")
+        elif ttype == "Field Goal Good":
+            m = _FG_GOOD_RE.match(text)
+            if m:
+                s = stats_for(m.group(1), team)
+                if s is not None:
+                    s.setdefault("fgDists", []).append(int(m.group(2)))
+        elif "safety" in ttype.lower():
+            if team:
+                bump(team_def_stats.setdefault(team, {}), "safeties")
+        elif (ttype not in _OFFENSE_SCORE_TYPES and "touchdown" in ttype.lower()) or ttype == "Sack Opp Fumble Recovery":
+            # INT return / fumble return / kick & punt return / blocked-kick TDs
+            if team:
+                bump(team_def_stats.setdefault(team, {}), "tds")
+
+        m = _2PT_PASS_RE.search(text)
+        if m:
+            bump(stats_for(m.group(1), team), "pass2pt")
+            bump(stats_for(m.group(2), team), "rec2pt")
+        m = _2PT_RUN_RE.search(text)
+        if m:
+            bump(stats_for(m.group(1), team), "rush2pt")
+
+    for drive in ((data.get("drives") or {}).get("previous") or []):
+        offense = (drive.get("team") or {}).get("abbreviation")
+        defense = other(offense)
+        for play in drive.get("plays") or []:
+            ptype = (play.get("type") or {}).get("text", "")
+            text = play.get("text") or ""
+            low = text.lower()
+            if ptype == "Field Goal Missed" or ("field goal" in low and "blocked" in low):
+                m = _FG_MISS_RE.search(text)
+                if m and offense:
+                    kicker = next((p for p in player_map.values()
+                                   if p.get("team") == offense and p["stats"].get("fgAtt", 0) > 0
+                                   and (p["name"].split()[-1].lower() in low)), None)
+                    if kicker:
+                        kicker["stats"].setdefault("fgMissDists", []).append(int(m.group(1)))
+            if "blocked" in low and defense:
+                d = team_def_stats.setdefault(defense, {})
+                if "field goal" in low:
+                    bump(d, "blkFg")
+                elif "extra point" in low:
+                    bump(d, "blkXp")
+                elif "punt" in low:
+                    bump(d, "blkPunt")
+            if ptype in ("Fumble Recovery (Opponent)", "Sack Opp Fumble Recovery") and "intercepted" not in low and defense:
+                bump(team_def_stats.setdefault(defense, {}), "fumRec")
+
+
 def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
     """Port of worker-api's handleNflPlayerStats box-score parsing loop.
 
@@ -557,16 +664,33 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
                         # docstring note above on why this exists.
                         if team_abbr:
                             team_def = team_def_stats.setdefault(team_abbr, {})
+                            # Only sacks come from here now. ESPN's
+                            # "defensive" group has no INT / fumble-recovery
+                            # / safety keys (INTs come from the
+                            # "interceptions" group), and DST TDs, safeties,
+                            # fumble recoveries and blocks are taken from the
+                            # play-by-play in _apply_play_details() so they
+                            # include special-teams plays and aren't counted
+                            # twice.
                             team_def["sacks"] = team_def.get("sacks", 0) + d_sacks
+                    elif name == "interceptions":
+                        # Bug fixed 2026-11-16: ESPN puts defensive INTs in
+                        # their own "interceptions" group — the "defensive"
+                        # group above has no interceptions key at all, so
+                        # every DST silently scored 0 INTs (CBS had JAX +2
+                        # for one INT in week 10; we had nothing).
+                        d_ints = _stat_val(keys, stats_arr, "interceptions")
+                        s["ints"] = s.get("ints", 0) + d_ints
+                        if team_abbr:
+                            team_def = team_def_stats.setdefault(team_abbr, {})
                             team_def["ints"] = team_def.get("ints", 0) + d_ints
-                            team_def["fumRec"] = team_def.get("fumRec", 0) + d_fumRec
-                            team_def["tds"] = team_def.get("tds", 0) + d_tds
-                            team_def["safeties"] = team_def.get("safeties", 0) + d_safeties
                     elif name == "fumbles":
                         s["fumLost"] = s.get("fumLost", 0) + _stat_val_first(keys, stats_arr, "fumblesLost", "lost")
 
                     if pts_allowed is not None:
                         s["ptsAllowed"] = pts_allowed
+
+        _apply_play_details(data, list(team_scores.keys()), player_map, team_def_stats)
 
     # Emit one synthetic "{TEAM} D/ST" entry per team from the accumulator
     # built during the loop above. Included whenever we have a points-allowed
@@ -610,8 +734,14 @@ def fetch_player_stats(events: list, roster_lookup: dict = None) -> list:
 # -- Scoring (must match app/src/lib/liveScoring.js exactly) --------------
 
 def get_scoring_rules() -> dict:
-    settings = r2_get("fantasai/league-settings.json")
-    scoring = (settings or {}).get("scoring")
+    # Same lookup order as worker-api handleLeagueSettingsLoad: the app's
+    # league-scoped key ("tau/…", what Rules & Settings saves to) first,
+    # then the legacy key.
+    settings = r2_get("tau/league-settings.json") or r2_get("fantasai/league-settings.json")
+    # Bug fixed 2026-11-16: the file is {settings: {scoring: …}, teams, savedAt}
+    # (worker-api handleLeagueSettingsSave), so a top-level "scoring" lookup
+    # never matched and this job always fell back to the defaults below.
+    scoring = ((settings or {}).get("settings") or {}).get("scoring") or (settings or {}).get("scoring")
     if scoring:
         return scoring
     return {
@@ -660,34 +790,88 @@ def calc_fantasy_pts(stats: dict, rules: dict, pos: str = None) -> float:
     # Joey Slye (K) was scoring +4 bogus points from his team's points-
     # allowed tier before this fix.
     is_dst = pos == "DST"
+    if is_dst:
+        # DST entries only score defensive stats (the synthetic "{TEAM} D/ST"
+        # line carries nothing else anyway).
+        pts = (
+            s.get("sacks", 0) * r.get("dstSack", 1)
+            + s.get("ints", 0) * r.get("dstInt", 2)
+            + s.get("fumRec", 0) * r.get("dstFumRec", 2)
+            + s.get("safeties", 0) * r.get("dstSafety", 2)
+            + s.get("tds", 0) * r.get("dstTd", 6)
+            + s.get("blkFg", 0) * r.get("dstBlkFg", 0)
+            + s.get("blkPunt", 0) * r.get("dstBlkPunt", 0)
+            + s.get("blkXp", 0) * r.get("dstBlkXp", 0)
+        )
+        if r.get("dstPtsAllowed", True) and s.get("ptsAllowed") is not None:
+            tiers = r.get("dstPaTiers")
+            pts += _tier_pts(s["ptsAllowed"], tiers) if tiers else _dst_pts_allowed_bonus(s["ptsAllowed"])
+        return round(max(0.0, pts), 2)
+
+    # Kicking — per-distance tiers when the play-by-play gave us distances
+    # (fgDists / fgMissDists from _apply_play_details), legacy flat values
+    # for any kick we couldn't place.
+    fg_dists = s.get("fgDists") or []
+    miss_dists = s.get("fgMissDists") or []
+    fg_tiers = r.get("fgTiers")
+    miss_tiers = r.get("fgMissTiers")
+    if fg_tiers and fg_dists:
+        fg_pts = sum(_tier_pts(d, fg_tiers) for d in fg_dists)
+        fg_pts += max(0, s.get("fgMade", 0) - len(fg_dists)) * r.get("kFgUnder50", 3)
+    else:
+        fg_pts = fg_made50 * r.get("kFg50", 4) + fg_made_under50 * r.get("kFgUnder50", 3)
+    if miss_tiers and miss_dists:
+        miss_pts = sum(_tier_pts(d, miss_tiers) for d in miss_dists)
+        miss_pts += max(0, fg_missed - len(miss_dists)) * r.get("kFgMiss", -1)
+    else:
+        miss_pts = fg_missed * r.get("kFgMiss", -1)
+
+    # CBS scores yardage as "0+ Yds = x per yard" — a net-negative day is 0,
+    # not negative (Rodgers −1 RuYd, week 10: CBS 15.72, not 15.62).
+    pass_yds = max(0, s.get("passYds", 0))
+    rush_yds = max(0, s.get("rushYds", 0))
+    rec_yds = max(0, s.get("recYds", 0))
     pts = (
-        s.get("passYds", 0) * r.get("passYd", 0.04)
+        pass_yds * r.get("passYd", 0.04)
         + s.get("passTds", 0) * r.get("passTD", 4)
         + s.get("passInt", 0) * r.get("passInt", -2)
-        + s.get("rushYds", 0) * r.get("rushYd", 0.1)
+        + rush_yds * r.get("rushYd", 0.1)
         + s.get("rushTds", 0) * r.get("rushTD", 6)
-        + s.get("recYds", 0) * r.get("recYd", 0.1)
+        + rec_yds * r.get("recYd", 0.1)
         + s.get("recTds", 0) * r.get("recTD", 6)
         + s.get("rec", 0) * r.get("rec", 0.5)
         + s.get("fumLost", 0) * r.get("fumbleLost", -2)
-        + fg_made50 * r.get("kFg50", 4)
-        + fg_made_under50 * r.get("kFgUnder50", 3)
-        + fg_missed * r.get("kFgMiss", -1)
+        # Long-TD bonuses, 2-pt conversions, yardage milestones (CBS-style)
+        + s.get("passTd50", 0) * r.get("passTdLongBonus", 0)
+        + s.get("rushTd40", 0) * r.get("rushTdLongBonus", 0)
+        + s.get("recTd50", 0) * r.get("recTdLongBonus", 0)
+        + s.get("pass2pt", 0) * r.get("pass2pt", 0)
+        + s.get("rush2pt", 0) * r.get("rush2pt", 0)
+        + s.get("rec2pt", 0) * r.get("rec2pt", 0)
+        + _milestone_pts(s.get("passYds", 0), r.get("passYdBonus"))
+        + _milestone_pts(s.get("rushYds", 0), r.get("rushYdBonus"))
+        + _milestone_pts(s.get("recYds", 0), r.get("recYdBonus"))
+        + fg_pts + miss_pts
         + s.get("xpMade", 0) * r.get("kXp", 1)
         + xp_missed * r.get("kXpMiss", -1)
-        # DST — bug fixed 2026-08-22: this whole block was missing, so even
-        # the synthetic D/ST entries fetch_player_stats() now emits always
-        # scored 0. Same rule keys/tiers as ScoringTest.jsx's applyScoring().
-        + (s.get("sacks", 0) * r.get("dstSack", 1) if is_dst else 0)
-        + (s.get("ints", 0) * r.get("dstInt", 2) if is_dst else 0)
-        + (s.get("fumRec", 0) * r.get("dstFumRec", 2) if is_dst else 0)
-        + (s.get("safeties", 0) * r.get("dstSafety", 2) if is_dst else 0)
-        + (s.get("tds", 0) * r.get("dstTd", 6) if is_dst else 0)
-        + (_dst_pts_allowed_bonus(s["ptsAllowed"])
-           if is_dst and r.get("dstPtsAllowed", True) and s.get("ptsAllowed") is not None
-           else 0)
     )
     return round(max(0.0, pts), 2)
+
+
+def _tier_pts(value, tiers) -> float:
+    """tiers: [[min, max, pts], ...] inclusive; first match wins, else 0."""
+    v = float(value)
+    for lo, hi, p in tiers or []:
+        if lo <= v <= hi:
+            return float(p)
+    return 0.0
+
+
+def _milestone_pts(value, bonuses) -> float:
+    """bonuses: [[threshold, pts], ...] — cumulative, like CBS's
+    "2 point bonus @ 100+, 2 more @ 200+, 3 more @ 300+"."""
+    v = float(value or 0)
+    return float(sum(p for t, p in (bonuses or []) if v >= t))
 
 
 # -- Main -------------------------------------------------------------------

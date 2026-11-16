@@ -14,9 +14,20 @@ function cbsHeaders() {
   return h
 }
 
+// The CBS worker is the only host that serves /api/cbs/* routes. When
+// VITE_WORKER_URL points somewhere else (local app/.env sets it to
+// api.fantasai.net, which 401s/404s these paths), every CBS call failed and
+// screens silently fell back to stale snapshots — e.g. the sidebar team card
+// stuck at the Week 3 record (1-2, 276.9). Retry against the CBS worker.
+const CBS_WORKER = 'https://fantasai-cbs.fantasai.workers.dev'
+
 async function get(path) {
-  const res = await fetch(BASE + path, { headers: cbsHeaders() })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  let res = await fetch(BASE + path, { headers: cbsHeaders() }).catch(() => null)
+  if ((!res || !res.ok) && BASE !== CBS_WORKER && path.startsWith('/api/cbs/')) {
+    res = await fetch(CBS_WORKER + path, { headers: cbsHeaders() })
+  }
+  if (!res) throw new Error('Network error')
+  if (!res.ok) throw new Error(`CBS request failed (HTTP ${res.status})`)
   return res.json()
 }
 
@@ -44,7 +55,14 @@ export const api = {
   rankings: (pos = 'ALL') => get(`/api/cbs/rankings?pos=${pos}`),
   draft:    (year)        => get(`/api/cbs/draft?year=${year}`),
   rosters:  ()            => get('/api/cbs/rosters'),
-  lineups:  ()            => get('/api/cbs/lineups'),
+  // Always via the main API's /api/v1/lineups (forwards X-CBS-Cookie to the CBS
+  // worker). get('/api/cbs/lineups') 404'd whenever VITE_WORKER_URL points at
+  // api.fantasai.net, which only exposes CBS routes under /api/v1/*.
+  lineups:  async () => {
+    const res = await fetch(`${API_BASE}/api/v1/lineups`, { headers: cbsHeaders() })
+    if (!res.ok) throw new Error(`CBS lineups request failed (HTTP ${res.status})`)
+    return res.json()
+  },
   // Full active NFL player pool from Databricks export_players_2026_draft (via worker-api)
   dbPlayers: () => fetch(`${API_BASE}/api/v1/db/players`, { headers: apiHeaders() }).then(r => r.json()),
   // Sleeper full player list proxied through CBS Worker (no CORS, 1 h edge cache, ~1500 active players)

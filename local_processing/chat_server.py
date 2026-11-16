@@ -100,9 +100,14 @@ def check_auth(key: str | None):
 
 def call_ollama(prompt: str, model: str) -> str:
     full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}"
+    # think=False: Qwen3 otherwise runs a hidden reasoning pass first. Measured
+    # 2026-11-16 on "Top 3 waiver targets" with qwen3:14b: 47.5s / 2,743 tokens
+    # with thinking vs 9.5s / 450 tokens without — the thinking run blew past
+    # the app's chat timeout, so every medium question failed with
+    # "signal timed out".
     resp = requests.post(
         OLLAMA_URL,
-        json={"model": model, "prompt": full_prompt, "stream": False},
+        json={"model": model, "prompt": full_prompt, "stream": False, "think": False},
         timeout=120,
     )
     resp.raise_for_status()
@@ -113,7 +118,7 @@ def call_ollama_raw(prompt: str, model: str) -> str:
     """No system prompt — used for classification."""
     resp = requests.post(
         OLLAMA_URL,
-        json={"model": model, "prompt": prompt, "stream": False},
+        json={"model": model, "prompt": prompt, "stream": False, "think": False},
         timeout=15,
     )
     resp.raise_for_status()

@@ -563,7 +563,13 @@ export default function SourcesScreen({ onNav, sourcesState, onSourcesChange, us
               <div className="src-hero-right">
                 <div className="src-status">
                   <span className="live-dot"></span>
-                  <span>Live · synced {cbs.lastSync}</span>
+                  <span>{(() => {
+                    let at = null;
+                    try { at = localStorage.getItem('fantasai_cbs_last_roster_sync'); } catch {}
+                    if (!at) return 'Rosters not synced yet · click Resync';
+                    const mins = Math.round((Date.now() - new Date(at).getTime()) / 60000);
+                    return `Rosters synced ${mins < 1 ? 'just now' : mins < 60 ? `${mins} min ago` : new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`;
+                  })()}</span>
                 </div>
                 <div className="flex gap-8">
                   <button className="btn sm ghost" onClick={() => { setModalMode('resync'); setShowModal(true); }}>↻ Resync</button>
