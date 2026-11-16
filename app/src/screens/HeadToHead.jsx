@@ -1,5 +1,5 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters, refreshTeamRostersFromServer, syncLineupsFromCbs } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, buildRosterFrame, assignRoster, findTeam, refreshTeamRosters, refreshTeamRostersFromServer, syncLineupsFromCbs, getWeekMatchups, CBS_LINEUP_SYNCED } from '../lib/data.js';
 import { findPlayer, findPlayerByName, usePlayers } from '../lib/playerStore.js';
 import { PosBadge, TeamLogoBadge } from '../components/ui.jsx';
 import { api } from '../api.js';
@@ -148,7 +148,15 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   React.useEffect(() => {
     refreshTeamRosters();
     setRosterVersion(v => v + 1);
-    refreshTeamRostersFromServer().then(() => setRosterVersion(v => v + 1));
+    // Current rosters first, then CBS's real starters on top — automatically,
+    // not only when someone presses "Resync from CBS". Otherwise starters
+    // were a position-order guess that happily started bye-week players
+    // (Caleb Williams / Loveland / Barkley / PHI D/ST in Week 10).
+    refreshTeamRostersFromServer()
+      .then(() => { CBS_LINEUP_SYNCED.clear(); setRosterVersion(v => v + 1); })
+      .then(() => syncLineupsFromCbs(findPlayerByName, findPlayer))
+      .catch(() => {})
+      .finally(() => setRosterVersion(v => v + 1));
   }, []);
 
   // Live per-player stats + per-game status. Primary source is the Worker's
@@ -284,16 +292,20 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
 
   // Use the commissioner-set schedule from localStorage if available (same source as sidebar),
   // fall back to the algorithmic round-robin only when no schedule has been generated yet.
-  const schedule = React.useMemo(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
-      const ms = saved?.matchupSchedule;
-      if (ms && Object.keys(ms).length > 0) {
-        return Array.from({ length: NUM_WEEKS }, (_, i) => ms[i + 1] || ms[String(i + 1)] || []);
-      }
-    } catch {}
-    return buildSchedule(LEAGUE_TEAMS.map(t => t.id), NUM_WEEKS);
+  // Real league schedule via getWeekMatchups (server settings → CBS-mirrored).
+  // Recomputed when App.jsx finishes loading server settings, since this
+  // screen can mount before that fetch resolves.
+  const [settingsVersion, setSettingsVersion] = React.useState(0);
+  React.useEffect(() => {
+    const bump = () => setSettingsVersion(v => v + 1);
+    window.addEventListener('fantasai:league-settings-updated', bump);
+    return () => window.removeEventListener('fantasai:league-settings-updated', bump);
   }, []);
+  const schedule = React.useMemo(() => {
+    const weeks = Array.from({ length: NUM_WEEKS }, (_, i) => getWeekMatchups(i + 1));
+    if (weeks.some(Boolean)) return weeks.map(w => w || []);
+    return buildSchedule(LEAGUE_TEAMS.map(t => t.id), NUM_WEEKS);
+  }, [settingsVersion]);
 
   const allMatchups = schedule[week - 1] || [];
   const matchups = showAll
@@ -306,10 +318,17 @@ export default function HeadToHeadScreen({ onOpenPlayer, user, myRosterIds, slot
   }, []);
   const slotFrame = React.useMemo(() => buildRosterFrame(rosterSettings), [rosterSettings]);
   // allPlayers in deps: re-assign when live player data loads (findPlayer depends on the store)
-  const myLiveRoster = React.useMemo(
-    () => (myRosterIds && slotFrame) ? assignRoster(slotFrame, myRosterIds, slotOverrides || {}, findPlayer) : null,
-    [slotFrame, myRosterIds, slotOverrides, allPlayers],
-  );
+  const myLiveRoster = React.useMemo(() => {
+    if (!myRosterIds || !slotFrame) return null;
+    // Prefer CBS's real lineup for my team when it's been synced and covers
+    // exactly the same players as my saved roster (otherwise one of the two
+    // is stale and the in-app slot assignment is the safer choice).
+    const cbs = CBS_LINEUP_SYNCED.has(myTeamId) ? (TEAM_ROSTERS[myTeamId] || []) : [];
+    const cbsIds = cbs.map(e => e.playerId).filter(Boolean);
+    const same = cbsIds.length === myRosterIds.size && cbsIds.every(id => myRosterIds.has(id));
+    if (same) return assignRoster(slotFrame, cbsIds, {}, findPlayer);
+    return assignRoster(slotFrame, myRosterIds, slotOverrides || {}, findPlayer);
+  }, [slotFrame, myRosterIds, slotOverrides, allPlayers, rosterVersion, myTeamId]);
 
   // Build assigned rosters for ALL teams so H2H shows starter slots, not raw BENCH picks
   const allTeamRosters = React.useMemo(() => {

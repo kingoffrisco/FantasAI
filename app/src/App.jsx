@@ -339,6 +339,19 @@ async function loadLeagueData(leagueId) {
       const payload = { leagueId, teams: data.teams ?? null, settings: data.settings ?? null, savedAt: data.savedAt ?? null };
       applyLeagueData(payload);
       localStorage.setItem(cacheKey, JSON.stringify(payload));
+      // Most screens (H2H, sidebar matchup card, live scoring, lineup slots)
+      // read league settings from the 'fantasai_league_settings' localStorage
+      // key, which used to be refreshed ONLY when someone opened Rules &
+      // Settings. So a server-side change (the CBS schedule and scoring saved
+      // 2026-11-16) never reached them — H2H kept showing the old random
+      // Week 10 opponent. Server settings win, same merge as LeagueSettings.jsx.
+      if (data.settings) {
+        try {
+          const local = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null') || {};
+          localStorage.setItem('fantasai_league_settings', JSON.stringify({ ...local, ...data.settings }));
+          window.dispatchEvent(new CustomEvent('fantasai:league-settings-updated'));
+        } catch {}
+      }
     }
   } catch {}
 }

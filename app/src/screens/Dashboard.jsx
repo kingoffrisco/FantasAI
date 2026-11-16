@@ -1,5 +1,5 @@
 import React from 'react';
-import { TEAM_ROSTERS, findTeam, NEWS, LEAGUE_TEAMS, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { TEAM_ROSTERS, findTeam, NEWS, LEAGUE_TEAMS, buildRosterFrame, assignRoster, getOpponentId } from '../lib/data.js';
 import { computeOptimal } from './LineupDecisions.jsx';
 import { buildPowerData, useCbsSeason, remainingMatchups } from '../lib/powerUtils.js';
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
@@ -166,6 +166,11 @@ const RR_SCHEDULE = buildRRSchedule(LEAGUE_TEAMS.map(t => t.id), 14);
 
 function getOpponent(myTeamId, weekNum) {
   if (!weekNum || weekNum < 1 || weekNum > 14) return null;
+  // Real league schedule first (mirrors CBS) — the round-robin below is only
+  // a last resort for a league with no saved schedule. Using it
+  // unconditionally showed the wrong Week 10 opponent (Victory Formation).
+  const realOpp = getOpponentId(myTeamId, weekNum);
+  if (realOpp != null) return LEAGUE_TEAMS.find(t => t.id === realOpp) ?? null;
   const matchups = RR_SCHEDULE[weekNum - 1] || [];
   const match = matchups.find(([a, b]) => a === myTeamId || b === myTeamId);
   if (!match) return null;

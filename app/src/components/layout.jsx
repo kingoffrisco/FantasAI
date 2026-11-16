@@ -1,5 +1,5 @@
 import React from 'react';
-import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster } from '../lib/data.js';
+import { LEAGUE_TEAMS, TEAM_ROSTERS, findTeam, buildRosterFrame, assignRoster, getWeekMatchups } from '../lib/data.js';
 import { findPlayer, usePlayers } from '../lib/playerStore.js';
 import { getSubscriptionState, subscribeToPush, unsubscribeFromPush, showLocalNotification } from '../lib/pushNotifications.js';
 import { getPrefs } from '../lib/remotePrefs.js';
@@ -232,13 +232,8 @@ export const Sidebar = ({ active, onNav, user, lineupAlertCount = 0, myRosterIds
 
     const week = getH2HWeek();
 
-    // Prefer the commissioner-set schedule stored in localStorage
-    let weekMatchups = null;
-    try {
-      const saved = JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null');
-      const ms = saved?.matchupSchedule;
-      if (ms) weekMatchups = ms[week] || ms[String(week)] || null;
-    } catch {}
+    // Real league schedule (server settings, mirroring CBS) — see getWeekMatchups
+    let weekMatchups = getWeekMatchups(week);
 
     // Fallback: generate a round-robin from LEAGUE_TEAMS
     if (!weekMatchups) {

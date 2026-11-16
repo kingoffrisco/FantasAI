@@ -1,5 +1,5 @@
 // Mock data - converted from vanilla prototype to ES module exports
-import { getLiveTeams, getMyTeamPrefs, LEGACY_TEAM_NAME_MAP } from './leagueStore.js';
+import { getLiveTeams, getLiveSettings, getMyTeamPrefs, LEGACY_TEAM_NAME_MAP } from './leagueStore.js';
 import { api } from '../api.js';
 
 export const NFL_TEAMS = [
@@ -834,6 +834,27 @@ refreshTeamRosters();
 // draft-data corruption fixed earlier today; there is no case where a
 // browser's local cache should outrank the real server draft.
 export async function refreshTeamRostersFromServer() {
+  // Current rosters (R2 rosters.json — kept in step with CBS by Sources →
+  // Resync, plus in-app adds/drops) win over the draft results. Using
+  // draft_picks.json alone froze every H2H / All Rosters / Owner Intel view
+  // at draft day: confirmed 2026-11-16, H2H still showed Jordan Love,
+  // De'Zhaun Stribling and other long-gone players.
+  try {
+    const loaded = await Promise.all(LEAGUE_TEAMS.map(async t => {
+      try {
+        const r = await fetch(`https://api.fantasai.net/api/v1/rosters/load?teamId=${t.id}`, { signal: AbortSignal.timeout(6000) });
+        const d = r.ok ? await r.json() : null;
+        return [t.id, d?.fromS3 && Array.isArray(d.playerIds) ? d.playerIds.map(Number) : null];
+      } catch { return [t.id, null]; }
+    }));
+    const have = loaded.filter(([, ids]) => ids && ids.length);
+    if (have.length >= Math.ceil(LEAGUE_TEAMS.length / 2)) {
+      for (const [tid, ids] of loaded) {
+        if (ids && ids.length) TEAM_ROSTERS[tid] = ids.map(playerId => ({ slot: 'BENCH', playerId }));
+      }
+      return;
+    }
+  } catch { /* fall through to draft picks */ }
   try {
     const remote = await api.draftPicks.get();
     if (!Array.isArray(remote) || remote.length === 0) return;
@@ -850,6 +871,27 @@ export async function refreshTeamRostersFromServer() {
 }
 refreshTeamRostersFromServer();
 
+// ─── Weekly matchups — the one place every screen should get its opponent ───
+// Before 2026-11-16, Dashboard used a hardcoded round-robin, while H2H and the
+// sidebar read a possibly-stale localStorage copy, so the three screens showed
+// three different Week 10 opponents (Victory Formation / Bourbon / CBS's real
+// Howdy Hut). Order: server-loaded settings (R2, now mirroring CBS's
+// schedule) → localStorage copy → null (no guessing).
+export function getWeekMatchups(week) {
+  const pick = ms => (ms ? (ms[week] || ms[String(week)] || null) : null);
+  let m = pick(getLiveSettings()?.matchupSchedule);
+  if (!m) {
+    try { m = pick(JSON.parse(localStorage.getItem('fantasai_league_settings') || 'null')?.matchupSchedule); } catch {}
+  }
+  return Array.isArray(m) && m.length ? m.map(p => [Number(p[0]), Number(p[1])]) : null;
+}
+
+export function getOpponentId(teamId, week) {
+  const pair = (getWeekMatchups(week) || []).find(([a, b]) => a === Number(teamId) || b === Number(teamId));
+  if (!pair) return null;
+  return pair[0] === Number(teamId) ? pair[1] : pair[0];
+}
+
 // Resync every team's real current-week starter/bench split from CBS.
 //
 // Nothing else in this app ever learns who an opponent actually started this
@@ -865,6 +907,10 @@ refreshTeamRostersFromServer();
 // findPlayerByNameFn/findPlayerFn are passed in rather than imported directly
 // because playerStore.js imports PLAYER_ID_MAP from this file — importing
 // playerStore.js back from here would be circular.
+// Team ids whose TEAM_ROSTERS entry currently carries CBS's real starters
+// (so H2H can prefer it over a position-order guess for the user's own team).
+export const CBS_LINEUP_SYNCED = new Set();
+
 export async function syncLineupsFromCbs(findPlayerByNameFn, findPlayerFn) {
   const resp = await api.lineups();
   const cbsTeams = Array.isArray(resp?.teams) ? resp.teams : [];
@@ -903,6 +949,7 @@ export async function syncLineupsFromCbs(findPlayerByNameFn, findPlayerFn) {
       ...rosterIds.filter(id => !starterIds.has(id)),
     ];
     TEAM_ROSTERS[team.id] = assignRoster(frame, reordered, {}, findPlayerFn);
+    CBS_LINEUP_SYNCED.add(team.id);
     updated++;
   }
   return { ok: true, updated, teams: cbsTeams.length, fetchedAt: resp?.fetchedAt };
